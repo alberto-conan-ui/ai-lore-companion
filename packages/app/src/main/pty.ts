@@ -37,7 +37,12 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
   return {
     spawn: () => {
       const id = randomUUID();
-      const pty = spawn(DEFAULT_SHELL, [], {
+      // A login shell ('-l') sources the full profile chain — /etc/zprofile
+      // (path_helper), ~/.zprofile, ~/.zshrc — so the terminal has the same
+      // PATH and environment as Terminal.app. Without it, a Finder-launched
+      // app inherits only macOS's minimal env and tools like `docker` or
+      // Homebrew binaries are missing.
+      const pty = spawn(DEFAULT_SHELL, ['-l'], {
         name: 'xterm-color',
         cols: 80,
         rows: 24,
