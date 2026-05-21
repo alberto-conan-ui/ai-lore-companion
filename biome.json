@@ -1,0 +1,62 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "ignore": [
+      "**/node_modules",
+      "**/dist",
+      "**/dist-test",
+      "**/out",
+      "**/.cache",
+      "**/test-results",
+      "**/playwright-report",
+      "archive/**",
+      ".ai-lore-ai-lore-companion/**"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "semicolons": "always",
+      "trailingCommas": "all"
+    }
+  },
+  "overrides": [
+    {
+      "include": ["packages/core/**"],
+      "linter": {
+        "rules": {
+          "nursery": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "electron": "packages/core cannot import from electron — keep core/ Electron-independent (blueprint contract).",
+                  "electron-builder": "packages/core cannot depend on electron tooling.",
+                  "electron-vite": "packages/core cannot depend on electron tooling."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

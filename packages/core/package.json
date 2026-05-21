@@ -1,0 +1,32 @@
+{
+  "name": "@ai-lore-companion/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pure-Node logic for the AI-Lore cockpit: tracker chain reader, change queue, persistence, watcher.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm rebuild better-sqlite3 --silent && rm -rf dist-test && tsc -p tsconfig.test.json && node --test --enable-source-maps \"dist-test/test/**/*.test.js\"",
+    "clean": "rm -rf dist dist-test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.5.0",
+    "chokidar": "^3.6.0",
+    "drizzle-orm": "^0.36.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.0",
+    "drizzle-kit": "^0.28.1",
+    "typescript": "^5.7.2"
+  }
+}

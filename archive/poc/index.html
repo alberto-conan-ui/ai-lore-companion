@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>AI-Lore Companion</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #1e1e1e;
+        color: #e0e0e0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .tracker-strip {
+        display: flex;
+        align-items: center;
+        padding: 12px 18px;
+        background: #252526;
+        border-bottom: 1px solid #3a3a3a;
+        gap: 14px;
+        font-size: 13px;
+        flex-shrink: 0;
+      }
+      .tracker-strip .group {
+        display: inline-flex;
+        align-items: baseline;
+        gap: 6px;
+      }
+      .tracker-strip .label {
+        color: #777;
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .tracker-strip .value {
+        color: #e0e0e0;
+        font-weight: 500;
+      }
+      .tracker-strip .sep {
+        color: #444;
+      }
+      .tracker-strip .spacer {
+        flex: 1;
+      }
+      .drift {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        background: #2a2a2a;
+        color: #888;
+        border: 1px solid transparent;
+        transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+      }
+      .drift .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.85;
+      }
+      .drift[data-level="idle"]  { background: #232323; color: #555; }
+      .drift[data-level="live"]  { background: #2a3a2a; color: #7fbf7f; border-color: #34532f; }
+      .drift[data-level="warn"]  { background: #3a361f; color: #d6c14a; border-color: #5a4f24; }
+      .drift[data-level="alert"] { background: #3a2424; color: #ff6a6a; border-color: #5a2828; }
+      .ack-all-btn {
+        background: transparent;
+        border: 1px solid #3a3a3a;
+        color: #888;
+        padding: 4px 10px;
+        font-size: 11px;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+      }
+      .ack-all-btn:hover {
+        background: #2a3a2a;
+        color: #7fbf7f;
+        border-color: #34532f;
+      }
+      .root-line {
+        padding: 8px 18px;
+        font-size: 11px;
+        color: #777;
+        background: #1a1a1a;
+        border-bottom: 1px solid #2a2a2a;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        flex-shrink: 0;
+      }
+      .root-line .label {
+        color: #555;
+        margin-right: 6px;
+      }
+      .queue {
+        flex: 1;
+        overflow-y: auto;
+        padding: 4px 0;
+      }
+      .queue-empty {
+        padding: 32px 24px;
+        color: #555;
+        font-size: 13px;
+        text-align: center;
+      }
+      .queue-row {
+        display: grid;
+        grid-template-columns: 28px 1fr auto 32px;
+        align-items: center;
+        gap: 12px;
+        padding: 8px 18px;
+        font-size: 12px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        border-bottom: 1px solid #2a2a2a;
+        transition: opacity 120ms ease, transform 120ms ease, background 120ms ease;
+      }
+      .queue-row:hover {
+        background: #232323;
+      }
+      .queue-row .glyph {
+        font-weight: 600;
+        text-align: center;
+        width: 16px;
+      }
+      .queue-row--add .glyph { color: #4ec97a; }
+      .queue-row--change .glyph { color: #d6c14a; }
+      .queue-row--unlink .glyph { color: #e06464; }
+      .queue-row .path {
+        color: #d0d0d0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .queue-row .time {
+        color: #666;
+        font-size: 11px;
+      }
+      .queue-row .ack {
+        background: transparent;
+        border: 1px solid #3a3a3a;
+        color: #888;
+        width: 22px;
+        height: 22px;
+        border-radius: 4px;
+        font-size: 13px;
+        line-height: 1;
+        cursor: pointer;
+        padding: 0;
+        transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+      }
+      .queue-row .ack:hover {
+        background: #2a3a2a;
+        color: #7fbf7f;
+        border-color: #34532f;
+      }
+      .queue-row--acking {
+        opacity: 0;
+        transform: translateX(8px);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="tracker-strip">
+      <span class="group"><span class="label">Mode</span><span class="value" id="mode">—</span></span>
+      <span class="sep">·</span>
+      <span class="group"><span class="label">Focus</span><span class="value" id="focus">—</span></span>
+      <span class="sep">·</span>
+      <span class="group"><span class="label">Active</span><span class="value" id="active-child">—</span></span>
+      <span class="spacer"></span>
+      <button id="ack-all" class="ack-all-btn" title="Ack all entries">Ack all</button>
+      <span class="drift" id="drift" data-level="idle" title="In sync — no unacked changes">
+        <span class="dot"></span>
+        <span id="drift-count">0</span>
+      </span>
+    </div>
+    <div class="root-line">
+      <span class="label">Root</span><span id="root">—</span>
+      <span class="label" style="margin-left: 16px">Lore</span><span id="lore">—</span>
+    </div>
+    <div class="queue" id="queue"></div>
+    <script src="renderer.js"></script>
+  </body>
+</html>

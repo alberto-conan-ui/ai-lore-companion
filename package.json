@@ -1,0 +1,24 @@
+{
+  "name": "ai-lore-companion",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Human Lead cockpit for AI-Lore projects",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "npm run build -w @ai-lore-companion/core && npm run build -w @ai-lore-companion/app",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "dev": "COCKPIT_ROOT=\"$PWD\" npm run dev -w @ai-lore-companion/app",
+    "dev:mock": "COCKPIT_ROOT=\"$PWD\" COCKPIT_MOCK=1 npm run dev -w @ai-lore-companion/app",
+    "e2e": "npm --workspace=@ai-lore-companion/app run test:e2e"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

@@ -1,0 +1,18 @@
+
+# AI-Lore (.ai-lore-ai-lore-companion)
+.ai-lore-ai-lore-companion/*
+!.ai-lore-ai-lore-companion/workspace.yaml
+ai_readme.md
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Electron build artifacts
+out/
+dist/
+
+# macOS
+.DS_Store
