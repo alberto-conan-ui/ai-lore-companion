@@ -60,6 +60,8 @@ export const IPC = {
   TerminalData: 'terminal:data',
   /** Main → renderer: a terminal's shell exited on its own. */
   TerminalExit: 'terminal:exit',
+  /** Main → renderer: a terminal's foreground status — idle/running + command. */
+  TerminalStatus: 'terminal:status',
 
   /** Renderer → main: create the `WebContentsView` for a browser tab. */
   BrowserCreate: 'browser:create',
@@ -79,6 +81,8 @@ export const IPC = {
   BrowserReload: 'browser:reload',
   /** Renderer → main: switch a browser tab's profile. */
   BrowserSetProfile: 'browser:set-profile',
+  /** Renderer → main: hide / restore every browser view in the window so a DOM overlay can sit on top. */
+  BrowserSuppressAll: 'browser:suppress-all',
   /** Main → renderer: a browser tab's state — url, nav availability, profile. */
   BrowserState: 'browser:state',
 
@@ -128,6 +132,18 @@ export type TerminalResizeArg = { id: string; cols: number; rows: number };
 export type TerminalDataPayload = { id: string; data: string };
 /** A terminal whose shell process exited. */
 export type TerminalExitPayload = { id: string };
+
+/** A terminal's foreground state: its shell is idle, or it is running a task. */
+export type TerminalForegroundStatus = 'idle' | 'running';
+/**
+ * Main → renderer: a terminal's foreground status. `command` is the full
+ * command line of the running task while `running`, and `''` while `idle`.
+ */
+export type TerminalStatusPayload = {
+  id: string;
+  status: TerminalForegroundStatus;
+  command: string;
+};
 
 /** Pixel bounds for the browser companion view, in window content coordinates. */
 export type BrowserBounds = { x: number; y: number; width: number; height: number };
@@ -193,6 +209,7 @@ export type CockpitApi = {
   killTerminal: (id: string) => void;
   onTerminalData: (handler: (payload: TerminalDataPayload) => void) => Unsubscribe;
   onTerminalExit: (handler: (payload: TerminalExitPayload) => void) => Unsubscribe;
+  onTerminalStatus: (handler: (payload: TerminalStatusPayload) => void) => Unsubscribe;
   browserCreate: (tabId: string) => void;
   browserDestroy: (tabId: string) => void;
   browserSetVisible: (tabId: string, visible: boolean) => void;
@@ -202,6 +219,8 @@ export type CockpitApi = {
   browserGoForward: (tabId: string) => void;
   browserReload: (tabId: string) => void;
   browserSetProfile: (tabId: string, profile: BrowserProfile) => void;
+  /** Hide every browser view in this window (`true`) or restore them (`false`). */
+  browserSuppressAll: (suppress: boolean) => void;
   onBrowserState: (handler: (state: BrowserStatePayload) => void) => Unsubscribe;
   shortcutsList: () => Promise<Shortcut[]>;
   shortcutsRun: (id: string) => void;

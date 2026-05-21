@@ -1,10 +1,24 @@
-import type { JSX } from 'react';
+import { type JSX, useState } from 'react';
+import type { TerminalForegroundStatus } from '../../../shared/ipc.js';
+import { type DriftLevel, driftLevel } from '../store.js';
 
-/** A tab's kind selects which surface it renders. */
-export type TabKind = 'cockpit' | 'terminal' | 'browser';
+/** A tab's kind selects which surface it renders. `pane` tabs are the pinned
+ *  cockpit panes — not closable, not movable. */
+export type TabKind = 'pane' | 'terminal' | 'browser';
 
 /** A tab in a panel — `id` is stable for the tab's lifetime. */
-export type WorkspaceTab = { id: string; kind: TabKind; title: string };
+export type WorkspaceTab = {
+  id: string;
+  kind: TabKind;
+  /** The displayed title — auto-managed for terminals unless renamed by hand. */
+  title: string;
+  /** The default name a terminal/browser tab reverts to (`Terminal N`). */
+  baseTitle?: string;
+  /** True once the title was set by hand — freezes terminal auto-rename. */
+  manualTitle?: boolean;
+  /** A terminal tab's foreground status — drives the idle/running dot. */
+  status?: TerminalForegroundStatus;
+};
 
 /** The three docks of the workspace. */
 export type PanelId = 'left' | 'right' | 'bottom';
@@ -17,17 +31,57 @@ type Props = {
   onCloseTab: (id: string) => void;
   onNewTerminal: () => void;
   onNewBrowser: () => void;
+  /** Rename a tab — an empty name reverts to the auto-managed default. */
+  onRenameTab: (id: string, name: string) => void;
   /** Move a tab — from a panel into this strip at `index` (drag and drop). */
   onMoveTab: (fromPanel: PanelId, tabId: string, toPanel: PanelId, index: number) => void;
   /** The panel's content slot — the shell portals tab content into it. */
   slotRef: (el: HTMLDivElement | null) => void;
+  /** Per-tab unacked-drift counts, keyed by tab id — shown as a badge on the tab. */
+  tabDrift?: Record<string, number>;
 };
+
+/** Drift badge on a pinned tab — count plus the four-level colour scale. */
+const TAB_DRIFT_COLOR: Record<DriftLevel, { bg: string; fg: string }> = {
+  idle: { bg: '#1f2933', fg: '#7c8893' },
+  live: { bg: '#2c5b3f', fg: '#bcefcd' },
+  warn: { bg: '#7a5a14', fg: '#ffdf91' },
+  alert: { bg: '#7a1f1f', fg: '#ffc2c2' },
+};
+
+function DriftBadge({ count }: { count: number }): JSX.Element {
+  const c = TAB_DRIFT_COLOR[driftLevel(count)];
+  return (
+    <span
+      style={{ ...tabBadgeStyle, background: c.bg, color: c.fg }}
+      aria-label={`${count} changed`}
+    >
+      {count}
+    </span>
+  );
+}
+
+/** Idle/running dot on a terminal tab — lit while a foreground task runs. */
+function StatusDot({ status }: { status: TerminalForegroundStatus }): JSX.Element {
+  const running = status === 'running';
+  return (
+    <span
+      style={{
+        ...statusDotStyle,
+        background: running ? '#4cd07d' : '#3a4654',
+        boxShadow: running ? '0 0 4px #4cd07d' : 'none',
+      }}
+      aria-label={running ? 'running' : 'idle'}
+    />
+  );
+}
 
 /**
  * A panel: a strip of typed, draggable tabs over a content slot. The strip is
  * a drop target — dropping a tab moves it here. The content slot stays empty;
  * the shell portals each tab's surface into it so a tab keeps its component
- * (terminal scrollback, browser page) when dragged between panels.
+ * (terminal scrollback, browser page) when dragged between panels. Pinned
+ * `pane` tabs cannot be moved or closed.
  */
 export function TabbedPanel({
   panelId,
@@ -37,9 +91,24 @@ export function TabbedPanel({
   onCloseTab,
   onNewTerminal,
   onNewBrowser,
+  onRenameTab,
   onMoveTab,
   slotRef,
+  tabDrift,
 }: Props): JSX.Element {
+  // The tab currently being renamed inline, plus its draft text.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+
+  const startEdit = (tab: WorkspaceTab): void => {
+    setEditingId(tab.id);
+    setDraft(tab.title);
+  };
+  const commitEdit = (): void => {
+    if (editingId !== null) onRenameTab(editingId, draft);
+    setEditingId(null);
+  };
+
   const allowDrop = (e: React.DragEvent): void => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
@@ -69,12 +138,13 @@ export function TabbedPanel({
       >
         {tabs.map((tab, i) => {
           const active = tab.id === activeTabId;
+          const pinned = tab.kind === 'pane';
           return (
             <div
               key={tab.id}
               style={{ ...tabStyle, ...(active ? activeTabStyle : null) }}
-              data-testid={`tab-${tab.kind}`}
-              draggable={tab.kind !== 'cockpit'}
+              data-testid={pinned ? `tab-${tab.id}` : `tab-${tab.kind}`}
+              draggable={!pinned}
               onDragStart={(e) => {
                 e.dataTransfer.setData(
                   'text/plain',
@@ -85,14 +155,36 @@ export function TabbedPanel({
               onDragOver={allowDrop}
               onDrop={(e) => handleDrop(e, i)}
             >
-              <button
-                type="button"
-                style={{ ...tabLabelBtn, color: active ? '#e6edf3' : '#8a96a2' }}
-                onClick={() => onSelectTab(tab.id)}
-              >
-                {tab.title}
-              </button>
-              {tab.kind !== 'cockpit' ? (
+              {editingId === tab.id ? (
+                <input
+                  // Focus and select on mount so the rename is type-ready.
+                  ref={(el) => el?.select()}
+                  style={tabEditInput}
+                  value={draft}
+                  spellCheck={false}
+                  aria-label="Rename tab"
+                  onChange={(e) => setDraft(e.target.value)}
+                  onBlur={commitEdit}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitEdit();
+                    else if (e.key === 'Escape') setEditingId(null);
+                  }}
+                />
+              ) : (
+                <button
+                  type="button"
+                  style={{ ...tabLabelBtn, color: active ? '#e6edf3' : '#8a96a2' }}
+                  title={tab.title}
+                  onClick={() => onSelectTab(tab.id)}
+                  // Pinned panes keep fixed names; terminal/browser tabs rename.
+                  onDoubleClick={pinned ? undefined : () => startEdit(tab)}
+                >
+                  {tab.kind === 'terminal' ? <StatusDot status={tab.status ?? 'idle'} /> : null}
+                  <span style={tabTitleStyle}>{tab.title}</span>
+                  {tabDrift && tab.id in tabDrift ? <DriftBadge count={tabDrift[tab.id]} /> : null}
+                </button>
+              )}
+              {pinned ? null : (
                 <button
                   type="button"
                   style={closeBtn}
@@ -101,7 +193,7 @@ export function TabbedPanel({
                 >
                   ×
                 </button>
-              ) : null}
+              )}
             </div>
           );
         })}
@@ -168,6 +260,9 @@ const activeTabStyle: React.CSSProperties = {
 };
 
 const tabLabelBtn: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.4rem',
   padding: '0.35rem 0.7rem',
   background: 'transparent',
   border: 'none',
@@ -176,6 +271,48 @@ const tabLabelBtn: React.CSSProperties = {
   fontWeight: 600,
   cursor: 'grab',
   whiteSpace: 'nowrap',
+};
+
+const tabTitleStyle: React.CSSProperties = {
+  display: 'inline-block',
+  maxWidth: '14rem',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  verticalAlign: 'middle',
+};
+
+const statusDotStyle: React.CSSProperties = {
+  flexShrink: 0,
+  width: '7px',
+  height: '7px',
+  borderRadius: '50%',
+};
+
+const tabEditInput: React.CSSProperties = {
+  margin: '0.2rem 0.45rem',
+  width: '8rem',
+  padding: '0.15rem 0.3rem',
+  background: '#0a0f17',
+  border: '1px solid #5a9bd4',
+  borderRadius: '3px',
+  color: '#e6edf3',
+  font: 'inherit',
+  fontSize: '0.78rem',
+  fontWeight: 600,
+};
+
+const tabBadgeStyle: React.CSSProperties = {
+  flexShrink: 0,
+  minWidth: '1.1rem',
+  height: '1.05rem',
+  padding: '0 0.3rem',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  borderRadius: '999px',
+  fontSize: '0.62rem',
+  fontWeight: 700,
+  fontVariantNumeric: 'tabular-nums',
 };
 
 const closeBtn: React.CSSProperties = {

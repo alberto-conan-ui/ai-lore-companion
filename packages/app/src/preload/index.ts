@@ -9,6 +9,7 @@ import {
   type Shortcut,
   type TerminalDataPayload,
   type TerminalExitPayload,
+  type TerminalStatusPayload,
   type TreeInitPayload,
   type TreeUpdatePayload,
   type WindowInitPayload,
@@ -43,6 +44,7 @@ const api: CockpitApi = {
   killTerminal: (id) => ipcRenderer.send(IPC.TerminalKill, id),
   onTerminalData: makeSubscribe<TerminalDataPayload>(IPC.TerminalData),
   onTerminalExit: makeSubscribe<TerminalExitPayload>(IPC.TerminalExit),
+  onTerminalStatus: makeSubscribe<TerminalStatusPayload>(IPC.TerminalStatus),
   browserCreate: (tabId) => ipcRenderer.send(IPC.BrowserCreate, tabId),
   browserDestroy: (tabId) => ipcRenderer.send(IPC.BrowserDestroy, tabId),
   browserSetVisible: (tabId, visible) =>
@@ -54,6 +56,7 @@ const api: CockpitApi = {
   browserReload: (tabId) => ipcRenderer.send(IPC.BrowserReload, tabId),
   browserSetProfile: (tabId, profile) =>
     ipcRenderer.send(IPC.BrowserSetProfile, { tabId, profile }),
+  browserSuppressAll: (suppress) => ipcRenderer.send(IPC.BrowserSuppressAll, suppress),
   onBrowserState: makeSubscribe<BrowserStatePayload>(IPC.BrowserState),
   shortcutsList: () => ipcRenderer.invoke(IPC.ShortcutsList),
   shortcutsRun: (id) => ipcRenderer.send(IPC.ShortcutsRun, id),

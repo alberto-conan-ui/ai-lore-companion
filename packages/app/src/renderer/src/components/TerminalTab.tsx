@@ -2,6 +2,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { type JSX, useCallback, useEffect, useRef } from 'react';
+import type { TerminalForegroundStatus } from '../../../shared/ipc.js';
 
 const TERMINAL_THEME = {
   background: '#0a0f17',
@@ -15,8 +16,19 @@ const TERMINAL_THEME = {
  * component's lifetime is the tab's lifetime: it mounts when the tab is
  * created and unmounts (killing the PTY) only when the tab is closed. Tab
  * switching toggles visibility, so this never unmounts on a switch.
+ *
+ * `onStatus` bubbles the PTY's foreground status up to the shell, which owns
+ * the tab's title and idle/running indicator.
  */
-export function TerminalTab({ active }: { active: boolean }): JSX.Element {
+export function TerminalTab({
+  active,
+  tabId,
+  onStatus,
+}: {
+  active: boolean;
+  tabId: string;
+  onStatus: (tabId: string, status: TerminalForegroundStatus, command: string) => void;
+}): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -52,9 +64,27 @@ export function TerminalTab({ active }: { active: boolean }): JSX.Element {
     termRef.current = term;
     fitRef.current = fit;
 
+    // Shift+Enter must insert a newline, not submit. xterm sends a bare `\r`
+    // for both Enter and Shift+Enter, and Claude Code reads `\r` as submit.
+    // Sending `\n` (LF — the Ctrl+J code) instead is the sequence Claude Code
+    // reliably treats as newline-insert. (The "correct" Shift+Enter sequence
+    // `\x1b[13;2u` is currently mis-parsed by Claude Code, so LF is used.)
+    // Returning false for the whole keystroke — keydown and keypress — keeps
+    // xterm from emitting its own `\r`.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.key === 'Enter' && e.shiftKey) {
+        if (e.type === 'keydown' && idRef.current) {
+          window.cockpit.sendTerminalInput({ id: idRef.current, data: '\n' });
+        }
+        return false;
+      }
+      return true;
+    });
+
     let disposed = false;
     let offData = (): void => {};
     let offExit = (): void => {};
+    let offStatus = (): void => {};
 
     window.cockpit.spawnTerminal().then((id) => {
       if (disposed) {
@@ -68,6 +98,9 @@ export function TerminalTab({ active }: { active: boolean }): JSX.Element {
       });
       offExit = window.cockpit.onTerminalExit((p) => {
         if (p.id === id) term.write('\r\n\x1b[2m[process exited]\x1b[0m\r\n');
+      });
+      offStatus = window.cockpit.onTerminalStatus((p) => {
+        if (p.id === id) onStatus(tabId, p.status, p.command);
       });
       term.onData((data) => window.cockpit.sendTerminalInput({ id, data }));
       term.focus();
@@ -86,12 +119,15 @@ export function TerminalTab({ active }: { active: boolean }): JSX.Element {
       resizeObserver.disconnect();
       offData();
       offExit();
+      offStatus();
       if (idRef.current) window.cockpit.killTerminal(idRef.current);
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
     };
-  }, [doFit]);
+    // `doFit` / `onStatus` / `tabId` are all stable for the component's
+    // lifetime, so the effect runs exactly once — at mount.
+  }, [doFit, onStatus, tabId]);
 
   // Re-fit and focus when this tab becomes the visible one (it cannot lay out
   // while `display: none`).

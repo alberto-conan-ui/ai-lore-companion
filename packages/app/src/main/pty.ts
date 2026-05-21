@@ -1,11 +1,17 @@
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { basename } from 'node:path';
+import { promisify } from 'node:util';
 import { type IPty, spawn } from 'node-pty';
+import type { TerminalForegroundStatus } from '../shared/ipc.js';
+
+const execFileP = promisify(execFile);
 
 /** Per-id callbacks the host wires to IPC. */
 export type PtyServiceCallbacks = {
   onData: (id: string, data: string) => void;
   onExit: (id: string) => void;
+  /** Fired when a terminal's foreground status changes (idle/running + command). */
+  onStatus: (id: string, status: TerminalForegroundStatus, command: string) => void;
 };
 
 export type PtyService = {
@@ -14,25 +20,113 @@ export type PtyService = {
   write: (id: string, data: string) => void;
   resize: (id: string, cols: number, rows: number) => void;
   kill: (id: string) => void;
-  /** Kill every live PTY — call on app teardown. */
+  /** Kill every live PTY and stop polling — call on app teardown. */
   killAll: () => void;
   /**
-   * True when any live PTY has a foreground process other than the login
-   * shell — a heuristic for "a terminal is running a task". A process named
-   * like the shell, or a backgrounded job, is the fuzzy edge.
+   * True when any live PTY is running a foreground task — read from the same
+   * per-terminal foreground feed that drives the tab status indicators.
    */
   hasRunningTask: () => boolean;
 };
 
 const DEFAULT_SHELL = process.env.SHELL ?? '/bin/zsh';
 
+/** How often each live PTY's foreground process is polled. */
+const POLL_MS = 1000;
+
+/** What a single foreground probe found. */
+type Probe = { status: TerminalForegroundStatus; command: string };
+
+const IDLE: Probe = { status: 'idle', command: '' };
+
+/** Bookkeeping for one live PTY — the shell, its tty, and last seen status. */
+type PtyEntry = {
+  pty: IPty;
+  /** The PTY's controlling tty (e.g. `ttys003`), resolved lazily once. */
+  tty: string | null;
+  ttyResolved: boolean;
+  /** Last status pushed to the renderer — dedupes the poll feed. */
+  last: Probe;
+};
+
+/** Resolve the controlling tty of a process id via `ps`; null when it has none. */
+async function ttyForPid(pid: number): Promise<string | null> {
+  try {
+    const { stdout } = await execFileP('ps', ['-o', 'tty=', '-p', String(pid)]);
+    const tty = stdout.trim();
+    // `ps` prints `??` for a process with no controlling terminal.
+    return tty && tty !== '??' ? tty : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Probe a tty for its foreground task. `ps -t` lists every process on the
+ * terminal; the foreground process group carries a `+` in its STAT flags. The
+ * login shell itself (`shellPid`) is excluded — what is left, if anything, is
+ * the running command. The command launched directly by the shell is
+ * preferred so a pipeline or a subprocess does not mask the real task.
+ */
+async function probeForeground(shellPid: number, tty: string): Promise<Probe> {
+  try {
+    const { stdout } = await execFileP('ps', ['-t', tty, '-o', 'pid=,ppid=,stat=,command=']);
+    const fg: { ppid: number; command: string }[] = [];
+    for (const line of stdout.split('\n')) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/);
+      if (!m) continue;
+      const [, pid, ppid, stat, command] = m;
+      if (!stat.includes('+')) continue;
+      if (Number(pid) === shellPid) continue;
+      fg.push({ ppid: Number(ppid), command });
+    }
+    if (fg.length === 0) return IDLE;
+    const top = fg.find((r) => r.ppid === shellPid) ?? fg[0];
+    return { status: 'running', command: top.command };
+  } catch {
+    return IDLE;
+  }
+}
+
 /**
  * Tracks live `node-pty` shells by id. App-main infrastructure — kept out of
- * `packages/core/`, which stays headless. The host wires `onData` / `onExit`
- * to IPC and calls `killAll` from the app's teardown.
+ * `packages/core/`, which stays headless. The host wires `onData` / `onExit` /
+ * `onStatus` to IPC and calls `killAll` from the app's teardown.
+ *
+ * Each live PTY's foreground process is polled (~1s) so the renderer can show
+ * whether a terminal is idle or running a task, and what that task is.
  */
 export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): PtyService {
-  const ptys = new Map<string, IPty>();
+  const ptys = new Map<string, PtyEntry>();
+
+  let pollTimer: NodeJS.Timeout | null = null;
+  let stopped = false;
+
+  /** Probe every live PTY once and push status changes to the renderer. */
+  async function pollOnce(): Promise<void> {
+    for (const [id, entry] of ptys) {
+      if (!entry.ttyResolved) {
+        entry.tty = await ttyForPid(entry.pty.pid);
+        entry.ttyResolved = true;
+      }
+      const probe = entry.tty ? await probeForeground(entry.pty.pid, entry.tty) : IDLE;
+      if (probe.status !== entry.last.status || probe.command !== entry.last.command) {
+        entry.last = probe;
+        opts.onStatus(id, probe.status, probe.command);
+      }
+    }
+  }
+
+  /** Self-rescheduling poll — a fresh tick is only queued after the last one
+   *  settles, so a slow `ps` cannot stack overlapping probes. */
+  function scheduleNext(): void {
+    pollTimer = setTimeout(() => {
+      void pollOnce().finally(() => {
+        if (!stopped) scheduleNext();
+      });
+    }, POLL_MS);
+  }
+  scheduleNext();
 
   return {
     spawn: () => {
@@ -49,7 +143,7 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
         cwd: opts.cwd,
         env: process.env as Record<string, string>,
       });
-      ptys.set(id, pty);
+      ptys.set(id, { pty, tty: null, ttyResolved: false, last: IDLE });
       pty.onData((data) => opts.onData(id, data));
       pty.onExit(() => {
         ptys.delete(id);
@@ -58,23 +152,25 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
       return id;
     },
     write: (id, data) => {
-      ptys.get(id)?.write(data);
+      ptys.get(id)?.pty.write(data);
     },
     resize: (id, cols, rows) => {
-      const pty = ptys.get(id);
-      if (pty) pty.resize(cols, rows);
+      const entry = ptys.get(id);
+      if (entry) entry.pty.resize(cols, rows);
     },
     kill: (id) => {
-      const pty = ptys.get(id);
-      if (pty) {
-        pty.kill();
+      const entry = ptys.get(id);
+      if (entry) {
+        entry.pty.kill();
         ptys.delete(id);
       }
     },
     killAll: () => {
-      for (const pty of ptys.values()) {
+      stopped = true;
+      if (pollTimer) clearTimeout(pollTimer);
+      for (const entry of ptys.values()) {
         try {
-          pty.kill();
+          entry.pty.kill();
         } catch {
           // Already exited — nothing to kill.
         }
@@ -82,12 +178,8 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
       ptys.clear();
     },
     hasRunningTask: () => {
-      const shellName = basename(DEFAULT_SHELL);
-      for (const pty of ptys.values()) {
-        // `node-pty` reports the foreground process; a login shell may carry a
-        // leading '-'. Anything that is not the shell counts as a task.
-        const fg = (pty.process || '').replace(/^-/, '');
-        if (fg && fg !== shellName) return true;
+      for (const entry of ptys.values()) {
+        if (entry.last.status === 'running') return true;
       }
       return false;
     },

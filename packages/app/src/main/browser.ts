@@ -23,10 +23,24 @@ type Companion = {
   profile: BrowserProfile;
   /** Last bounds the renderer reported; re-applied on show and profile swap. */
   bounds: BrowserBounds;
+  /** The renderer's intended visibility for this tab. */
   visible: boolean;
+  /** A DOM overlay is occluding the window — force the view hidden regardless of `visible`. */
+  suppressed: boolean;
 };
 
 const companions = new Map<string, Companion>();
+
+/**
+ * Push a companion's effective visibility to its native view. A view shows
+ * only when the renderer wants it (`visible`) and no DOM overlay is suppressing
+ * it. Bounds are re-applied on show — a hidden view can drift stale bounds.
+ */
+function applyVisibility(c: Companion): void {
+  const shown = c.visible && !c.suppressed;
+  c.view.setVisible(shown);
+  if (shown) c.view.setBounds(c.bounds);
+}
 
 /** Where a freshly opened browser tab lands. */
 const HOME_URL = 'https://www.google.com';
@@ -71,6 +85,7 @@ function buildView(tabId: string, win: BrowserWindow, profile: BrowserProfile): 
     profile,
     bounds: { x: 0, y: 0, width: 0, height: 0 },
     visible: false,
+    suppressed: false,
   };
 
   const wc = view.webContents;
@@ -112,11 +127,8 @@ export function setVisible(tabId: string, visible: boolean): void {
   const c = companions.get(tabId);
   if (!c) return;
   c.visible = visible;
-  c.view.setVisible(visible);
-  if (visible) {
-    c.view.setBounds(c.bounds);
-    pushState(tabId, c);
-  }
+  applyVisibility(c);
+  if (visible) pushState(tabId, c);
 }
 
 /** Position a browser tab's view. The renderer is the source of layout truth. */
@@ -124,7 +136,22 @@ export function setBounds(tabId: string, bounds: BrowserBounds): void {
   const c = companions.get(tabId);
   if (!c) return;
   c.bounds = bounds;
-  if (c.visible) c.view.setBounds(bounds);
+  if (c.visible && !c.suppressed) c.view.setBounds(bounds);
+}
+
+/**
+ * Hide every browser view in a window, or restore them. A `WebContentsView`
+ * renders above all DOM *and* intercepts the clicks landing on it, so a DOM
+ * overlay (a menu, a dialog) is both invisible and dead behind one. The
+ * renderer calls this around such an overlay; each view's intended visibility
+ * is preserved and restored.
+ */
+export function suppressAll(winId: number, suppress: boolean): void {
+  for (const c of companions.values()) {
+    if (c.win.id !== winId) continue;
+    c.suppressed = suppress;
+    applyVisibility(c);
+  }
 }
 
 export function navigate(tabId: string, url: string): void {
@@ -148,16 +175,16 @@ export function reload(tabId: string): void {
 export function setProfile(tabId: string, profile: BrowserProfile): void {
   const old = companions.get(tabId);
   if (!old) return;
-  const { win, bounds, visible } = old;
+  const { win, bounds, visible, suppressed } = old;
   if (!win.isDestroyed()) win.contentView.removeChildView(old.view);
   old.view.webContents.close();
 
   const c = buildView(tabId, win, profile);
   c.bounds = bounds;
   c.visible = visible;
+  c.suppressed = suppressed;
   win.contentView.addChildView(c.view);
-  c.view.setBounds(bounds);
-  c.view.setVisible(visible);
+  applyVisibility(c);
   companions.set(tabId, c);
   pushState(tabId, c);
 }

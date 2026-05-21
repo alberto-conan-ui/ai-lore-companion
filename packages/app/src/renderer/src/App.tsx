@@ -1,11 +1,12 @@
-import { type JSX, useCallback, useEffect, useState } from 'react';
+import type { ChangeScope } from '@ai-lore-companion/core';
+import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { RecentProject } from '../../shared/ipc.js';
+import type { RecentProject, TerminalForegroundStatus } from '../../shared/ipc.js';
 import { isChainErrorPayload } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BrowserTab } from './components/BrowserTab.js';
-import { CockpitTab } from './components/CockpitTab.js';
 import { DockPanel } from './components/DockPanel.js';
+import { Pane, type SubRoot, entriesInSubRoot } from './components/Pane.js';
 import { type PanelId, TabbedPanel, type WorkspaceTab } from './components/TabbedPanel.js';
 import { TerminalTab } from './components/TerminalTab.js';
 import { TrackerStrip } from './components/TrackerStrip.js';
@@ -14,7 +15,15 @@ import { useCockpitStore } from './store.js';
 
 type Panel = { tabs: WorkspaceTab[]; activeId: string };
 
-const COCKPIT_TAB: WorkspaceTab = { id: 'cockpit', kind: 'cockpit', title: 'Cockpit' };
+/** One of the four pinned cockpit panes — its tab, plus how to root and scope it. */
+type PaneSpec = { id: string; title: string; scope: ChangeScope; subRoot: SubRoot };
+
+/** The three pinned cockpit tabs. Always open in the left panel, in this order. */
+const PANE_TABS: WorkspaceTab[] = [
+  { id: 'status', kind: 'pane', title: 'Status' },
+  { id: 'payload', kind: 'pane', title: 'Payload' },
+  { id: 'memory', kind: 'pane', title: 'Memory' },
+];
 const PANEL_IDS = ['left', 'right', 'bottom'] as const;
 
 /** What this window is — set once by main via `onWindowInit`. */
@@ -27,12 +36,13 @@ export function App(): JSX.Element {
   const setTrees = useCockpitStore((s) => s.setTrees);
   const applyTreeUpdate = useCockpitStore((s) => s.applyTreeUpdate);
   const chain = useCockpitStore((s) => s.chain);
+  const entries = useCockpitStore((s) => s.entries);
 
   const [mode, setMode] = useState<WindowMode>('loading');
   const [recents, setRecents] = useState<RecentProject[]>([]);
   const [alteredFolder, setAlteredFolder] = useState<string>('');
   const [panels, setPanels] = useState<Record<PanelId, Panel>>({
-    left: { tabs: [COCKPIT_TAB], activeId: 'cockpit' },
+    left: { tabs: PANE_TABS, activeId: 'status' },
     right: { tabs: [], activeId: '' },
     bottom: { tabs: [], activeId: '' },
   });
@@ -43,6 +53,56 @@ export function App(): JSX.Element {
     right: null,
     bottom: null,
   });
+
+  // The three pinned panes, rooted against the resolved chain. Status and
+  // Memory each group sibling memory folders via a synthetic sub-root.
+  const paneSpecs = useMemo<PaneSpec[]>(() => {
+    if (!chain || isChainErrorPayload(chain)) return [];
+    const mem = `${chain.lorePath}/memory`;
+    return [
+      {
+        id: 'status',
+        title: 'Status',
+        scope: 'lore',
+        subRoot: {
+          kind: 'synthetic',
+          id: 'synthetic:status',
+          name: 'Status',
+          childPaths: [`${mem}/status`, `${mem}/journal`, `${mem}/action-tree`],
+        },
+      },
+      {
+        id: 'payload',
+        title: 'Payload',
+        scope: 'payload',
+        subRoot: { kind: 'path', path: chain.root },
+      },
+      {
+        id: 'memory',
+        title: 'Memory',
+        scope: 'lore',
+        subRoot: {
+          kind: 'synthetic',
+          id: 'synthetic:memory',
+          name: 'Memory',
+          childPaths: [`${mem}/blueprint`, `${mem}/knowledge-tree`],
+        },
+      },
+    ];
+  }, [chain]);
+
+  const paneSpecById = useMemo(() => new Map(paneSpecs.map((p) => [p.id, p])), [paneSpecs]);
+
+  // Unacked-drift counts per pinned tab — shown as a badge on the tab strip.
+  const tabDrift = useMemo(() => {
+    const out: Record<string, number> = {};
+    if (chain && !isChainErrorPayload(chain)) {
+      for (const p of paneSpecs) {
+        out[p.id] = entriesInSubRoot(entries, p.scope, p.subRoot, chain.root).length;
+      }
+    }
+    return out;
+  }, [paneSpecs, entries, chain]);
 
   useEffect(() => {
     return window.cockpit.onWindowInit((payload) => {
@@ -103,10 +163,55 @@ export function App(): JSX.Element {
     setPanels((p) => {
       const n = p[panelId].tabs.filter((t) => t.kind === kind).length + 1;
       const title = `${kind === 'terminal' ? 'Terminal' : 'Browser'} ${n}`;
-      return { ...p, [panelId]: { tabs: [...p[panelId].tabs, { id, kind, title }], activeId: id } };
+      const tab: WorkspaceTab =
+        kind === 'terminal'
+          ? { id, kind, title, baseTitle: title, status: 'idle' }
+          : { id, kind, title, baseTitle: title };
+      return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
     });
     setDockOpen(panelId, true);
   };
+
+  /** Rename a tab by hand. A non-empty name wins and freezes terminal
+   *  auto-rename; an empty name reverts to the auto-managed default. */
+  const renameTab = (panelId: PanelId, tabId: string, raw: string): void => {
+    const name = raw.trim();
+    setPanels((p) => {
+      const tabs = p[panelId].tabs.map((t) => {
+        if (t.id !== tabId) return t;
+        return name === ''
+          ? { ...t, manualTitle: false, title: t.baseTitle ?? t.title }
+          : { ...t, manualTitle: true, title: name };
+      });
+      return { ...p, [panelId]: { ...p[panelId], tabs } };
+    });
+  };
+
+  /** Apply a terminal's foreground status: light the dot, and auto-rename the
+   *  tab to the running command unless its title was set by hand. */
+  const handleTerminalStatus = useCallback(
+    (tabId: string, status: TerminalForegroundStatus, command: string): void => {
+      setPanels((prev) => {
+        for (const panelId of PANEL_IDS) {
+          const tabs = prev[panelId].tabs;
+          const idx = tabs.findIndex((t) => t.id === tabId);
+          if (idx === -1) continue;
+          const tab = tabs[idx];
+          const title = tab.manualTitle
+            ? tab.title
+            : status === 'running' && command
+              ? command
+              : (tab.baseTitle ?? tab.title);
+          if (tab.status === status && tab.title === title) return prev;
+          const next = [...tabs];
+          next[idx] = { ...tab, status, title };
+          return { ...prev, [panelId]: { ...prev[panelId], tabs: next } };
+        }
+        return prev;
+      });
+    },
+    [],
+  );
 
   const selectTab = (panelId: PanelId, tabId: string): void => {
     setPanels((p) => ({ ...p, [panelId]: { ...p[panelId], activeId: tabId } }));
@@ -125,9 +230,9 @@ export function App(): JSX.Element {
     if (panelId !== 'left' && panel.tabs.length === 1) setDockOpen(panelId, false);
   };
 
-  /** Move a tab between panels (or reorder within one). The cockpit stays put. */
+  /** Move a tab between panels (or reorder within one). Pinned panes stay put. */
   const moveTab = (fromPanel: PanelId, tabId: string, toPanel: PanelId, index: number): void => {
-    if (tabId === 'cockpit') return;
+    if (panels[fromPanel].tabs.find((t) => t.id === tabId)?.kind === 'pane') return;
     const fromTabsBefore = panels[fromPanel].tabs;
     setPanels((p) => {
       const tab = p[fromPanel].tabs.find((t) => t.id === tabId);
@@ -214,8 +319,10 @@ export function App(): JSX.Element {
       onCloseTab={(id) => closeTab(panelId, id)}
       onNewTerminal={() => addTab(panelId, 'terminal')}
       onNewBrowser={() => addTab(panelId, 'browser')}
+      onRenameTab={(id, name) => renameTab(panelId, id, name)}
       onMoveTab={moveTab}
       slotRef={slotRefs[panelId]}
+      tabDrift={panelId === 'left' ? tabDrift : undefined}
     />
   );
 
@@ -228,15 +335,28 @@ export function App(): JSX.Element {
     return panels[panelId].tabs.map((tab) => {
       const active = panels[panelId].activeId === tab.id;
       const visible = active && dockOpen(panelId);
+      let body: JSX.Element | null = null;
+      if (tab.kind === 'pane') {
+        const spec = paneSpecById.get(tab.id);
+        if (spec) {
+          body = (
+            <Pane
+              testId={spec.id}
+              scope={spec.scope}
+              label={spec.title}
+              subRoot={spec.subRoot}
+              projectRoot={chain.root}
+            />
+          );
+        }
+      } else if (tab.kind === 'terminal') {
+        body = <TerminalTab active={visible} tabId={tab.id} onStatus={handleTerminalStatus} />;
+      } else {
+        body = <BrowserTab tabId={tab.id} visible={visible} />;
+      }
       return createPortal(
         <div style={{ display: active ? 'flex' : 'none', flex: 1, minWidth: 0, minHeight: 0 }}>
-          {tab.kind === 'cockpit' ? (
-            <CockpitTab chain={chain} />
-          ) : tab.kind === 'terminal' ? (
-            <TerminalTab active={visible} />
-          ) : (
-            <BrowserTab tabId={tab.id} visible={visible} />
-          )}
+          {body}
         </div>,
         slot,
         tab.id,

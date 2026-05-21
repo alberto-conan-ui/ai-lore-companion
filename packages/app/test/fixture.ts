@@ -22,6 +22,10 @@ export function makeProject(): Fixture {
   const lore = join(root, '.ai-lore-e2e-fixture');
   mkdirSync(join(lore, 'memory', 'status', 'focus'), { recursive: true });
   mkdirSync(join(lore, 'memory', 'action-tree', 'demo'), { recursive: true });
+  // The four cockpit panes each root at a memory area — give them all a folder.
+  mkdirSync(join(lore, 'memory', 'journal', 'live'), { recursive: true });
+  mkdirSync(join(lore, 'memory', 'blueprint'), { recursive: true });
+  mkdirSync(join(lore, 'memory', 'knowledge-tree'), { recursive: true });
 
   writeFileSync(
     join(lore, 'workspace.yaml'),

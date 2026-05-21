@@ -10,17 +10,44 @@ function scratchUserData(): string {
 }
 
 test.describe('window modes', () => {
-  test('a valid project opens the cockpit workspace', async () => {
+  test('a valid project opens the pinned cockpit tabs', async () => {
     const fixture = makeProject();
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('cockpit')).toBeVisible({ timeout: 15_000 });
-      await expect(page.getByTestId('tab-strip').first()).toBeVisible();
-      await expect(page.getByTestId('tab-cockpit')).toBeVisible();
+      // The three pinned cockpit tabs are open on launch.
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('tab-payload')).toBeVisible();
+      await expect(page.getByTestId('tab-memory')).toBeVisible();
+      // Status is the default tab — its pane is shown.
+      await expect(page.getByTestId('pane-status')).toBeVisible();
 
       // The panel/tab workspace: a new terminal opens in the left panel.
       await page.getByTestId('tab-strip').first().getByTestId('new-terminal').click();
       await expect(page.getByTestId('tab-terminal').first()).toBeVisible({ timeout: 5_000 });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('a terminal tab can be renamed by hand', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTestId('tab-strip').first().getByTestId('new-terminal').click();
+      const tab = page.getByTestId('tab-terminal').first();
+      await expect(tab).toBeVisible({ timeout: 5_000 });
+
+      // Double-click the tab to make its title editable; a typed name sticks.
+      await tab.dblclick();
+      const input = page.getByLabel('Rename tab');
+      await expect(input).toBeVisible();
+      await input.fill('My shell');
+      await input.press('Enter');
+      await expect(tab.getByText('My shell')).toBeVisible();
 
       await app.close();
     } finally {

@@ -208,6 +208,7 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
     cwd: root,
     onData: (id, data) => sendToWin(win, IPC.TerminalData, { id, data }),
     onExit: (id) => sendToWin(win, IPC.TerminalExit, { id }),
+    onStatus: (id, status, command) => sendToWin(win, IPC.TerminalStatus, { id, status, command }),
   });
 
   return { root, chain, wiring, ptyService };
@@ -434,6 +435,10 @@ function registerIpcHandlers(): void {
   ipcMain.on(IPC.BrowserSetProfile, (_event, arg: { tabId: string; profile: BrowserProfile }) => {
     saveBrowserProfile(userDataDir, arg.profile);
     browser.setProfile(arg.tabId, arg.profile);
+  });
+  ipcMain.on(IPC.BrowserSuppressAll, (event, suppress: boolean) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) browser.suppressAll(win.id, suppress);
   });
 
   ipcMain.handle(IPC.ShortcutsList, (): Shortcut[] => loadShortcuts(userDataDir));

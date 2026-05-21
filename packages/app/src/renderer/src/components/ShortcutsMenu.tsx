@@ -38,6 +38,9 @@ export function ShortcutsMenu(): JSX.Element {
 
   useEffect(() => {
     if (!open) return;
+    // Browser tabs are native `WebContentsView`s — they render above the DOM
+    // popover and eat its clicks. Hide them while the menu is open.
+    window.cockpit.browserSuppressAll(true);
     const onDown = (e: MouseEvent): void => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
         setOpen(false);
@@ -45,7 +48,10 @@ export function ShortcutsMenu(): JSX.Element {
       }
     };
     document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      window.cockpit.browserSuppressAll(false);
+    };
   }, [open]);
 
   const pickApp = useCallback(async () => {
@@ -126,28 +132,37 @@ export function ShortcutsMenu(): JSX.Element {
                 ))}
               </div>
               {draft.target === 'url' ? (
-                <input
-                  style={textInputStyle}
-                  value={draft.url}
-                  placeholder="https://example.com"
-                  spellCheck={false}
-                  data-testid="shortcut-url"
-                  onChange={(e) => setDraft({ ...draft, url: e.target.value })}
-                />
+                <label style={fieldStyle}>
+                  <span style={fieldLabelStyle}>URL</span>
+                  <input
+                    style={textInputStyle}
+                    value={draft.url}
+                    placeholder="https://example.com"
+                    spellCheck={false}
+                    data-testid="shortcut-url"
+                    onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+                  />
+                </label>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <button type="button" style={chooseAppStyle} onClick={() => void pickApp()}>
-                    Choose app…
-                  </button>
-                  {draft.app ? <span style={appNameStyle}>{appName(draft.app)}</span> : null}
+                <div style={fieldStyle}>
+                  <span style={fieldLabelStyle}>Application</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <button type="button" style={chooseAppStyle} onClick={() => void pickApp()}>
+                      Choose app…
+                    </button>
+                    {draft.app ? <span style={appNameStyle}>{appName(draft.app)}</span> : null}
+                  </div>
                 </div>
               )}
-              <input
-                style={textInputStyle}
-                value={draft.labelInput}
-                placeholder={defaultLabel(draft)}
-                onChange={(e) => setDraft({ ...draft, labelInput: e.target.value })}
-              />
+              <label style={fieldStyle}>
+                <span style={fieldLabelStyle}>Name</span>
+                <input
+                  style={textInputStyle}
+                  value={draft.labelInput}
+                  placeholder={defaultLabel(draft)}
+                  onChange={(e) => setDraft({ ...draft, labelInput: e.target.value })}
+                />
+              </label>
               <div style={{ display: 'flex', gap: '0.4rem' }}>
                 <button
                   type="button"
@@ -295,6 +310,22 @@ const textInputStyle: React.CSSProperties = {
   borderRadius: '4px',
   color: '#e6edf3',
   fontSize: '0.76rem',
+};
+
+/** A labelled form field — its caption above the control, so URL and Name
+ *  cannot be confused for one another. */
+const fieldStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.2rem',
+};
+
+const fieldLabelStyle: React.CSSProperties = {
+  fontSize: '0.66rem',
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: '#8a96a2',
 };
 
 const chooseAppStyle: React.CSSProperties = {
