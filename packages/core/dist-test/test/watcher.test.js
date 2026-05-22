@@ -71,6 +71,28 @@ test('watcher emits add event when a payload file is created', async () => {
         cleanup();
     }
 });
+test('attachWatcher prunes pre-existing index-file drift from the queue', async () => {
+    const { root, lorePath, cleanup } = setupTempProject();
+    const handle = openDb(':memory:');
+    try {
+        const queue = createQueue({ db: handle.db });
+        // Drift an older build queued, before index files were untracked.
+        queue.push({
+            path: join('memory', 'status', 'status.index.md'),
+            type: 'change',
+            scope: 'lore',
+        });
+        queue.push({ path: join('src', 'app.ts'), type: 'change', scope: 'payload' });
+        const watcher = attachWatcher(queue, { root, lorePath });
+        // The index file is pruned on attach; the ordinary file stays.
+        assert.deepEqual(queue.snapshot().map((e) => e.path), [join('src', 'app.ts')]);
+        await watcher.close();
+    }
+    finally {
+        handle.close();
+        cleanup();
+    }
+});
 test('watcher classifies events under the lore folder as scope=lore', async () => {
     const { root, lorePath, cleanup } = setupTempProject();
     const handle = openDb(':memory:');

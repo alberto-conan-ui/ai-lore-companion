@@ -1,12 +1,19 @@
 import { readFileSync } from 'node:fs';
-import { relative, sep } from 'node:path';
+import { basename, relative, sep } from 'node:path';
 import chokidar from 'chokidar';
-import { DEFAULT_IGNORED } from '../ignore.js';
+import { DEFAULT_IGNORED, isUntrackedFile } from '../ignore.js';
 import { classifyTrackerFile } from '../tracker/classifier.js';
 import { createTransitionDetector } from '../tracker/detector.js';
 import { parseStatus, parseTitle } from '../tracker/parser.js';
 export function attachWatcher(queue, options) {
     const { root, lorePath } = options;
+    // An older build may have queued index-file drift before such files were
+    // untracked. Prune it on attach so the rule holds for the existing queue,
+    // not just events from here on.
+    for (const entry of queue.snapshot()) {
+        if (isUntrackedFile(basename(entry.path)))
+            queue.ack(entry.id);
+    }
     const ignored = [...DEFAULT_IGNORED, ...(options.ignored ?? [])];
     const loreRel = relative(root, lorePath);
     const detector = createTransitionDetector();
@@ -22,6 +29,10 @@ export function attachWatcher(queue, options) {
     const handle = (chokidarEvent, absPath) => {
         const rel = relative(root, absPath);
         if (!rel || rel.startsWith('..'))
+            return;
+        // AI-Lore index files churn constantly as Memory is reshaped — noise, not
+        // drift. They stay in the tree and search; they just never reach the queue.
+        if (isUntrackedFile(basename(absPath)))
             return;
         const scope = classifyScope(rel, loreRel);
         const loreRelPath = scope === 'lore' && loreRel ? relative(lorePath, absPath) : null;

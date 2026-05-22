@@ -25,6 +25,20 @@ export const DEFAULT_IGNORED: readonly string[] = [
 ];
 
 /**
+ * Whether a file is excluded from drift tracking by its name alone. AI-Lore
+ * index files (`<name>.index.md`) are rewritten constantly as Memory is
+ * reshaped, and would flood the drift queue with noise — the watcher silences
+ * them.
+ *
+ * This is a *tracking* exclusion only: it deliberately stands apart from
+ * `DEFAULT_IGNORED` (which the file tree and search consume), so an index file
+ * stays visible in the tree and findable by the search — it just never drifts.
+ */
+export function isUntrackedFile(name: string): boolean {
+  return name.endsWith('.index.md');
+}
+
+/**
  * Compile a list of chokidar-style ignore globs into a predicate. The
  * predicate takes a path segment, or a path relative to a read root, and
  * returns true when any pattern matches it.

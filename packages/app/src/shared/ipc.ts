@@ -41,6 +41,8 @@ export const IPC = {
   OpenPath: 'cockpit:open-path',
   /** Renderer → main: read a directory's children on demand. */
   TreeExpand: 'cockpit:tree-expand',
+  /** Renderer → main: recursively search file names under the given directories. */
+  FileSearch: 'cockpit:file-search',
   /** Renderer → main: open a project — a given folder, or prompt a folder dialog. */
   OpenProject: 'cockpit:open-project',
   /** Renderer → main: re-run AI-Lore detection on this window's folder. */
@@ -124,6 +126,11 @@ export type TreeUpdatePayload = { scope: ChangeScope; path: string; children: Tr
 /** Argument to a `tree-expand` request. */
 export type TreeExpandArg = { scope: ChangeScope; path: string };
 
+/** A global file-search request — absolute directories to walk, and the query. */
+export type FileSearchArg = { dirs: string[]; query: string };
+/** One file matched by a search — its base name and absolute path. */
+export type FileSearchHit = { name: string; path: string };
+
 /** Keystrokes (or pasted text) bound for a terminal's PTY. */
 export type TerminalInputArg = { id: string; data: string };
 /** A terminal resize request, in character cells. */
@@ -200,6 +207,7 @@ export type CockpitApi = {
   ackAllScope: (scope: ChangeScope) => Promise<number>;
   openPath: (path: string) => Promise<string>;
   treeExpand: (arg: TreeExpandArg) => Promise<TreeNode[]>;
+  searchFiles: (arg: FileSearchArg) => Promise<FileSearchHit[]>;
   openProject: (path?: string) => Promise<void>;
   openExternal: (url: string) => Promise<void>;
   reload: () => Promise<void>;

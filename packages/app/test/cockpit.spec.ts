@@ -31,6 +31,40 @@ test.describe('window modes', () => {
     }
   });
 
+  test('the file tree shows a selectable root node', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('pane-status')).toBeVisible({ timeout: 15_000 });
+      // The pane's tree has a root node row at its top — selecting it surfaces
+      // the files that sit directly at the pane's root.
+      await expect(page.getByTestId('pane-status').getByTestId('tree-root')).toBeVisible({
+        timeout: 10_000,
+      });
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the global search finds a file and lists it', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTestId('global-search').fill('demo');
+      // The fixture has memory/status/focus/demo.focus.md — it shows as a result.
+      await expect(
+        page.getByTestId('search-result').filter({ hasText: 'demo.focus.md' }),
+      ).toBeVisible({ timeout: 5_000 });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('a terminal tab can be renamed by hand', async () => {
     const fixture = makeProject();
     try {

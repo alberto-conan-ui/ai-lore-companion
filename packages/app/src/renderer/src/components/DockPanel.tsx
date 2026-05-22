@@ -6,6 +6,10 @@ type Props = {
   side: Side;
   open: boolean;
   onToggle: (open: boolean) => void;
+  /** The project's accent colour — the click-to-toggle handle wears it. */
+  accent: string;
+  /** The project's dark background tint — the handle's background. */
+  tint: string;
   children: ReactNode;
 };
 
@@ -20,7 +24,7 @@ const DEFAULT_BOTTOM = 240;
  * drag it to resize. Children stay mounted while collapsed, so terminals keep
  * their PTY and browsers their page.
  */
-export function DockPanel({ side, open, onToggle, children }: Props): JSX.Element {
+export function DockPanel({ side, open, onToggle, accent, tint, children }: Props): JSX.Element {
   const [size, setSize] = useState(side === 'right' ? DEFAULT_RIGHT : DEFAULT_BOTTOM);
   const movedRef = useRef(false);
 
@@ -56,6 +60,15 @@ export function DockPanel({ side, open, onToggle, children }: Props): JSX.Elemen
   }, [open, onToggle]);
 
   const chevron = side === 'right' ? (open ? '›' : '‹') : open ? '⌄' : '⌃';
+  // The toggle handle wears the project's hue — same signal as the header.
+  const handleStyle: React.CSSProperties = {
+    ...(side === 'right' ? rightHandle : bottomHandle),
+    background: tint,
+    color: accent,
+    ...(side === 'right'
+      ? { borderLeft: `1px solid ${accent}` }
+      : { borderTop: `1px solid ${accent}` }),
+  };
   const contentStyle: React.CSSProperties = {
     display: open ? 'flex' : 'none',
     flexDirection: 'column',
@@ -68,7 +81,7 @@ export function DockPanel({ side, open, onToggle, children }: Props): JSX.Elemen
     <aside style={side === 'right' ? rightAside : bottomAside} data-testid={`dock-${side}`}>
       <button
         type="button"
-        style={side === 'right' ? rightHandle : bottomHandle}
+        style={handleStyle}
         title={open ? 'Drag to resize · click to collapse' : 'Open panel'}
         data-testid={`dock-handle-${side}`}
         onMouseDown={onHandleMouseDown}

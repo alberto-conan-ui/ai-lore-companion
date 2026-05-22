@@ -21,7 +21,7 @@ if (LICENSE_KEY) LicenseManager.setLicenseKey(LICENSE_KEY);
  * built here: Quartz + the dark colour scheme, tuned to sit on the cockpit's
  * `#0a0f17` chrome instead of the generic dark grey.
  */
-const cockpitGridTheme = themeQuartz.withPart(colorSchemeDark).withParams({
+export const cockpitGridTheme = themeQuartz.withPart(colorSchemeDark).withParams({
   backgroundColor: '#0a0f17',
   chromeBackgroundColor: '#121a24',
   headerBackgroundColor: '#0f1620',

@@ -35,6 +35,7 @@ const api: CockpitApi = {
   ackAllScope: (scope) => ipcRenderer.invoke(IPC.AckAllScope, scope),
   openPath: (path) => ipcRenderer.invoke(IPC.OpenPath, path),
   treeExpand: (arg) => ipcRenderer.invoke(IPC.TreeExpand, arg),
+  searchFiles: (arg) => ipcRenderer.invoke(IPC.FileSearch, arg),
   openProject: (path) => ipcRenderer.invoke(IPC.OpenProject, path),
   openExternal: (url) => ipcRenderer.invoke(IPC.OpenExternal, url),
   reload: () => ipcRenderer.invoke(IPC.Reload),

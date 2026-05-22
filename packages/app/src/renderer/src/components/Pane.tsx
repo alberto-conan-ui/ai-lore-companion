@@ -59,6 +59,10 @@ type Props = {
   subRoot: SubRoot;
   /** Project root — queue entry paths are relative to it; needed to absolutise them. */
   projectRoot: string;
+  /** Maps an absolute path to its tab-relative display path (for the queue grid). */
+  displayPath: (absPath: string) => string;
+  /** Set by a global-search pick: reveal this file. A new token re-triggers. */
+  revealRequest?: { path: string; token: number };
 };
 
 /**
@@ -67,7 +71,15 @@ type Props = {
  * `SubRoot` — a slice of its `scope`'s tree — and its drift is filtered to
  * that slice. Drift is per-`scope` throughout; the sub-root narrows it further.
  */
-export function Pane({ scope, label, testId, subRoot, projectRoot }: Props): JSX.Element {
+export function Pane({
+  scope,
+  label,
+  testId,
+  subRoot,
+  projectRoot,
+  displayPath,
+  revealRequest,
+}: Props): JSX.Element {
   const tree = useCockpitStore((s) => s.trees[scope]);
   const entries = useCockpitStore((s) => s.entries);
   const expandTree = useCockpitStore((s) => s.expandTree);
@@ -87,6 +99,12 @@ export function Pane({ scope, label, testId, subRoot, projectRoot }: Props): JSX
   // Queue entry paths are relative to the project root; tree/grid paths are absolute.
   const toAbs = useCallback((relPath: string) => `${projectRoot}/${relPath}`, [projectRoot]);
 
+  // The queue grid shows tab-relative paths — absolutise, then map to display.
+  const queueDisplayPath = useCallback(
+    (relPath: string) => displayPath(toAbs(relPath)),
+    [displayPath, toAbs],
+  );
+
   // Scope entries narrowed to the ones that fall within this pane's sub-root.
   const paneEntries = useMemo(
     () => entriesInSubRoot(entries, scope, subRoot, projectRoot),
@@ -95,7 +113,10 @@ export function Pane({ scope, label, testId, subRoot, projectRoot }: Props): JSX
 
   const [selectedFolder, setSelectedFolder] = useState<string>(rootId);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
+  // Seed the root expanded so its child folders show under the new root row.
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([rootId]));
+  const [queueHeight, setQueueHeight] = useState(220);
+  const [treeWidth, setTreeWidth] = useState(240);
 
   const entryAbsPaths = useMemo(() => paneEntries.map((e) => toAbs(e.path)), [paneEntries, toAbs]);
 
@@ -165,6 +186,44 @@ export function Pane({ scope, label, testId, subRoot, projectRoot }: Props): JSX
     });
   }, []);
 
+  /** Drag the divider above the queue to resize it — dragging up grows it. */
+  const onQueueResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startH = queueHeight;
+      const onMove = (ev: MouseEvent): void => {
+        setQueueHeight(Math.max(120, Math.min(680, startH + (startY - ev.clientY))));
+      };
+      const onUp = (): void => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [queueHeight],
+  );
+
+  /** Drag the divider between the tree and the grid to resize the tree column. */
+  const onTreeResize = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = treeWidth;
+      const onMove = (ev: MouseEvent): void => {
+        setTreeWidth(Math.max(140, Math.min(520, startW + (ev.clientX - startX))));
+      };
+      const onUp = (): void => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [treeWidth],
+  );
+
   /**
    * Reveal a file: load every ancestor folder, expand the chain in the tree,
    * select the containing folder, and select the file so the grid scrolls to
@@ -212,6 +271,12 @@ export function Pane({ scope, label, testId, subRoot, projectRoot }: Props): JSX
     [revealFile, toAbs],
   );
 
+  // A global-search pick (App sets `revealRequest`) reveals the file in the
+  // pane that owns it — the token changes per pick so a repeat still fires.
+  useEffect(() => {
+    if (revealRequest) void revealFile(revealRequest.path);
+  }, [revealRequest, revealFile]);
+
   const handleQueueDouble = useCallback(
     (entry: QueueEntry) => {
       void window.cockpit.openPath(toAbs(entry.path));
@@ -230,7 +295,7 @@ export function Pane({ scope, label, testId, subRoot, projectRoot }: Props): JSX
       </header>
 
       <div style={paneBodyStyle}>
-        <div style={treeColumnStyle}>
+        <div style={{ ...treeColumnStyle, width: treeWidth }}>
           {renderedRoot ? (
             <FileTree
               root={renderedRoot}
@@ -244,6 +309,12 @@ export function Pane({ scope, label, testId, subRoot, projectRoot }: Props): JSX
             <div style={treeLoadingStyle}>Reading tree…</div>
           )}
         </div>
+        <div
+          style={treeResizeHandleStyle}
+          onMouseDown={onTreeResize}
+          title="Drag to resize the tree"
+          data-testid={`tree-resize-${testId}`}
+        />
         <div style={gridColumnStyle}>
           <FileGrid
             scope={scope}
@@ -256,10 +327,17 @@ export function Pane({ scope, label, testId, subRoot, projectRoot }: Props): JSX
         </div>
       </div>
 
-      <div style={queueRowStyle}>
+      <div
+        style={queueResizeHandleStyle}
+        onMouseDown={onQueueResize}
+        title="Drag to resize the queue"
+        data-testid={`queue-resize-${testId}`}
+      />
+      <div style={{ ...queueRowStyle, height: queueHeight }}>
         <PaneQueue
           label={label}
           entries={paneEntries}
+          displayPath={queueDisplayPath}
           onRowClick={handleQueueClick}
           onRowDoubleClick={handleQueueDouble}
           onAck={(id) => {
@@ -318,12 +396,19 @@ const paneBodyStyle: React.CSSProperties = {
 };
 
 const treeColumnStyle: React.CSSProperties = {
-  width: '240px',
   flexShrink: 0,
   overflowY: 'auto',
   background: '#0c121a',
-  borderRight: '1px solid #1f2933',
   padding: '0.3rem 0',
+};
+
+/** The drag bar between the tree and the grid — resizes the tree horizontally. */
+const treeResizeHandleStyle: React.CSSProperties = {
+  width: '7px',
+  flexShrink: 0,
+  cursor: 'ew-resize',
+  background: '#0c121a',
+  borderLeft: '1px solid #1f2933',
 };
 
 const treeLoadingStyle: React.CSSProperties = {
@@ -340,8 +425,16 @@ const gridColumnStyle: React.CSSProperties = {
 };
 
 const queueRowStyle: React.CSSProperties = {
-  height: '32%',
-  minHeight: '160px',
+  flexShrink: 0,
   display: 'flex',
   flexDirection: 'column',
+};
+
+/** The drag bar between the grid and the queue — resizes the queue vertically. */
+const queueResizeHandleStyle: React.CSSProperties = {
+  height: '7px',
+  flexShrink: 0,
+  cursor: 'ns-resize',
+  background: '#0c121a',
+  borderTop: '1px solid #1f2933',
 };

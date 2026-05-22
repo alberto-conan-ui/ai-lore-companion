@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { DEFAULT_IGNORED, createIgnoreMatcher, parseIgnorePatterns, readProjectIgnores, } from '../src/index.js';
+import { DEFAULT_IGNORED, createIgnoreMatcher, isUntrackedFile, parseIgnorePatterns, readProjectIgnores, } from '../src/index.js';
 test('DEFAULT_IGNORED covers the cockpit exclusion set', () => {
     assert.deepEqual([...DEFAULT_IGNORED], [
         '**/upstream/**',
@@ -86,5 +86,19 @@ test('a parsed user pattern feeds the same matcher as DEFAULT_IGNORED', () => {
     assert.equal(isIgnored('coverage'), true);
     assert.equal(isIgnored('packages/app/coverage'), true);
     assert.equal(isIgnored('coverages'), false);
+});
+test('isUntrackedFile silences AI-Lore index files', () => {
+    assert.equal(isUntrackedFile('memory.index.md'), true);
+    assert.equal(isUntrackedFile('status.index.md'), true);
+    assert.equal(isUntrackedFile('cockpit-pane-refinements.index.md'), true);
+});
+test('isUntrackedFile leaves ordinary files tracked', () => {
+    // Only `<name>.index.md` is silenced — not a bare `index.md`, not other types.
+    assert.equal(isUntrackedFile('status.md'), false);
+    assert.equal(isUntrackedFile('A-phase.phase.md'), false);
+    assert.equal(isUntrackedFile('contracts.spec.md'), false);
+    assert.equal(isUntrackedFile('README.md'), false);
+    assert.equal(isUntrackedFile('index.ts'), false);
+    assert.equal(isUntrackedFile('index.md'), false);
 });
 //# sourceMappingURL=ignore.test.js.map

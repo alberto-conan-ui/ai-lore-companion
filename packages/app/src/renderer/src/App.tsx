@@ -6,11 +6,13 @@ import { isChainErrorPayload } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BrowserTab } from './components/BrowserTab.js';
 import { DockPanel } from './components/DockPanel.js';
-import { Pane, type SubRoot, entriesInSubRoot } from './components/Pane.js';
+import { GlobalSearch } from './components/GlobalSearch.js';
+import { Pane, type SubRoot, baseDirsOf, entriesInSubRoot } from './components/Pane.js';
 import { type PanelId, TabbedPanel, type WorkspaceTab } from './components/TabbedPanel.js';
 import { TerminalTab } from './components/TerminalTab.js';
 import { TrackerStrip } from './components/TrackerStrip.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
+import { accentColor, accentTint, hueFor, projectName } from './projectAccent.js';
 import { useCockpitStore } from './store.js';
 
 type Panel = { tabs: WorkspaceTab[]; activeId: string };
@@ -53,6 +55,13 @@ export function App(): JSX.Element {
     right: null,
     bottom: null,
   });
+  // A global-search pick: which pane should reveal which file. The token makes
+  // picking the same file twice re-trigger the reveal.
+  const [revealTarget, setRevealTarget] = useState<{
+    paneId: string;
+    path: string;
+    token: number;
+  } | null>(null);
 
   // The three pinned panes, rooted against the resolved chain. Status and
   // Memory each group sibling memory folders via a synthetic sub-root.
@@ -92,6 +101,9 @@ export function App(): JSX.Element {
   }, [chain]);
 
   const paneSpecById = useMemo(() => new Map(paneSpecs.map((p) => [p.id, p])), [paneSpecs]);
+
+  // Every directory the global search walks — the union of all panes' roots.
+  const searchDirs = useMemo(() => paneSpecs.flatMap((p) => baseDirsOf(p.subRoot)), [paneSpecs]);
 
   // Unacked-drift counts per pinned tab — shown as a badge on the tab strip.
   const tabDrift = useMemo(() => {
@@ -217,9 +229,44 @@ export function App(): JSX.Element {
     setPanels((p) => ({ ...p, [panelId]: { ...p[panelId], activeId: tabId } }));
   };
 
+  /** A global-search pick: switch the left panel to the cockpit tab that owns
+   *  the file, then ask that pane to reveal and scroll to it. */
+  const handleSearchPick = useCallback(
+    (path: string): void => {
+      const spec = paneSpecs.find((p) =>
+        baseDirsOf(p.subRoot).some((b) => path === b || path.startsWith(`${b}/`)),
+      );
+      if (!spec) return;
+      setPanels((p) => ({ ...p, left: { ...p.left, activeId: spec.id } }));
+      setRevealTarget((prev) => ({ paneId: spec.id, path, token: (prev?.token ?? 0) + 1 }));
+    },
+    [paneSpecs],
+  );
+
+  /** A short, tab-relative display path for a search hit — `payload/…` for the
+   *  project, or the memory subfolder (`status/…`, `journal/…`) for the Lore. */
+  const displayPath = useCallback(
+    (abs: string): string => {
+      if (!chain || isChainErrorPayload(chain)) return abs;
+      const memRoot = `${chain.lorePath}/memory/`;
+      if (abs.startsWith(memRoot)) return abs.slice(memRoot.length);
+      if (abs.startsWith(`${chain.root}/`)) return `payload/${abs.slice(chain.root.length + 1)}`;
+      return abs;
+    },
+    [chain],
+  );
+
   const closeTab = (panelId: PanelId, tabId: string): void => {
     const panel = panels[panelId];
     const tab = panel.tabs.find((t) => t.id === tabId);
+    // A terminal tab running a task confirms before closing — the whole-window
+    // close has the same guard, but closing a single tab bypassed it.
+    if (tab?.kind === 'terminal' && tab.status === 'running') {
+      const proceed = window.confirm(
+        'This terminal is running a task. Closing the tab will end it.\n\nClose anyway?',
+      );
+      if (!proceed) return;
+    }
     if (tab?.kind === 'browser') window.cockpit.browserDestroy(tabId);
     setPanels((p) => {
       const tabs = p[panelId].tabs.filter((t) => t.id !== tabId);
@@ -310,6 +357,9 @@ export function App(): JSX.Element {
     );
   }
 
+  // The project's hue — the dock toggle handles wear it, as the header does.
+  const projectHue = hueFor(projectName(chain.root));
+
   const panel = (panelId: PanelId): JSX.Element => (
     <TabbedPanel
       panelId={panelId}
@@ -346,6 +396,8 @@ export function App(): JSX.Element {
               label={spec.title}
               subRoot={spec.subRoot}
               projectRoot={chain.root}
+              displayPath={displayPath}
+              revealRequest={revealTarget?.paneId === spec.id ? revealTarget : undefined}
             />
           );
         }
@@ -366,14 +418,30 @@ export function App(): JSX.Element {
 
   return (
     <div style={cockpitShell}>
-      <TrackerStrip />
+      <TrackerStrip
+        search={
+          <GlobalSearch dirs={searchDirs} onPick={handleSearchPick} displayPath={displayPath} />
+        }
+      />
       <div style={panelsRow}>
         <div style={appColumn}>{panel('left')}</div>
-        <DockPanel side="right" open={rightOpen} onToggle={setRightOpen}>
+        <DockPanel
+          side="right"
+          open={rightOpen}
+          onToggle={setRightOpen}
+          accent={accentColor(projectHue)}
+          tint={accentTint(projectHue)}
+        >
           {panel('right')}
         </DockPanel>
       </div>
-      <DockPanel side="bottom" open={bottomOpen} onToggle={setBottomOpen}>
+      <DockPanel
+        side="bottom"
+        open={bottomOpen}
+        onToggle={setBottomOpen}
+        accent={accentColor(projectHue)}
+        tint={accentTint(projectHue)}
+      >
         {panel('bottom')}
       </DockPanel>
       {contentPortals}

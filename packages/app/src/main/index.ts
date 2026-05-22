@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   type ChainResult,
   type ChangeScope,
+  DEFAULT_IGNORED,
   type DbHandle,
   type DirEvent,
   type Queue,
@@ -33,6 +34,8 @@ import {
   type BrowserBounds,
   type BrowserProfile,
   type CockpitApi,
+  type FileSearchArg,
+  type FileSearchHit,
   IPC,
   type Shortcut,
   type ShortcutInput,
@@ -376,6 +379,32 @@ function registerIpcHandlers(): void {
       return Promise.resolve(isTreeError(result) ? [] : (result.children ?? []));
     },
   );
+  ipcMain.handle(IPC.FileSearch, (event, arg: FileSearchArg): FileSearchHit[] => {
+    const ctx = contextFor(event);
+    if (!ctx) return [];
+    const query = arg.query.trim().toLowerCase();
+    if (query.length === 0) return [];
+    // Skip build/scratch dirs (node_modules, .git, dist, …) and the Lore
+    // folder — both for walk speed and so the results stay sensible.
+    const ignore = [...DEFAULT_IGNORED, ...treeHideFor(ctx.chain, 'payload')];
+    const LIMIT = 40;
+    const hits: FileSearchHit[] = [];
+    const walk = (dir: string): void => {
+      if (hits.length >= LIMIT) return;
+      const result = readDirectory(dir, { ignore });
+      if (isTreeError(result)) return;
+      for (const child of result.children ?? []) {
+        if (hits.length >= LIMIT) break;
+        if (child.isDir) walk(child.path);
+        else if (child.name.toLowerCase().includes(query)) {
+          hits.push({ name: child.name, path: child.path });
+        }
+      }
+    };
+    for (const dir of arg.dirs) walk(dir);
+    return hits;
+  });
+
   ipcMain.handle(IPC.OpenProject, async (event, path?: string): Promise<void> => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     if (typeof path === 'string' && path.length > 0) {

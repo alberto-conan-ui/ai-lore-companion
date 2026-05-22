@@ -30,6 +30,7 @@ export type {
 export {
   DEFAULT_IGNORED,
   createIgnoreMatcher,
+  isUntrackedFile,
   parseIgnorePatterns,
   readProjectIgnores,
 } from './ignore.js';
