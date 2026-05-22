@@ -1,7 +1,6 @@
 
-# AI-Lore (.ai-lore-ai-lore-companion)
-.ai-lore-ai-lore-companion/*
-!.ai-lore-ai-lore-companion/workspace.yaml
+# AI-Lore — the Lore folder is its own concern, entirely out of this repo
+.ai-lore-ai-lore-companion/
 ai_readme.md
 
 # Node
