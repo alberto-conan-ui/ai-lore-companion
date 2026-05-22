@@ -12,6 +12,10 @@ yarn-error.log*
 # Electron build artifacts
 out/
 dist/
+dist-test/
+
+# IDE
+.idea/
 
 # macOS
 .DS_Store
