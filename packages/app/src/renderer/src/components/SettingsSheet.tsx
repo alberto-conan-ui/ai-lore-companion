@@ -1,0 +1,927 @@
+import type { IgnoreLevel, IgnoreRule, SettingDef, SettingValue } from '@ai-lore-companion/core';
+import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import type {
+  SettingsSnapshot,
+  Shortcut,
+  ShortcutInput,
+  ShortcutTarget,
+} from '../../../shared/ipc.js';
+import { ActionButton } from './ActionButton.js';
+
+/** Which tier the Settings sheet is editing. */
+type Scope = 'global' | 'project';
+
+const SECTION_FALLBACK = 'General';
+
+/** The rail section that hosts the ignore-rule editor — not a registry section. */
+const IGNORE_SECTION = 'Ignore rules';
+/** The rail section that hosts the shortcuts manager — not a registry section. */
+const SHORTCUTS_SECTION = 'Shortcuts';
+
+/** The ignore levels, with their human labels. */
+const LEVEL_OPTIONS: { value: IgnoreLevel; label: string }[] = [
+  { value: 'no-drift', label: 'No drift' },
+  { value: 'no-search', label: 'No search' },
+  { value: 'hidden', label: 'Hidden' },
+];
+
+function levelLabel(level: IgnoreLevel): string {
+  return LEVEL_OPTIONS.find((o) => o.value === level)?.label ?? level;
+}
+
+/** Whether a setting is editable in the given scope, by its declared tier. */
+function inScope(def: SettingDef, scope: Scope): boolean {
+  return def.tier === scope || def.tier === 'both';
+}
+
+/** The setting's section, or the catch-all when it declares none. */
+function sectionOf(def: SettingDef): string {
+  return def.section ?? SECTION_FALLBACK;
+}
+
+/**
+ * The value to show for a setting in a scope: the value stored in that tier if
+ * it has one, else what it inherits — the global value, then the default.
+ */
+function valueForScope(def: SettingDef, snap: SettingsSnapshot, scope: Scope): SettingValue {
+  if (scope === 'project' && snap.project && def.key in snap.project.values) {
+    return snap.project.values[def.key];
+  }
+  if (def.key in snap.global.values) return snap.global.values[def.key];
+  return def.default;
+}
+
+/** The header gear — opens the Settings sheet. Controlled by the parent. */
+export function SettingsButton({
+  onOpen,
+}: {
+  onOpen: () => void;
+}): JSX.Element {
+  return (
+    <ActionButton
+      icon="⚙"
+      label="Settings"
+      title="Settings"
+      testId="settings-button"
+      onClick={onOpen}
+    />
+  );
+}
+
+/** Open the Settings sheet at a specific section — used by the popover "Manage…" link. */
+export type SettingsSheetSection = 'shortcuts' | null;
+
+/**
+ * The Settings sheet modal — controlled by the parent. `initialSection`
+ * pre-selects a rail section; falls through to the first section in scope.
+ */
+export function SettingsSheetModal({
+  onClose,
+  initialSection,
+}: {
+  onClose: () => void;
+  initialSection?: SettingsSheetSection;
+}): JSX.Element {
+  return <SettingsSheet onClose={onClose} initialSection={initialSection ?? null} />;
+}
+
+/**
+ * The modal Settings sheet — a section rail, a Global / This-project scope
+ * switch, registry-driven controls, and the ignore-rules editor. Rendered into
+ * `document.body` so it overlays the whole window.
+ */
+function SettingsSheet({
+  onClose,
+  initialSection,
+}: {
+  onClose: () => void;
+  initialSection: SettingsSheetSection;
+}): JSX.Element {
+  const [snap, setSnap] = useState<SettingsSnapshot | null>(null);
+  const [scope, setScope] = useState<Scope>('global');
+  const [section, setSection] = useState<string | null>(
+    initialSection === 'shortcuts' ? SHORTCUTS_SECTION : null,
+  );
+
+  useEffect(() => {
+    void window.cockpit.settingsGet().then(setSnap);
+    const off = window.cockpit.onSettingsChanged(setSnap);
+    // Native browser views render above the DOM — hide them under the modal.
+    window.cockpit.browserSuppressAll(true);
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      off();
+      document.removeEventListener('keydown', onKey);
+      window.cockpit.browserSuppressAll(false);
+    };
+  }, [onClose]);
+
+  // The sections present in the current scope. `Ignore rules` is always there;
+  // `Shortcuts` is global-only (the store is one global list); a registry
+  // section shows when it has a setting editable in that tier.
+  const sections = useMemo<string[]>(() => {
+    if (!snap) return [];
+    const set = new Set<string>([IGNORE_SECTION]);
+    if (scope === 'global') set.add(SHORTCUTS_SECTION);
+    for (const def of snap.registry) {
+      if (inScope(def, scope)) set.add(sectionOf(def));
+    }
+    return [...set].sort();
+  }, [snap, scope]);
+
+  const activeSection =
+    section !== null && sections.includes(section) ? section : (sections[0] ?? null);
+
+  const rows = useMemo<SettingDef[]>(() => {
+    if (
+      !snap ||
+      activeSection === null ||
+      activeSection === IGNORE_SECTION ||
+      activeSection === SHORTCUTS_SECTION
+    ) {
+      return [];
+    }
+    return snap.registry.filter((d) => inScope(d, scope) && sectionOf(d) === activeSection);
+  }, [snap, scope, activeSection]);
+
+  const write = useCallback(
+    (key: string, value: SettingValue) => {
+      void window.cockpit.settingsSet({ tier: scope, key, value }).then(setSnap);
+    },
+    [scope],
+  );
+
+  const writeIgnores = useCallback(
+    (rules: IgnoreRule[]) => {
+      void window.cockpit.settingsSetIgnores({ tier: scope, rules }).then(setSnap);
+    },
+    [scope],
+  );
+
+  const pickScope = (next: Scope): void => {
+    setScope(next);
+    setSection(null);
+  };
+
+  return createPortal(
+    <div style={backdropStyle} onMouseDown={onClose}>
+      <div style={panelStyle} data-testid="settings-sheet" onMouseDown={(e) => e.stopPropagation()}>
+        <div style={headerStyle}>
+          <span style={titleStyle}>Settings</span>
+          <div style={scopeSwitchStyle}>
+            <button
+              type="button"
+              data-testid="settings-scope-global"
+              style={scope === 'global' ? scopeTabActiveStyle : scopeTabStyle}
+              onClick={() => pickScope('global')}
+            >
+              Global
+            </button>
+            <button
+              type="button"
+              data-testid="settings-scope-project"
+              style={scope === 'project' ? scopeTabActiveStyle : scopeTabStyle}
+              onClick={() => pickScope('project')}
+            >
+              This project
+            </button>
+          </div>
+          <button type="button" style={closeStyle} title="Close" onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        <div style={bodyStyle}>
+          <div style={railStyle}>
+            {sections.map((s) => (
+              <button
+                key={s}
+                type="button"
+                style={s === activeSection ? railItemActiveStyle : railItemStyle}
+                onClick={() => setSection(s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <div style={contentStyle}>
+            {snap === null ? (
+              <div style={hintStyle}>Loading…</div>
+            ) : activeSection === IGNORE_SECTION ? (
+              <IgnoreRulesSection snapshot={snap} scope={scope} onWrite={writeIgnores} />
+            ) : activeSection === SHORTCUTS_SECTION ? (
+              <ShortcutsSection />
+            ) : rows.length === 0 ? (
+              <div style={hintStyle}>
+                No {scope === 'project' ? 'project-level' : 'global'} settings yet.
+              </div>
+            ) : (
+              rows.map((def) => (
+                <div key={def.key} style={settingRowStyle}>
+                  <span style={settingLabelStyle}>{def.label}</span>
+                  <Control
+                    def={def}
+                    value={valueForScope(def, snap, scope)}
+                    onChange={(v) => write(def.key, v)}
+                  />
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** The control for one setting, chosen by its declared type. */
+function Control({
+  def,
+  value,
+  onChange,
+}: {
+  def: SettingDef;
+  value: SettingValue;
+  onChange: (value: SettingValue) => void;
+}): JSX.Element {
+  const testId = `setting-${def.key}`;
+  switch (def.type) {
+    case 'boolean':
+      return (
+        <input
+          type="checkbox"
+          data-testid={testId}
+          style={checkboxStyle}
+          checked={value === true}
+          onChange={(e) => onChange(e.target.checked)}
+        />
+      );
+    case 'number':
+      return (
+        <input
+          type="number"
+          data-testid={testId}
+          style={inputStyle}
+          value={typeof value === 'number' ? value : ''}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+      );
+    case 'enum':
+      return (
+        <select
+          data-testid={testId}
+          style={inputStyle}
+          value={String(value)}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {(def.options ?? []).map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      );
+    case 'string':
+      return (
+        <input
+          type="text"
+          data-testid={testId}
+          style={inputStyle}
+          value={String(value)}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+  }
+}
+
+/**
+ * The Ignore rules section: the tier's own rules, editable (level + remove),
+ * with the inherited rules shown read-only above them, and a row to add one.
+ */
+function IgnoreRulesSection({
+  snapshot,
+  scope,
+  onWrite,
+}: {
+  snapshot: SettingsSnapshot;
+  scope: Scope;
+  onWrite: (rules: IgnoreRule[]) => void;
+}): JSX.Element {
+  const [draftPattern, setDraftPattern] = useState('');
+  const [draftLevel, setDraftLevel] = useState<IgnoreLevel>('no-drift');
+
+  const editable: readonly IgnoreRule[] =
+    scope === 'global' ? snapshot.global.ignores : (snapshot.project?.ignores ?? []);
+  const inherited: IgnoreRule[] =
+    scope === 'global'
+      ? [...snapshot.defaultIgnores]
+      : [...snapshot.defaultIgnores, ...snapshot.global.ignores];
+
+  const setLevel = (index: number, level: IgnoreLevel): void => {
+    onWrite(editable.map((r, i) => (i === index ? { ...r, level } : r)));
+  };
+  const remove = (index: number): void => {
+    onWrite(editable.filter((_, i) => i !== index));
+  };
+  const add = (): void => {
+    const pattern = draftPattern.trim();
+    setDraftPattern('');
+    setDraftLevel('no-drift');
+    if (pattern === '' || editable.some((r) => r.pattern === pattern)) return;
+    onWrite([...editable, { pattern, level: draftLevel }]);
+  };
+
+  return (
+    <>
+      <p style={ignoreBlurbStyle}>
+        Patterns matched here drop out of the cockpit by level — <strong>No drift</strong> silences
+        the watcher, <strong>No search</strong> also hides them from search, <strong>Hidden</strong>{' '}
+        also removes them from the file tree.
+        {scope === 'project' ? ' Project rules add to and override the global ones.' : ''}
+      </p>
+
+      {inherited.length > 0 ? (
+        <div style={ignoreGroupStyle}>
+          <span style={ignoreGroupLabelStyle}>Inherited</span>
+          {inherited.map((rule) => (
+            <div key={`inh:${rule.pattern}`} style={ignoreRowStyle}>
+              <span style={ignorePatternStyle}>{rule.pattern}</span>
+              <span style={ignoreInheritedLevelStyle}>{levelLabel(rule.level)}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div style={ignoreGroupStyle}>
+        <span style={ignoreGroupLabelStyle}>{scope === 'global' ? 'Global' : 'This project'}</span>
+        {editable.length === 0 ? (
+          <div style={hintStyle}>No rules yet.</div>
+        ) : (
+          editable.map((rule, index) => (
+            <div key={`own:${rule.pattern}`} style={ignoreRowStyle} data-testid="ignore-rule">
+              <span style={ignorePatternStyle}>{rule.pattern}</span>
+              <select
+                style={ignoreLevelSelectStyle}
+                value={rule.level}
+                onChange={(e) => setLevel(index, e.target.value as IgnoreLevel)}
+              >
+                {LEVEL_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                style={ignoreRemoveStyle}
+                title="Remove rule"
+                onClick={() => remove(index)}
+              >
+                ✕
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      <div style={ignoreAddRowStyle}>
+        <input
+          type="text"
+          style={ignoreAddInputStyle}
+          placeholder="folder name, or *.glob"
+          value={draftPattern}
+          spellCheck={false}
+          data-testid="ignore-add-pattern"
+          onChange={(e) => setDraftPattern(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') add();
+          }}
+        />
+        <select
+          style={ignoreLevelSelectStyle}
+          value={draftLevel}
+          onChange={(e) => setDraftLevel(e.target.value as IgnoreLevel)}
+        >
+          {LEVEL_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <button type="button" style={ignoreAddBtnStyle} data-testid="ignore-add" onClick={add}>
+          Add
+        </button>
+      </div>
+    </>
+  );
+}
+
+/** App name from a `/Applications/Foo.app` path. */
+function appName(appPath: string): string {
+  return (appPath.split('/').pop() ?? appPath).replace(/\.app$/i, '');
+}
+
+type ShortcutDraft = {
+  target: ShortcutTarget;
+  app: string;
+  url: string;
+  labelInput: string;
+};
+
+const SHORTCUT_TARGETS: { id: ShortcutTarget; label: string }[] = [
+  { id: 'project', label: 'Project' },
+  { id: 'lore', label: 'Lore' },
+  { id: 'url', label: 'URL' },
+];
+
+function defaultShortcutLabel(draft: ShortcutDraft): string {
+  if (draft.target === 'url') return draft.url.trim() || 'URL shortcut';
+  const where = draft.target === 'lore' ? 'Lore' : 'project';
+  return draft.app ? `Open ${where} in ${appName(draft.app)}` : `Open ${where}`;
+}
+
+/**
+ * Manage the global list of app-launch shortcuts: list, remove, and add. The
+ * store is one global list — `onShortcutsChanged` keeps every window in sync.
+ */
+function ShortcutsSection(): JSX.Element {
+  const [list, setList] = useState<Shortcut[]>([]);
+  const [draft, setDraft] = useState<ShortcutDraft | null>(null);
+
+  useEffect(() => {
+    void window.cockpit.shortcutsList().then(setList);
+    return window.cockpit.onShortcutsChanged(setList);
+  }, []);
+
+  const pickApp = useCallback(async () => {
+    const app = await window.cockpit.shortcutsPickApp();
+    if (app) setDraft((d) => (d ? { ...d, app } : d));
+  }, []);
+
+  const saveDraft = useCallback(() => {
+    if (!draft) return;
+    const label = draft.labelInput.trim() || defaultShortcutLabel(draft);
+    const input: ShortcutInput =
+      draft.target === 'url'
+        ? { label, target: 'url', url: draft.url.trim() }
+        : { label, target: draft.target, app: draft.app };
+    void window.cockpit.shortcutsAdd(input).then(setList);
+    setDraft(null);
+  }, [draft]);
+
+  const canSave = draft
+    ? draft.target === 'url'
+      ? draft.url.trim() !== ''
+      : draft.app !== ''
+    : false;
+
+  return (
+    <>
+      <p style={ignoreBlurbStyle}>
+        Shortcuts launch a folder in an app (Finder, an editor) or a URL in Chrome. They appear in
+        the header for quick access.
+      </p>
+
+      <div style={ignoreGroupStyle}>
+        <span style={ignoreGroupLabelStyle}>Configured</span>
+        {list.length === 0 ? (
+          <div style={hintStyle}>No shortcuts yet.</div>
+        ) : (
+          list.map((s) => (
+            <div key={s.id} style={ignoreRowStyle} data-testid="shortcut-row">
+              <span style={ignorePatternStyle}>{s.label}</span>
+              <button
+                type="button"
+                style={ignoreRemoveStyle}
+                title="Remove shortcut"
+                onClick={() => void window.cockpit.shortcutsRemove(s.id).then(setList)}
+              >
+                ✕
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+
+      {draft ? (
+        <div style={formStyle}>
+          <div style={{ display: 'flex', gap: '0.7rem' }}>
+            {SHORTCUT_TARGETS.map((t) => (
+              <label key={t.id} style={radioLabelStyle}>
+                <input
+                  type="radio"
+                  checked={draft.target === t.id}
+                  onChange={() => setDraft({ ...draft, target: t.id })}
+                />
+                {t.label}
+              </label>
+            ))}
+          </div>
+          {draft.target === 'url' ? (
+            <label style={fieldStyle}>
+              <span style={fieldLabelStyle}>URL</span>
+              <input
+                style={textInputStyle}
+                value={draft.url}
+                placeholder="https://example.com"
+                spellCheck={false}
+                data-testid="shortcut-url"
+                onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+              />
+            </label>
+          ) : (
+            <div style={fieldStyle}>
+              <span style={fieldLabelStyle}>Application</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button type="button" style={chooseAppStyle} onClick={() => void pickApp()}>
+                  Choose app…
+                </button>
+                {draft.app ? <span style={appNameStyle}>{appName(draft.app)}</span> : null}
+              </div>
+            </div>
+          )}
+          <label style={fieldStyle}>
+            <span style={fieldLabelStyle}>Name</span>
+            <input
+              style={textInputStyle}
+              value={draft.labelInput}
+              placeholder={defaultShortcutLabel(draft)}
+              onChange={(e) => setDraft({ ...draft, labelInput: e.target.value })}
+            />
+          </label>
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <button
+              type="button"
+              style={canSave ? saveBtnStyle : saveDisabledStyle}
+              disabled={!canSave}
+              data-testid="shortcut-save"
+              onClick={saveDraft}
+            >
+              Save
+            </button>
+            <button type="button" style={cancelBtnStyle} onClick={() => setDraft(null)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          style={shortcutAddBtnStyle}
+          data-testid="shortcut-add"
+          onClick={() => setDraft({ target: 'project', app: '', url: '', labelInput: '' })}
+        >
+          + Add shortcut
+        </button>
+      )}
+    </>
+  );
+}
+
+const backdropStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 100,
+  background: 'rgba(0, 0, 0, 0.55)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const panelStyle: React.CSSProperties = {
+  width: '660px',
+  maxWidth: '90vw',
+  height: '460px',
+  maxHeight: '85vh',
+  display: 'flex',
+  flexDirection: 'column',
+  background: '#121a24',
+  border: '1px solid #2f3a45',
+  borderRadius: '8px',
+  boxShadow: '0 16px 48px rgba(0, 0, 0, 0.6)',
+  overflow: 'hidden',
+  color: '#dde3ea',
+  fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+};
+
+const headerStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '1rem',
+  padding: '0.7rem 0.9rem',
+  borderBottom: '1px solid #1f2933',
+};
+
+const titleStyle: React.CSSProperties = {
+  fontWeight: 700,
+  fontSize: '0.92rem',
+  color: '#e6edf3',
+};
+
+const scopeSwitchStyle: React.CSSProperties = {
+  display: 'flex',
+  gap: '0.2rem',
+  marginLeft: 'auto',
+  padding: '0.15rem',
+  background: '#0a0f17',
+  border: '1px solid #2f3a45',
+  borderRadius: '5px',
+};
+
+const scopeTabStyle: React.CSSProperties = {
+  padding: '0.25rem 0.6rem',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: '4px',
+  color: '#9fb1bd',
+  fontSize: '0.74rem',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const scopeTabActiveStyle: React.CSSProperties = {
+  ...scopeTabStyle,
+  background: '#3a78c2',
+  color: '#ffffff',
+};
+
+const closeStyle: React.CSSProperties = {
+  width: '1.7rem',
+  height: '1.7rem',
+  background: 'transparent',
+  border: 'none',
+  color: '#9fb1bd',
+  fontSize: '0.85rem',
+  cursor: 'pointer',
+};
+
+const bodyStyle: React.CSSProperties = {
+  display: 'flex',
+  flex: 1,
+  minHeight: 0,
+};
+
+const railStyle: React.CSSProperties = {
+  width: '170px',
+  flexShrink: 0,
+  padding: '0.5rem',
+  borderRight: '1px solid #1f2933',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.15rem',
+};
+
+const railItemStyle: React.CSSProperties = {
+  padding: '0.4rem 0.55rem',
+  textAlign: 'left',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: '4px',
+  color: '#cbd5dd',
+  fontSize: '0.78rem',
+  cursor: 'pointer',
+};
+
+const railItemActiveStyle: React.CSSProperties = {
+  ...railItemStyle,
+  background: '#1f2933',
+  color: '#e6edf3',
+  fontWeight: 600,
+};
+
+const contentStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  padding: '0.9rem 1rem',
+  overflowY: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.6rem',
+};
+
+const hintStyle: React.CSSProperties = {
+  color: '#6c7783',
+  fontSize: '0.8rem',
+};
+
+const settingRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  gap: '1rem',
+  padding: '0.5rem 0.6rem',
+  background: '#0f1620',
+  border: '1px solid #1f2933',
+  borderRadius: '5px',
+};
+
+const settingLabelStyle: React.CSSProperties = {
+  fontSize: '0.8rem',
+  color: '#dde3ea',
+};
+
+const checkboxStyle: React.CSSProperties = {
+  width: '1rem',
+  height: '1rem',
+  flexShrink: 0,
+  cursor: 'pointer',
+};
+
+const inputStyle: React.CSSProperties = {
+  padding: '0.25rem 0.45rem',
+  background: '#0a0f17',
+  border: '1px solid #2f3a45',
+  borderRadius: '4px',
+  color: '#e6edf3',
+  fontSize: '0.78rem',
+};
+
+const ignoreBlurbStyle: React.CSSProperties = {
+  margin: 0,
+  color: '#9fb1bd',
+  fontSize: '0.76rem',
+  lineHeight: 1.5,
+};
+
+const ignoreGroupStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.25rem',
+};
+
+const ignoreGroupLabelStyle: React.CSSProperties = {
+  fontSize: '0.66rem',
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: '#8a96a2',
+};
+
+const ignoreRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.5rem',
+  padding: '0.3rem 0.5rem',
+  background: '#0f1620',
+  border: '1px solid #1f2933',
+  borderRadius: '4px',
+};
+
+const ignorePatternStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.76rem',
+  color: '#dde3ea',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const ignoreInheritedLevelStyle: React.CSSProperties = {
+  fontSize: '0.72rem',
+  color: '#6c7783',
+};
+
+const ignoreLevelSelectStyle: React.CSSProperties = {
+  ...inputStyle,
+  fontSize: '0.74rem',
+};
+
+const ignoreRemoveStyle: React.CSSProperties = {
+  flexShrink: 0,
+  width: '1.4rem',
+  height: '1.4rem',
+  background: 'transparent',
+  border: 'none',
+  color: '#6c7783',
+  fontSize: '0.74rem',
+  cursor: 'pointer',
+};
+
+const ignoreAddRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.5rem',
+  paddingTop: '0.2rem',
+};
+
+const ignoreAddInputStyle: React.CSSProperties = {
+  ...inputStyle,
+  flex: 1,
+  minWidth: 0,
+};
+
+const ignoreAddBtnStyle: React.CSSProperties = {
+  flexShrink: 0,
+  padding: '0.3rem 0.8rem',
+  background: '#3a78c2',
+  border: 'none',
+  borderRadius: '4px',
+  color: '#ffffff',
+  fontSize: '0.76rem',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const formStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.5rem',
+  padding: '0.4rem 0.5rem',
+  background: '#0f1620',
+  border: '1px solid #1f2933',
+  borderRadius: '5px',
+};
+
+const radioLabelStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.25rem',
+  color: '#cbd5dd',
+  fontSize: '0.76rem',
+  cursor: 'pointer',
+};
+
+const textInputStyle: React.CSSProperties = {
+  padding: '0.3rem 0.5rem',
+  background: '#0a0f17',
+  border: '1px solid #2f3a45',
+  borderRadius: '4px',
+  color: '#e6edf3',
+  fontSize: '0.76rem',
+};
+
+const fieldStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.2rem',
+};
+
+const fieldLabelStyle: React.CSSProperties = {
+  fontSize: '0.66rem',
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: '#8a96a2',
+};
+
+const chooseAppStyle: React.CSSProperties = {
+  padding: '0.3rem 0.6rem',
+  background: '#1c2c3e',
+  border: '1px solid #2f4860',
+  borderRadius: '4px',
+  color: '#cbd5dd',
+  fontSize: '0.74rem',
+  cursor: 'pointer',
+};
+
+const appNameStyle: React.CSSProperties = {
+  color: '#e6edf3',
+  fontSize: '0.78rem',
+  fontWeight: 600,
+};
+
+const saveBtnStyle: React.CSSProperties = {
+  padding: '0.3rem 0.8rem',
+  background: '#3a78c2',
+  border: 'none',
+  borderRadius: '4px',
+  color: '#ffffff',
+  fontSize: '0.76rem',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const saveDisabledStyle: React.CSSProperties = {
+  ...saveBtnStyle,
+  background: '#2a323a',
+  color: '#7a8590',
+  cursor: 'default',
+};
+
+const cancelBtnStyle: React.CSSProperties = {
+  padding: '0.3rem 0.8rem',
+  background: '#2a323a',
+  border: 'none',
+  borderRadius: '4px',
+  color: '#cbd5dd',
+  fontSize: '0.76rem',
+  cursor: 'pointer',
+};
+
+const shortcutAddBtnStyle: React.CSSProperties = {
+  alignSelf: 'flex-start',
+  padding: '0.35rem 0.7rem',
+  background: 'transparent',
+  border: '1px dashed #3a78c2',
+  borderRadius: '4px',
+  color: '#5a9bd4',
+  fontSize: '0.76rem',
+  fontWeight: 600,
+  cursor: 'pointer',
+};

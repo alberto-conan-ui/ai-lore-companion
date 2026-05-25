@@ -1,4 +1,4 @@
-import { type JSX, type ReactNode, useCallback, useRef, useState } from 'react';
+import { type JSX, type ReactNode, useCallback, useRef } from 'react';
 
 type Side = 'right' | 'bottom';
 
@@ -6,6 +6,10 @@ type Props = {
   side: Side;
   open: boolean;
   onToggle: (open: boolean) => void;
+  /** The dock's current size in pixels — width for `right`, height for `bottom`. */
+  size: number;
+  /** Live resize updates as the user drags the handle. */
+  onResize: (size: number) => void;
   /** The project's accent colour — the click-to-toggle handle wears it. */
   accent: string;
   /** The project's dark background tint — the handle's background. */
@@ -13,9 +17,9 @@ type Props = {
   children: ReactNode;
 };
 
-const MIN = 200;
-const DEFAULT_RIGHT = 480;
-const DEFAULT_BOTTOM = 240;
+export const DOCK_MIN_SIZE = 200;
+export const DOCK_DEFAULT_RIGHT = 480;
+export const DOCK_DEFAULT_BOTTOM = 240;
 
 /**
  * A collapsible, resizable dock. `side='right'` docks to the window's right
@@ -23,9 +27,20 @@ const DEFAULT_BOTTOM = 240;
  * resizes vertically. The handle is always visible — click it to toggle,
  * drag it to resize. Children stay mounted while collapsed, so terminals keep
  * their PTY and browsers their page.
+ *
+ * The dock is controlled — the parent owns `size` and `open` so they can be
+ * captured to the workspace-layout snapshot and restored on the next open.
  */
-export function DockPanel({ side, open, onToggle, accent, tint, children }: Props): JSX.Element {
-  const [size, setSize] = useState(side === 'right' ? DEFAULT_RIGHT : DEFAULT_BOTTOM);
+export function DockPanel({
+  side,
+  open,
+  onToggle,
+  size,
+  onResize,
+  accent,
+  tint,
+  children,
+}: Props): JSX.Element {
   const movedRef = useRef(false);
 
   const onHandleMouseDown = useCallback(
@@ -38,7 +53,7 @@ export function DockPanel({ side, open, onToggle, accent, tint, children }: Prop
       const onMove = (ev: MouseEvent): void => {
         const cur = side === 'right' ? ev.clientX : ev.clientY;
         if (Math.abs(cur - start) > 3) movedRef.current = true;
-        setSize(Math.max(MIN, startSize + (start - cur)));
+        onResize(Math.max(DOCK_MIN_SIZE, startSize + (start - cur)));
       };
       const onUp = (): void => {
         window.removeEventListener('mousemove', onMove);
@@ -47,7 +62,7 @@ export function DockPanel({ side, open, onToggle, accent, tint, children }: Prop
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
     },
-    [open, side, size],
+    [open, side, size, onResize],
   );
 
   const onHandleClick = useCallback(() => {

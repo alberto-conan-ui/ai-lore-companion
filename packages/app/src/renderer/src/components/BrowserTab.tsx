@@ -10,6 +10,8 @@ type Props = {
   tabId: string;
   /** Whether this tab's panel is open and the tab is the active one. */
   visible: boolean;
+  /** Seed URL from a restored layout; falls through to the home page when absent. */
+  initialUrl?: string;
 };
 
 /**
@@ -18,17 +20,18 @@ type Props = {
  * web content itself: it creates the view on mount, reports the placeholder's
  * bounds, and drives navigation over IPC, all keyed by `tabId`.
  */
-export function BrowserTab({ tabId, visible }: Props): JSX.Element {
+export function BrowserTab({ tabId, visible, initialUrl }: Props): JSX.Element {
   const [state, setState] = useState<BrowserStatePayload | null>(null);
   const [urlText, setUrlText] = useState('');
   const urlFocused = useRef(false);
   const pageRef = useRef<HTMLDivElement>(null);
 
-  // Create the view on mount (idempotent in main). It is destroyed by the
-  // shell when the tab is closed, or by main when the window closes.
+  // Create the view on mount (idempotent in main — `initialUrl` is honoured
+  // only on the first create for a given tab id; a re-run is a no-op there).
+  // The view is destroyed when the tab closes or when the window closes.
   useEffect(() => {
-    window.cockpit.browserCreate(tabId);
-  }, [tabId]);
+    window.cockpit.browserCreate(tabId, initialUrl);
+  }, [tabId, initialUrl]);
 
   // Browser state for *this* tab only.
   useEffect(

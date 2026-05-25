@@ -2,9 +2,15 @@ import type {
   ChainError,
   ChainResult,
   ChangeScope,
+  IgnoreRule,
   QueueEntry,
   QueueEvent,
+  SettingDef,
+  SettingValue,
+  SettingsFile,
   TreeNode,
+  WorkspaceLayout,
+  WriteTier,
 } from '@ai-lore-companion/core';
 
 /**
@@ -15,6 +21,14 @@ import type {
 export function isChainErrorPayload(chain: ChainResult): chain is ChainError {
   return 'error' in chain;
 }
+
+/**
+ * Renderer-safe mirror of `WORKSPACE_LAYOUT_SCHEMA_VERSION` from core. The
+ * renderer cannot value-import from `@ai-lore-companion/core` (its runtime
+ * pulls in chokidar / better-sqlite3); this constant must stay in sync with
+ * `packages/core/src/settings/settings.ts`.
+ */
+export const WORKSPACE_LAYOUT_SCHEMA_VERSION = 1;
 
 export const IPC = {
   /** Main → renderer: the window's mode — welcome or cockpit — sent once on load. */
@@ -87,6 +101,8 @@ export const IPC = {
   BrowserSuppressAll: 'browser:suppress-all',
   /** Main → renderer: a browser tab's state — url, nav availability, profile. */
   BrowserState: 'browser:state',
+  /** Renderer → main: the current URL of a browser tab — for the layout snapshot. */
+  BrowserGetUrl: 'browser:get-url',
 
   /** Renderer → main: list configured app-launch shortcuts. */
   ShortcutsList: 'shortcuts:list',
@@ -100,6 +116,17 @@ export const IPC = {
   ShortcutsRemove: 'shortcuts:remove',
   /** Main → renderer: the configured shortcut list changed. */
   ShortcutsChanged: 'shortcuts:changed',
+
+  /** Renderer → main: the window's settings snapshot — registry, resolved values, raw tiers. */
+  SettingsGet: 'settings:get',
+  /** Renderer → main: write a setting into a tier; resolves to the fresh snapshot. */
+  SettingsSet: 'settings:set',
+  /** Main → renderer: the settings changed — a fresh snapshot for this window. */
+  SettingsChanged: 'settings:changed',
+  /** Renderer → main: replace a tier's ignore rules; resolves to the fresh snapshot. */
+  SettingsSetIgnores: 'settings:set-ignores',
+  /** Renderer → main: replace the per-project workspace-layout snapshot. */
+  SettingsSetLayout: 'settings:set-layout',
 } as const;
 
 export type ChainPayload = ChainResult;
@@ -193,6 +220,32 @@ export type ShortcutInput = {
   url?: string;
 };
 
+/**
+ * A window's view of the settings store: the registry to render, the resolved
+ * value for every setting, and the raw per-tier files so the UI can show what
+ * each tier overrides. `project` is null for a window with no AI-Lore project.
+ */
+export type SettingsSnapshot = {
+  registry: readonly SettingDef[];
+  resolved: Record<string, SettingValue>;
+  global: SettingsFile;
+  project: SettingsFile | null;
+  /** The built-in ignore rules, beneath the global and per-project tiers. */
+  defaultIgnores: readonly IgnoreRule[];
+};
+
+/** A write to the settings store — a value for one key in one tier. */
+export type SettingsSetArg = { tier: WriteTier; key: string; value: SettingValue };
+
+/** A write to a tier's ignore rules — the complete replacement list. */
+export type SettingsSetIgnoresArg = { tier: WriteTier; rules: IgnoreRule[] };
+
+/**
+ * Replace the per-project workspace-layout snapshot — or clear it with `null`.
+ * A global-tier window (welcome / altered) silently ignores this.
+ */
+export type SettingsSetLayoutArg = { layout: WorkspaceLayout | null };
+
 export type Unsubscribe = () => void;
 
 export type CockpitApi = {
@@ -218,8 +271,11 @@ export type CockpitApi = {
   onTerminalData: (handler: (payload: TerminalDataPayload) => void) => Unsubscribe;
   onTerminalExit: (handler: (payload: TerminalExitPayload) => void) => Unsubscribe;
   onTerminalStatus: (handler: (payload: TerminalStatusPayload) => void) => Unsubscribe;
-  browserCreate: (tabId: string) => void;
+  /** Create a browser tab. An `initialUrl` seeds it instead of the home page. */
+  browserCreate: (tabId: string, initialUrl?: string) => void;
   browserDestroy: (tabId: string) => void;
+  /** Read the current URL of a browser tab — for the layout snapshot. */
+  browserGetUrl: (tabId: string) => Promise<string | null>;
   browserSetVisible: (tabId: string, visible: boolean) => void;
   browserSetBounds: (tabId: string, bounds: BrowserBounds) => void;
   browserNavigate: (tabId: string, url: string) => void;
@@ -236,6 +292,12 @@ export type CockpitApi = {
   shortcutsAdd: (input: ShortcutInput) => Promise<Shortcut[]>;
   shortcutsRemove: (id: string) => Promise<Shortcut[]>;
   onShortcutsChanged: (handler: (list: Shortcut[]) => void) => Unsubscribe;
+  settingsGet: () => Promise<SettingsSnapshot>;
+  settingsSet: (arg: SettingsSetArg) => Promise<SettingsSnapshot>;
+  settingsSetIgnores: (arg: SettingsSetIgnoresArg) => Promise<SettingsSnapshot>;
+  /** Replace the per-project workspace-layout snapshot — silently no-ops on non-project windows. */
+  settingsSetLayout: (arg: SettingsSetLayoutArg) => Promise<void>;
+  onSettingsChanged: (handler: (snapshot: SettingsSnapshot) => void) => Unsubscribe;
 };
 
 declare global {

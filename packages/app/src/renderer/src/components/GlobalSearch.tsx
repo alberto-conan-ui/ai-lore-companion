@@ -51,6 +51,9 @@ export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element 
 
   return (
     <div style={wrapStyle}>
+      <span aria-hidden style={iconStyle}>
+        ⌕
+      </span>
       <input
         type="search"
         value={query}
@@ -70,7 +73,7 @@ export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element 
             pick(hits[0]);
           }
         }}
-        placeholder="Search files…"
+        placeholder="Find a file by name…"
         style={inputStyle}
         data-testid="global-search"
       />
@@ -107,12 +110,25 @@ const wrapStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
-  padding: '0.28rem 0.6rem',
+  height: '2.05rem',
+  padding: '0 0.7rem 0 2rem',
   background: '#0c121a',
   border: '1px solid #2f3a45',
-  borderRadius: '4px',
+  borderRadius: '5px',
   color: '#dde3ea',
-  fontSize: '0.76rem',
+  fontSize: '0.82rem',
+};
+
+/** A leading glyph inside the search input — visually marks the row as a search. */
+const iconStyle: React.CSSProperties = {
+  position: 'absolute',
+  left: '0.7rem',
+  top: '50%',
+  transform: 'translateY(-50%)',
+  pointerEvents: 'none',
+  color: '#6c7783',
+  fontSize: '0.95rem',
+  lineHeight: 1,
 };
 
 const dropdownStyle: React.CSSProperties = {

@@ -28,12 +28,42 @@ export type {
 } from './queue/types.js';
 
 export {
-  DEFAULT_IGNORED,
+  DEFAULT_IGNORE_RULES,
   createIgnoreMatcher,
+  deriveIgnoreLists,
+  isIgnoreRule,
   isUntrackedFile,
-  parseIgnorePatterns,
-  readProjectIgnores,
+  mergeIgnoreRules,
+  normalizeIgnorePattern,
 } from './ignore.js';
+export type { IgnoreLevel, IgnoreLists, IgnoreRule } from './ignore.js';
+
+export {
+  SETTINGS_REGISTRY,
+  SETTINGS_SCHEMA_VERSION,
+  WORKSPACE_LAYOUT_SCHEMA_VERSION,
+  emptySettingsFile,
+  isValidValue,
+  parseSettingsFile,
+  resolveAll,
+  resolveSetting,
+  serializeSettingsFile,
+  validateRegistry,
+  withIgnores,
+  withLayout,
+  withSetting,
+} from './settings/settings.js';
+export type {
+  LayoutPanel,
+  LayoutTab,
+  SettingDef,
+  SettingTier,
+  SettingType,
+  SettingValue,
+  SettingsFile,
+  WorkspaceLayout,
+  WriteTier,
+} from './settings/types.js';
 
 export { isTreeError, readDirectory } from './tree/tree.js';
 export type {

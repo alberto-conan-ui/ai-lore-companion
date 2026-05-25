@@ -9,6 +9,8 @@ type Props = {
   expandedPaths: Set<string>;
   onToggleExpand: (path: string) => void;
   driftLevelFor: (folderPath: string) => DriftLevel;
+  /** Right-click on a real folder — opens the pane's ignore menu at the cursor. */
+  onContextMenu?: (node: TreeNode, x: number, y: number) => void;
 };
 
 /** Folder drift dot — the four-level scale, tuned to read on the tree's dark background. */
@@ -38,6 +40,7 @@ export function FileTree({
   expandedPaths,
   onToggleExpand,
   driftLevelFor,
+  onContextMenu,
 }: Props): JSX.Element {
   return (
     <ul style={listReset}>
@@ -50,6 +53,7 @@ export function FileTree({
         expandedPaths={expandedPaths}
         onToggleExpand={onToggleExpand}
         driftLevelFor={driftLevelFor}
+        onContextMenu={onContextMenu}
       />
     </ul>
   );
@@ -65,6 +69,7 @@ type NodeProps = {
   expandedPaths: Set<string>;
   onToggleExpand: (path: string) => void;
   driftLevelFor: (folderPath: string) => DriftLevel;
+  onContextMenu?: (node: TreeNode, x: number, y: number) => void;
 };
 
 function Node({
@@ -76,12 +81,13 @@ function Node({
   expandedPaths,
   onToggleExpand,
   driftLevelFor,
+  onContextMenu,
 }: NodeProps): JSX.Element {
   const open = expandedPaths.has(node.path);
   const isSelected = selectedPath === node.path;
   const childList = folderChildren(node);
   // A synthetic root (e.g. the Status tab grouping several memory folders) has
-  // no real path on disk — skip the path tooltip and the Reveal-in-Finder shortcut.
+  // no real path on disk — skip the path tooltip, Reveal-in-Finder, and ignore.
   const synthetic = node.path.startsWith('synthetic:');
 
   const rowStyle: React.CSSProperties = {
@@ -99,6 +105,11 @@ function Node({
         onClick={() => {
           onSelectFolder(node.path);
           onToggleExpand(node.path);
+        }}
+        onContextMenu={(e) => {
+          if (synthetic || !onContextMenu) return;
+          e.preventDefault();
+          onContextMenu(node, e.clientX, e.clientY);
         }}
         title={synthetic ? node.name : node.path}
         data-testid={isRoot ? 'tree-root' : undefined}
@@ -133,6 +144,7 @@ function Node({
               expandedPaths={expandedPaths}
               onToggleExpand={onToggleExpand}
               driftLevelFor={driftLevelFor}
+              onContextMenu={onContextMenu}
             />
           ))}
         </ul>

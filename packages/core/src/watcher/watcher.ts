@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { basename, relative, sep } from 'node:path';
 import chokidar from 'chokidar';
-import { DEFAULT_IGNORED, isUntrackedFile } from '../ignore.js';
+import { isUntrackedFile } from '../ignore.js';
 import type { Queue } from '../queue/queue.js';
 import type { ChangeScope, ChangeType } from '../queue/types.js';
 import { classifyTrackerFile } from '../tracker/classifier.js';
@@ -45,7 +45,9 @@ export function attachWatcher(queue: Queue, options: WatcherOptions): WatcherHan
     if (isUntrackedFile(basename(entry.path))) queue.ack(entry.id);
   }
 
-  const ignored = [...DEFAULT_IGNORED, ...(options.ignored ?? [])];
+  // The full ignore list is the caller's to assemble — `main` passes the
+  // `drift` list derived from the project's ignore rules (defaults included).
+  const ignored = [...(options.ignored ?? [])];
   const loreRel = relative(root, lorePath);
   const detector = createTransitionDetector();
 

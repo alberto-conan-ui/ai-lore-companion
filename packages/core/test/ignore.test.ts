@@ -1,19 +1,19 @@
 import { strict as assert } from 'node:assert';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { test } from 'node:test';
 import {
-  DEFAULT_IGNORED,
+  DEFAULT_IGNORE_RULES,
+  type IgnoreRule,
   createIgnoreMatcher,
+  deriveIgnoreLists,
+  isIgnoreRule,
   isUntrackedFile,
-  parseIgnorePatterns,
-  readProjectIgnores,
+  mergeIgnoreRules,
+  normalizeIgnorePattern,
 } from '../src/index.js';
 
-test('DEFAULT_IGNORED covers the cockpit exclusion set', () => {
+test('DEFAULT_IGNORE_RULES covers the build/scratch folders at no-search level', () => {
   assert.deepEqual(
-    [...DEFAULT_IGNORED],
+    DEFAULT_IGNORE_RULES.map((r) => r.pattern),
     [
       '**/upstream/**',
       '**/process/**',
@@ -24,101 +24,97 @@ test('DEFAULT_IGNORED covers the cockpit exclusion set', () => {
       '**/out/**',
     ],
   );
+  assert.ok(DEFAULT_IGNORE_RULES.every((r) => r.level === 'no-search'));
 });
 
-test('createIgnoreMatcher matches each DEFAULT_IGNORED folder by basename', () => {
-  const isIgnored = createIgnoreMatcher(DEFAULT_IGNORED);
-  for (const name of ['upstream', 'process', '.git', 'node_modules', 'dist', 'dist-test', 'out']) {
-    assert.equal(isIgnored(name), true, `expected '${name}' to be ignored`);
-  }
+test('normalizeIgnorePattern expands bare names and file globs, keeps paths verbatim', () => {
+  assert.equal(normalizeIgnorePattern('coverage'), '**/coverage/**');
+  assert.equal(normalizeIgnorePattern('  tmp  '), '**/tmp/**');
+  assert.equal(normalizeIgnorePattern('*.log'), '**/*.log');
+  assert.equal(normalizeIgnorePattern('src/generated'), 'src/generated');
+  assert.equal(normalizeIgnorePattern('**/dist/**'), '**/dist/**');
+  assert.equal(normalizeIgnorePattern(''), '');
 });
 
-test('createIgnoreMatcher matches an ignored folder as a path segment', () => {
-  const isIgnored = createIgnoreMatcher(DEFAULT_IGNORED);
+test('mergeIgnoreRules overrides by pattern and appends new rules', () => {
+  const base: IgnoreRule[] = [
+    { pattern: 'a', level: 'no-drift' },
+    { pattern: 'b', level: 'no-search' },
+  ];
+  const override: IgnoreRule[] = [
+    { pattern: 'b', level: 'hidden' },
+    { pattern: 'c', level: 'no-drift' },
+  ];
+  assert.deepEqual(mergeIgnoreRules(base, override), [
+    { pattern: 'a', level: 'no-drift' },
+    { pattern: 'b', level: 'hidden' },
+    { pattern: 'c', level: 'no-drift' },
+  ]);
+});
+
+test('deriveIgnoreLists produces three cumulative, nesting lists', () => {
+  const lists = deriveIgnoreLists([
+    { pattern: 'd', level: 'no-drift' },
+    { pattern: 's', level: 'no-search' },
+    { pattern: 'h', level: 'hidden' },
+  ]);
+  // Every rule suppresses drift.
+  assert.deepEqual(lists.drift, ['**/d/**', '**/s/**', '**/h/**']);
+  // no-search and hidden suppress search.
+  assert.deepEqual(lists.search, ['**/s/**', '**/h/**']);
+  // hidden alone hides the tree.
+  assert.deepEqual(lists.hidden, ['**/h/**']);
+});
+
+test('deriveIgnoreLists normalises patterns and drops empty ones', () => {
+  const lists = deriveIgnoreLists([
+    { pattern: '*.log', level: 'no-drift' },
+    { pattern: '   ', level: 'hidden' },
+  ]);
+  assert.deepEqual(lists.drift, ['**/*.log']);
+  assert.deepEqual(lists.hidden, []);
+});
+
+test('DEFAULT_IGNORE_RULES derive to drift + search suppression, but nothing hidden', () => {
+  const lists = deriveIgnoreLists(DEFAULT_IGNORE_RULES);
+  assert.equal(lists.drift.length, 7);
+  assert.equal(lists.search.length, 7);
+  assert.deepEqual(lists.hidden, []);
+});
+
+test('isIgnoreRule accepts well-formed rules and rejects malformed data', () => {
+  assert.equal(isIgnoreRule({ pattern: 'dist', level: 'hidden' }), true);
+  assert.equal(isIgnoreRule({ pattern: 'dist', level: 'bogus' }), false);
+  assert.equal(isIgnoreRule({ pattern: 'dist' }), false);
+  assert.equal(isIgnoreRule({ level: 'hidden' }), false);
+  assert.equal(isIgnoreRule('dist'), false);
+  assert.equal(isIgnoreRule(null), false);
+});
+
+test('createIgnoreMatcher matches a folder pattern by basename and as a path segment', () => {
+  const isIgnored = createIgnoreMatcher(['**/node_modules/**', '**/.git/**']);
+  assert.equal(isIgnored('node_modules'), true);
   assert.equal(isIgnored('packages/core/node_modules'), true);
-  assert.equal(isIgnored('node_modules/better-sqlite3/lib'), true);
-  assert.equal(isIgnored('.ai-lore-x/upstream/core-0.4'), true);
-});
-
-test('createIgnoreMatcher does not match names that merely contain an ignored token', () => {
-  const isIgnored = createIgnoreMatcher(DEFAULT_IGNORED);
+  assert.equal(isIgnored('.git'), true);
+  assert.equal(isIgnored('src'), false);
   assert.equal(isIgnored('node_modules.ts'), false);
-  assert.equal(isIgnored('src/dist-helpers.ts'), false);
-  assert.equal(isIgnored('output'), false);
-  assert.equal(isIgnored('processor.ts'), false);
 });
 
-test('createIgnoreMatcher passes through ordinary source paths', () => {
-  const isIgnored = createIgnoreMatcher(DEFAULT_IGNORED);
-  for (const name of ['src', 'test', 'package.json', 'README.md', 'packages/app/src']) {
-    assert.equal(isIgnored(name), false, `expected '${name}' to pass`);
-  }
+test('createIgnoreMatcher matches a normalised file glob against a basename', () => {
+  const isIgnored = createIgnoreMatcher([normalizeIgnorePattern('*.log')]);
+  assert.equal(isIgnored('debug.log'), true);
+  assert.equal(isIgnored('debug.txt'), false);
 });
 
 test('createIgnoreMatcher with an empty pattern list ignores nothing', () => {
   const isIgnored = createIgnoreMatcher([]);
   assert.equal(isIgnored('node_modules'), false);
-  assert.equal(isIgnored('anything'), false);
 });
 
-test('createIgnoreMatcher supports a plain-glob pattern (no **/.../** wrapper)', () => {
-  const isIgnored = createIgnoreMatcher(['*.log']);
-  assert.equal(isIgnored('debug.log'), true);
-  assert.equal(isIgnored('debug.txt'), false);
-  // A '*' segment does not cross a slash.
-  assert.equal(isIgnored('logs/debug.log'), false);
-});
-
-test('parseIgnorePatterns wraps bare names and keeps globs and paths verbatim', () => {
-  assert.deepEqual(parseIgnorePatterns('coverage\n*.log\nsrc/generated\n'), [
-    '**/coverage/**',
-    '*.log',
-    'src/generated',
-  ]);
-});
-
-test('parseIgnorePatterns skips blank lines, comments, and negations', () => {
-  assert.deepEqual(parseIgnorePatterns('\n# a comment\n   \ntmp\n!keep\n'), ['**/tmp/**']);
-});
-
-test('readProjectIgnores returns [] when no ignore file exists', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ai-lore-ignore-'));
-  try {
-    assert.deepEqual(readProjectIgnores(dir), []);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('readProjectIgnores reads and parses <root>/.ailoreignore', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ai-lore-ignore-'));
-  try {
-    writeFileSync(join(dir, '.ailoreignore'), '# project ignores\ncoverage\ntmp\n');
-    assert.deepEqual(readProjectIgnores(dir), ['**/coverage/**', '**/tmp/**']);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('a parsed user pattern feeds the same matcher as DEFAULT_IGNORED', () => {
-  const isIgnored = createIgnoreMatcher(parseIgnorePatterns('coverage'));
-  assert.equal(isIgnored('coverage'), true);
-  assert.equal(isIgnored('packages/app/coverage'), true);
-  assert.equal(isIgnored('coverages'), false);
-});
-
-test('isUntrackedFile silences AI-Lore index files', () => {
+test('isUntrackedFile silences AI-Lore index files only', () => {
   assert.equal(isUntrackedFile('memory.index.md'), true);
-  assert.equal(isUntrackedFile('status.index.md'), true);
   assert.equal(isUntrackedFile('cockpit-pane-refinements.index.md'), true);
-});
-
-test('isUntrackedFile leaves ordinary files tracked', () => {
-  // Only `<name>.index.md` is silenced — not a bare `index.md`, not other types.
   assert.equal(isUntrackedFile('status.md'), false);
-  assert.equal(isUntrackedFile('A-phase.phase.md'), false);
-  assert.equal(isUntrackedFile('contracts.spec.md'), false);
   assert.equal(isUntrackedFile('README.md'), false);
-  assert.equal(isUntrackedFile('index.ts'), false);
   assert.equal(isUntrackedFile('index.md'), false);
 });

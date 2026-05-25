@@ -1,6 +1,8 @@
 import type { ChangeScope, QueueEntry, TreeNode } from '@ai-lore-companion/core';
 import {
   type ColDef,
+  type GetContextMenuItemsParams,
+  type MenuItemDef,
   ModuleRegistry,
   type ValueGetterParams,
   colorSchemeDark,
@@ -39,6 +41,8 @@ type Props = {
   /** Double-clicking a folder row navigates the pane into that folder. */
   onOpenFolder: (path: string) => void;
   driftByPath: Map<string, QueueEntry>;
+  /** Right-click ▸ Ignore — create a project ignore rule for the row's path. */
+  onIgnore: (node: TreeNode) => void;
 };
 
 const DRIFT_GLYPH: Record<QueueEntry['type'], { glyph: string; color: string; label: string }> = {
@@ -95,6 +99,7 @@ export function FileGrid({
   onSelectPath,
   onOpenFolder,
   driftByPath,
+  onIgnore,
 }: Props): JSX.Element {
   const gridRef = useRef<AgGridReact<TreeNode>>(null);
 
@@ -172,6 +177,20 @@ export function FileGrid({
         rowSelection={{ mode: 'singleRow', checkboxes: false }}
         suppressCellFocus
         animateRows={false}
+        getContextMenuItems={(
+          params: GetContextMenuItemsParams<TreeNode>,
+        ): (MenuItemDef | string)[] => {
+          const node = params.node?.data;
+          if (!node) return [];
+          return [
+            {
+              name: node.isDir
+                ? 'Ignore this folder in the project'
+                : 'Ignore this file in the project',
+              action: () => onIgnore(node),
+            },
+          ];
+        }}
         headerHeight={28}
         rowHeight={26}
         onRowClicked={(e) => {

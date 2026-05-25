@@ -1,0 +1,278 @@
+/**
+ * The cockpit's settings system: a registry of declared settings, and pure
+ * logic to parse, validate, merge, and resolve a two-tier (global +
+ * per-project) store. All I/O lives in the Electron `main` process; this
+ * module is Electron-free and fully unit-tested.
+ */
+
+import { type IgnoreRule, isIgnoreRule } from '../ignore.js';
+import type {
+  LayoutPanel,
+  LayoutTab,
+  SettingDef,
+  SettingValue,
+  SettingsFile,
+  WorkspaceLayout,
+} from './types.js';
+
+/**
+ * The on-disk schema version of a settings file. Bump when the persisted shape
+ * changes, so a future load can migrate older files.
+ */
+export const SETTINGS_SCHEMA_VERSION = 1;
+
+/**
+ * The version of the embedded workspace-layout snapshot. Independent of the
+ * settings file's `schemaVersion` — a snapshot with an unknown version is
+ * dropped on load, and the window opens with the default layout.
+ */
+export const WORKSPACE_LAYOUT_SCHEMA_VERSION = 1;
+
+/**
+ * Every setting the cockpit knows. The Settings UI renders from this list and
+ * the store validates writes against it; adding a setting is one entry here
+ * plus wiring its effect.
+ */
+export const SETTINGS_REGISTRY: readonly SettingDef[] = [
+  {
+    key: 'appearance.showProjectAccent',
+    label: 'Tint the header with the project colour',
+    section: 'Appearance',
+    type: 'boolean',
+    tier: 'both',
+    default: true,
+  },
+  {
+    key: 'workspace.restoreLayout',
+    label: 'Restore workspace layout on open',
+    section: 'Workspace',
+    type: 'boolean',
+    tier: 'global',
+    default: true,
+  },
+];
+
+/** A fresh, empty settings file at the current schema version. */
+export function emptySettingsFile(): SettingsFile {
+  return { schemaVersion: SETTINGS_SCHEMA_VERSION, values: {}, ignores: [] };
+}
+
+/** Whether a raw value is shaped like a `LayoutTab`. Unknown fields are tolerated. */
+function isLayoutTab(value: unknown): value is LayoutTab {
+  if (typeof value !== 'object' || value === null) return false;
+  const o = value as Record<string, unknown>;
+  if (typeof o.id !== 'string' || typeof o.kind !== 'string' || typeof o.title !== 'string') {
+    return false;
+  }
+  if (o.baseTitle !== undefined && typeof o.baseTitle !== 'string') return false;
+  if (o.manualTitle !== undefined && typeof o.manualTitle !== 'boolean') return false;
+  return true;
+}
+
+/** Coerce a parsed value into a `LayoutPanel`, dropping malformed tabs. */
+function parseLayoutPanel(value: unknown): LayoutPanel | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const o = value as Record<string, unknown>;
+  if (!Array.isArray(o.tabs) || typeof o.activeId !== 'string') return null;
+  const tabs: LayoutTab[] = [];
+  for (const raw of o.tabs) {
+    if (!isLayoutTab(raw)) continue;
+    const t: LayoutTab = { id: raw.id, kind: raw.kind, title: raw.title };
+    if (raw.baseTitle !== undefined) t.baseTitle = raw.baseTitle;
+    if (raw.manualTitle !== undefined) t.manualTitle = raw.manualTitle;
+    tabs.push(t);
+  }
+  return { tabs, activeId: o.activeId };
+}
+
+/**
+ * Read a workspace-layout snapshot out of a parsed `layout` field. Returns
+ * `null` for absent, malformed, or unknown-version snapshots — the caller
+ * treats that as "no snapshot" and the window opens with defaults.
+ */
+function parseWorkspaceLayout(value: unknown): WorkspaceLayout | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const o = value as Record<string, unknown>;
+  if (o.schemaVersion !== WORKSPACE_LAYOUT_SCHEMA_VERSION) return null;
+  if (typeof o.panels !== 'object' || o.panels === null) return null;
+  const p = o.panels as Record<string, unknown>;
+  const left = parseLayoutPanel(p.left);
+  const right = parseLayoutPanel(p.right);
+  const bottom = parseLayoutPanel(p.bottom);
+  if (!left || !right || !bottom) return null;
+  if (typeof o.rightOpen !== 'boolean' || typeof o.bottomOpen !== 'boolean') return null;
+  if (
+    typeof o.rightWidth !== 'number' ||
+    !Number.isFinite(o.rightWidth) ||
+    typeof o.bottomHeight !== 'number' ||
+    !Number.isFinite(o.bottomHeight)
+  ) {
+    return null;
+  }
+  const browserUrls: Record<string, string> = {};
+  if (typeof o.browserUrls === 'object' && o.browserUrls !== null) {
+    for (const [k, v] of Object.entries(o.browserUrls as Record<string, unknown>)) {
+      if (typeof v === 'string') browserUrls[k] = v;
+    }
+  }
+  return {
+    schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
+    panels: { left, right, bottom },
+    rightOpen: o.rightOpen,
+    bottomOpen: o.bottomOpen,
+    rightWidth: o.rightWidth,
+    bottomHeight: o.bottomHeight,
+    browserUrls,
+  };
+}
+
+/** Whether `value` is a primitive the store can persist. */
+function isSettingValue(value: unknown): value is SettingValue {
+  return typeof value === 'boolean' || typeof value === 'string' || typeof value === 'number';
+}
+
+/**
+ * Parse the JSON text of a settings file. A missing or corrupt file is not an
+ * error — `null` or unparseable text yields an empty file. Stored values that
+ * are not primitives, and malformed ignore rules, are dropped.
+ */
+export function parseSettingsFile(text: string | null): SettingsFile {
+  if (text === null) return emptySettingsFile();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return emptySettingsFile();
+  }
+  if (typeof raw !== 'object' || raw === null) return emptySettingsFile();
+  const obj = raw as Record<string, unknown>;
+  const version =
+    typeof obj.schemaVersion === 'number' ? obj.schemaVersion : SETTINGS_SCHEMA_VERSION;
+  const values: Record<string, SettingValue> = {};
+  if (typeof obj.values === 'object' && obj.values !== null) {
+    for (const [key, value] of Object.entries(obj.values as Record<string, unknown>)) {
+      if (isSettingValue(value)) values[key] = value;
+    }
+  }
+  const ignores: IgnoreRule[] = Array.isArray(obj.ignores) ? obj.ignores.filter(isIgnoreRule) : [];
+  const layout = parseWorkspaceLayout(obj.layout);
+  const file: SettingsFile = { schemaVersion: version, values, ignores };
+  if (layout) file.layout = layout;
+  return file;
+}
+
+/** Serialize a settings file to pretty JSON. */
+export function serializeSettingsFile(file: SettingsFile): string {
+  return JSON.stringify(file, null, 2);
+}
+
+/** A new settings file with `key` set to `value` — the input is not mutated. */
+export function withSetting(file: SettingsFile, key: string, value: SettingValue): SettingsFile {
+  const next: SettingsFile = {
+    schemaVersion: file.schemaVersion,
+    values: { ...file.values, [key]: value },
+    ignores: file.ignores,
+  };
+  if (file.layout) next.layout = file.layout;
+  return next;
+}
+
+/** A new settings file carrying `rules` as its ignore set — the input is not mutated. */
+export function withIgnores(file: SettingsFile, rules: readonly IgnoreRule[]): SettingsFile {
+  const next: SettingsFile = {
+    schemaVersion: file.schemaVersion,
+    values: file.values,
+    ignores: [...rules],
+  };
+  if (file.layout) next.layout = file.layout;
+  return next;
+}
+
+/**
+ * A new settings file carrying `layout` (or clearing it, when `null`) — the
+ * input is not mutated. The layout snapshot belongs to the per-project tier.
+ */
+export function withLayout(file: SettingsFile, layout: WorkspaceLayout | null): SettingsFile {
+  const next: SettingsFile = {
+    schemaVersion: file.schemaVersion,
+    values: file.values,
+    ignores: file.ignores,
+  };
+  if (layout) next.layout = layout;
+  return next;
+}
+
+/** Whether a raw value is valid for a setting's declared type. */
+export function isValidValue(def: SettingDef, value: unknown): value is SettingValue {
+  switch (def.type) {
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'string':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'enum':
+      return typeof value === 'string' && (def.options ?? []).includes(value);
+  }
+}
+
+/** Whether a setting may be stored in the given tier. */
+function tierAllows(def: SettingDef, tier: 'global' | 'project'): boolean {
+  return def.tier === tier || def.tier === 'both';
+}
+
+/**
+ * Resolve one setting: the per-project value when the setting may live in the
+ * project tier and the project file carries a valid one, else the global
+ * value under the same rule, else the registry default. A stored value that
+ * fails validation is skipped, never returned.
+ */
+export function resolveSetting(
+  def: SettingDef,
+  global: SettingsFile,
+  project: SettingsFile | null,
+): SettingValue {
+  if (project && tierAllows(def, 'project')) {
+    const value = project.values[def.key];
+    if (isValidValue(def, value)) return value;
+  }
+  if (tierAllows(def, 'global')) {
+    const value = global.values[def.key];
+    if (isValidValue(def, value)) return value;
+  }
+  return def.default;
+}
+
+/** Resolve every setting in a registry into a flat key→value map. */
+export function resolveAll(
+  registry: readonly SettingDef[],
+  global: SettingsFile,
+  project: SettingsFile | null,
+): Record<string, SettingValue> {
+  const resolved: Record<string, SettingValue> = {};
+  for (const def of registry) {
+    resolved[def.key] = resolveSetting(def, global, project);
+  }
+  return resolved;
+}
+
+/**
+ * Check a registry for authoring mistakes — a duplicate key, an `enum` without
+ * `options`, or a `default` that fails its own type. Returns one message per
+ * problem; an empty list means the registry is sound.
+ */
+export function validateRegistry(registry: readonly SettingDef[]): string[] {
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  for (const def of registry) {
+    if (seen.has(def.key)) errors.push(`duplicate key: ${def.key}`);
+    seen.add(def.key);
+    if (def.type === 'enum' && (def.options === undefined || def.options.length === 0)) {
+      errors.push(`enum setting has no options: ${def.key}`);
+    }
+    if (!isValidValue(def, def.default)) {
+      errors.push(`default is not a valid ${def.type}: ${def.key}`);
+    }
+  }
+  return errors;
+}

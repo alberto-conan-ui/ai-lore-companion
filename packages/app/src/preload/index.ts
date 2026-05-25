@@ -6,6 +6,7 @@ import {
   type CockpitApi,
   IPC,
   type RestorePayload,
+  type SettingsSnapshot,
   type Shortcut,
   type TerminalDataPayload,
   type TerminalExitPayload,
@@ -46,8 +47,9 @@ const api: CockpitApi = {
   onTerminalData: makeSubscribe<TerminalDataPayload>(IPC.TerminalData),
   onTerminalExit: makeSubscribe<TerminalExitPayload>(IPC.TerminalExit),
   onTerminalStatus: makeSubscribe<TerminalStatusPayload>(IPC.TerminalStatus),
-  browserCreate: (tabId) => ipcRenderer.send(IPC.BrowserCreate, tabId),
+  browserCreate: (tabId, initialUrl) => ipcRenderer.send(IPC.BrowserCreate, { tabId, initialUrl }),
   browserDestroy: (tabId) => ipcRenderer.send(IPC.BrowserDestroy, tabId),
+  browserGetUrl: (tabId) => ipcRenderer.invoke(IPC.BrowserGetUrl, tabId),
   browserSetVisible: (tabId, visible) =>
     ipcRenderer.send(IPC.BrowserSetVisible, { tabId, visible }),
   browserSetBounds: (tabId, bounds) => ipcRenderer.send(IPC.BrowserSetBounds, { tabId, bounds }),
@@ -65,6 +67,11 @@ const api: CockpitApi = {
   shortcutsAdd: (input) => ipcRenderer.invoke(IPC.ShortcutsAdd, input),
   shortcutsRemove: (id) => ipcRenderer.invoke(IPC.ShortcutsRemove, id),
   onShortcutsChanged: makeSubscribe<Shortcut[]>(IPC.ShortcutsChanged),
+  settingsGet: () => ipcRenderer.invoke(IPC.SettingsGet),
+  settingsSet: (arg) => ipcRenderer.invoke(IPC.SettingsSet, arg),
+  settingsSetIgnores: (arg) => ipcRenderer.invoke(IPC.SettingsSetIgnores, arg),
+  settingsSetLayout: (arg) => ipcRenderer.invoke(IPC.SettingsSetLayout, arg),
+  onSettingsChanged: makeSubscribe<SettingsSnapshot>(IPC.SettingsChanged),
 };
 
 contextBridge.exposeInMainWorld('cockpit', api);

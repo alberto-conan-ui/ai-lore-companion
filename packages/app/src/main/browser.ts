@@ -75,7 +75,12 @@ function pushState(tabId: string, c: Companion): void {
   c.win.webContents.send(IPC.BrowserState, state);
 }
 
-function buildView(tabId: string, win: BrowserWindow, profile: BrowserProfile): Companion {
+function buildView(
+  tabId: string,
+  win: BrowserWindow,
+  profile: BrowserProfile,
+  initialUrl: string,
+): Companion {
   const view = new WebContentsView({
     webPreferences: { partition: partitionFor(profile) },
   });
@@ -100,17 +105,32 @@ function buildView(tabId: string, win: BrowserWindow, profile: BrowserProfile): 
     wc.on(e, update);
   }
 
-  void wc.loadURL(HOME_URL);
+  void wc.loadURL(initialUrl);
   return c;
 }
 
-/** Create a browser tab's view (idempotent — a known tab id is a no-op). */
-export function create(win: BrowserWindow, tabId: string, profile: BrowserProfile): void {
+/**
+ * Create a browser tab's view (idempotent — a known tab id is a no-op). An
+ * `initialUrl` overrides the home page — used to restore a persisted layout.
+ */
+export function create(
+  win: BrowserWindow,
+  tabId: string,
+  profile: BrowserProfile,
+  initialUrl?: string,
+): void {
   if (companions.has(tabId)) return;
-  const c = buildView(tabId, win, profile);
+  const c = buildView(tabId, win, profile, initialUrl ?? HOME_URL);
   win.contentView.addChildView(c.view);
   c.view.setVisible(false);
   companions.set(tabId, c);
+}
+
+/** The live URL of a browser tab, or `null` for an unknown tab. */
+export function getUrl(tabId: string): string | null {
+  const c = companions.get(tabId);
+  if (!c || c.win.isDestroyed()) return null;
+  return c.view.webContents.getURL();
 }
 
 /** Destroy a browser tab's view — the tab was closed. */
@@ -176,10 +196,13 @@ export function setProfile(tabId: string, profile: BrowserProfile): void {
   const old = companions.get(tabId);
   if (!old) return;
   const { win, bounds, visible, suppressed } = old;
+  // Carry the current URL across the partition swap — the user expects the
+  // page to stay on the tab when they only changed its profile.
+  const currentUrl = old.view.webContents.getURL();
   if (!win.isDestroyed()) win.contentView.removeChildView(old.view);
   old.view.webContents.close();
 
-  const c = buildView(tabId, win, profile);
+  const c = buildView(tabId, win, profile, currentUrl || HOME_URL);
   c.bounds = bounds;
   c.visible = visible;
   c.suppressed = suppressed;

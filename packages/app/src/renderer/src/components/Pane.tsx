@@ -1,4 +1,4 @@
-import type { ChangeScope, QueueEntry, TreeNode } from '@ai-lore-companion/core';
+import type { ChangeScope, IgnoreRule, QueueEntry, TreeNode } from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
 import { type DriftLevel, driftLevel, findTreeNode, useCockpitStore } from '../store.js';
 import { DriftPill } from './DriftPill.js';
@@ -117,6 +117,8 @@ export function Pane({
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([rootId]));
   const [queueHeight, setQueueHeight] = useState(220);
   const [treeWidth, setTreeWidth] = useState(240);
+  // The tree's right-click ignore menu: the node and where to draw it.
+  const [treeMenu, setTreeMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null);
 
   const entryAbsPaths = useMemo(() => paneEntries.map((e) => toAbs(e.path)), [paneEntries, toAbs]);
 
@@ -184,6 +186,17 @@ export function Pane({
       else next.add(path);
       return next;
     });
+  }, []);
+
+  /** Right-click ▸ Ignore — add a `no-drift` project rule for the path. It can
+   *  be re-levelled or removed in Settings ▸ Ignore rules. */
+  const ignorePath = useCallback(async (node: TreeNode): Promise<void> => {
+    const snap = await window.cockpit.settingsGet();
+    const pattern = node.isDir ? `**/${node.name}/**` : `**/${node.name}`;
+    const rules = snap.project?.ignores ?? [];
+    if (rules.some((r) => r.pattern === pattern)) return;
+    const next: IgnoreRule[] = [...rules, { pattern, level: 'no-drift' }];
+    await window.cockpit.settingsSetIgnores({ tier: 'project', rules: next });
   }, []);
 
   /** Drag the divider above the queue to resize it — dragging up grows it. */
@@ -304,6 +317,7 @@ export function Pane({
               expandedPaths={expandedPaths}
               onToggleExpand={handleToggleExpand}
               driftLevelFor={driftLevelFor}
+              onContextMenu={(node, x, y) => setTreeMenu({ node, x, y })}
             />
           ) : (
             <div style={treeLoadingStyle}>Reading tree…</div>
@@ -323,6 +337,7 @@ export function Pane({
             onSelectPath={setSelectedFile}
             onOpenFolder={handleOpenFolder}
             driftByPath={driftByPath}
+            onIgnore={(node) => void ignorePath(node)}
           />
         </div>
       </div>
@@ -348,6 +363,24 @@ export function Pane({
           }}
         />
       </div>
+
+      {treeMenu ? (
+        <>
+          <div style={menuBackdropStyle} onMouseDown={() => setTreeMenu(null)} />
+          <div style={{ ...treeMenuStyle, left: treeMenu.x, top: treeMenu.y }}>
+            <button
+              type="button"
+              style={treeMenuItemStyle}
+              onClick={() => {
+                void ignorePath(treeMenu.node);
+                setTreeMenu(null);
+              }}
+            >
+              {treeMenu.node.isDir ? 'Ignore this folder' : 'Ignore this file'}
+            </button>
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -437,4 +470,35 @@ const queueResizeHandleStyle: React.CSSProperties = {
   cursor: 'ns-resize',
   background: '#0c121a',
   borderTop: '1px solid #1f2933',
+};
+
+/** Full-window catcher that dismisses the tree's right-click ignore menu. */
+const menuBackdropStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 50,
+};
+
+const treeMenuStyle: React.CSSProperties = {
+  position: 'fixed',
+  zIndex: 51,
+  background: '#121a24',
+  border: '1px solid #2f3a45',
+  borderRadius: '5px',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+  padding: '0.2rem',
+};
+
+const treeMenuItemStyle: React.CSSProperties = {
+  display: 'block',
+  width: '100%',
+  padding: '0.35rem 0.7rem',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: '4px',
+  color: '#dde3ea',
+  fontSize: '0.78rem',
+  textAlign: 'left',
+  whiteSpace: 'nowrap',
+  cursor: 'pointer',
 };

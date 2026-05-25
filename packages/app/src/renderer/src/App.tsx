@@ -1,14 +1,24 @@
-import type { ChangeScope } from '@ai-lore-companion/core';
-import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
+import type { ChangeScope, LayoutTab, WorkspaceLayout } from '@ai-lore-companion/core';
+import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { RecentProject, TerminalForegroundStatus } from '../../shared/ipc.js';
-import { isChainErrorPayload } from '../../shared/ipc.js';
+import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BrowserTab } from './components/BrowserTab.js';
-import { DockPanel } from './components/DockPanel.js';
+import {
+  DOCK_DEFAULT_BOTTOM,
+  DOCK_DEFAULT_RIGHT,
+  DOCK_MIN_SIZE,
+  DockPanel,
+} from './components/DockPanel.js';
 import { GlobalSearch } from './components/GlobalSearch.js';
 import { Pane, type SubRoot, baseDirsOf, entriesInSubRoot } from './components/Pane.js';
-import { type PanelId, TabbedPanel, type WorkspaceTab } from './components/TabbedPanel.js';
+import {
+  type PanelId,
+  type TabKind,
+  TabbedPanel,
+  type WorkspaceTab,
+} from './components/TabbedPanel.js';
 import { TerminalTab } from './components/TerminalTab.js';
 import { TrackerStrip } from './components/TrackerStrip.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
@@ -27,6 +37,27 @@ const PANE_TABS: WorkspaceTab[] = [
   { id: 'memory', kind: 'pane', title: 'Memory' },
 ];
 const PANEL_IDS = ['left', 'right', 'bottom'] as const;
+
+const TAB_KINDS = new Set<TabKind>(['pane', 'terminal', 'browser']);
+
+/** Convert a runtime `WorkspaceTab` into its persisted form — drops live state. */
+function tabToLayout(tab: WorkspaceTab): LayoutTab {
+  const out: LayoutTab = { id: tab.id, kind: tab.kind, title: tab.title };
+  if (tab.baseTitle !== undefined) out.baseTitle = tab.baseTitle;
+  if (tab.manualTitle !== undefined) out.manualTitle = tab.manualTitle;
+  return out;
+}
+
+/** Lift a persisted `LayoutTab` into a runtime `WorkspaceTab`, or drop it if its kind is unknown. */
+function tabFromLayout(t: LayoutTab): WorkspaceTab | null {
+  if (!TAB_KINDS.has(t.kind as TabKind)) return null;
+  const out: WorkspaceTab = { id: t.id, kind: t.kind as TabKind, title: t.title };
+  if (t.baseTitle !== undefined) out.baseTitle = t.baseTitle;
+  if (t.manualTitle !== undefined) out.manualTitle = t.manualTitle;
+  // Terminal tabs always restore as idle — their PTY is fresh.
+  if (out.kind === 'terminal') out.status = 'idle';
+  return out;
+}
 
 /** What this window is — set once by main via `onWindowInit`. */
 type WindowMode = 'loading' | 'welcome' | 'cockpit' | 'altered';
@@ -50,6 +81,11 @@ export function App(): JSX.Element {
   });
   const [rightOpen, setRightOpen] = useState(false);
   const [bottomOpen, setBottomOpen] = useState(false);
+  const [rightSize, setRightSize] = useState(DOCK_DEFAULT_RIGHT);
+  const [bottomSize, setBottomSize] = useState(DOCK_DEFAULT_BOTTOM);
+  // Per-tab URLs the restored layout seeded. Consumed by `BrowserTab` on
+  // mount to override the browser companion's default home page.
+  const [browserInitialUrls, setBrowserInitialUrls] = useState<Record<string, string>>({});
   const [slots, setSlots] = useState<Record<PanelId, HTMLDivElement | null>>({
     left: null,
     right: null,
@@ -144,6 +180,119 @@ export function App(): JSX.Element {
       offTreeUpdate();
     };
   }, [setChain, setEntries, applyEvent, setTrees, applyTreeUpdate]);
+
+  // Seed the workspace layout from the per-project snapshot, exactly once per
+  // window — gated on `workspace.restoreLayout`. A missing snapshot, or the
+  // toggle off, leaves the defaults in place.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current) return;
+    if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
+    seededRef.current = true;
+    void window.cockpit.settingsGet().then((snap) => {
+      if (snap.resolved['workspace.restoreLayout'] === false) return;
+      const layout = snap.project?.layout;
+      if (!layout) return;
+      const liftPanel = (p: { tabs: LayoutTab[]; activeId: string }): Panel => {
+        const tabs = p.tabs.flatMap((t) => {
+          const lifted = tabFromLayout(t);
+          return lifted ? [lifted] : [];
+        });
+        // The persisted activeId might be a tab that got dropped on lift —
+        // fall back to the last surviving tab so the panel stays usable.
+        const stillThere = tabs.some((t) => t.id === p.activeId);
+        return {
+          tabs,
+          activeId: stillThere ? p.activeId : (tabs[tabs.length - 1]?.id ?? ''),
+        };
+      };
+      // The left panel always carries the pinned panes, even when a stale
+      // snapshot lost them — drop the snapshot rather than ship a cockpit
+      // with no Status/Payload/Memory.
+      const left = liftPanel(layout.panels.left);
+      const hasAllPanes = PANE_TABS.every((p) => left.tabs.some((t) => t.id === p.id));
+      if (!hasAllPanes) return;
+      setPanels({
+        left,
+        right: liftPanel(layout.panels.right),
+        bottom: liftPanel(layout.panels.bottom),
+      });
+      setRightOpen(layout.rightOpen);
+      setBottomOpen(layout.bottomOpen);
+      setRightSize(Math.max(DOCK_MIN_SIZE, layout.rightWidth));
+      setBottomSize(Math.max(DOCK_MIN_SIZE, layout.bottomHeight));
+      setBrowserInitialUrls(layout.browserUrls);
+    });
+  }, [mode, chain]);
+
+  // Whether this window currently has OS focus — only the focused window
+  // writes layout. The blurred window keeps its in-memory state but stops
+  // writing, so two windows on the same project do not race their writes.
+  const [hasFocus, setHasFocus] = useState<boolean>(() =>
+    typeof document === 'undefined' ? true : document.hasFocus(),
+  );
+  useEffect(() => {
+    const onFocus = (): void => setHasFocus(true);
+    const onBlur = (): void => setHasFocus(false);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  /** Snapshot the current layout — asks main for each browser tab's URL. */
+  const captureLayout = useCallback(async (): Promise<WorkspaceLayout> => {
+    const browserUrls: Record<string, string> = {};
+    for (const panelId of PANEL_IDS) {
+      for (const tab of panels[panelId].tabs) {
+        if (tab.kind !== 'browser') continue;
+        const url = await window.cockpit.browserGetUrl(tab.id);
+        if (typeof url === 'string' && url.length > 0) browserUrls[tab.id] = url;
+      }
+    }
+    return {
+      schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
+      panels: {
+        left: { tabs: panels.left.tabs.map(tabToLayout), activeId: panels.left.activeId },
+        right: { tabs: panels.right.tabs.map(tabToLayout), activeId: panels.right.activeId },
+        bottom: { tabs: panels.bottom.tabs.map(tabToLayout), activeId: panels.bottom.activeId },
+      },
+      rightOpen,
+      bottomOpen,
+      rightWidth: rightSize,
+      bottomHeight: bottomSize,
+      browserUrls,
+    };
+  }, [panels, rightOpen, bottomOpen, rightSize, bottomSize]);
+
+  // Capture the layout on changes, debounced to 300ms, and only from the
+  // focused window. A final flush goes out on `beforeunload`. Skipped until a
+  // project context is in place — pre-cockpit state is not a real layout.
+  useEffect(() => {
+    if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
+    if (!seededRef.current) return; // wait until the seed pass has run
+    if (!hasFocus) return;
+    const handle = window.setTimeout(() => {
+      void captureLayout().then((layout) => {
+        void window.cockpit.settingsSetLayout({ layout });
+      });
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [mode, chain, hasFocus, captureLayout]);
+
+  // Final flush on window close — fire-and-forget; main records what reaches it.
+  useEffect(() => {
+    if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
+    const onUnload = (): void => {
+      void captureLayout().then((layout) => {
+        void window.cockpit.settingsSetLayout({ layout });
+      });
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [mode, chain, captureLayout]);
 
   const dockOpen = (id: PanelId): boolean =>
     id === 'left' || (id === 'right' ? rightOpen : bottomOpen);
@@ -404,7 +553,9 @@ export function App(): JSX.Element {
       } else if (tab.kind === 'terminal') {
         body = <TerminalTab active={visible} tabId={tab.id} onStatus={handleTerminalStatus} />;
       } else {
-        body = <BrowserTab tabId={tab.id} visible={visible} />;
+        body = (
+          <BrowserTab tabId={tab.id} visible={visible} initialUrl={browserInitialUrls[tab.id]} />
+        );
       }
       return createPortal(
         <div style={{ display: active ? 'flex' : 'none', flex: 1, minWidth: 0, minHeight: 0 }}>
@@ -429,6 +580,8 @@ export function App(): JSX.Element {
           side="right"
           open={rightOpen}
           onToggle={setRightOpen}
+          size={rightSize}
+          onResize={setRightSize}
           accent={accentColor(projectHue)}
           tint={accentTint(projectHue)}
         >
@@ -439,6 +592,8 @@ export function App(): JSX.Element {
         side="bottom"
         open={bottomOpen}
         onToggle={setBottomOpen}
+        size={bottomSize}
+        onResize={setBottomSize}
         accent={accentColor(projectHue)}
         tint={accentTint(projectHue)}
       >

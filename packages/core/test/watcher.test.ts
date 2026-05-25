@@ -197,7 +197,11 @@ test('watcher ignores upstream/ and process/ paths', async () => {
   const handle = openDb(':memory:');
   try {
     const queue = createQueue({ db: handle.db });
-    const watcher = attachWatcher(queue, { root, lorePath });
+    const watcher = attachWatcher(queue, {
+      root,
+      lorePath,
+      ignored: ['**/upstream/**', '**/process/**'],
+    });
 
     await new Promise((r) => setTimeout(r, 200));
 

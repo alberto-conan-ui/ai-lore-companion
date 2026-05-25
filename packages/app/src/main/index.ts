@@ -4,20 +4,26 @@ import { fileURLToPath } from 'node:url';
 import {
   type ChainResult,
   type ChangeScope,
-  DEFAULT_IGNORED,
+  DEFAULT_IGNORE_RULES,
   type DbHandle,
   type DirEvent,
+  type IgnoreLists,
   type Queue,
+  SETTINGS_REGISTRY,
   type TreeNode,
   type WatcherHandle,
   attachWatcher,
   createQueue,
+  deriveIgnoreLists,
   isChainError,
+  isIgnoreRule,
   isTreeError,
+  isValidValue,
+  mergeIgnoreRules,
   openDb,
   readChain,
   readDirectory,
-  readProjectIgnores,
+  resolveAll,
 } from '@ai-lore-companion/core';
 import {
   BrowserWindow,
@@ -37,6 +43,10 @@ import {
   type FileSearchArg,
   type FileSearchHit,
   IPC,
+  type SettingsSetArg,
+  type SettingsSetIgnoresArg,
+  type SettingsSetLayoutArg,
+  type SettingsSnapshot,
   type Shortcut,
   type ShortcutInput,
   type TerminalInputArg,
@@ -50,6 +60,15 @@ import { projectDbPath } from './db-path.js';
 import { buildAppMenu } from './menu.js';
 import { type PtyService, createPtyService } from './pty.js';
 import { addRecent, clearRecents, loadRecents } from './recents.js';
+import {
+  loadGlobalSettings,
+  loadProjectSettings,
+  saveGlobalIgnores,
+  saveGlobalSetting,
+  saveProjectIgnores,
+  saveProjectLayout,
+  saveProjectSetting,
+} from './settings.js';
 import { launchApp, launchUrl, loadShortcuts, saveShortcuts } from './shortcuts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -71,6 +90,8 @@ type ProjectContext = {
   chain: ChainResult;
   wiring: Wiring | null;
   ptyService: PtyService;
+  /** The project's resolved ignore lists — drift / search / hidden patterns. */
+  ignoreLists: IgnoreLists;
 };
 
 /** Project context per window, keyed by `BrowserWindow.id`. */
@@ -94,22 +115,32 @@ function contextFor(event: IpcMainEvent | IpcMainInvokeEvent): ProjectContext | 
   return win ? contexts.get(win.id) : undefined;
 }
 
+/** The Lore-folder glob — hidden from the Payload pane, which has its own. */
+function loreHide(chain: ChainResult, scope: ChangeScope): string[] {
+  return scope === 'payload' && !isChainError(chain) ? [`**/${basename(chain.lorePath)}/**`] : [];
+}
+
 /**
- * What a side's tree read hides. The Payload tree hides only the Lore folder
- * (the Lore has its own pane). Build and scratch folders are NOT hidden — the
- * ignore list (`DEFAULT_IGNORED` + `.ailoreignore`) silences the watcher's
- * drift; it does not hide anything from the tree.
+ * What a tree read on `scope` omits: the Lore folder, plus the project's
+ * `hidden`-level ignore patterns. `no-drift` and `no-search` ignores are not
+ * here — they silence the watcher and the search, but do not hide the tree.
  */
-function treeHideFor(chain: ChainResult, scope: ChangeScope): readonly string[] {
-  if (scope === 'payload' && !isChainError(chain)) {
-    return [`**/${basename(chain.lorePath)}/**`];
-  }
-  return [];
+function treeHideFor(
+  chain: ChainResult,
+  scope: ChangeScope,
+  hidden: readonly string[],
+): readonly string[] {
+  return [...loreHide(chain, scope), ...hidden];
 }
 
 /** Read a directory one level deep; on error, fall back to an empty node. */
-function readTreeNode(chain: ChainResult, absPath: string, scope: ChangeScope): TreeNode {
-  const result = readDirectory(absPath, { ignore: treeHideFor(chain, scope) });
+function readTreeNode(
+  chain: ChainResult,
+  absPath: string,
+  scope: ChangeScope,
+  hidden: readonly string[],
+): TreeNode {
+  const result = readDirectory(absPath, { ignore: treeHideFor(chain, scope, hidden) });
   if (isTreeError(result)) {
     return { name: basename(absPath), path: absPath, isDir: true, children: [] };
   }
@@ -121,9 +152,14 @@ function readTreeNode(chain: ChainResult, absPath: string, scope: ChangeScope): 
  * — its children list is what changed — and push the fresh list to the owning
  * window. The window ignores updates for paths it has not loaded.
  */
-function handleDirEvent(win: BrowserWindow, chain: ChainResult, event: DirEvent): void {
+function handleDirEvent(
+  win: BrowserWindow,
+  chain: ChainResult,
+  hidden: readonly string[],
+  event: DirEvent,
+): void {
   const parent = dirname(event.absPath);
-  const node = readTreeNode(chain, parent, event.scope);
+  const node = readTreeNode(chain, parent, event.scope, hidden);
   sendToWin(win, IPC.TreeUpdate, {
     scope: event.scope,
     path: parent,
@@ -192,17 +228,28 @@ function createWindow(): BrowserWindow {
  */
 function createProjectContext(win: BrowserWindow, root: string): ProjectContext {
   const chain = readChain({ root });
-  const userIgnores = readProjectIgnores(root);
 
+  // Ignore rules: the built-in defaults, then the global tier, then this
+  // project's tier — each layer overriding the last by pattern. The three
+  // derived lists feed the watcher, the file search, and the tree reader.
+  let ignoreLists: IgnoreLists = { drift: [], search: [], hidden: [] };
   let wiring: Wiring | null = null;
   if (!isChainError(chain)) {
+    const globalRules = mergeIgnoreRules(
+      DEFAULT_IGNORE_RULES,
+      loadGlobalSettings(userDataDir).ignores,
+    );
+    const rules = mergeIgnoreRules(globalRules, loadProjectSettings(userDataDir, root).ignores);
+    ignoreLists = deriveIgnoreLists(rules);
+
     const dbHandle = openDb(projectDbPath(userDataDir, root));
     const queue = createQueue({ db: dbHandle.db });
+    const hidden = ignoreLists.hidden;
     const watcher = attachWatcher(queue, {
       root,
       lorePath: chain.lorePath,
-      ignored: userIgnores,
-      onDirEvent: (event) => handleDirEvent(win, chain, event),
+      ignored: ignoreLists.drift,
+      onDirEvent: (event) => handleDirEvent(win, chain, hidden, event),
     });
     wiring = { dbHandle, queue, watcher };
   }
@@ -214,7 +261,7 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
     onStatus: (id, status, command) => sendToWin(win, IPC.TerminalStatus, { id, status, command }),
   });
 
-  return { root, chain, wiring, ptyService };
+  return { root, chain, wiring, ptyService, ignoreLists };
 }
 
 /** Open a welcome window — no project, just Open / Open Recent. */
@@ -261,10 +308,10 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       sendToWin(win, IPC.Restore, ctx.wiring.queue.snapshot());
     }
     sendToWin(win, IPC.TreeInit, {
-      payload: readTreeNode(chain, chain.root, 'payload'),
+      payload: readTreeNode(chain, chain.root, 'payload', ctx.ignoreLists.hidden),
       // The Lore pane is rooted at memory/ — process/ and upstream/ sit
       // outside memory/, so the pane never lists them.
-      lore: readTreeNode(chain, join(chain.lorePath, 'memory'), 'lore'),
+      lore: readTreeNode(chain, join(chain.lorePath, 'memory'), 'lore', ctx.ignoreLists.hidden),
     });
   });
 
@@ -349,6 +396,68 @@ function broadcastShortcuts(list: Shortcut[]): void {
   }
 }
 
+/**
+ * Build the settings snapshot for a window: the registry, the resolved value
+ * of every setting, and the raw tier files. A window with no AI-Lore project
+ * (welcome or altered) has no project tier — `project` is null.
+ */
+function settingsSnapshot(ctx: ProjectContext | undefined): SettingsSnapshot {
+  const global = loadGlobalSettings(userDataDir);
+  const project =
+    ctx && !isChainError(ctx.chain) ? loadProjectSettings(userDataDir, ctx.root) : null;
+  return {
+    registry: SETTINGS_REGISTRY,
+    resolved: resolveAll(SETTINGS_REGISTRY, global, project),
+    global,
+    project,
+    defaultIgnores: DEFAULT_IGNORE_RULES,
+  };
+}
+
+/** Push a fresh settings snapshot to every window — each gets its own tiers. */
+function broadcastSettings(): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    sendToWin(win, IPC.SettingsChanged, settingsSnapshot(contexts.get(win.id)));
+  }
+}
+
+/**
+ * Re-apply a window's ignore rules after they changed: re-derive the three
+ * lists, re-attach the watcher with the new drift filter, and re-send the
+ * trees with the new hidden set. The file search reads `ctx.ignoreLists` live,
+ * so it needs nothing further.
+ */
+function reapplyIgnores(win: BrowserWindow): void {
+  const ctx = contexts.get(win.id);
+  if (!ctx || isChainError(ctx.chain) || !ctx.wiring) return;
+  const chain = ctx.chain;
+  const wiring = ctx.wiring;
+  const globalRules = mergeIgnoreRules(
+    DEFAULT_IGNORE_RULES,
+    loadGlobalSettings(userDataDir).ignores,
+  );
+  const rules = mergeIgnoreRules(globalRules, loadProjectSettings(userDataDir, ctx.root).ignores);
+  ctx.ignoreLists = deriveIgnoreLists(rules);
+  const { hidden, drift } = ctx.ignoreLists;
+
+  // Re-attach the watcher so its drift filter reflects the new rules.
+  void wiring.watcher.close().then(() => {
+    if (contexts.get(win.id) !== ctx) return;
+    wiring.watcher = attachWatcher(wiring.queue, {
+      root: ctx.root,
+      lorePath: chain.lorePath,
+      ignored: drift,
+      onDirEvent: (event) => handleDirEvent(win, chain, hidden, event),
+    });
+  });
+
+  // Re-send the trees with the new hidden set — a clear, visible refresh.
+  sendToWin(win, IPC.TreeInit, {
+    payload: readTreeNode(chain, chain.root, 'payload', hidden),
+    lore: readTreeNode(chain, join(chain.lorePath, 'memory'), 'lore', hidden),
+  });
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC.Ack, (event, id: string): ReturnType<CockpitApi['ack']> => {
     const ctx = contextFor(event);
@@ -374,7 +483,7 @@ function registerIpcHandlers(): void {
       const ctx = contextFor(event);
       if (!ctx) return Promise.resolve([]);
       const result = readDirectory(arg.path, {
-        ignore: treeHideFor(ctx.chain, arg.scope),
+        ignore: treeHideFor(ctx.chain, arg.scope, ctx.ignoreLists.hidden),
       });
       return Promise.resolve(isTreeError(result) ? [] : (result.children ?? []));
     },
@@ -384,9 +493,9 @@ function registerIpcHandlers(): void {
     if (!ctx) return [];
     const query = arg.query.trim().toLowerCase();
     if (query.length === 0) return [];
-    // Skip build/scratch dirs (node_modules, .git, dist, …) and the Lore
-    // folder — both for walk speed and so the results stay sensible.
-    const ignore = [...DEFAULT_IGNORED, ...treeHideFor(ctx.chain, 'payload')];
+    // Skip the project's `no-search` and `hidden` ignores, plus the Lore
+    // folder — for walk speed and so the results stay sensible.
+    const ignore = [...loreHide(ctx.chain, 'payload'), ...ctx.ignoreLists.search];
     const LIMIT = 40;
     const hits: FileSearchHit[] = [];
     const walk = (dir: string): void => {
@@ -436,12 +545,15 @@ function registerIpcHandlers(): void {
     contextFor(event)?.ptyService.kill(id);
   });
 
-  ipcMain.on(IPC.BrowserCreate, (event, tabId: string) => {
+  ipcMain.on(IPC.BrowserCreate, (event, arg: { tabId: string; initialUrl?: string }) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) browser.create(win, tabId, loadBrowserProfile(userDataDir));
+    if (win) browser.create(win, arg.tabId, loadBrowserProfile(userDataDir), arg.initialUrl);
   });
   ipcMain.on(IPC.BrowserDestroy, (_event, tabId: string) => {
     browser.destroy(tabId);
+  });
+  ipcMain.handle(IPC.BrowserGetUrl, (_event, tabId: string): string | null => {
+    return browser.getUrl(tabId);
   });
   ipcMain.on(IPC.BrowserSetVisible, (_event, arg: { tabId: string; visible: boolean }) => {
     browser.setVisible(arg.tabId, arg.visible);
@@ -507,6 +619,49 @@ function registerIpcHandlers(): void {
     saveShortcuts(userDataDir, list);
     broadcastShortcuts(list);
     return list;
+  });
+
+  ipcMain.handle(IPC.SettingsGet, (event): SettingsSnapshot => {
+    return settingsSnapshot(contextFor(event));
+  });
+  ipcMain.handle(IPC.SettingsSet, (event, arg: SettingsSetArg): SettingsSnapshot => {
+    const ctx = contextFor(event);
+    const def = SETTINGS_REGISTRY.find((d) => d.key === arg.key);
+    // Reject an unknown key, a value that fails its declared type, or a
+    // project-tier write from a window with no AI-Lore project.
+    if (def && isValidValue(def, arg.value)) {
+      if (arg.tier === 'global') {
+        saveGlobalSetting(userDataDir, arg.key, arg.value);
+        broadcastSettings();
+      } else if (ctx && !isChainError(ctx.chain)) {
+        saveProjectSetting(userDataDir, ctx.root, arg.key, arg.value);
+        broadcastSettings();
+      }
+    }
+    return settingsSnapshot(ctx);
+  });
+  ipcMain.handle(IPC.SettingsSetIgnores, (event, arg: SettingsSetIgnoresArg): SettingsSnapshot => {
+    const ctx = contextFor(event);
+    const rules = arg.rules.filter(isIgnoreRule);
+    if (arg.tier === 'global') {
+      saveGlobalIgnores(userDataDir, rules);
+      for (const win of BrowserWindow.getAllWindows()) reapplyIgnores(win);
+    } else if (ctx && !isChainError(ctx.chain)) {
+      saveProjectIgnores(userDataDir, ctx.root, rules);
+      const root = ctx.root;
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (contexts.get(win.id)?.root === root) reapplyIgnores(win);
+      }
+    }
+    broadcastSettings();
+    return settingsSnapshot(ctx);
+  });
+  // Workspace-layout writes do not broadcast — the snapshot is a window's own
+  // capture of its own arrangement; no other window needs to react.
+  ipcMain.handle(IPC.SettingsSetLayout, (event, arg: SettingsSetLayoutArg): void => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return;
+    saveProjectLayout(userDataDir, ctx.root, arg.layout);
   });
 }
 
