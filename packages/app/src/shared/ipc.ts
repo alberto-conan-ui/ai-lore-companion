@@ -105,6 +105,8 @@ export const IPC = {
   BrowserGetUrl: 'browser:get-url',
 
   /** Renderer → main: list configured app-launch shortcuts. */
+  /** Main → renderer: a `terminal` shortcut fired — spawn a tab + run the command. */
+  ShortcutOpenTerminal: 'shortcut:open-terminal',
   ShortcutsList: 'shortcuts:list',
   /** Renderer → main: run a shortcut by id on this window's target folder. */
   ShortcutsRun: 'shortcuts:run',
@@ -127,6 +129,8 @@ export const IPC = {
   SettingsSetIgnores: 'settings:set-ignores',
   /** Renderer → main: replace the per-project workspace-layout snapshot. */
   SettingsSetLayout: 'settings:set-layout',
+  /** Main → renderer: the macOS App menu's Settings… item (or ⌘,) was triggered. */
+  SettingsOpen: 'settings:open',
 } as const;
 
 export type ChainPayload = ChainResult;
@@ -196,13 +200,16 @@ export type BrowserStatePayload = {
   profile: BrowserProfile;
 };
 
-/** What an app-launch shortcut opens: a folder in an app, or a URL in Chrome. */
-export type ShortcutTarget = 'project' | 'lore' | 'url';
+/** What an app-launch shortcut opens: a folder in an app, a URL in Chrome,
+ *  or a terminal tab running a command. */
+export type ShortcutTarget = 'project' | 'lore' | 'url' | 'terminal';
 
 /**
  * A configured shortcut. `project` / `lore` targets carry `app` (a macOS app
  * path passed to `open -a` on the folder); a `url` target carries `url`,
- * opened in Chrome.
+ * opened in Chrome; a `terminal` target carries `command`, run in a new
+ * terminal tab. `iconUrl` is set by main when the shortcut has an extractable
+ * icon (data URL of the `.app`'s icon) — absent otherwise.
  */
 export type Shortcut = {
   id: string;
@@ -210,6 +217,8 @@ export type Shortcut = {
   target: ShortcutTarget;
   app?: string;
   url?: string;
+  command?: string;
+  iconUrl?: string;
 };
 
 /** The fields needed to create a shortcut; `main` assigns the id. */
@@ -218,7 +227,11 @@ export type ShortcutInput = {
   target: ShortcutTarget;
   app?: string;
   url?: string;
+  command?: string;
 };
+
+/** Push payload for a `terminal` shortcut: open a new terminal tab and run `command`. */
+export type ShortcutTerminalPayload = { label: string; command: string };
 
 /**
  * A window's view of the settings store: the registry to render, the resolved
@@ -292,12 +305,16 @@ export type CockpitApi = {
   shortcutsAdd: (input: ShortcutInput) => Promise<Shortcut[]>;
   shortcutsRemove: (id: string) => Promise<Shortcut[]>;
   onShortcutsChanged: (handler: (list: Shortcut[]) => void) => Unsubscribe;
+  /** A `terminal` shortcut was run — open a new terminal tab and execute `command`. */
+  onOpenTerminalShortcut: (handler: (payload: ShortcutTerminalPayload) => void) => Unsubscribe;
   settingsGet: () => Promise<SettingsSnapshot>;
   settingsSet: (arg: SettingsSetArg) => Promise<SettingsSnapshot>;
   settingsSetIgnores: (arg: SettingsSetIgnoresArg) => Promise<SettingsSnapshot>;
   /** Replace the per-project workspace-layout snapshot — silently no-ops on non-project windows. */
   settingsSetLayout: (arg: SettingsSetLayoutArg) => Promise<void>;
   onSettingsChanged: (handler: (snapshot: SettingsSnapshot) => void) => Unsubscribe;
+  /** Subscribe to the macOS App menu's Settings… item firing (also `⌘,`). */
+  onSettingsOpen: (handler: () => void) => Unsubscribe;
 };
 
 declare global {

@@ -7,7 +7,6 @@ import type {
   ShortcutInput,
   ShortcutTarget,
 } from '../../../shared/ipc.js';
-import { ActionButton } from './ActionButton.js';
 
 /** Which tier the Settings sheet is editing. */
 type Scope = 'global' | 'project';
@@ -52,38 +51,30 @@ function valueForScope(def: SettingDef, snap: SettingsSnapshot, scope: Scope): S
   return def.default;
 }
 
-/** The header gear — opens the Settings sheet. Controlled by the parent. */
-export function SettingsButton({
-  onOpen,
-}: {
-  onOpen: () => void;
-}): JSX.Element {
-  return (
-    <ActionButton
-      icon="⚙"
-      label="Settings"
-      title="Settings"
-      testId="settings-button"
-      onClick={onOpen}
-    />
-  );
-}
-
-/** Open the Settings sheet at a specific section — used by the popover "Manage…" link. */
+/** Open the Settings sheet at a specific section, or with no section preference. */
 export type SettingsSheetSection = 'shortcuts' | null;
 
 /**
  * The Settings sheet modal — controlled by the parent. `initialSection`
- * pre-selects a rail section; falls through to the first section in scope.
+ * pre-selects a rail section; `initialDraftTarget` lands on the Shortcuts
+ * section and seeds an add-shortcut draft with that target pre-selected.
  */
 export function SettingsSheetModal({
   onClose,
   initialSection,
+  initialDraftTarget,
 }: {
   onClose: () => void;
   initialSection?: SettingsSheetSection;
+  initialDraftTarget?: ShortcutTarget;
 }): JSX.Element {
-  return <SettingsSheet onClose={onClose} initialSection={initialSection ?? null} />;
+  return (
+    <SettingsSheet
+      onClose={onClose}
+      initialSection={initialDraftTarget ? 'shortcuts' : (initialSection ?? null)}
+      initialDraftTarget={initialDraftTarget}
+    />
+  );
 }
 
 /**
@@ -94,9 +85,11 @@ export function SettingsSheetModal({
 function SettingsSheet({
   onClose,
   initialSection,
+  initialDraftTarget,
 }: {
   onClose: () => void;
   initialSection: SettingsSheetSection;
+  initialDraftTarget?: ShortcutTarget;
 }): JSX.Element {
   const [snap, setSnap] = useState<SettingsSnapshot | null>(null);
   const [scope, setScope] = useState<Scope>('global');
@@ -213,7 +206,7 @@ function SettingsSheet({
             ) : activeSection === IGNORE_SECTION ? (
               <IgnoreRulesSection snapshot={snap} scope={scope} onWrite={writeIgnores} />
             ) : activeSection === SHORTCUTS_SECTION ? (
-              <ShortcutsSection />
+              <ShortcutsSection initialDraftTarget={initialDraftTarget} />
             ) : rows.length === 0 ? (
               <div style={hintStyle}>
                 No {scope === 'project' ? 'project-level' : 'global'} settings yet.
@@ -429,6 +422,7 @@ type ShortcutDraft = {
   target: ShortcutTarget;
   app: string;
   url: string;
+  command: string;
   labelInput: string;
 };
 
@@ -436,10 +430,12 @@ const SHORTCUT_TARGETS: { id: ShortcutTarget; label: string }[] = [
   { id: 'project', label: 'Project' },
   { id: 'lore', label: 'Lore' },
   { id: 'url', label: 'URL' },
+  { id: 'terminal', label: 'Terminal' },
 ];
 
 function defaultShortcutLabel(draft: ShortcutDraft): string {
   if (draft.target === 'url') return draft.url.trim() || 'URL shortcut';
+  if (draft.target === 'terminal') return draft.command.trim() || 'Terminal shortcut';
   const where = draft.target === 'lore' ? 'Lore' : 'project';
   return draft.app ? `Open ${where} in ${appName(draft.app)}` : `Open ${where}`;
 }
@@ -447,10 +443,20 @@ function defaultShortcutLabel(draft: ShortcutDraft): string {
 /**
  * Manage the global list of app-launch shortcuts: list, remove, and add. The
  * store is one global list — `onShortcutsChanged` keeps every window in sync.
+ * `initialDraftTarget` pre-populates the add form when the section is opened
+ * from a row's `+` button in the header.
  */
-function ShortcutsSection(): JSX.Element {
+function ShortcutsSection({
+  initialDraftTarget,
+}: {
+  initialDraftTarget?: ShortcutTarget;
+}): JSX.Element {
   const [list, setList] = useState<Shortcut[]>([]);
-  const [draft, setDraft] = useState<ShortcutDraft | null>(null);
+  const [draft, setDraft] = useState<ShortcutDraft | null>(() =>
+    initialDraftTarget
+      ? { target: initialDraftTarget, app: '', url: '', command: '', labelInput: '' }
+      : null,
+  );
 
   useEffect(() => {
     void window.cockpit.shortcutsList().then(setList);
@@ -465,10 +471,11 @@ function ShortcutsSection(): JSX.Element {
   const saveDraft = useCallback(() => {
     if (!draft) return;
     const label = draft.labelInput.trim() || defaultShortcutLabel(draft);
-    const input: ShortcutInput =
-      draft.target === 'url'
-        ? { label, target: 'url', url: draft.url.trim() }
-        : { label, target: draft.target, app: draft.app };
+    let input: ShortcutInput;
+    if (draft.target === 'url') input = { label, target: 'url', url: draft.url.trim() };
+    else if (draft.target === 'terminal')
+      input = { label, target: 'terminal', command: draft.command.trim() };
+    else input = { label, target: draft.target, app: draft.app };
     void window.cockpit.shortcutsAdd(input).then(setList);
     setDraft(null);
   }, [draft]);
@@ -476,7 +483,9 @@ function ShortcutsSection(): JSX.Element {
   const canSave = draft
     ? draft.target === 'url'
       ? draft.url.trim() !== ''
-      : draft.app !== ''
+      : draft.target === 'terminal'
+        ? draft.command.trim() !== ''
+        : draft.app !== ''
     : false;
 
   return (
@@ -533,6 +542,18 @@ function ShortcutsSection(): JSX.Element {
                 onChange={(e) => setDraft({ ...draft, url: e.target.value })}
               />
             </label>
+          ) : draft.target === 'terminal' ? (
+            <label style={fieldStyle}>
+              <span style={fieldLabelStyle}>Command</span>
+              <input
+                style={textInputStyle}
+                value={draft.command}
+                placeholder="e.g. npm run dev"
+                spellCheck={false}
+                data-testid="shortcut-command"
+                onChange={(e) => setDraft({ ...draft, command: e.target.value })}
+              />
+            </label>
           ) : (
             <div style={fieldStyle}>
               <span style={fieldLabelStyle}>Application</span>
@@ -573,7 +594,9 @@ function ShortcutsSection(): JSX.Element {
           type="button"
           style={shortcutAddBtnStyle}
           data-testid="shortcut-add"
-          onClick={() => setDraft({ target: 'project', app: '', url: '', labelInput: '' })}
+          onClick={() =>
+            setDraft({ target: 'project', app: '', url: '', command: '', labelInput: '' })
+          }
         >
           + Add shortcut
         </button>

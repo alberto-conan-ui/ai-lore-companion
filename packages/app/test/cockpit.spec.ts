@@ -1,12 +1,24 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { type ElectronApplication, expect, test } from '@playwright/test';
 import { launchApp, makeProject } from './fixture';
 
 /** A throwaway userData dir so a test never touches real cockpit state. */
 function scratchUserData(): string {
   return mkdtempSync(join(tmpdir(), 'ai-lore-e2e-ud-'));
+}
+
+/** Trigger the macOS App menu's Settings… item — Playwright's `keyboard.press`
+ *  does not fire native menu accelerators, so we walk the menu and click the
+ *  item directly. Mirrors what `⌘,` does for a real user. */
+async function openSettingsViaMenu(app: ElectronApplication): Promise<void> {
+  await app.evaluate(({ Menu }) => {
+    const menu = Menu.getApplicationMenu();
+    const submenu = menu?.items[0]?.submenu;
+    const item = submenu?.items.find((i) => i.label === 'Settings…');
+    item?.click();
+  });
 }
 
 test.describe('window modes', () => {
@@ -58,6 +70,71 @@ test.describe('window modes', () => {
       await expect(
         page.getByTestId('search-result').filter({ hasText: 'demo.focus.md' }),
       ).toBeVisible({ timeout: 5_000 });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the global search routes a Lore-pane hit to the right tab', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      // `demo.focus.md` lives under `memory/status/focus/` — the Status pane
+      // (which groups status + journal + action-tree). Picking it must switch
+      // the active pane to Status, not Payload (the routing bug Phase B fixed).
+      await page.getByTestId('global-search').fill('demo');
+      const hit = page.getByTestId('search-result').filter({ hasText: 'demo.focus.md' });
+      await expect(hit).toBeVisible({ timeout: 5_000 });
+      await hit.click();
+
+      await expect(page.getByTestId('pane-status')).toBeVisible({ timeout: 3_000 });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the action toolbar splits into three labelled rows', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      await expect(page.getByTestId('actions-row-project')).toBeVisible();
+      await expect(page.getByTestId('actions-row-lore')).toBeVisible();
+      await expect(page.getByTestId('actions-row-other')).toBeVisible();
+      // The drift cluster sits on the Other row (anchored right via `marginLeft: auto`).
+      await expect(
+        page.getByTestId('actions-row-other').getByTestId('drift-cluster'),
+      ).toBeVisible();
+      // Each row carries an `+ Add shortcut` affordance.
+      await expect(page.getByTestId('add-shortcut-project')).toBeVisible();
+      await expect(page.getByTestId('add-shortcut-lore')).toBeVisible();
+      await expect(page.getByTestId('add-shortcut-other')).toBeVisible();
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the default Finder shortcut appears in the Project row', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      // Finder is seeded with target='project' → renders in the Project row.
+      const finder = page
+        .getByTestId('actions-row-project')
+        .getByTestId('shortcut-run')
+        .filter({ hasText: 'Finder' });
+      await expect(finder).toBeVisible({ timeout: 5_000 });
 
       await app.close();
     } finally {
@@ -143,7 +220,7 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTestId('settings-button').click();
+      await openSettingsViaMenu(app);
       const sheet = page.getByTestId('settings-sheet');
       await expect(sheet).toBeVisible();
 
@@ -177,7 +254,7 @@ test.describe('window modes', () => {
       await page.getByTestId('global-search').fill('');
 
       // Add a project-tier `no-search` rule for the `demo` pattern.
-      await page.getByTestId('settings-button').click();
+      await openSettingsViaMenu(app);
       const sheet = page.getByTestId('settings-sheet');
       await expect(sheet).toBeVisible();
       await sheet.getByTestId('settings-scope-project').click();

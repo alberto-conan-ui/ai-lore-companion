@@ -69,7 +69,7 @@ import {
   saveProjectLayout,
   saveProjectSetting,
 } from './settings.js';
-import { launchApp, launchUrl, loadShortcuts, saveShortcuts } from './shortcuts.js';
+import { launchApp, launchUrl, loadShortcuts, saveShortcuts, withIcons } from './shortcuts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -389,10 +389,13 @@ function rebuildMenu(): void {
   );
 }
 
-/** Push the shortcut list to every window so all header menus stay in sync. */
+/** Push the shortcut list to every window so all header menus stay in sync.
+ *  Icons are extracted (cached) before broadcast so the renderer never sees
+ *  a list without its icon decorations. */
 function broadcastShortcuts(list: Shortcut[]): void {
+  const decorated = withIcons(list);
   for (const win of BrowserWindow.getAllWindows()) {
-    sendToWin(win, IPC.ShortcutsChanged, list);
+    sendToWin(win, IPC.ShortcutsChanged, decorated);
   }
 }
 
@@ -582,12 +585,20 @@ function registerIpcHandlers(): void {
     if (win) browser.suppressAll(win.id, suppress);
   });
 
-  ipcMain.handle(IPC.ShortcutsList, (): Shortcut[] => loadShortcuts(userDataDir));
+  ipcMain.handle(IPC.ShortcutsList, (): Shortcut[] => withIcons(loadShortcuts(userDataDir)));
   ipcMain.on(IPC.ShortcutsRun, (event, id: string) => {
     const shortcut = loadShortcuts(userDataDir).find((s) => s.id === id);
     if (!shortcut) return;
     if (shortcut.target === 'url') {
       if (shortcut.url) launchUrl(shortcut.url);
+      return;
+    }
+    if (shortcut.target === 'terminal') {
+      if (!shortcut.command) return;
+      event.sender.send(IPC.ShortcutOpenTerminal, {
+        label: shortcut.label,
+        command: shortcut.command,
+      });
       return;
     }
     const ctx = contextFor(event);
@@ -612,13 +623,13 @@ function registerIpcHandlers(): void {
     const list = [...loadShortcuts(userDataDir), { id: randomUUID(), ...input }];
     saveShortcuts(userDataDir, list);
     broadcastShortcuts(list);
-    return list;
+    return withIcons(list);
   });
   ipcMain.handle(IPC.ShortcutsRemove, (_event, id: string): Shortcut[] => {
     const list = loadShortcuts(userDataDir).filter((s) => s.id !== id);
     saveShortcuts(userDataDir, list);
     broadcastShortcuts(list);
-    return list;
+    return withIcons(list);
   });
 
   ipcMain.handle(IPC.SettingsGet, (event): SettingsSnapshot => {

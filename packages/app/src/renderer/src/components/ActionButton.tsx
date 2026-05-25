@@ -1,8 +1,9 @@
 import type { JSX, ReactNode } from 'react';
 
 type Props = {
-  /** Inline glyph rendered to the left of the label — e.g. `⚙`, `↗`. */
-  icon: string;
+  /** Inline icon rendered to the left of the label — a glyph string (`⚙`,
+   *  `↗`, `▸`) or a small `<img>` for a native icon. */
+  icon: ReactNode;
   /** The button label — kept visible (no demote-to-tooltip). */
   label: ReactNode;
   onClick: () => void;

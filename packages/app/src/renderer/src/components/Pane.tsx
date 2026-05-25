@@ -240,15 +240,17 @@ export function Pane({
   /**
    * Reveal a file: load every ancestor folder, expand the chain in the tree,
    * select the containing folder, and select the file so the grid scrolls to
-   * it. The walk starts at whichever of the sub-root's base directories
-   * contains the file.
+   * it. The walk starts at the base directory that contains the file — base is
+   * loaded first because a synthetic sub-root's bases (Status, Memory) have no
+   * auto-load, so `patchTree` would silently fail to attach a deeper folder's
+   * children if base were skipped.
    */
   const revealFile = useCallback(
     async (fileAbs: string) => {
       const base = bases.find((b) => fileAbs === b || fileAbs.startsWith(`${b}/`));
       if (!base) return;
       const folderAbs = fileAbs.slice(0, fileAbs.lastIndexOf('/'));
-      const toLoad: string[] = [];
+      const toLoad: string[] = [base];
       if (folderAbs !== base && folderAbs.startsWith(`${base}/`)) {
         let cur = base;
         for (const seg of folderAbs.slice(base.length + 1).split('/')) {
@@ -261,16 +263,11 @@ export function Pane({
         const children = await window.cockpit.treeExpand({ scope, path });
         expandTree(scope, path, children);
       }
-      if (toLoad.length > 0) {
-        setExpandedPaths((prev) => {
-          const next = new Set(prev);
-          // The base folder itself is a tree row when the sub-root groups
-          // several folders — expand it so the revealed chain is visible.
-          next.add(base);
-          for (const p of toLoad) next.add(p);
-          return next;
-        });
-      }
+      setExpandedPaths((prev) => {
+        const next = new Set(prev);
+        for (const p of toLoad) next.add(p);
+        return next;
+      });
       setSelectedFolder(folderAbs);
       setSelectedFile(fileAbs);
     },

@@ -24,10 +24,14 @@ export function TerminalTab({
   active,
   tabId,
   onStatus,
+  initialCommand,
 }: {
   active: boolean;
   tabId: string;
   onStatus: (tabId: string, status: TerminalForegroundStatus, command: string) => void;
+  /** A one-shot command written to the PTY once it spawns — used by terminal
+   *  shortcuts to run a command in the freshly opened tab. */
+  initialCommand?: string;
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -104,6 +108,16 @@ export function TerminalTab({
       });
       term.onData((data) => window.cockpit.sendTerminalInput({ id, data }));
       term.focus();
+      // Terminal shortcut: write the one-shot command into the PTY. A small
+      // delay lets the login shell finish writing its banner before our input
+      // lands; without it the command interleaves with the prompt.
+      if (initialCommand) {
+        setTimeout(() => {
+          if (!disposed) {
+            window.cockpit.sendTerminalInput({ id, data: `${initialCommand}\n` });
+          }
+        }, 250);
+      }
     });
 
     const onResize = (): void => doFit();
@@ -125,9 +139,9 @@ export function TerminalTab({
       termRef.current = null;
       fitRef.current = null;
     };
-    // `doFit` / `onStatus` / `tabId` are all stable for the component's
-    // lifetime, so the effect runs exactly once — at mount.
-  }, [doFit, onStatus, tabId]);
+    // `doFit` / `onStatus` / `tabId` / `initialCommand` are all stable for the
+    // component's lifetime, so the effect runs exactly once — at mount.
+  }, [doFit, onStatus, tabId, initialCommand]);
 
   // Re-fit and focus when this tab becomes the visible one (it cannot lay out
   // while `display: none`).

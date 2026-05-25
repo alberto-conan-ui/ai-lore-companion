@@ -1,4 +1,4 @@
-import { type JSX, useEffect, useState } from 'react';
+import { type JSX, useEffect, useRef, useState } from 'react';
 import type { FileSearchHit } from '../../../shared/ipc.js';
 
 type Props = {
@@ -19,12 +19,17 @@ function dirname(p: string): string {
  * Global file search in the cockpit header. Typing runs a debounced
  * main-process recursive search across every cockpit pane's directories;
  * picking a result hands the path to `onPick`, which switches to the tab that
- * owns the file and reveals it there.
+ * owns the file and reveals it there. Mouse and keyboard share one highlight:
+ * `↑`/`↓` move it (wrapping), `Enter` picks the highlighted hit, hovering a
+ * row updates it, `Escape` closes.
  */
 export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<FileSearchHit[]>([]);
   const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  // Refs to the result `<li>`s so we can scroll the highlighted one into view.
+  const itemRefs = useRef<Array<HTMLLIElement | null>>([]);
 
   // Debounced search — one IPC round trip ~150ms after typing settles.
   useEffect(() => {
@@ -36,11 +41,23 @@ export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element 
     const timer = setTimeout(() => {
       void window.cockpit.searchFiles({ dirs, query: q }).then((result) => {
         setHits(result);
+        setHighlight(0);
         setOpen(true);
       });
     }, 150);
     return () => clearTimeout(timer);
   }, [query, dirs]);
+
+  // Keep `highlight` clamped if `hits` shrinks (e.g. user keeps typing).
+  useEffect(() => {
+    if (highlight >= hits.length) setHighlight(Math.max(0, hits.length - 1));
+  }, [hits.length, highlight]);
+
+  // Scroll the highlighted row into view when the dropdown overflows `maxHeight`.
+  useEffect(() => {
+    if (!open) return;
+    itemRefs.current[highlight]?.scrollIntoView({ block: 'nearest' });
+  }, [highlight, open]);
 
   const pick = (hit: FileSearchHit): void => {
     onPick(hit.path);
@@ -69,8 +86,14 @@ export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element 
           if (e.key === 'Escape') {
             setOpen(false);
             (e.target as HTMLInputElement).blur();
+          } else if (e.key === 'ArrowDown' && hits.length > 0) {
+            e.preventDefault();
+            setHighlight((h) => (h + 1) % hits.length);
+          } else if (e.key === 'ArrowUp' && hits.length > 0) {
+            e.preventDefault();
+            setHighlight((h) => (h - 1 + hits.length) % hits.length);
           } else if (e.key === 'Enter' && hits.length > 0) {
-            pick(hits[0]);
+            pick(hits[highlight] ?? hits[0]);
           }
         }}
         placeholder="Find a file by name…"
@@ -79,23 +102,34 @@ export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element 
       />
       {open && hits.length > 0 ? (
         <ul style={dropdownStyle}>
-          {hits.map((hit) => (
-            <li key={hit.path} style={{ listStyle: 'none' }}>
-              <button
-                type="button"
-                style={hitStyle}
-                data-testid="search-result"
-                // onMouseDown fires before the input's blur — so the pick lands.
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  pick(hit);
+          {hits.map((hit, i) => {
+            const isHighlight = i === highlight;
+            return (
+              <li
+                key={hit.path}
+                ref={(el) => {
+                  itemRefs.current[i] = el;
                 }}
+                style={{ listStyle: 'none' }}
               >
-                <span style={hitNameStyle}>{hit.name}</span>
-                <span style={hitDirStyle}>{dirname(displayPath(hit.path))}</span>
-              </button>
-            </li>
-          ))}
+                <button
+                  type="button"
+                  style={isHighlight ? hitStyleHighlighted : hitStyle}
+                  data-testid="search-result"
+                  aria-selected={isHighlight}
+                  onMouseEnter={() => setHighlight(i)}
+                  // onMouseDown fires before the input's blur — so the pick lands.
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    pick(hit);
+                  }}
+                >
+                  <span style={hitNameStyle}>{hit.name}</span>
+                  <span style={hitDirStyle}>{dirname(displayPath(hit.path))}</span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
     </div>
@@ -157,6 +191,11 @@ const hitStyle: React.CSSProperties = {
   border: 'none',
   textAlign: 'left',
   cursor: 'pointer',
+};
+
+const hitStyleHighlighted: React.CSSProperties = {
+  ...hitStyle,
+  background: '#1a2433',
 };
 
 const hitNameStyle: React.CSSProperties = {

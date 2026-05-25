@@ -40,11 +40,13 @@ function firstSegment(p: string): string {
   return i === -1 ? p : p.slice(0, i);
 }
 
-/** A display path's directory, minus its leading location segment. */
+/** A display path's directory, minus its leading location segment. Root-level
+ *  files (whose only directory component is the location itself) render as `/`
+ *  so they are visually distinct from a blank rendering bug. */
 function folderRest(displayP: string): string {
   const dir = dirname(displayP);
   const i = dir.indexOf('/');
-  return i === -1 ? '' : dir.slice(i + 1);
+  return i === -1 ? '/' : dir.slice(i + 1);
 }
 
 function formatTime(ts: number): string {
@@ -97,10 +99,10 @@ export function PaneQueue({
       {
         colId: 'location',
         headerName: 'Location',
+        width: 140,
         valueGetter: (p: ValueGetterParams<QueueEntry>) =>
           p.data ? firstSegment(displayPath(p.data.path)) : '',
         rowGroup: true,
-        hide: true,
         filter: 'agSetColumnFilter',
       },
       {
@@ -191,7 +193,7 @@ export function PaneQueue({
           getRowId={(p) => p.data.id}
           quickFilterText={quickFilter}
           rowGroupPanelShow="always"
-          autoGroupColumnDef={{ headerName: 'Location', minWidth: 150, flex: 2 }}
+          groupDisplayType="groupRows"
           groupDefaultExpanded={1}
           rowSelection={{ mode: 'singleRow', checkboxes: false }}
           suppressCellFocus

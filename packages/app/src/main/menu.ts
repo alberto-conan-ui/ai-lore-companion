@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
-import { type BrowserWindow, Menu, type MenuItemConstructorOptions } from 'electron';
-import type { RecentProject } from '../shared/ipc.js';
+import { BrowserWindow, Menu, type MenuItemConstructorOptions, app } from 'electron';
+import { IPC, type RecentProject } from '../shared/ipc.js';
 
 /** Click handlers the application menu routes back into the main process. */
 export type MenuHandlers = {
@@ -51,13 +51,45 @@ const viewSubmenu: MenuItemConstructorOptions[] = [
 ];
 
 /**
+ * The macOS App menu, hand-built rather than `{ role: 'appMenu' }`. The stock
+ * role gives the standard items (About, Services, Hide/Show, Quit) but no way
+ * to slot a custom Settings… item with `⌘,`. Hand-building keeps every stock
+ * item present in its conventional position and inserts Settings… between
+ * About and Services per macOS convention. The Settings click sends a
+ * `settings:open` push IPC to the focused window's `webContents`.
+ */
+const appSubmenu: MenuItemConstructorOptions[] = [
+  { role: 'about' },
+  { type: 'separator' },
+  {
+    label: 'Settings…',
+    accelerator: 'CmdOrCtrl+,',
+    click: (_item, win) => {
+      // `win` is the focused window when the user fires `⌘,`. Programmatic
+      // `item.click()` (used by the e2e) does not pass `win`, so fall back to
+      // `getFocusedWindow()`. No-op when nothing is focused.
+      const target = win ?? BrowserWindow.getFocusedWindow();
+      if (target) target.webContents.send(IPC.SettingsOpen);
+    },
+  },
+  { type: 'separator' },
+  { role: 'services' },
+  { type: 'separator' },
+  { role: 'hide' },
+  { role: 'hideOthers' },
+  { role: 'unhide' },
+  { type: 'separator' },
+  { role: 'quit' },
+];
+
+/**
  * Build the application menu. The File menu carries Open Project… and the
  * Open Recent list; the rest are standard roles so editing, view, and window
  * controls keep working. Rebuilt whenever the recents list changes.
  */
 export function buildAppMenu(recents: RecentProject[], handlers: MenuHandlers): Menu {
   const template: MenuItemConstructorOptions[] = [
-    { role: 'appMenu' },
+    { label: app.name, submenu: appSubmenu },
     {
       label: 'File',
       submenu: [

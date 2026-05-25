@@ -1,11 +1,15 @@
 import { type JSX, type ReactNode, useEffect, useState } from 'react';
-import { type SettingsSnapshot, isChainErrorPayload } from '../../../shared/ipc.js';
+import {
+  type SettingsSnapshot,
+  type ShortcutTarget,
+  isChainErrorPayload,
+} from '../../../shared/ipc.js';
 import { accentColor, accentTint, hueFor, projectName } from '../projectAccent.js';
 import { driftLevel, useCockpitStore } from '../store.js';
-import { ACTION_BUTTON_HEIGHT, ActionButton } from './ActionButton.js';
+import { ACTION_BUTTON_HEIGHT } from './ActionButton.js';
 import { DriftPill } from './DriftPill.js';
-import { SettingsButton, SettingsSheetModal, type SettingsSheetSection } from './SettingsSheet.js';
-import { ShortcutsMenu } from './ShortcutsMenu.js';
+import { SettingsSheetModal, type SettingsSheetSection } from './SettingsSheet.js';
+import { ShortcutButtons } from './ShortcutButtons.js';
 
 /** `search` is the global file-search, slotted into the dedicated search row. */
 export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
@@ -23,14 +27,31 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
     return window.cockpit.onSettingsChanged(apply);
   }, []);
 
-  // The Settings sheet is opened from two places — the header gear (no section
-  // preference) and the Shortcuts launcher's "Manage…" link (lands on the
-  // Shortcuts section). The state is owned here so both can drive it.
+  // The Settings sheet is opened from the macOS App menu's `Settings…` item
+  // (or `⌘,`) via the `settings:open` push IPC. `initialSection` stays in the
+  // type so a future entry point could deep-link a section.
   const [settingsSection, setSettingsSection] = useState<SettingsSheetSection | undefined>(
     undefined,
   );
+  /** Pre-populates the add-shortcut form when Settings opens via a row's `+`. */
+  const [draftTarget, setDraftTarget] = useState<ShortcutTarget | undefined>(undefined);
   const settingsOpen = settingsSection !== undefined;
-  const closeSettings = (): void => setSettingsSection(undefined);
+  const closeSettings = (): void => {
+    setSettingsSection(undefined);
+    setDraftTarget(undefined);
+  };
+
+  useEffect(() => {
+    return window.cockpit.onSettingsOpen(() => {
+      setDraftTarget(undefined);
+      setSettingsSection(null);
+    });
+  }, []);
+
+  const addShortcutFor = (target: ShortcutTarget): void => {
+    setDraftTarget(target);
+    setSettingsSection('shortcuts');
+  };
 
   if (!chain || isChainErrorPayload(chain)) {
     return (
@@ -81,17 +102,36 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
           {search}
         </div>
       ) : null}
-      <div style={actionsRowStyle} data-testid="header-actions">
-        <SettingsButton onOpen={() => setSettingsSection(null)} />
-        <ShortcutsMenu onManage={() => setSettingsSection('shortcuts')} />
-        <FinderButton root={chain.root} />
-        <div style={driftClusterStyle} data-testid="drift-cluster">
-          <DriftPill level={level} count={count} />
-          <AckAllButton disabled={count === 0} />
+      <div style={actionsBlockStyle} data-testid="header-actions">
+        <div style={actionsSubRowStyle} data-testid="actions-row-project">
+          <span style={rowLabelStyle}>Project</span>
+          <ShortcutButtons row="project" />
+          <AddShortcutButton
+            testId="add-shortcut-project"
+            onClick={() => addShortcutFor('project')}
+          />
+        </div>
+        <div style={actionsSubRowStyle} data-testid="actions-row-lore">
+          <span style={rowLabelStyle}>Lore</span>
+          <ShortcutButtons row="lore" />
+          <AddShortcutButton testId="add-shortcut-lore" onClick={() => addShortcutFor('lore')} />
+        </div>
+        <div style={actionsSubRowStyle} data-testid="actions-row-other">
+          <span style={rowLabelStyle}>Other</span>
+          <ShortcutButtons row="other" />
+          <AddShortcutButton testId="add-shortcut-other" onClick={() => addShortcutFor('url')} />
+          <div style={driftClusterStyle} data-testid="drift-cluster">
+            <DriftPill level={level} count={count} />
+            <AckAllButton disabled={count === 0} />
+          </div>
         </div>
       </div>
       {settingsOpen ? (
-        <SettingsSheetModal onClose={closeSettings} initialSection={settingsSection} />
+        <SettingsSheetModal
+          onClose={closeSettings}
+          initialSection={settingsSection}
+          initialDraftTarget={draftTarget}
+        />
       ) : null}
     </header>
   );
@@ -164,16 +204,26 @@ function ChainLink({
   );
 }
 
-function FinderButton({ root }: { root: string }): JSX.Element {
+/** A compact `+` button that sits at the end of each shortcut row. Click
+ *  opens the Settings sheet on the Shortcuts section with an add-shortcut
+ *  draft pre-targeted at the row's target. */
+function AddShortcutButton({
+  onClick,
+  testId,
+}: {
+  onClick: () => void;
+  testId: string;
+}): JSX.Element {
   return (
-    <ActionButton
-      icon="↗"
-      label="Finder"
-      title="Open project folder in Finder"
-      onClick={() => {
-        void window.cockpit.openPath(root);
-      }}
-    />
+    <button
+      type="button"
+      data-testid={testId}
+      title="Add shortcut"
+      onClick={onClick}
+      style={addShortcutStyle}
+    >
+      +
+    </button>
   );
 }
 
@@ -231,11 +281,49 @@ const searchRowStyle: React.CSSProperties = {
   display: 'flex',
 };
 
-/** Row 3 — the action toolbar. One height across every control. */
-const actionsRowStyle: React.CSSProperties = {
+/** Row 3 — the action toolbar. Two sub-rows stacked vertically: the project
+ *  row (folder shortcuts) on top, the other row (URL + terminal + drift
+ *  cluster) below. Both wrap horizontally on overflow. Each row carries a
+ *  min-height so an empty group still reserves space and the header layout
+ *  stays stable. */
+const actionsBlockStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.4rem',
+};
+
+const actionsSubRowStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
+  flexWrap: 'wrap',
   gap: '0.5rem',
+  minHeight: '1.85rem',
+};
+
+/** The left-aligned row label that names what each sub-row opens —
+ *  "Project" / "Payload" / "Other". Sits at a fixed width so the buttons
+ *  line up vertically across rows. */
+const rowLabelStyle: React.CSSProperties = {
+  width: '4.5rem',
+  flexShrink: 0,
+  fontSize: '0.72rem',
+  fontWeight: 600,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: '#6c7783',
+};
+
+const addShortcutStyle: React.CSSProperties = {
+  width: ACTION_BUTTON_HEIGHT,
+  height: ACTION_BUTTON_HEIGHT,
+  background: 'transparent',
+  color: '#6c7783',
+  border: '1px dashed #2f3a45',
+  borderRadius: '5px',
+  fontSize: '1rem',
+  fontWeight: 600,
+  lineHeight: 1,
+  cursor: 'pointer',
 };
 
 /** DriftPill + Ack all read as one unit — sit adjacent, separator-free. */

@@ -86,6 +86,11 @@ export function App(): JSX.Element {
   // Per-tab URLs the restored layout seeded. Consumed by `BrowserTab` on
   // mount to override the browser companion's default home page.
   const [browserInitialUrls, setBrowserInitialUrls] = useState<Record<string, string>>({});
+  // Per-tab one-shot commands a terminal shortcut seeded. Consumed by
+  // `TerminalTab` on mount; written to the PTY once the shell is up.
+  const [terminalInitialCommands, setTerminalInitialCommands] = useState<Record<string, string>>(
+    {},
+  );
   const [slots, setSlots] = useState<Record<PanelId, HTMLDivElement | null>>({
     left: null,
     right: null,
@@ -333,6 +338,31 @@ export function App(): JSX.Element {
     setDockOpen(panelId, true);
   };
 
+  /** Spawn a terminal tab from a shortcut: bottom dock, titled after the
+   *  shortcut, with the command queued for the PTY once it spawns. */
+  const spawnTerminalShortcut = useCallback((label: string, command: string): void => {
+    const id = crypto.randomUUID();
+    setTerminalInitialCommands((prev) => ({ ...prev, [id]: command }));
+    setPanels((p) => {
+      const tab: WorkspaceTab = {
+        id,
+        kind: 'terminal',
+        title: label,
+        baseTitle: label,
+        status: 'idle',
+      };
+      return { ...p, bottom: { tabs: [...p.bottom.tabs, tab], activeId: id } };
+    });
+    setBottomOpen(true);
+  }, []);
+
+  // Terminal shortcuts: main sends a payload whenever one fires.
+  useEffect(() => {
+    return window.cockpit.onOpenTerminalShortcut((payload) => {
+      spawnTerminalShortcut(payload.label, payload.command);
+    });
+  }, [spawnTerminalShortcut]);
+
   /** Rename a tab by hand. A non-empty name wins and freezes terminal
    *  auto-rename; an empty name reverts to the auto-managed default. */
   const renameTab = (panelId: PanelId, tabId: string, raw: string): void => {
@@ -379,15 +409,24 @@ export function App(): JSX.Element {
   };
 
   /** A global-search pick: switch the left panel to the cockpit tab that owns
-   *  the file, then ask that pane to reveal and scroll to it. */
+   *  the file, then ask that pane to reveal and scroll to it. Routing picks the
+   *  pane with the **longest** matching base directory, not the first that
+   *  prefix-matches — the Lore folder lives under `chain.root`, so a naïve
+   *  first-match always returns the Payload pane for Status and Memory files. */
   const handleSearchPick = useCallback(
     (path: string): void => {
-      const spec = paneSpecs.find((p) =>
-        baseDirsOf(p.subRoot).some((b) => path === b || path.startsWith(`${b}/`)),
-      );
-      if (!spec) return;
-      setPanels((p) => ({ ...p, left: { ...p.left, activeId: spec.id } }));
-      setRevealTarget((prev) => ({ paneId: spec.id, path, token: (prev?.token ?? 0) + 1 }));
+      let best: { spec: PaneSpec; baseLen: number } | undefined;
+      for (const spec of paneSpecs) {
+        for (const base of baseDirsOf(spec.subRoot)) {
+          if (path === base || path.startsWith(`${base}/`)) {
+            if (!best || base.length > best.baseLen) best = { spec, baseLen: base.length };
+          }
+        }
+      }
+      if (!best) return;
+      const picked = best.spec;
+      setPanels((p) => ({ ...p, left: { ...p.left, activeId: picked.id } }));
+      setRevealTarget((prev) => ({ paneId: picked.id, path, token: (prev?.token ?? 0) + 1 }));
     },
     [paneSpecs],
   );
@@ -551,7 +590,14 @@ export function App(): JSX.Element {
           );
         }
       } else if (tab.kind === 'terminal') {
-        body = <TerminalTab active={visible} tabId={tab.id} onStatus={handleTerminalStatus} />;
+        body = (
+          <TerminalTab
+            active={visible}
+            tabId={tab.id}
+            onStatus={handleTerminalStatus}
+            initialCommand={terminalInitialCommands[tab.id]}
+          />
+        );
       } else {
         body = (
           <BrowserTab tabId={tab.id} visible={visible} initialUrl={browserInitialUrls[tab.id]} />

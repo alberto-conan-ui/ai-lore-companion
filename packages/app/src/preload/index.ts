@@ -8,6 +8,7 @@ import {
   type RestorePayload,
   type SettingsSnapshot,
   type Shortcut,
+  type ShortcutTerminalPayload,
   type TerminalDataPayload,
   type TerminalExitPayload,
   type TerminalStatusPayload,
@@ -67,11 +68,13 @@ const api: CockpitApi = {
   shortcutsAdd: (input) => ipcRenderer.invoke(IPC.ShortcutsAdd, input),
   shortcutsRemove: (id) => ipcRenderer.invoke(IPC.ShortcutsRemove, id),
   onShortcutsChanged: makeSubscribe<Shortcut[]>(IPC.ShortcutsChanged),
+  onOpenTerminalShortcut: makeSubscribe<ShortcutTerminalPayload>(IPC.ShortcutOpenTerminal),
   settingsGet: () => ipcRenderer.invoke(IPC.SettingsGet),
   settingsSet: (arg) => ipcRenderer.invoke(IPC.SettingsSet, arg),
   settingsSetIgnores: (arg) => ipcRenderer.invoke(IPC.SettingsSetIgnores, arg),
   settingsSetLayout: (arg) => ipcRenderer.invoke(IPC.SettingsSetLayout, arg),
   onSettingsChanged: makeSubscribe<SettingsSnapshot>(IPC.SettingsChanged),
+  onSettingsOpen: makeSubscribe<void>(IPC.SettingsOpen),
 };
 
 contextBridge.exposeInMainWorld('cockpit', api);
