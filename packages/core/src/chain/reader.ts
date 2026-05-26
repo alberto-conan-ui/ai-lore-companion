@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { parseMemoryFile } from '../frontmatter/parser.js';
 import type { Dials, FocusStatus, FocusType, Posture } from '../frontmatter/types.js';
+import { latestSavePoint } from '../save-points/save-points.js';
 import { locateLore } from './lore.js';
 import {
   parseActiveChild,
@@ -34,6 +35,8 @@ export function readChain({ root }: { root: string }): ChainResult {
       ? { altitude: register.altitude, commitment: register.commitment }
       : null;
 
+  const hasSavePoint = latestSavePoint(resolve(located.lorePath, 'memory/save-points')) !== null;
+
   const focusRef = parseActiveFocus(statusText);
   if (!focusRef) {
     return {
@@ -46,6 +49,7 @@ export function readChain({ root }: { root: string }): ChainResult {
       activeChild: null,
       root,
       lorePath: located.lorePath,
+      hasSavePoint,
     };
   }
 
@@ -69,6 +73,7 @@ export function readChain({ root }: { root: string }): ChainResult {
     activeChild,
     root,
     lorePath: located.lorePath,
+    hasSavePoint,
   };
 }
 

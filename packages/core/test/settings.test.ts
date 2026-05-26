@@ -1,6 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
+  type AppEntry,
   SETTINGS_REGISTRY,
   SETTINGS_SCHEMA_VERSION,
   type SettingDef,
@@ -14,6 +15,7 @@ import {
   resolveSetting,
   serializeSettingsFile,
   validateRegistry,
+  withApps,
   withIgnores,
   withLayout,
   withSetting,
@@ -252,6 +254,40 @@ test('parseSettingsFile round-trips a layout through serialize', () => {
   const original = withLayout(emptySettingsFile(), sampleLayout());
   const parsed = parseSettingsFile(serializeSettingsFile(original));
   assert.deepEqual(parsed.layout, original.layout);
+});
+
+const sampleApp: AppEntry = {
+  id: 'vscode',
+  label: 'VS Code',
+  kind: 'app',
+  target: 'both',
+  appPath: '/Applications/Visual Studio Code.app',
+};
+
+test('withApps attaches the catalog without mutating the input', () => {
+  const before = emptySettingsFile();
+  const after = withApps(before, [sampleApp]);
+  assert.equal(before.apps, undefined);
+  assert.equal(after.apps?.length, 1);
+  assert.equal(after.apps?.[0]?.id, 'vscode');
+});
+
+test('withApps replacing the catalog preserves layout + ignores', () => {
+  const base = withIgnores(
+    withLayout(emptySettingsFile(), sampleLayout()),
+    [{ pattern: 'dist', level: 'hidden' }],
+  );
+  const after = withApps(base, [sampleApp]);
+  assert.equal(after.apps?.length, 1);
+  assert.equal(after.layout?.rightWidth, 480);
+  assert.equal(after.ignores.length, 1);
+});
+
+test('parseSettingsFile round-trips Apps through serialize', () => {
+  const original = withApps(emptySettingsFile(), [sampleApp]);
+  const parsed = parseSettingsFile(serializeSettingsFile(original));
+  assert.equal(parsed.apps?.length, 1);
+  assert.equal(parsed.apps?.[0]?.label, 'VS Code');
 });
 
 test('parseSettingsFile drops a layout at an unknown version', () => {

@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  type AppEntry,
   type IgnoreRule,
   type SettingValue,
   type SettingsFile,
@@ -8,6 +9,7 @@ import {
   emptySettingsFile,
   parseSettingsFile,
   serializeSettingsFile,
+  withApps,
   withIgnores,
   withLayout,
   withSetting,
@@ -107,5 +109,12 @@ export function saveProjectLayout(
 ): SettingsFile {
   const next = withLayout(loadProjectSettings(userDataDir, projectRoot), layout);
   writeSettingsFile(projectSettingsPath(userDataDir, projectRoot), next);
+  return next;
+}
+
+/** Replace the global tier's Apps catalog; returns the updated file. */
+export function saveGlobalApps(userDataDir: string, apps: readonly AppEntry[]): SettingsFile {
+  const next = withApps(loadGlobalSettings(userDataDir), apps);
+  writeSettingsFile(globalSettingsPath(userDataDir), next);
   return next;
 }

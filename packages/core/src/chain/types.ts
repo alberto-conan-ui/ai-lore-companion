@@ -26,6 +26,13 @@ export type ChainSuccess = {
   activeChild: NodeRef | null;
   root: string;
   lorePath: string;
+  /**
+   * `true` when at least one save-point is recorded in
+   * `<lorePath>/memory/save-points/`. The Companion uses this to enable the
+   * diff-against-latest-save-point affordance — without a save-point there is
+   * no baseline. The latest save-point itself is read on demand.
+   */
+  hasSavePoint: boolean;
 };
 
 export type ChainError = {

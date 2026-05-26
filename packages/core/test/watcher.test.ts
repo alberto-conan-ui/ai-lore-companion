@@ -3,13 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import {
-  type DirEvent,
-  type QueueEvent,
-  attachWatcher,
-  createQueue,
-  openDb,
-} from '../src/index.js';
+import { type DirEvent, type FileChangeEvent, attachWatcher } from '../src/index.js';
 
 function setupTempProject(): { root: string; lorePath: string; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'cockpit-watch-'));
@@ -21,26 +15,6 @@ function setupTempProject(): { root: string; lorePath: string; cleanup: () => vo
     lorePath,
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
-}
-
-function waitForEvent(
-  predicate: (event: QueueEvent) => boolean,
-  attach: (cb: (e: QueueEvent) => void) => () => void,
-  timeoutMs: number,
-): Promise<QueueEvent> {
-  return new Promise((resolveOuter, reject) => {
-    const timer = setTimeout(() => {
-      off();
-      reject(new Error(`timed out after ${timeoutMs}ms waiting for queue event`));
-    }, timeoutMs);
-    const off = attach((event) => {
-      if (predicate(event)) {
-        clearTimeout(timer);
-        off();
-        resolveOuter(event);
-      }
-    });
-  });
 }
 
 function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
@@ -59,102 +33,57 @@ function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {
   });
 }
 
-test('watcher emits add event when a payload file is created', async () => {
+test('watcher fires onFileChange when a payload file is created', async () => {
   const { root, lorePath, cleanup } = setupTempProject();
-  const handle = openDb(':memory:');
   try {
-    const queue = createQueue({ db: handle.db });
-    const watcher = attachWatcher(queue, { root, lorePath });
+    const events: FileChangeEvent[] = [];
+    const watcher = attachWatcher({
+      root,
+      lorePath,
+      onFileChange: (e) => events.push(e),
+    });
 
-    // chokidar needs a tick to wire FS listeners after construction.
     await new Promise((r) => setTimeout(r, 200));
 
     const target = join(root, 'src', 'new.ts');
-    const eventP = waitForEvent(
-      (e) => (e.kind === 'add' || e.kind === 'replace') && e.entry.path.endsWith('new.ts'),
-      (cb) => queue.on(cb),
-      2000,
-    );
     writeFileSync(target, 'export const x = 1;\n');
-
-    const event = await eventP;
-    assert.ok(event.kind === 'add' || event.kind === 'replace');
-    if (event.kind === 'add' || event.kind === 'replace') {
-      assert.equal(event.entry.scope, 'payload');
-      assert.equal(event.entry.path, join('src', 'new.ts'));
-    }
+    await waitFor(() => events.some((e) => e.event === 'add' && e.absPath === target), 2000);
+    assert.equal(events.find((e) => e.absPath === target)?.scope, 'payload');
 
     await watcher.close();
   } finally {
-    handle.close();
-    cleanup();
-  }
-});
-
-test('attachWatcher prunes pre-existing index-file drift from the queue', async () => {
-  const { root, lorePath, cleanup } = setupTempProject();
-  const handle = openDb(':memory:');
-  try {
-    const queue = createQueue({ db: handle.db });
-    // Drift an older build queued, before index files were untracked.
-    queue.push({
-      path: join('memory', 'status', 'status.index.md'),
-      type: 'change',
-      scope: 'lore',
-    });
-    queue.push({ path: join('src', 'app.ts'), type: 'change', scope: 'payload' });
-
-    const watcher = attachWatcher(queue, { root, lorePath });
-
-    // The index file is pruned on attach; the ordinary file stays.
-    assert.deepEqual(
-      queue.snapshot().map((e) => e.path),
-      [join('src', 'app.ts')],
-    );
-
-    await watcher.close();
-  } finally {
-    handle.close();
     cleanup();
   }
 });
 
 test('watcher classifies events under the lore folder as scope=lore', async () => {
   const { root, lorePath, cleanup } = setupTempProject();
-  const handle = openDb(':memory:');
   try {
-    const queue = createQueue({ db: handle.db });
-    const watcher = attachWatcher(queue, { root, lorePath });
+    const events: FileChangeEvent[] = [];
+    const watcher = attachWatcher({
+      root,
+      lorePath,
+      onFileChange: (e) => events.push(e),
+    });
 
     await new Promise((r) => setTimeout(r, 200));
 
     const target = join(lorePath, 'note.md');
-    const eventP = waitForEvent(
-      (e) => (e.kind === 'add' || e.kind === 'replace') && e.entry.path.endsWith('note.md'),
-      (cb) => queue.on(cb),
-      2000,
-    );
     writeFileSync(target, '# note\n');
-
-    const event = await eventP;
-    if (event.kind === 'add' || event.kind === 'replace') {
-      assert.equal(event.entry.scope, 'lore');
-    }
+    await waitFor(() => events.some((e) => e.absPath === target), 2000);
+    assert.equal(events.find((e) => e.absPath === target)?.scope, 'lore');
 
     await watcher.close();
   } finally {
-    handle.close();
     cleanup();
   }
 });
 
 test('watcher fires onDirEvent on directory add and remove, scoped per side', async () => {
   const { root, lorePath, cleanup } = setupTempProject();
-  const handle = openDb(':memory:');
   try {
-    const queue = createQueue({ db: handle.db });
     const dirEvents: DirEvent[] = [];
-    const watcher = attachWatcher(queue, {
+    const watcher = attachWatcher({
       root,
       lorePath,
       onDirEvent: (e) => dirEvents.push(e),
@@ -173,7 +102,6 @@ test('watcher fires onDirEvent on directory add and remove, scoped per side', as
         dirEvents.some((e) => e.event === 'addDir' && e.absPath === loreDir),
       2000,
     );
-
     assert.equal(dirEvents.find((e) => e.absPath === payloadDir)?.scope, 'payload');
     assert.equal(dirEvents.find((e) => e.absPath === loreDir)?.scope, 'lore');
 
@@ -185,18 +113,15 @@ test('watcher fires onDirEvent on directory add and remove, scoped per side', as
 
     await watcher.close();
   } finally {
-    handle.close();
     cleanup();
   }
 });
 
 test('watcher fires onDirEvent on file add and unlink so the tree refreshes', async () => {
   const { root, lorePath, cleanup } = setupTempProject();
-  const handle = openDb(':memory:');
   try {
-    const queue = createQueue({ db: handle.db });
     const dirEvents: DirEvent[] = [];
-    const watcher = attachWatcher(queue, {
+    const watcher = attachWatcher({
       root,
       lorePath,
       onDirEvent: (e) => dirEvents.push(e),
@@ -206,7 +131,6 @@ test('watcher fires onDirEvent on file add and unlink so the tree refreshes', as
 
     const target = join(root, 'src', 'new.ts');
     writeFileSync(target, 'export const x = 1;\n');
-
     await waitFor(() => dirEvents.some((e) => e.event === 'add' && e.absPath === target), 2000);
     assert.equal(dirEvents.find((e) => e.absPath === target)?.scope, 'payload');
 
@@ -215,20 +139,19 @@ test('watcher fires onDirEvent on file add and unlink so the tree refreshes', as
 
     await watcher.close();
   } finally {
-    handle.close();
     cleanup();
   }
 });
 
-test('watcher fires onDirEvent on index-file add so the tree refreshes even when the queue ignores it', async () => {
+test('watcher fires both onFileChange and onDirEvent on an add (host can listen to either)', async () => {
   const { root, lorePath, cleanup } = setupTempProject();
-  const handle = openDb(':memory:');
   try {
-    const queue = createQueue({ db: handle.db });
+    const fileEvents: FileChangeEvent[] = [];
     const dirEvents: DirEvent[] = [];
-    const watcher = attachWatcher(queue, {
+    const watcher = attachWatcher({
       root,
       lorePath,
+      onFileChange: (e) => fileEvents.push(e),
       onDirEvent: (e) => dirEvents.push(e),
     });
 
@@ -236,17 +159,15 @@ test('watcher fires onDirEvent on index-file add so the tree refreshes even when
 
     const target = join(lorePath, 'memory.index.md');
     writeFileSync(target, '# memory\n');
-
-    await waitFor(() => dirEvents.some((e) => e.event === 'add' && e.absPath === target), 2000);
-    // Index files are untracked in the queue but still appear in the tree.
-    assert.equal(
-      queue.snapshot().some((entry) => entry.path.endsWith('memory.index.md')),
-      false,
+    await waitFor(
+      () =>
+        fileEvents.some((e) => e.absPath === target) &&
+        dirEvents.some((e) => e.absPath === target),
+      2000,
     );
 
     await watcher.close();
   } finally {
-    handle.close();
     cleanup();
   }
 });
@@ -255,48 +176,37 @@ test('watcher ignores upstream/ and process/ paths', async () => {
   const { root, lorePath, cleanup } = setupTempProject();
   mkdirSync(join(lorePath, 'upstream', 'core-0.4'), { recursive: true });
   mkdirSync(join(lorePath, 'process'), { recursive: true });
-  const handle = openDb(':memory:');
   try {
-    const queue = createQueue({ db: handle.db });
-    const watcher = attachWatcher(queue, {
+    const events: FileChangeEvent[] = [];
+    const watcher = attachWatcher({
       root,
       lorePath,
       ignored: ['**/upstream/**', '**/process/**'],
+      onFileChange: (e) => events.push(e),
     });
 
     await new Promise((r) => setTimeout(r, 200));
-
-    const events: QueueEvent[] = [];
-    queue.on((e) => events.push(e));
 
     writeFileSync(join(lorePath, 'upstream', 'core-0.4', 'a.md'), 'a');
     writeFileSync(join(lorePath, 'process', 'b.md'), 'b');
     // Real event that SHOULD fire so we have something to wait on.
     writeFileSync(join(root, 'tracked.ts'), 'export {};');
 
-    await waitForEvent(
-      (e) => (e.kind === 'add' || e.kind === 'replace') && e.entry.path.endsWith('tracked.ts'),
-      (cb) => queue.on(cb),
-      2000,
-    );
+    await waitFor(() => events.some((e) => e.absPath.endsWith('tracked.ts')), 2000);
     // Give chokidar a moment to ensure the ignored writes don't also fire.
     await new Promise((r) => setTimeout(r, 200));
 
-    const observedPaths = events
-      .map((e) => (e.kind === 'add' || e.kind === 'replace' ? e.entry.path : null))
-      .filter((p): p is string => p !== null);
     assert.equal(
-      observedPaths.some((p) => p.includes('upstream')),
+      events.some((e) => e.absPath.includes('upstream')),
       false,
     );
     assert.equal(
-      observedPaths.some((p) => p.includes('process')),
+      events.some((e) => e.absPath.includes('process')),
       false,
     );
 
     await watcher.close();
   } finally {
-    handle.close();
     cleanup();
   }
 });

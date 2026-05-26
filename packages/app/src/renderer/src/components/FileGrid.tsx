@@ -1,4 +1,4 @@
-import type { ChangeScope, QueueEntry, TreeNode } from '@ai-lore-companion/core';
+import type { AppEntry, GitStatusScope, TreeNode } from '@ai-lore-companion/core';
 import {
   type CellKeyDownEvent,
   type ColDef,
@@ -20,6 +20,9 @@ import {
   useMemo,
   useRef,
 } from 'react';
+import { type DriftKind, categoriseDriftCode } from '../store.js';
+import type { DriftRow } from './PaneQueue.js';
+import { buildNodeContextMenu } from './nodeContextMenu.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the grid. */
 export type FileGridHandle = {
@@ -50,35 +53,48 @@ export const cockpitGridTheme = themeQuartz.withPart(colorSchemeDark).withParams
 });
 
 type Props = {
-  scope: ChangeScope;
+  scope: GitStatusScope;
   rows: TreeNode[];
   selectedPath: string | null;
   onSelectPath: (path: string) => void;
   /** Double-clicking a folder row navigates the pane into that folder. */
   onOpenFolder: (path: string) => void;
-  driftByPath: Map<string, QueueEntry>;
+  driftByPath: Map<string, DriftRow>;
   /** Right-click ▸ Ignore — create a project ignore rule for the row's path. */
   onIgnore: (node: TreeNode) => void;
+  /**
+   * Right-click ▸ Diff against latest save-point — opens the configured
+   * external diff app. Disabled in the menu when no save-point exists.
+   */
+  onDiff: (node: TreeNode) => void;
+  /** Whether a save-point is recorded — drives the Diff menu item's enabled state. */
+  hasSavePoint: boolean;
+  /** The Apps catalog — drives the *Open with [label]* menu entries. */
+  apps: AppEntry[];
+  /** Invoke a catalog app on a node. */
+  onOpenWith: (app: AppEntry, node: TreeNode) => void;
+  /** Reveal a node in Finder (folder = open, file = highlight). */
+  onRevealInFinder: (node: TreeNode) => void;
 };
 
-const DRIFT_GLYPH: Record<QueueEntry['type'], { glyph: string; color: string; label: string }> = {
+const DRIFT_GLYPH: Record<DriftKind, { glyph: string; color: string; label: string }> = {
   add: { glyph: '+', color: '#7fc97f', label: 'added' },
   change: { glyph: '~', color: '#ffb84d', label: 'changed' },
   unlink: { glyph: '−', color: '#ff6b6b', label: 'removed' },
-  'tracker-review': { glyph: '▸', color: '#c599ff', label: 'tracker → Review' },
 };
 
 /**
  * Drift glyph cell — a React element, not an HTML string. AG Grid v33+ renders
  * a string returned from `cellRenderer` as escaped text, so an HTML string
- * shows up literally as `<span…>`.
+ * shows up literally as `<span…>`. The value is the raw porcelain code; we
+ * categorise it into add/change/unlink for the glyph.
  */
 function DriftCell(params: { value?: string }): JSX.Element | null {
-  const t = params.value ? DRIFT_GLYPH[params.value as QueueEntry['type']] : undefined;
-  if (!t) return null;
+  if (!params.value) return null;
+  const meta = DRIFT_GLYPH[categoriseDriftCode(params.value)];
   return (
-    <span title={t.label} style={{ color: t.color, fontWeight: 700, fontSize: '0.95rem' }}>
-      {t.glyph}
+    <span title={meta.label} style={{ color: meta.color, fontWeight: 700, fontSize: '0.95rem' }}>
+      {meta.glyph}
     </span>
   );
 }
@@ -109,7 +125,20 @@ function formatModified(ts: number | undefined): string {
 }
 
 export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
-  { scope, rows, selectedPath, onSelectPath, onOpenFolder, driftByPath, onIgnore }: Props,
+  {
+    scope,
+    rows,
+    selectedPath,
+    onSelectPath,
+    onOpenFolder,
+    driftByPath,
+    onIgnore,
+    onDiff,
+    hasSavePoint,
+    apps,
+    onOpenWith,
+    onRevealInFinder,
+  }: Props,
   forwardedRef,
 ): JSX.Element {
   const gridRef = useRef<AgGridReact<TreeNode>>(null);
@@ -136,7 +165,7 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
         colId: 'drift',
         width: 64,
         valueGetter: (p: ValueGetterParams<TreeNode>) =>
-          p.data ? (driftByPath.get(p.data.path)?.type ?? '') : '',
+          p.data ? (driftByPath.get(p.data.path)?.code ?? '') : '',
         cellRenderer: DriftCell,
         filter: 'agSetColumnFilter',
         cellStyle: { textAlign: 'center' },
@@ -256,14 +285,15 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
         ): (MenuItemDef | string)[] => {
           const node = params.node?.data;
           if (!node) return [];
-          return [
-            {
-              name: node.isDir
-                ? 'Ignore this folder in the project'
-                : 'Ignore this file in the project',
-              action: () => onIgnore(node),
-            },
-          ];
+          return buildNodeContextMenu({
+            node,
+            apps,
+            hasSavePoint,
+            onRevealInFinder,
+            onOpenWith,
+            onDiff,
+            onIgnore,
+          });
         }}
         headerHeight={28}
         rowHeight={26}

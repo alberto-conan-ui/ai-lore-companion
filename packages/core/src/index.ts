@@ -86,6 +86,7 @@ export {
   resolveSetting,
   serializeSettingsFile,
   validateRegistry,
+  withApps,
   withIgnores,
   withLayout,
   withSetting,
@@ -102,6 +103,55 @@ export type {
   WriteTier,
 } from './settings/types.js';
 
+export {
+  type AppEntry,
+  type AppKind,
+  type AppRole,
+  type AppTarget,
+  appsForNode,
+  findDiffApp,
+  isAppEntry,
+  parseAppEntries,
+  parseAppEntry,
+} from './apps/index.js';
+
+export {
+  type BuildDiffArgvInput,
+  buildDiffArgv,
+  templateUsesBothPlaceholders,
+} from './diff/index.js';
+
+export {
+  type GitStatusResult,
+  type GitStatusScope,
+  type GitStatusSnapshot,
+  type GitStatusTracker,
+  type GitStatusTrackerOptions,
+  type PorcelainEntry,
+  attachGitStatusTracker,
+  isAdded,
+  isDeleted,
+  isRenamed,
+  parsePorcelainZ,
+  readGitStatus,
+} from './git-status/index.js';
+
+export {
+  attachTrackerReviewTracker,
+  readTrackerReview,
+  type TrackerReviewEntry,
+  type TrackerReviewKind,
+  type TrackerReviewTracker,
+  type TrackerReviewTrackerOptions,
+} from './tracker-review/index.js';
+
+export {
+  baselineCommit,
+  latestSavePoint,
+  listSavePoints,
+  type SavePoint,
+} from './save-points/index.js';
+
 export { isTreeError, readDirectory } from './tree/tree.js';
 export type {
   ReadDirectoryOptions,
@@ -111,4 +161,10 @@ export type {
 } from './tree/tree.js';
 
 export { attachWatcher } from './watcher/watcher.js';
-export type { DirEvent, WatcherHandle, WatcherOptions } from './watcher/watcher.js';
+export type {
+  DirEvent,
+  FileChangeEvent,
+  WatcherHandle,
+  WatcherOptions,
+  WatcherScope,
+} from './watcher/watcher.js';

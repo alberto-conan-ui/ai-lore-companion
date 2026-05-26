@@ -57,7 +57,7 @@ test('queue dedups by path — new event replaces old entry', () => {
   }
 });
 
-test('queue ack removes a single entry and emits ack event', () => {
+test('queue dismiss removes a single entry and emits dismiss event', () => {
   const handle = openMemoryDb();
   try {
     const queue = createQueue({ db: handle.db });
@@ -67,11 +67,11 @@ test('queue ack removes a single entry and emits ack event', () => {
     const events: QueueEvent[] = [];
     queue.on((e) => events.push(e));
 
-    const removed = queue.ack(a.id);
+    const removed = queue.dismiss(a.id);
     assert.equal(removed, true);
     assert.equal(events.length, 1);
-    assert.equal(events[0]?.kind, 'ack');
-    if (events[0]?.kind === 'ack') {
+    assert.equal(events[0]?.kind, 'dismiss');
+    if (events[0]?.kind === 'dismiss') {
       assert.equal(events[0].id, a.id);
     }
 
@@ -83,7 +83,7 @@ test('queue ack removes a single entry and emits ack event', () => {
   }
 });
 
-test('queue ackAll clears every entry and emits clear once', () => {
+test('queue dismissAll clears every entry and emits clear once', () => {
   const handle = openMemoryDb();
   try {
     const queue = createQueue({ db: handle.db });
@@ -94,7 +94,7 @@ test('queue ackAll clears every entry and emits clear once', () => {
     const events: QueueEvent[] = [];
     queue.on((e) => events.push(e));
 
-    const cleared = queue.ackAll();
+    const cleared = queue.dismissAll();
     assert.equal(cleared, 3);
     assert.equal(queue.snapshot().length, 0);
     assert.equal(events.length, 1);
@@ -104,7 +104,7 @@ test('queue ackAll clears every entry and emits clear once', () => {
   }
 });
 
-test('queue ackAllScope clears only the named scope and emits a scoped clear', () => {
+test('queue dismissAllScope clears only the named scope and emits a scoped clear', () => {
   const handle = openMemoryDb();
   try {
     const queue = createQueue({ db: handle.db });
@@ -115,7 +115,7 @@ test('queue ackAllScope clears only the named scope and emits a scoped clear', (
     const events: QueueEvent[] = [];
     queue.on((e) => events.push(e));
 
-    const cleared = queue.ackAllScope('payload');
+    const cleared = queue.dismissAllScope('payload');
     assert.equal(cleared, 2);
     assert.equal(events.length, 1);
     assert.equal(events[0]?.kind, 'clear');
@@ -132,7 +132,7 @@ test('queue ackAllScope clears only the named scope and emits a scoped clear', (
   }
 });
 
-test('queue ackAllScope on an empty scope is a no-op', () => {
+test('queue dismissAllScope on an empty scope is a no-op', () => {
   const handle = openMemoryDb();
   try {
     const queue = createQueue({ db: handle.db });
@@ -140,7 +140,7 @@ test('queue ackAllScope on an empty scope is a no-op', () => {
     const events: QueueEvent[] = [];
     queue.on((e) => events.push(e));
 
-    const cleared = queue.ackAllScope('payload');
+    const cleared = queue.dismissAllScope('payload');
     assert.equal(cleared, 0);
     assert.equal(events.length, 0);
     assert.equal(queue.snapshot().length, 1);
@@ -149,7 +149,7 @@ test('queue ackAllScope on an empty scope is a no-op', () => {
   }
 });
 
-test('queue ack of unknown id is a no-op', () => {
+test('queue dismiss of unknown id is a no-op', () => {
   const handle = openMemoryDb();
   try {
     const queue = createQueue({ db: handle.db });
@@ -157,7 +157,7 @@ test('queue ack of unknown id is a no-op', () => {
     const events: QueueEvent[] = [];
     queue.on((e) => events.push(e));
 
-    const removed = queue.ack('not-a-real-id');
+    const removed = queue.dismiss('not-a-real-id');
     assert.equal(removed, false);
     assert.equal(events.length, 0);
     assert.equal(queue.snapshot().length, 1);

@@ -1,10 +1,17 @@
-import type { ChangeScope, IgnoreRule, QueueEntry, TreeNode } from '@ai-lore-companion/core';
+import type {
+  AppEntry,
+  GitStatusScope,
+  IgnoreRule,
+  PorcelainEntry,
+  TreeNode,
+} from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type DriftLevel, driftLevel, findTreeNode, useCockpitStore } from '../store.js';
+import { AppPickerModal } from './AppPickerModal.js';
 import { DriftPill } from './DriftPill.js';
 import { FileGrid, type FileGridHandle } from './FileGrid.js';
 import { FileTree, type FileTreeHandle } from './FileTree.js';
-import { PaneQueue, type PaneQueueHandle } from './PaneQueue.js';
+import { type DriftRow, PaneQueue, type PaneQueueHandle } from './PaneQueue.js';
 
 /** Which of the three regions inside a Pane currently owns the keyboard.
  *  Drives Tab cycling between them and the visible focus accent. */
@@ -41,21 +48,28 @@ function isUnderBases(absPath: string, bases: string[]): boolean {
   return bases.some((b) => absPath === b || absPath.startsWith(`${b}/`));
 }
 
-/** Queue entries on `scope` whose file falls within the sub-root's directories. */
+/**
+ * Filter a porcelain-entry list to the sub-root's directories, producing
+ * [`DriftRow`](./PaneQueue.tsx#DriftRow) objects with the absolute and
+ * project-relative paths the renderer needs.
+ */
 export function entriesInSubRoot(
-  entries: QueueEntry[],
-  scope: ChangeScope,
+  entries: readonly PorcelainEntry[],
   subRoot: SubRoot,
   projectRoot: string,
-): QueueEntry[] {
+): DriftRow[] {
   const bases = baseDirsOf(subRoot);
-  return entries.filter(
-    (e) => e.scope === scope && isUnderBases(`${projectRoot}/${e.path}`, bases),
-  );
+  const out: DriftRow[] = [];
+  for (const e of entries) {
+    const absPath = `${projectRoot}/${e.path}`;
+    if (!isUnderBases(absPath, bases)) continue;
+    out.push({ ...e, projectRelPath: e.path, absPath });
+  }
+  return out;
 }
 
 type Props = {
-  scope: ChangeScope;
+  scope: GitStatusScope;
   label: string;
   /** Stable identifier for this pane — drives its `data-testid`. */
   testId: string;
@@ -85,8 +99,23 @@ export function Pane({
   revealRequest,
 }: Props): JSX.Element {
   const tree = useCockpitStore((s) => s.trees[scope]);
-  const entries = useCockpitStore((s) => s.entries);
+  const gitStatusForScope = useCockpitStore((s) => s.gitStatus[scope]);
   const expandTree = useCockpitStore((s) => s.expandTree);
+  const hasSavePoint = useCockpitStore((s) =>
+    s.chain && !('error' in s.chain) ? s.chain.hasSavePoint : false,
+  );
+  const apps = useCockpitStore((s) => s.apps);
+
+  // Context-menu actions shared across tree, grid, and (eventually) queue.
+  const handleRevealInFinder = useCallback((node: TreeNode) => {
+    window.cockpit.revealInFinder(node.path);
+  }, []);
+  const handleOpenWith = useCallback(async (app: AppEntry, node: TreeNode) => {
+    const result = await window.cockpit.appsInvoke({ appId: app.id, path: node.path });
+    if (result.kind === 'failed') {
+      window.alert(`Could not open with ${app.label}: ${result.message}`);
+    }
+  }, []);
 
   const renderedRoot = useMemo(() => resolveSubRoot(tree, subRoot), [tree, subRoot]);
   const bases = useMemo(() => baseDirsOf(subRoot), [subRoot]);
@@ -111,8 +140,8 @@ export function Pane({
 
   // Scope entries narrowed to the ones that fall within this pane's sub-root.
   const paneEntries = useMemo(
-    () => entriesInSubRoot(entries, scope, subRoot, projectRoot),
-    [entries, scope, subRoot, projectRoot],
+    () => entriesInSubRoot(gitStatusForScope, subRoot, projectRoot),
+    [gitStatusForScope, subRoot, projectRoot],
   );
 
   const [selectedFolder, setSelectedFolder] = useState<string>(rootId);
@@ -182,13 +211,13 @@ export function Pane({
     [focusRegion, regionOf],
   );
 
-  const entryAbsPaths = useMemo(() => paneEntries.map((e) => toAbs(e.path)), [paneEntries, toAbs]);
+  const entryAbsPaths = useMemo(() => paneEntries.map((e) => e.absPath), [paneEntries]);
 
   const driftByPath = useMemo(() => {
-    const map = new Map<string, QueueEntry>();
-    for (const entry of paneEntries) map.set(toAbs(entry.path), entry);
+    const map = new Map<string, DriftRow>();
+    for (const entry of paneEntries) map.set(entry.absPath, entry);
     return map;
-  }, [paneEntries, toAbs]);
+  }, [paneEntries]);
 
   /** Drift level for a folder = unacked entries anywhere in its subtree. */
   const driftLevelFor = useCallback(
@@ -337,10 +366,10 @@ export function Pane({
   );
 
   const handleQueueClick = useCallback(
-    (entry: QueueEntry) => {
-      void revealFile(toAbs(entry.path));
+    (entry: DriftRow) => {
+      void revealFile(entry.absPath);
     },
-    [revealFile, toAbs],
+    [revealFile],
   );
 
   // A global-search pick (App sets `revealRequest`) reveals the file in the
@@ -349,11 +378,56 @@ export function Pane({
     if (revealRequest) void revealFile(revealRequest.path);
   }, [revealRequest, revealFile]);
 
+  // Queue double-click prefers the configured external diff over the OS-default
+  // open. When no diff app is configured, when no save-point exists, or when
+  // anything goes wrong, falls back to today's OS-default open so the user
+  // still sees the file.
   const handleQueueDouble = useCallback(
-    (entry: QueueEntry) => {
-      void window.cockpit.openPath(toAbs(entry.path));
+    async (entry: DriftRow) => {
+      const result = await window.cockpit.openDiff({ scope, relPath: entry.projectRelPath });
+      if (result.kind === 'ok') return;
+      if (result.kind === 'failed') {
+        console.warn('[diff]', result.message);
+      }
+      void window.cockpit.openPath(entry.absPath);
     },
-    [toAbs],
+    [scope],
+  );
+
+  // Diff target awaiting a freshly-picked app. When the user clicks *Diff*
+  // and no diff entry exists in the Apps catalog, we open the App picker;
+  // after they save, we retry the diff against the node they originally
+  // clicked — that's why we stash it.
+  const [pickerForDiff, setPickerForDiff] = useState<TreeNode | null>(null);
+
+  // File context menu "Diff against latest save-point" — invokes the same
+  // IPC. The main handler accepts absolute paths and resolves them against
+  // the project root before materialising the baseline.
+  const handleDiff = useCallback(
+    async (node: TreeNode) => {
+      if (node.isDir) return;
+      const result = await window.cockpit.openDiff({ scope, relPath: node.path });
+      if (result.kind === 'no-cli') {
+        // First-use prompt: surface the App picker preselected to *diff* so
+        // the user can pick a CLI without visiting Settings.
+        setPickerForDiff(node);
+      } else if (result.kind === 'failed') {
+        window.alert(`Diff failed to open: ${result.message}`);
+      }
+    },
+    [scope],
+  );
+
+  const onPickerSave = useCallback(
+    async (entry: AppEntry) => {
+      const target = pickerForDiff;
+      // Add the new entry to the catalog and persist.
+      await window.cockpit.appsSave([...apps, entry]);
+      setPickerForDiff(null);
+      // Retry the diff with the node the user originally clicked.
+      if (target) void handleDiff(target);
+    },
+    [apps, handleDiff, pickerForDiff],
   );
 
   return (
@@ -420,6 +494,11 @@ export function Pane({
             onOpenFolder={handleOpenFolder}
             driftByPath={driftByPath}
             onIgnore={(node) => void ignorePath(node)}
+            onDiff={(node) => void handleDiff(node)}
+            hasSavePoint={hasSavePoint}
+            apps={apps}
+            onOpenWith={(app, node) => void handleOpenWith(app, node)}
+            onRevealInFinder={handleRevealInFinder}
           />
         </div>
       </div>
@@ -445,19 +524,74 @@ export function Pane({
           displayPath={queueDisplayPath}
           onRowClick={handleQueueClick}
           onRowDoubleClick={handleQueueDouble}
-          onAck={(id) => {
-            void window.cockpit.ack(id);
-          }}
-          onAckAll={() => {
-            void window.cockpit.ackAllScope(scope);
-          }}
+          apps={apps}
+          hasSavePoint={hasSavePoint}
+          onOpenWith={(app, node) => void handleOpenWith(app, node)}
+          onRevealInFinder={handleRevealInFinder}
+          onDiff={(node) => void handleDiff(node)}
+          onIgnore={(node) => void ignorePath(node)}
         />
       </div>
+
+      {pickerForDiff ? (
+        <AppPickerModal
+          initial="diff"
+          onSave={(e) => void onPickerSave(e)}
+          onClose={() => setPickerForDiff(null)}
+        />
+      ) : null}
 
       {treeMenu ? (
         <>
           <div style={menuBackdropStyle} onMouseDown={() => setTreeMenu(null)} />
           <div style={{ ...treeMenuStyle, left: treeMenu.x, top: treeMenu.y }}>
+            <button
+              type="button"
+              style={treeMenuItemStyle}
+              onClick={() => {
+                handleRevealInFinder(treeMenu.node);
+                setTreeMenu(null);
+              }}
+            >
+              Open in Finder
+            </button>
+            {(treeMenu.node.isDir
+              ? apps.filter((a) => a.target === 'folder' || a.target === 'both')
+              : apps.filter((a) => a.target === 'file' || a.target === 'both')
+            )
+              .filter((a) => a.role !== 'diff')
+              .map((app) => (
+                <button
+                  key={app.id}
+                  type="button"
+                  style={treeMenuItemStyle}
+                  onClick={() => {
+                    void handleOpenWith(app, treeMenu.node);
+                    setTreeMenu(null);
+                  }}
+                >
+                  Open with {app.label}
+                </button>
+              ))}
+            {!treeMenu.node.isDir ? (
+              <button
+                type="button"
+                style={treeMenuItemStyle}
+                disabled={!hasSavePoint}
+                onClick={() => {
+                  if (hasSavePoint) {
+                    void handleDiff(treeMenu.node);
+                    setTreeMenu(null);
+                  }
+                }}
+                title={
+                  hasSavePoint ? undefined : 'No save-point recorded — diff baseline unavailable'
+                }
+              >
+                {hasSavePoint ? 'Diff against latest save-point' : 'Diff (no save-point recorded)'}
+              </button>
+            ) : null}
+            <div style={treeMenuSeparatorStyle} />
             <button
               type="button"
               style={treeMenuItemStyle}
@@ -598,4 +732,10 @@ const treeMenuItemStyle: React.CSSProperties = {
   textAlign: 'left',
   whiteSpace: 'nowrap',
   cursor: 'pointer',
+};
+
+const treeMenuSeparatorStyle: React.CSSProperties = {
+  height: '1px',
+  background: '#2f3a45',
+  margin: '0.25rem 0.3rem',
 };

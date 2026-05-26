@@ -1,4 +1,10 @@
-import type { IgnoreLevel, IgnoreRule, SettingDef, SettingValue } from '@ai-lore-companion/core';
+import type {
+  AppEntry,
+  IgnoreLevel,
+  IgnoreRule,
+  SettingDef,
+  SettingValue,
+} from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type {
@@ -7,6 +13,7 @@ import type {
   ShortcutInput,
   ShortcutTarget,
 } from '../../../shared/ipc.js';
+import { AppPickerModal } from './AppPickerModal.js';
 
 /** Which tier the Settings sheet is editing. */
 type Scope = 'global' | 'project';
@@ -17,6 +24,8 @@ const SECTION_FALLBACK = 'General';
 const IGNORE_SECTION = 'Ignore rules';
 /** The rail section that hosts the shortcuts manager — not a registry section. */
 const SHORTCUTS_SECTION = 'Shortcuts';
+/** The rail section that hosts the Apps catalog editor — global-only. */
+const APPS_SECTION = 'Apps';
 
 /** The ignore levels, with their human labels. */
 const LEVEL_OPTIONS: { value: IgnoreLevel; label: string }[] = [
@@ -56,25 +65,16 @@ export type SettingsSheetSection = 'shortcuts' | null;
 
 /**
  * The Settings sheet modal — controlled by the parent. `initialSection`
- * pre-selects a rail section; `initialDraftTarget` lands on the Shortcuts
- * section and seeds an add-shortcut draft with that target pre-selected.
+ * pre-selects a rail section.
  */
 export function SettingsSheetModal({
   onClose,
   initialSection,
-  initialDraftTarget,
 }: {
   onClose: () => void;
   initialSection?: SettingsSheetSection;
-  initialDraftTarget?: ShortcutTarget;
 }): JSX.Element {
-  return (
-    <SettingsSheet
-      onClose={onClose}
-      initialSection={initialDraftTarget ? 'shortcuts' : (initialSection ?? null)}
-      initialDraftTarget={initialDraftTarget}
-    />
-  );
+  return <SettingsSheet onClose={onClose} initialSection={initialSection ?? null} />;
 }
 
 /**
@@ -85,11 +85,9 @@ export function SettingsSheetModal({
 function SettingsSheet({
   onClose,
   initialSection,
-  initialDraftTarget,
 }: {
   onClose: () => void;
   initialSection: SettingsSheetSection;
-  initialDraftTarget?: ShortcutTarget;
 }): JSX.Element {
   const [snap, setSnap] = useState<SettingsSnapshot | null>(null);
   const [scope, setScope] = useState<Scope>('global');
@@ -114,12 +112,15 @@ function SettingsSheet({
   }, [onClose]);
 
   // The sections present in the current scope. `Ignore rules` is always there;
-  // `Shortcuts` is global-only (the store is one global list); a registry
-  // section shows when it has a setting editable in that tier.
+  // `Apps` and `Shortcuts` are global-only (the stores are global lists); a
+  // registry section shows when it has a setting editable in that tier.
   const sections = useMemo<string[]>(() => {
     if (!snap) return [];
     const set = new Set<string>([IGNORE_SECTION]);
-    if (scope === 'global') set.add(SHORTCUTS_SECTION);
+    if (scope === 'global') {
+      set.add(APPS_SECTION);
+      set.add(SHORTCUTS_SECTION);
+    }
     for (const def of snap.registry) {
       if (inScope(def, scope)) set.add(sectionOf(def));
     }
@@ -134,7 +135,8 @@ function SettingsSheet({
       !snap ||
       activeSection === null ||
       activeSection === IGNORE_SECTION ||
-      activeSection === SHORTCUTS_SECTION
+      activeSection === SHORTCUTS_SECTION ||
+      activeSection === APPS_SECTION
     ) {
       return [];
     }
@@ -205,8 +207,10 @@ function SettingsSheet({
               <div style={hintStyle}>Loading…</div>
             ) : activeSection === IGNORE_SECTION ? (
               <IgnoreRulesSection snapshot={snap} scope={scope} onWrite={writeIgnores} />
+            ) : activeSection === APPS_SECTION ? (
+              <AppsCatalogSection snapshot={snap} />
             ) : activeSection === SHORTCUTS_SECTION ? (
-              <ShortcutsSection initialDraftTarget={initialDraftTarget} />
+              <ShortcutsSection />
             ) : rows.length === 0 ? (
               <div style={hintStyle}>
                 No {scope === 'project' ? 'project-level' : 'global'} settings yet.
@@ -441,22 +445,14 @@ function defaultShortcutLabel(draft: ShortcutDraft): string {
 }
 
 /**
- * Manage the global list of app-launch shortcuts: list, remove, and add. The
- * store is one global list — `onShortcutsChanged` keeps every window in sync.
- * `initialDraftTarget` pre-populates the add form when the section is opened
- * from a row's `+` button in the header.
+ * Manage the legacy shortcuts list — currently scoped to URL and terminal
+ * shortcuts that surface in each panel's tab strip. Folder shortcuts
+ * (Project / Lore) were migrated into the Apps catalog in v0.6 Phase A and
+ * no longer surface here.
  */
-function ShortcutsSection({
-  initialDraftTarget,
-}: {
-  initialDraftTarget?: ShortcutTarget;
-}): JSX.Element {
+function ShortcutsSection(): JSX.Element {
   const [list, setList] = useState<Shortcut[]>([]);
-  const [draft, setDraft] = useState<ShortcutDraft | null>(() =>
-    initialDraftTarget
-      ? { target: initialDraftTarget, app: '', url: '', command: '', labelInput: '' }
-      : null,
-  );
+  const [draft, setDraft] = useState<ShortcutDraft | null>(null);
 
   useEffect(() => {
     void window.cockpit.shortcutsList().then(setList);
@@ -946,5 +942,172 @@ const shortcutAddBtnStyle: React.CSSProperties = {
   color: '#5a9bd4',
   fontSize: '0.76rem',
   fontWeight: 600,
+  cursor: 'pointer',
+};
+
+/**
+ * The Apps catalog editor. Each entry is one row with its label, kind / target
+ * summary, and a remove button. "Add app" opens the [`AppPickerModal`](./AppPickerModal.tsx),
+ * the same modal the first-use flow uses from context menus.
+ */
+function AppsCatalogSection({ snapshot }: { snapshot: SettingsSnapshot }): JSX.Element {
+  const apps = snapshot.global.apps ?? [];
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const persist = (next: AppEntry[]): void => {
+    void window.cockpit.appsSave(next);
+  };
+
+  const removeApp = (id: string): void => {
+    persist(apps.filter((a) => a.id !== id));
+  };
+
+  return (
+    <div style={appsCatalogStyle} data-testid="settings-apps-section">
+      <div style={appsHintStyle}>
+        Apps appear in every file and folder context menu as "Open with…" entries. The "diff" role
+        marks the entry the *Diff against latest save-point* action uses.
+      </div>
+      {apps.length === 0 ? (
+        <div style={appsEmptyStyle}>No apps configured yet.</div>
+      ) : (
+        <ul style={appsListStyle}>
+          {apps.map((app) => (
+            <li key={app.id} style={appRowStyle}>
+              {app.iconUrl ? (
+                <img src={app.iconUrl} alt="" width={20} height={20} style={appIconStyle} />
+              ) : (
+                <span style={appIconPlaceholder}>{app.kind === 'cli' ? '⌘' : '▸'}</span>
+              )}
+              <div style={appLabelColumnStyle}>
+                <span style={appLabelStyle}>{app.label}</span>
+                <span style={appMetaStyle}>{appMetaSummary(app)}</span>
+              </div>
+              <button
+                type="button"
+                style={appRemoveStyle}
+                onClick={() => removeApp(app.id)}
+                data-testid={`app-remove-${app.id}`}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        style={shortcutAddBtnStyle}
+        onClick={() => setPickerOpen(true)}
+        data-testid="apps-add"
+      >
+        Add app
+      </button>
+      {pickerOpen ? (
+        <AppPickerModal
+          initial="open-with"
+          onSave={(entry) => {
+            persist([...apps, entry]);
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function appMetaSummary(app: AppEntry): string {
+  const target =
+    app.target === 'both' ? 'file + folder' : app.target === 'file' ? 'file' : 'folder';
+  if (app.kind === 'app') return `${target} · ${app.appPath ?? ''}`;
+  const argv = app.argvTemplate ?? '';
+  const role = app.role === 'diff' ? ' · diff role' : '';
+  return `${target} · ${app.cliPath ?? ''} ${argv}${role}`;
+}
+
+const appsCatalogStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.6rem',
+};
+
+const appsHintStyle: React.CSSProperties = {
+  fontSize: '0.78rem',
+  color: '#9fb1bd',
+  lineHeight: 1.45,
+};
+
+const appsEmptyStyle: React.CSSProperties = {
+  fontSize: '0.82rem',
+  color: '#7a8590',
+  fontStyle: 'italic',
+};
+
+const appsListStyle: React.CSSProperties = {
+  margin: 0,
+  padding: 0,
+  listStyle: 'none',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.3rem',
+};
+
+const appRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.6rem',
+  padding: '0.45rem 0.6rem',
+  background: '#0c121a',
+  border: '1px solid #1f2933',
+  borderRadius: '5px',
+};
+
+const appIconStyle: React.CSSProperties = {
+  borderRadius: '4px',
+};
+
+const appIconPlaceholder: React.CSSProperties = {
+  width: '20px',
+  height: '20px',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: '#9fb1bd',
+  background: '#1f2933',
+  borderRadius: '4px',
+  fontSize: '0.78rem',
+};
+
+const appLabelColumnStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.1rem',
+  flex: 1,
+  minWidth: 0,
+};
+
+const appLabelStyle: React.CSSProperties = {
+  fontSize: '0.85rem',
+  color: '#dde3ea',
+  fontWeight: 600,
+};
+
+const appMetaStyle: React.CSSProperties = {
+  fontSize: '0.72rem',
+  color: '#7a8590',
+  fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const appRemoveStyle: React.CSSProperties = {
+  background: 'transparent',
+  border: '1px solid #2f3a45',
+  borderRadius: '4px',
+  color: '#9fb1bd',
+  fontSize: '0.74rem',
+  padding: '0.2rem 0.55rem',
   cursor: 'pointer',
 };

@@ -3,6 +3,7 @@
  * per-project) described by a registry. Pure types; no I/O.
  */
 
+import type { AppEntry } from '../apps/apps.js';
 import type { IgnoreRule } from '../ignore.js';
 
 /** Which tier(s) a setting may be stored in. */
@@ -46,6 +47,12 @@ export type SettingsFile = {
   values: Record<string, SettingValue>;
   /** This tier's ignore rules — layered over the lower tiers by pattern. */
   ignores: IgnoreRule[];
+  /**
+   * The Apps catalog — entries the cockpit can invoke on files/folders from
+   * context menus. Persisted in the global tier only; absent elsewhere. See
+   * [apps.ts](../apps/apps.ts).
+   */
+  apps?: AppEntry[];
   /**
    * A project window's workspace layout snapshot, persisted in the per-project
    * tier only. Absent for the global tier. Independent of `schemaVersion` —

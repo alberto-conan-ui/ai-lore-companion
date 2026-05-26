@@ -1,26 +1,30 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  type AppEntry,
   type ChainResult,
-  type ChangeScope,
   DEFAULT_IGNORE_RULES,
-  type DbHandle,
   type DirEvent,
+  type GitStatusScope,
+  type GitStatusTracker,
   type IgnoreLists,
-  type Queue,
   SETTINGS_REGISTRY,
   type TreeNode,
   type WatcherHandle,
+  attachGitStatusTracker,
   attachWatcher,
-  createQueue,
   deriveIgnoreLists,
+  findDiffApp,
   isChainError,
   isIgnoreRule,
   isTreeError,
   isValidValue,
+  latestSavePoint,
   mergeIgnoreRules,
-  openDb,
+  parseAppEntries,
   parseMemoryFileSync,
   parseMemorySections,
   readChain,
@@ -40,6 +44,8 @@ import {
   shell,
 } from 'electron';
 import {
+  type AppsInvokeArg,
+  type AppsInvokeResult,
   type BrowserBounds,
   type BrowserProfile,
   type CockpitApi,
@@ -48,6 +54,8 @@ import {
   type FocusReadArg,
   type FocusReadResult,
   IPC,
+  type OpenDiffArg,
+  type OpenDiffResult,
   type SetRegisterArg,
   type SettingsSetArg,
   type SettingsSetIgnoresArg,
@@ -59,16 +67,18 @@ import {
   type TerminalResizeArg,
   type TreeExpandArg,
 } from '../shared/ipc.js';
+import { appsWithIcons, migrateShortcutsIfNeeded } from './apps.js';
 import { resolveProjectRoot } from './args.js';
 import { loadBrowserProfile, saveBrowserProfile } from './browser-prefs.js';
 import * as browser from './browser.js';
-import { projectDbPath } from './db-path.js';
+import { launchDiff, materialiseBaseline } from './diff.js';
 import { buildAppMenu } from './menu.js';
 import { type PtyService, createPtyService } from './pty.js';
 import { addRecent, clearRecents, loadRecents } from './recents.js';
 import {
   loadGlobalSettings,
   loadProjectSettings,
+  saveGlobalApps,
   saveGlobalIgnores,
   saveGlobalSetting,
   saveProjectIgnores,
@@ -80,9 +90,8 @@ import { launchApp, launchUrl, loadShortcuts, saveShortcuts, withIcons } from '.
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 type Wiring = {
-  dbHandle: DbHandle;
-  queue: Queue;
   watcher: WatcherHandle;
+  gitStatus: GitStatusTracker;
 };
 
 /**
@@ -128,7 +137,7 @@ function contextFor(event: IpcMainEvent | IpcMainInvokeEvent): ProjectContext | 
 }
 
 /** The Lore-folder glob — hidden from the Payload pane, which has its own. */
-function loreHide(chain: ChainResult, scope: ChangeScope): string[] {
+function loreHide(chain: ChainResult, scope: GitStatusScope): string[] {
   return scope === 'payload' && !isChainError(chain) ? [`**/${basename(chain.lorePath)}/**`] : [];
 }
 
@@ -139,7 +148,7 @@ function loreHide(chain: ChainResult, scope: ChangeScope): string[] {
  */
 function treeHideFor(
   chain: ChainResult,
-  scope: ChangeScope,
+  scope: GitStatusScope,
   hidden: readonly string[],
 ): readonly string[] {
   return [...loreHide(chain, scope), ...hidden];
@@ -149,7 +158,7 @@ function treeHideFor(
 function readTreeNode(
   chain: ChainResult,
   absPath: string,
-  scope: ChangeScope,
+  scope: GitStatusScope,
   hidden: readonly string[],
 ): TreeNode {
   const result = readDirectory(absPath, { ignore: treeHideFor(chain, scope, hidden) });
@@ -235,8 +244,13 @@ function createWindow(): BrowserWindow {
 
 /**
  * Build the project context for a window: read the chain, and — when the folder
- * is a valid AI-Lore project — open the DB, queue, and watcher. The PTY service
- * is always created so the window has a terminal regardless of the chain.
+ * is a valid AI-Lore project — attach the watcher + git-status tracker +
+ * tracker-review tracker. The PTY service is always created so the window has
+ * a terminal regardless of the chain.
+ *
+ * v0.6 Phase B replaced the v0.5 SQLite queue with a live `git status`
+ * reader. The watcher is now a debounced *trigger*; it no longer owns
+ * drift state.
  */
 function createProjectContext(win: BrowserWindow, root: string): ProjectContext {
   const chain = readChain({ root });
@@ -254,16 +268,25 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
     const rules = mergeIgnoreRules(globalRules, loadProjectSettings(userDataDir, root).ignores);
     ignoreLists = deriveIgnoreLists(rules);
 
-    const dbHandle = openDb(projectDbPath(userDataDir, root));
-    const queue = createQueue({ db: dbHandle.db });
     const hidden = ignoreLists.hidden;
-    const watcher = attachWatcher(queue, {
+    const loreWorkingTree = join(chain.lorePath, 'memory');
+    const gitStatus = attachGitStatusTracker({
+      payloadRoot: root,
+      loreRoot: loreWorkingTree,
+      onChange: (scope, entries) =>
+        sendToWin(win, IPC.GitStatus, {
+          scope,
+          entries: projectRelativise(scope, entries, root, loreWorkingTree),
+        }),
+    });
+    const watcher = attachWatcher({
       root,
       lorePath: chain.lorePath,
       ignored: ignoreLists.drift,
+      onFileChange: (event) => gitStatus.scheduleRefresh(event.scope),
       onDirEvent: (event) => handleDirEvent(win, chain, hidden, event),
     });
-    wiring = { dbHandle, queue, watcher };
+    wiring = { watcher, gitStatus };
   }
 
   const ptyService = createPtyService({
@@ -275,6 +298,31 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
 
   return { root, chain, wiring, ptyService, ignoreLists };
 }
+
+/**
+ * Re-base porcelain entry paths onto the project root. Porcelain returns
+ * paths relative to each repo's working tree; the renderer expects every
+ * drift path to share one base (the project root) so it can group entries
+ * by pane sub-root. For the Payload scope this is a no-op; for Lore we
+ * prefix `<basename(lorePath)>/memory/` (or whatever `relative(root, …)`
+ * gives back).
+ */
+function projectRelativise(
+  scope: GitStatusScope,
+  entries: readonly { code: string; path: string; oldPath?: string }[],
+  projectRoot: string,
+  loreWorkingTree: string,
+): { code: string; path: string; oldPath?: string }[] {
+  if (scope === 'payload') return [...entries];
+  const prefix = relative(projectRoot, loreWorkingTree);
+  if (!prefix) return [...entries];
+  return entries.map((e) => ({
+    ...e,
+    path: `${prefix}/${e.path}`,
+    ...(e.oldPath ? { oldPath: `${prefix}/${e.oldPath}` } : {}),
+  }));
+}
+
 
 /** Open a welcome window — no project, just Open / Open Recent. */
 function openWelcomeWindow(): BrowserWindow {
@@ -317,7 +365,19 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
     sendToWin(win, IPC.WindowInit, { mode: 'cockpit' });
     sendToWin(win, IPC.Chain, chain);
     if (ctx.wiring) {
-      sendToWin(win, IPC.Restore, ctx.wiring.queue.snapshot());
+      // Seed the renderer with both repos' drift snapshots. Subsequent
+      // updates push from the tracker's `onChange` callback (wired in
+      // `createProjectContext`).
+      const seed = ctx.wiring.gitStatus.snapshot();
+      const loreWorkingTree = join(chain.lorePath, 'memory');
+      sendToWin(win, IPC.GitStatus, {
+        scope: 'payload',
+        entries: projectRelativise('payload', seed.payload, ctx.root, loreWorkingTree),
+      });
+      sendToWin(win, IPC.GitStatus, {
+        scope: 'lore',
+        entries: projectRelativise('lore', seed.lore, ctx.root, loreWorkingTree),
+      });
     }
     sendToWin(win, IPC.TreeInit, {
       payload: readTreeNode(chain, chain.root, 'payload', ctx.ignoreLists.hidden),
@@ -326,11 +386,6 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       lore: readTreeNode(chain, join(chain.lorePath, 'memory'), 'lore', ctx.ignoreLists.hidden),
     });
   });
-
-  if (ctx.wiring) {
-    const off = ctx.wiring.queue.on((event) => sendToWin(win, IPC.Change, event));
-    win.once('closed', off);
-  }
 
   // Re-read the chain on a slow interval so the header reflects status / focus
   // / active-child edits without requiring a window reload. The chain is small
@@ -441,7 +496,10 @@ function broadcastShortcuts(list: Shortcut[]): void {
  * (welcome or altered) has no project tier — `project` is null.
  */
 function settingsSnapshot(ctx: ProjectContext | undefined): SettingsSnapshot {
-  const global = loadGlobalSettings(userDataDir);
+  const rawGlobal = loadGlobalSettings(userDataDir);
+  // Decorate Apps catalog entries with `iconUrl` extracted from `.app`
+  // bundles — the renderer's *Open with* menu shows the real bundle icon.
+  const global = rawGlobal.apps ? { ...rawGlobal, apps: appsWithIcons(rawGlobal.apps) } : rawGlobal;
   const project =
     ctx && !isChainError(ctx.chain) ? loadProjectSettings(userDataDir, ctx.root) : null;
   return {
@@ -482,10 +540,11 @@ function reapplyIgnores(win: BrowserWindow): void {
   // Re-attach the watcher so its drift filter reflects the new rules.
   void wiring.watcher.close().then(() => {
     if (contexts.get(win.id) !== ctx) return;
-    wiring.watcher = attachWatcher(wiring.queue, {
+    wiring.watcher = attachWatcher({
       root: ctx.root,
       lorePath: chain.lorePath,
       ignored: drift,
+      onFileChange: (event) => wiring.gitStatus.scheduleRefresh(event.scope),
       onDirEvent: (event) => handleDirEvent(win, chain, hidden, event),
     });
   });
@@ -498,23 +557,26 @@ function reapplyIgnores(win: BrowserWindow): void {
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.handle(IPC.Ack, (event, id: string): ReturnType<CockpitApi['ack']> => {
-    const ctx = contextFor(event);
-    return Promise.resolve(ctx?.wiring ? ctx.wiring.queue.ack(id) : false);
-  });
-  ipcMain.handle(IPC.AckAll, (event): ReturnType<CockpitApi['ackAll']> => {
-    const ctx = contextFor(event);
-    return Promise.resolve(ctx?.wiring ? ctx.wiring.queue.ackAll() : 0);
-  });
-  ipcMain.handle(
-    IPC.AckAllScope,
-    (event, scope: ChangeScope): ReturnType<CockpitApi['ackAllScope']> => {
-      const ctx = contextFor(event);
-      return Promise.resolve(ctx?.wiring ? ctx.wiring.queue.ackAllScope(scope) : 0);
-    },
-  );
+  // The v0.5 dismiss channels were removed in v0.6 Phase A — see ipc.ts.
   ipcMain.handle(IPC.OpenPath, (_event, path: string): ReturnType<CockpitApi['openPath']> => {
     return shell.openPath(path);
+  });
+  ipcMain.on(IPC.RevealInFinder, (_event, path: string) => {
+    // `showItemInFolder` reveals files (highlights them in their parent). For
+    // folders it would show the *parent* directory, which is the wrong target
+    // — for folders we want Finder to open *into* them. statSync picks the
+    // right form.
+    let isDir = false;
+    try {
+      isDir = statSync(path).isDirectory();
+    } catch {
+      // Path may not exist; fall through to showItemInFolder.
+    }
+    if (isDir) {
+      void shell.openPath(path);
+    } else {
+      shell.showItemInFolder(path);
+    }
   });
   ipcMain.handle(
     IPC.TreeExpand,
@@ -744,9 +806,98 @@ function registerIpcHandlers(): void {
       return { error: `cannot read focus file: ${(err as Error).message}` };
     }
   });
+  ipcMain.handle(IPC.OpenDiff, (event, arg: OpenDiffArg): OpenDiffResult => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) {
+      return { kind: 'failed', message: 'no project context' };
+    }
+    const apps = loadGlobalSettings(userDataDir).apps ?? [];
+    const diff = findDiffApp(apps);
+    if (!diff || !diff.cliPath || !diff.argvTemplate) {
+      return { kind: 'no-cli' };
+    }
+    const cli = diff.cliPath;
+    const template = diff.argvTemplate;
+    const savePoint = latestSavePoint(resolve(ctx.chain.lorePath, 'memory/save-points'));
+    if (!savePoint) {
+      return { kind: 'no-save-point' };
+    }
+    // The queue carries paths relative to the Payload root for both scopes.
+    // Refuse anything that escapes that root.
+    const absFile = isAbsolute(arg.relPath) ? arg.relPath : resolve(ctx.root, arg.relPath);
+    const rootRel = relative(ctx.root, absFile);
+    if (rootRel.startsWith('..') || isAbsolute(rootRel)) {
+      return { kind: 'failed', message: 'path is outside the project' };
+    }
+    // Per-repo working tree + commit. The lore repo's .git/ lives at
+    // <lorePath>/memory/.git/, so its working tree root is <lorePath>/memory/.
+    const workingTreeRoot =
+      arg.scope === 'payload' ? ctx.root : resolve(ctx.chain.lorePath, 'memory');
+    const commit = arg.scope === 'payload' ? savePoint.payloadCommit : savePoint.loreCommit;
+    const gitRelPath = relative(workingTreeRoot, absFile);
+    if (gitRelPath.startsWith('..') || isAbsolute(gitRelPath)) {
+      return { kind: 'failed', message: 'path is outside the repo working tree' };
+    }
+    const materialised = materialiseBaseline({ workingTreeRoot, commit, gitRelPath });
+    if (materialised.kind === 'failed') {
+      return materialised;
+    }
+    const launched = launchDiff({
+      cli,
+      template,
+      baseline: materialised.tempPath,
+      current: absFile,
+    });
+    if (launched.kind === 'failed') {
+      return launched;
+    }
+    return { kind: 'ok', cli };
+  });
+  ipcMain.handle(IPC.AppsSave, (_event, apps: AppEntry[]): SettingsSnapshot => {
+    saveGlobalApps(userDataDir, parseAppEntries(apps));
+    broadcastSettings();
+    return settingsSnapshot(contextFor(_event));
+  });
+  ipcMain.handle(IPC.AppsInvoke, (_event, arg: AppsInvokeArg): AppsInvokeResult => {
+    const apps = loadGlobalSettings(userDataDir).apps ?? [];
+    const app = apps.find((a) => a.id === arg.appId);
+    if (!app) return { kind: 'not-found' };
+    if (app.kind === 'app') {
+      if (!app.appPath) return { kind: 'failed', message: 'app entry missing appPath' };
+      try {
+        // `open -a` is the canonical macOS way to target a specific app; the
+        // path argument is passed as argv, never shell-interpolated.
+        const child = spawn('open', ['-a', app.appPath, arg.path], {
+          detached: true,
+          stdio: 'ignore',
+        });
+        child.unref();
+        return { kind: 'ok' };
+      } catch (err) {
+        return { kind: 'failed', message: `open -a failed: ${(err as Error).message}` };
+      }
+    }
+    // kind === 'cli'
+    if (!app.cliPath || !app.argvTemplate) {
+      return { kind: 'failed', message: 'cli entry missing cliPath or argvTemplate' };
+    }
+    // Single-path template — `{path}` is the one placeholder for non-diff
+    // CLIs. Diff entries do not come through this path.
+    const argv = app.argvTemplate
+      .split(/\s+/)
+      .filter((t) => t.length > 0)
+      .map((t) => (t === '{path}' ? arg.path : t));
+    try {
+      const child = spawn(app.cliPath, argv, { detached: true, stdio: 'ignore' });
+      child.unref();
+      return { kind: 'ok' };
+    } catch (err) {
+      return { kind: 'failed', message: `spawn failed: ${(err as Error).message}` };
+    }
+  });
 }
 
-/** Tear down one window's context — kill its PTYs, close its watcher and DB. */
+/** Tear down one window's context — kill its PTYs, close its watcher + trackers. */
 async function teardownContext(winId: number): Promise<void> {
   // Browser tabs are per-window but live outside ProjectContext — tear them
   // all down regardless of whether a cockpit context was ever built.
@@ -763,7 +914,7 @@ async function teardownContext(winId: number): Promise<void> {
     } catch {
       // Best-effort — chokidar may already be torn down.
     }
-    ctx.wiring.dbHandle.close();
+    ctx.wiring.gitStatus.close();
   }
 }
 
@@ -783,6 +934,9 @@ function openLaunchWindow(): void {
 
 app.whenReady().then(() => {
   userDataDir = app.getPath('userData');
+  // v0.6 Phase A — migrate v0.5 folder shortcuts (project/lore targets) into
+  // the new Apps catalog before any window reads settings. Idempotent.
+  migrateShortcutsIfNeeded(userDataDir);
   registerIpcHandlers();
   rebuildMenu();
 

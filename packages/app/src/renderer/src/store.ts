@@ -1,8 +1,13 @@
-import type { ChangeScope, QueueEntry, TreeNode } from '@ai-lore-companion/core';
+import type {
+  AppEntry,
+  GitStatusScope,
+  PorcelainEntry,
+  TreeNode,
+} from '@ai-lore-companion/core';
 import { create } from 'zustand';
 import type {
   ChainPayload,
-  ChangePayload,
+  GitStatusPayload,
   TreeInitPayload,
   TreeUpdatePayload,
 } from '../../shared/ipc.js';
@@ -16,9 +21,31 @@ export function driftLevel(count: number): DriftLevel {
   return 'alert';
 }
 
-/** The flat entries list narrowed to one side. */
-export function entriesByScope(entries: QueueEntry[], scope: ChangeScope): QueueEntry[] {
-  return entries.filter((e) => e.scope === scope);
+/**
+ * The high-level kind of change a `git status --porcelain` code represents.
+ * Used by the file grid + drift list to pick a glyph and colour without
+ * exposing every porcelain edge case (renames, copies, conflicts).
+ */
+export type DriftKind = 'add' | 'change' | 'unlink';
+
+export function categoriseDriftCode(code: string): DriftKind {
+  // Untracked + index-add → added.
+  if (code[0] === '?' || code[0] === 'A') return 'add';
+  // Either column reporting delete → unlink.
+  if (code[0] === 'D' || code[1] === 'D') return 'unlink';
+  // Everything else (modified, renamed, copied, conflicted) → change.
+  return 'change';
+}
+
+/** The git-drift snapshot, kept per repo. */
+export type GitStatusState = {
+  payload: PorcelainEntry[];
+  lore: PorcelainEntry[];
+};
+
+/** Return one side of the git-drift snapshot. */
+export function entriesByScope(gitStatus: GitStatusState, scope: GitStatusScope): PorcelainEntry[] {
+  return gitStatus[scope];
 }
 
 /** Depth-first search for the node at `path` within `root`. */
@@ -36,41 +63,38 @@ type Trees = { payload: TreeNode | null; lore: TreeNode | null };
 
 type State = {
   chain: ChainPayload | null;
-  entries: QueueEntry[];
+  /**
+   * Live `git status --porcelain` snapshots for both repos. Pushed by main
+   * via [`IPC.GitStatus`](../../shared/ipc.ts) — v0.6 Phase B's git-as-truth
+   * model. Replaces the v0.5 SQLite-queue `entries` + event-reducer model.
+   */
+  gitStatus: GitStatusState;
   trees: Trees;
+  /**
+   * The Apps catalog — what *Open with…* menus offer. Mirrors the snapshot's
+   * `global.apps`. Populated via `settingsGet` on launch and refreshed by the
+   * `onSettingsChanged` subscription.
+   */
+  apps: AppEntry[];
   setChain: (chain: ChainPayload) => void;
-  setEntries: (entries: QueueEntry[]) => void;
-  applyEvent: (event: ChangePayload) => void;
+  applyGitStatus: (payload: GitStatusPayload) => void;
   setTrees: (init: TreeInitPayload) => void;
   applyTreeUpdate: (update: TreeUpdatePayload) => void;
-  expandTree: (scope: ChangeScope, path: string, children: TreeNode[]) => void;
+  expandTree: (scope: GitStatusScope, path: string, children: TreeNode[]) => void;
+  setApps: (apps: AppEntry[]) => void;
 };
 
 export const useCockpitStore = create<State>((set) => ({
   chain: null,
-  entries: [],
+  gitStatus: { payload: [], lore: [] },
   trees: { payload: null, lore: null },
+  apps: [],
+  setApps: (apps) => set({ apps }),
   setChain: (chain) => set({ chain }),
-  setEntries: (entries) => set({ entries: sortNewestFirst(entries) }),
-  applyEvent: (event) =>
-    set((state) => {
-      switch (event.kind) {
-        case 'add':
-          return { entries: [event.entry, ...state.entries] };
-        case 'replace':
-          return {
-            entries: [event.entry, ...state.entries.filter((e) => e.id !== event.replaces)],
-          };
-        case 'ack':
-          return { entries: state.entries.filter((e) => e.id !== event.id) };
-        case 'clear':
-          return {
-            entries: event.scope ? state.entries.filter((e) => e.scope !== event.scope) : [],
-          };
-        default:
-          return state;
-      }
-    }),
+  applyGitStatus: (payload) =>
+    set((state) => ({
+      gitStatus: { ...state.gitStatus, [payload.scope]: payload.entries },
+    })),
   setTrees: (init) => set({ trees: { payload: init.payload, lore: init.lore } }),
   applyTreeUpdate: (update) =>
     set((state) => patchTree(state.trees, update.scope, update.path, update.children)),
@@ -78,14 +102,10 @@ export const useCockpitStore = create<State>((set) => ({
     set((state) => patchTree(state.trees, scope, path, children)),
 }));
 
-function sortNewestFirst(entries: QueueEntry[]): QueueEntry[] {
-  return [...entries].sort((a, b) => b.ts - a.ts);
-}
-
 /** Return a new `trees` with the node at `path` on `scope` given fresh `children`. */
 function patchTree(
   trees: Trees,
-  scope: ChangeScope,
+  scope: GitStatusScope,
   path: string,
   children: TreeNode[],
 ): { trees: Trees } {

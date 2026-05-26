@@ -1,5 +1,11 @@
-import type { QueueEntry } from '@ai-lore-companion/core';
-import type { CellKeyDownEvent, ColDef, ValueGetterParams } from 'ag-grid-community';
+import type { AppEntry, PorcelainEntry, TreeNode } from '@ai-lore-companion/core';
+import type {
+  CellKeyDownEvent,
+  ColDef,
+  GetContextMenuItemsParams,
+  MenuItemDef,
+  ValueGetterParams,
+} from 'ag-grid-community';
 import { AgGridReact } from 'ag-grid-react';
 import {
   type JSX,
@@ -10,31 +16,49 @@ import {
   useRef,
   useState,
 } from 'react';
+import { type DriftKind, categoriseDriftCode } from '../store.js';
+// Importing the theme also evaluates FileGrid.tsx, which registers the AG Grid
+// modules and license — so this grid has them without repeating the setup.
+import { cockpitGridTheme } from './FileGrid.js';
+import { buildNodeContextMenu } from './nodeContextMenu.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the queue. */
 export type PaneQueueHandle = {
   focusMe: () => void;
 };
-// Importing the theme also evaluates FileGrid.tsx, which registers the AG Grid
-// modules and license — so this grid has them without repeating the setup.
-import { cockpitGridTheme } from './FileGrid.js';
+
+/**
+ * One row of the drift list. Wraps a `PorcelainEntry` with the absolute
+ * working-tree path the menu actions need.
+ */
+export type DriftRow = PorcelainEntry & {
+  /** Path relative to the project root — the form `displayPath` consumes. */
+  projectRelPath: string;
+  /** Absolute path — the form context-menu callbacks (revealInFinder, diff, openWith) consume. */
+  absPath: string;
+};
 
 type Props = {
   label: string;
-  entries: QueueEntry[];
-  onRowClick: (entry: QueueEntry) => void;
-  onRowDoubleClick: (entry: QueueEntry) => void;
-  onAck: (id: string) => void;
-  onAckAll: () => void;
-  /** Maps an entry's project-relative path to its tab-relative display path. */
+  entries: DriftRow[];
+  onRowClick: (entry: DriftRow) => void;
+  onRowDoubleClick: (entry: DriftRow) => void;
+  /** Maps a project-relative path to its tab-relative display path. */
   displayPath: (relPath: string) => string;
+  /** The Apps catalog — drives the *Open with* menu entries. */
+  apps: AppEntry[];
+  /** Whether a save-point is recorded — drives the Diff menu item's enabled state. */
+  hasSavePoint: boolean;
+  onOpenWith: (app: AppEntry, node: TreeNode) => void;
+  onRevealInFinder: (node: TreeNode) => void;
+  onDiff: (node: TreeNode) => void;
+  onIgnore: (node: TreeNode) => void;
 };
 
-const TYPE_GLYPH: Record<QueueEntry['type'], { glyph: string; color: string; label: string }> = {
+const KIND_GLYPH: Record<DriftKind, { glyph: string; color: string; label: string }> = {
   add: { glyph: '+', color: '#7fc97f', label: 'added' },
   change: { glyph: '~', color: '#ffb84d', label: 'changed' },
   unlink: { glyph: '−', color: '#ff6b6b', label: 'removed' },
-  'tracker-review': { glyph: '▸', color: '#c599ff', label: 'tracker → Review' },
 };
 
 function basename(p: string): string {
@@ -53,46 +77,54 @@ function firstSegment(p: string): string {
   return i === -1 ? p : p.slice(0, i);
 }
 
-/** A display path's directory, minus its leading location segment. Root-level
- *  files (whose only directory component is the location itself) render as `/`
- *  so they are visually distinct from a blank rendering bug. */
+/** A display path's directory, minus its leading location segment. */
 function folderRest(displayP: string): string {
   const dir = dirname(displayP);
   const i = dir.indexOf('/');
   return i === -1 ? '/' : dir.slice(i + 1);
 }
 
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  const hh = `${d.getHours()}`.padStart(2, '0');
-  const mm = `${d.getMinutes()}`.padStart(2, '0');
-  const ss = `${d.getSeconds()}`.padStart(2, '0');
-  return `${hh}:${mm}:${ss}`;
-}
-
-/** Change-type glyph cell — a React element so AG Grid renders it, not escaped text. */
-function TypeCell(params: { value?: string }): JSX.Element | null {
-  const t = params.value ? TYPE_GLYPH[params.value as QueueEntry['type']] : undefined;
-  if (!t) return null;
+/** Cell renderer for the per-row kind glyph. */
+function KindCell(params: { value?: string }): JSX.Element | null {
+  if (!params.value) return null;
+  const kind = categoriseDriftCode(params.value);
+  const meta = KIND_GLYPH[kind];
   return (
-    <span title={t.label} style={{ color: t.color, fontWeight: 700, fontSize: '0.95rem' }}>
-      {t.glyph}
+    <span title={meta.label} style={{ color: meta.color, fontWeight: 700, fontSize: '0.95rem' }}>
+      {meta.glyph}
     </span>
   );
 }
 
+function nodeForRow(row: DriftRow): TreeNode {
+  return { name: basename(row.projectRelPath), path: row.absPath, isDir: false };
+}
+
 /**
- * The pane's drift queue, rendered on the same AG Grid the file grid uses:
- * sortable columns, column filters, a quick-search box, and a folder-path
- * column. Row click reveals the file, double-click opens it, and ack / ack-all
- * stay on the same callbacks the pane already wires up.
+ * The pane's live drift list — a view of `git status --porcelain` filtered
+ * to this pane's sub-root. Rows reflect what's currently dirty in git;
+ * nothing is persisted in the cockpit (v0.6 Phase B's git-as-truth model).
+ * Right-click surfaces the uniform node context menu (Open in Finder, Open
+ * with…, Diff, Ignore).
  */
 export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
-  { label, entries, onRowClick, onRowDoubleClick, onAck, onAckAll, displayPath }: Props,
+  {
+    label,
+    entries,
+    onRowClick,
+    onRowDoubleClick,
+    displayPath,
+    apps,
+    hasSavePoint,
+    onOpenWith,
+    onRevealInFinder,
+    onDiff,
+    onIgnore,
+  }: Props,
   forwardedRef,
 ): JSX.Element {
   const [quickFilter, setQuickFilter] = useState('');
-  const gridRef = useRef<AgGridReact<QueueEntry>>(null);
+  const gridRef = useRef<AgGridReact<DriftRow>>(null);
 
   useImperativeHandle(forwardedRef, () => ({
     focusMe: () => {
@@ -108,33 +140,29 @@ export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
   }));
 
   // Keyboard activation parity with mouse: `Enter` reveals (single-click),
-  // `⌘+Enter` opens (double-click), `Backspace`/`Delete` acks the focused row.
+  // `⌘+Enter` opens (double-click). No `Backspace` — drift clears on commit
+  // or revert, not from inside the cockpit.
   const onCellKeyDown = useCallback(
-    (e: CellKeyDownEvent<QueueEntry>) => {
+    (e: CellKeyDownEvent<DriftRow>) => {
       const keyEvent = e.event as KeyboardEvent;
       if (!e.data) return;
       if (keyEvent.key === 'Enter') {
         keyEvent.preventDefault();
         if (keyEvent.metaKey) onRowDoubleClick(e.data);
         else onRowClick(e.data);
-        return;
-      }
-      if (keyEvent.key === 'Backspace' || keyEvent.key === 'Delete') {
-        keyEvent.preventDefault();
-        onAck(e.data.id);
       }
     },
-    [onRowClick, onRowDoubleClick, onAck],
+    [onRowClick, onRowDoubleClick],
   );
 
-  const columns = useMemo<ColDef<QueueEntry>[]>(
+  const columns = useMemo<ColDef<DriftRow>[]>(
     () => [
       {
         headerName: '',
-        colId: 'type',
+        colId: 'code',
         width: 56,
-        valueGetter: (p: ValueGetterParams<QueueEntry>) => p.data?.type ?? '',
-        cellRenderer: TypeCell,
+        valueGetter: (p: ValueGetterParams<DriftRow>) => p.data?.code ?? '',
+        cellRenderer: KindCell,
         filter: 'agSetColumnFilter',
         cellStyle: { textAlign: 'center' },
       },
@@ -142,8 +170,8 @@ export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
         colId: 'location',
         headerName: 'Location',
         width: 140,
-        valueGetter: (p: ValueGetterParams<QueueEntry>) =>
-          p.data ? firstSegment(displayPath(p.data.path)) : '',
+        valueGetter: (p: ValueGetterParams<DriftRow>) =>
+          p.data ? firstSegment(displayPath(p.data.projectRelPath)) : '',
         rowGroup: true,
         filter: 'agSetColumnFilter',
       },
@@ -152,8 +180,8 @@ export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
         headerName: 'Name',
         flex: 2,
         minWidth: 160,
-        valueGetter: (p: ValueGetterParams<QueueEntry>) =>
-          p.data ? (p.data.subject ? p.data.subject.title : basename(p.data.path)) : '',
+        valueGetter: (p: ValueGetterParams<DriftRow>) =>
+          p.data ? basename(p.data.projectRelPath) : '',
         filter: 'agTextColumnFilter',
         floatingFilter: true,
       },
@@ -162,52 +190,19 @@ export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
         headerName: 'Folder',
         flex: 3,
         minWidth: 140,
-        valueGetter: (p: ValueGetterParams<QueueEntry>) =>
-          p.data ? folderRest(displayPath(p.data.path)) : '',
+        valueGetter: (p: ValueGetterParams<DriftRow>) =>
+          p.data ? folderRest(displayPath(p.data.projectRelPath)) : '',
         filter: 'agTextColumnFilter',
         floatingFilter: true,
       },
-      {
-        field: 'ts',
-        headerName: 'Time',
-        width: 104,
-        filter: 'agNumberColumnFilter',
-        valueFormatter: (p: { value: number | undefined }) =>
-          p.value === undefined ? '' : formatTime(p.value),
-      },
-      {
-        headerName: '',
-        colId: 'ack',
-        width: 64,
-        sortable: false,
-        filter: false,
-        resizable: false,
-        cellStyle: { textAlign: 'center' },
-        cellRenderer: (p: { data?: QueueEntry }) => {
-          const entry = p.data;
-          if (!entry) return null;
-          return (
-            <button
-              type="button"
-              style={ackBtn}
-              onClick={(e) => {
-                e.stopPropagation();
-                onAck(entry.id);
-              }}
-            >
-              ack
-            </button>
-          );
-        },
-      },
     ],
-    [onAck, displayPath],
+    [displayPath],
   );
 
   return (
     <section style={containerStyle} data-testid={`queue-${label.toLowerCase()}`}>
       <header style={headerStyle}>
-        <span style={labelStyle}>{label} queue</span>
+        <span style={labelStyle}>{label} drift</span>
         <span style={countStyle}>{entries.length}</span>
         <input
           type="search"
@@ -217,23 +212,15 @@ export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
           style={searchStyle}
           data-testid={`queue-search-${label.toLowerCase()}`}
         />
-        <button
-          type="button"
-          onClick={onAckAll}
-          disabled={entries.length === 0}
-          style={{ ...ackAllBtn, ...(entries.length === 0 ? ackAllBtnDisabled : null) }}
-        >
-          Ack all
-        </button>
       </header>
       <div style={gridWrapStyle}>
-        <AgGridReact<QueueEntry>
+        <AgGridReact<DriftRow>
           ref={gridRef}
           theme={cockpitGridTheme}
           rowData={entries}
           columnDefs={columns}
           defaultColDef={{ sortable: true, resizable: true, enableRowGroup: true }}
-          getRowId={(p) => p.data.id}
+          getRowId={(p) => p.data.projectRelPath}
           quickFilterText={quickFilter}
           rowGroupPanelShow="always"
           groupDisplayType="groupRows"
@@ -242,7 +229,22 @@ export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
           animateRows={false}
           headerHeight={28}
           rowHeight={26}
-          overlayNoRowsTemplate="Drift is acked."
+          overlayNoRowsTemplate="No drift."
+          getContextMenuItems={(
+            params: GetContextMenuItemsParams<DriftRow>,
+          ): (MenuItemDef | string)[] => {
+            const row = params.node?.data;
+            if (!row) return [];
+            return buildNodeContextMenu({
+              node: nodeForRow(row),
+              apps,
+              hasSavePoint,
+              onRevealInFinder,
+              onOpenWith,
+              onDiff,
+              onIgnore,
+            });
+          }}
           onRowClicked={(e) => {
             if (e.data) onRowClick(e.data);
           }}
@@ -299,34 +301,6 @@ const searchStyle: React.CSSProperties = {
   borderRadius: '4px',
   color: '#dde3ea',
   fontSize: '0.72rem',
-};
-
-const ackAllBtn: React.CSSProperties = {
-  marginLeft: 'auto',
-  padding: '0.18rem 0.55rem',
-  background: '#3a78c2',
-  color: '#ffffff',
-  border: 'none',
-  borderRadius: '4px',
-  fontSize: '0.72rem',
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const ackAllBtnDisabled: React.CSSProperties = {
-  background: '#2a323a',
-  color: '#7a8590',
-  cursor: 'default',
-};
-
-const ackBtn: React.CSSProperties = {
-  background: 'transparent',
-  border: '1px solid #2f3a45',
-  color: '#aab4be',
-  borderRadius: '4px',
-  padding: '0.1rem 0.45rem',
-  fontSize: '0.7rem',
-  cursor: 'pointer',
 };
 
 const gridWrapStyle: React.CSSProperties = {

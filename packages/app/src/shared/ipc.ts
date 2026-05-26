@@ -1,15 +1,15 @@
 import type {
   Altitude,
+  AppEntry,
   ChainError,
   ChainResult,
-  ChangeScope,
   Commitment,
+  GitStatusScope,
   IgnoreRule,
   MemoryFrontmatter,
   MemorySections,
+  PorcelainEntry,
   Posture,
-  QueueEntry,
-  QueueEvent,
   SettingDef,
   SettingValue,
   SettingsFile,
@@ -17,6 +17,15 @@ import type {
   WorkspaceLayout,
   WriteTier,
 } from '@ai-lore-companion/core';
+
+/**
+ * `ChangeScope` was the v0.5 name for which side of the project a path
+ * belongs to. v0.6 Phase B renamed it to `GitStatusScope` — same values
+ * (`'payload'` / `'lore'`), shorter type. Re-exported here under the legacy
+ * name so the existing renderer + main wiring keeps compiling during the
+ * cutover; new code should use `GitStatusScope` directly.
+ */
+export type ChangeScope = GitStatusScope;
 
 /**
  * Type-only ChainResult discriminator that does not require importing
@@ -40,24 +49,48 @@ export const IPC = {
   WindowInit: 'cockpit:window-init',
   /** Main → renderer: full chain result (sent once on renderer ready). */
   Chain: 'cockpit:chain',
-  /** Main → renderer: persisted entries restored on launch (sent once after Chain). */
-  Restore: 'cockpit:restore',
-  /** Main → renderer: live queue event (add/replace/ack/clear). */
-  Change: 'cockpit:change',
+  /**
+   * Main → renderer: drift snapshot for one repo. Pushed on launch (both
+   * sides) and whenever the debounced [git-status tracker](../../../core/src/git-status/tracker.ts)
+   * sees the snapshot move. Replaces the v0.5 `Restore` + `Change` channels.
+   */
+  GitStatus: 'cockpit:git-status',
 
   /** Main → renderer: per-side root trees (sent once after Restore). */
   TreeInit: 'cockpit:tree-init',
   /** Main → renderer: refreshed children for a directory whose contents changed. */
   TreeUpdate: 'cockpit:tree-update',
 
-  /** Renderer → main: ack a single queue entry by id. */
-  Ack: 'cockpit:ack',
-  /** Renderer → main: ack every queue entry. */
-  AckAll: 'cockpit:ack-all',
-  /** Renderer → main: ack every queue entry on one side. */
-  AckAllScope: 'cockpit:ack-all-scope',
+  // (The v0.5 *Dismiss* / *Dismiss all* channels were removed in v0.6 Phase A.
+  // Drift now persists until the file is committed via the AI session's
+  // ack / save-point verbs, or reverted via git. The companion never
+  // dismisses rows behind git's back.)
+  /**
+   * Renderer → main: open a file's diff against the latest save-point in the
+   * configured external diff app. The diff app is the catalog's `role: 'diff'`
+   * entry; when absent the result kind is `'no-cli'` so the renderer can
+   * prompt the user to add one.
+   */
+  OpenDiff: 'cockpit:open-diff',
+  /**
+   * Renderer → main: replace the global Apps catalog. The renderer sends the
+   * full list — same shape as the catalog editor renders. Returns the new
+   * settings snapshot.
+   */
+  AppsSave: 'cockpit:apps-save',
+  /**
+   * Renderer → main: invoke a catalog app on a path. Dispatches to `open -a`
+   * (`kind: 'app'`) or `spawn(cli, argv)` (`kind: 'cli'` non-diff). Diff
+   * invocations go through `IPC.OpenDiff`, not here.
+   */
+  AppsInvoke: 'cockpit:apps-invoke',
   /** Renderer → main: open a path in the OS default application. */
   OpenPath: 'cockpit:open-path',
+  /**
+   * Renderer → main: reveal a path in Finder. For a folder, opens the folder
+   * in Finder; for a file, opens the parent folder with the file highlighted.
+   */
+  RevealInFinder: 'cockpit:reveal-in-finder',
   /** Renderer → main: read a directory's children on demand. */
   TreeExpand: 'cockpit:tree-expand',
   /** Renderer → main: recursively search file names under the given directories. */
@@ -160,8 +193,8 @@ export const IPC = {
 } as const;
 
 export type ChainPayload = ChainResult;
-export type RestorePayload = QueueEntry[];
-export type ChangePayload = QueueEvent;
+/** Per-scope drift snapshot pushed from main. */
+export type GitStatusPayload = { scope: GitStatusScope; entries: PorcelainEntry[] };
 
 /** A project folder the user has opened — an entry in the recents list. */
 export type RecentProject = { path: string; openedAt: number };
@@ -314,6 +347,42 @@ export function isFocusReadError(result: FocusReadResult): result is { error: st
   return 'error' in result;
 }
 
+/** The renderer's request to open a file's diff against the latest save-point. */
+export type OpenDiffArg = {
+  scope: ChangeScope;
+  /** Path relative to the Payload project root — the same shape queue entries carry. */
+  relPath: string;
+};
+
+/**
+ * Main's response to `IPC.OpenDiff`. The `ok` case fired the configured CLI;
+ * the others explain why the diff did not open and let the renderer act
+ * (fall back to OS-default for `no-cli`, surface a toast for the rest).
+ */
+export type OpenDiffResult =
+  /** The configured external diff CLI was spawned. */
+  | { kind: 'ok'; cli: string }
+  /** No external CLI configured in Settings — renderer may fall back to OS open. */
+  | { kind: 'no-cli' }
+  /** No save-point recorded — there is no baseline to diff against. */
+  | { kind: 'no-save-point' }
+  /** Something failed materialising the baseline or spawning the CLI. */
+  | { kind: 'failed'; message: string };
+
+/** The renderer's request to invoke a catalog app on a node path. */
+export type AppsInvokeArg = {
+  /** The `AppEntry.id` to invoke. */
+  appId: string;
+  /** Absolute path to the file or folder the app should open. */
+  path: string;
+};
+
+/** Main's response to `AppsInvoke`. */
+export type AppsInvokeResult =
+  | { kind: 'ok' }
+  | { kind: 'not-found' }
+  | { kind: 'failed'; message: string };
+
 /**
  * Replace the per-project workspace-layout snapshot — or clear it with `null`.
  * A global-tier window (welcome / altered) silently ignores this.
@@ -325,14 +394,11 @@ export type Unsubscribe = () => void;
 export type CockpitApi = {
   onWindowInit: (handler: (payload: WindowInitPayload) => void) => Unsubscribe;
   onChain: (handler: (chain: ChainPayload) => void) => Unsubscribe;
-  onRestore: (handler: (entries: RestorePayload) => void) => Unsubscribe;
-  onChange: (handler: (event: ChangePayload) => void) => Unsubscribe;
+  onGitStatus: (handler: (payload: GitStatusPayload) => void) => Unsubscribe;
   onTreeInit: (handler: (payload: TreeInitPayload) => void) => Unsubscribe;
   onTreeUpdate: (handler: (payload: TreeUpdatePayload) => void) => Unsubscribe;
-  ack: (id: string) => Promise<boolean>;
-  ackAll: () => Promise<number>;
-  ackAllScope: (scope: ChangeScope) => Promise<number>;
   openPath: (path: string) => Promise<string>;
+  revealInFinder: (path: string) => void;
   treeExpand: (arg: TreeExpandArg) => Promise<TreeNode[]>;
   searchFiles: (arg: FileSearchArg) => Promise<FileSearchHit[]>;
   openProject: (path?: string) => Promise<void>;
@@ -392,6 +458,16 @@ export type CockpitApi = {
    * scope / watch-outs without leaving the cockpit.
    */
   focusRead: (arg: FocusReadArg) => Promise<FocusReadResult>;
+  /**
+   * Open a file's diff against the latest save-point in the configured
+   * external diff app. Resolves to a status union so the renderer can show
+   * the right tooltip / fallback.
+   */
+  openDiff: (arg: OpenDiffArg) => Promise<OpenDiffResult>;
+  /** Replace the global Apps catalog; returns the new settings snapshot. */
+  appsSave: (apps: AppEntry[]) => Promise<SettingsSnapshot>;
+  /** Invoke a catalog app on a node path. */
+  appsInvoke: (arg: AppsInvokeArg) => Promise<AppsInvokeResult>;
 };
 
 declare global {

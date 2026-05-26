@@ -1,25 +1,46 @@
-import { readFileSync } from 'node:fs';
-import { basename, relative, sep } from 'node:path';
+/**
+ * The project's chokidar watcher — emits file-change events the host
+ * subscribes to. v0.6 Phase B simplified the contract: the watcher is now
+ * a *trigger*, not a queue producer. The host drives the [git-status
+ * tracker](../git-status/tracker.ts) and the [tracker-review reader](../tracker-review/tracker-review.ts)
+ * from these events.
+ *
+ * Removed in v0.6 Phase B:
+ *   - The `Queue` parameter and queue pushes.
+ *   - Tracker-transition detection inside the watcher (`classifyTrackerFile`,
+ *     `parseStatus`, `createTransitionDetector`). Tracker-review is now a
+ *     snapshot reader, not a transition log.
+ *   - The `isUntrackedFile` filter on index files. Drift is what `git status`
+ *     reports — if index files are noisy, they should be `.gitignore`'d.
+ *
+ * Phase B of [Companion v0.6](../../../../.ai-lore-ai-lore-companion/memory/action-tree/companion-v0.6/B-drift-is-git.phase.md).
+ */
+
+import { relative, sep } from 'node:path';
 import chokidar from 'chokidar';
-import { isUntrackedFile } from '../ignore.js';
-import type { Queue } from '../queue/queue.js';
-import type { ChangeScope, ChangeType } from '../queue/types.js';
-import { classifyTrackerFile } from '../tracker/classifier.js';
-import { createTransitionDetector } from '../tracker/detector.js';
-import { parseStatus, parseTitle } from '../tracker/parser.js';
+
+/** Which side of the project a path falls on — Payload or Lore. */
+export type WatcherScope = 'payload' | 'lore';
 
 /**
  * A filesystem event that affects the host's tree state. Covers directory
  * add/remove (the listing for the parent gains/loses a folder) and file
  * add/remove (the listing for the containing folder gains/loses a file).
- * Tree events bypass the queue — they drive tree-state updates, not
- * notifications — and reach the host through `onDirEvent`.
+ * Tree events reach the host through `onDirEvent`; file content events
+ * reach it through `onFileChange`.
  */
 export type DirEvent = {
   event: 'add' | 'unlink' | 'addDir' | 'unlinkDir';
   /** Absolute path of the file or directory that was added or removed. */
   absPath: string;
-  scope: ChangeScope;
+  scope: WatcherScope;
+};
+
+/** A file content event. The host typically debounces these into a `git status` re-read. */
+export type FileChangeEvent = {
+  event: 'add' | 'change' | 'unlink';
+  absPath: string;
+  scope: WatcherScope;
 };
 
 export type WatcherOptions = {
@@ -27,8 +48,14 @@ export type WatcherOptions = {
   lorePath: string;
   ignored?: readonly string[];
   /**
-   * Called on every `addDir` / `unlinkDir` event. Optional — when omitted, the
-   * watcher does not subscribe to directory events at all.
+   * Called on every file content event — `add` / `change` / `unlink`. Optional;
+   * a host that only cares about tree-shape updates can leave it out.
+   */
+  onFileChange?: (event: FileChangeEvent) => void;
+  /**
+   * Called on every directory event (`addDir` / `unlinkDir`) and on file
+   * `add` / `unlink` (since those change the parent listing). Optional —
+   * when omitted, the watcher does not subscribe to directory events at all.
    */
   onDirEvent?: (event: DirEvent) => void;
 };
@@ -37,21 +64,11 @@ export type WatcherHandle = {
   close: () => Promise<void>;
 };
 
-export function attachWatcher(queue: Queue, options: WatcherOptions): WatcherHandle {
+export function attachWatcher(options: WatcherOptions): WatcherHandle {
   const { root, lorePath } = options;
-
-  // An older build may have queued index-file drift before such files were
-  // untracked. Prune it on attach so the rule holds for the existing queue,
-  // not just events from here on.
-  for (const entry of queue.snapshot()) {
-    if (isUntrackedFile(basename(entry.path))) queue.ack(entry.id);
-  }
-
-  // The full ignore list is the caller's to assemble — `main` passes the
-  // `drift` list derived from the project's ignore rules (defaults included).
   const ignored = [...(options.ignored ?? [])];
   const loreRel = relative(root, lorePath);
-  const detector = createTransitionDetector();
+  const { onFileChange, onDirEvent } = options;
 
   const watcher = chokidar.watch(root, {
     ignored,
@@ -63,75 +80,27 @@ export function attachWatcher(queue: Queue, options: WatcherOptions): WatcherHan
     },
   });
 
-  const onDirEvent = options.onDirEvent;
-  const handle = (chokidarEvent: 'add' | 'change' | 'unlink', absPath: string): void => {
+  const handleFile = (chokidarEvent: 'add' | 'change' | 'unlink', absPath: string): void => {
     const rel = relative(root, absPath);
     if (!rel || rel.startsWith('..')) return;
     const scope = classifyScope(rel, loreRel);
 
-    // A file appearing or vanishing changes its parent's listing — the host's
-    // tree state needs the same refresh `addDir`/`unlinkDir` triggers. Fires
-    // for every file event including index files; only `change` (content
-    // edit, listing unchanged) skips it.
+    // File adds/removes also shift the parent directory's listing — fire the
+    // dir event so the host can refresh the tree. `change` (content-only
+    // edit) doesn't change the listing, so it skips this.
     if (chokidarEvent !== 'change' && onDirEvent) {
       onDirEvent({ event: chokidarEvent, absPath, scope });
     }
 
-    // AI-Lore index files churn constantly as Memory is reshaped — noise, not
-    // drift. They stay in the tree and search; they just never reach the queue.
-    if (isUntrackedFile(basename(absPath))) return;
-
-    const loreRelPath = scope === 'lore' && loreRel ? relative(lorePath, absPath) : null;
-    const trackerKind = loreRelPath ? classifyTrackerFile(loreRelPath) : null;
-    const ts = Date.now();
-
-    // Non-tracker files (or tracker unlinks) always emit a normal change event.
-    if (!trackerKind) {
-      queue.push({ path: rel, type: chokidarEvent satisfies ChangeType, scope, ts });
-      return;
+    if (onFileChange) {
+      onFileChange({ event: chokidarEvent, absPath, scope });
     }
-    if (chokidarEvent === 'unlink') {
-      detector.forget(absPath);
-      queue.push({ path: rel, type: 'unlink', scope, ts });
-      return;
-    }
-
-    // Tracker file change — try to detect a Status transition.
-    let text: string;
-    try {
-      text = readFileSync(absPath, 'utf8');
-    } catch {
-      // File vanished between event and read; fall back to a normal event.
-      queue.push({ path: rel, type: chokidarEvent, scope, ts });
-      return;
-    }
-
-    const status = parseStatus(text);
-    const result = detector.observe({ key: absPath, status });
-
-    if (result.kind === 'transition') {
-      const title = parseTitle(text) ?? rel;
-      queue.push({
-        path: rel,
-        type: 'tracker-review',
-        scope,
-        ts,
-        subject: { kind: trackerKind, title },
-      });
-      return;
-    }
-
-    queue.push({ path: rel, type: chokidarEvent, scope, ts });
   };
 
-  watcher.on('add', (p) => handle('add', p));
-  watcher.on('change', (p) => handle('change', p));
-  watcher.on('unlink', (p) => handle('unlink', p));
+  watcher.on('add', (p) => handleFile('add', p));
+  watcher.on('change', (p) => handleFile('change', p));
+  watcher.on('unlink', (p) => handleFile('unlink', p));
 
-  // Directory events bypass `handle` (the queue-push path) entirely — they
-  // are tree-state updates, not queue notifications. (File `add`/`unlink`
-  // also drive a tree update — that fires from inside `handle` above,
-  // alongside the queue push.)
   if (onDirEvent) {
     const emitDir = (event: 'addDir' | 'unlinkDir', absPath: string): void => {
       const rel = relative(root, absPath);
@@ -147,7 +116,7 @@ export function attachWatcher(queue: Queue, options: WatcherOptions): WatcherHan
   };
 }
 
-function classifyScope(relPath: string, loreRel: string): ChangeScope {
+function classifyScope(relPath: string, loreRel: string): WatcherScope {
   if (!loreRel) return 'payload';
   const normalized = relPath.split(sep).join('/');
   const lore = loreRel.split(sep).join('/');

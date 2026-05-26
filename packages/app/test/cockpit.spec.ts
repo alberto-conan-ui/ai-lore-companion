@@ -113,46 +113,9 @@ test.describe('window modes', () => {
     }
   });
 
-  test('the action toolbar splits into two labelled rows', async () => {
-    const fixture = makeProject();
-    try {
-      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
-
-      // URL + terminal shortcuts moved to each panel's tab strip as `+ <name>`
-      // creators — the header keeps Project and Lore rows only.
-      await expect(page.getByTestId('actions-row-project')).toBeVisible();
-      await expect(page.getByTestId('actions-row-lore')).toBeVisible();
-      await expect(page.getByTestId('actions-row-other')).toHaveCount(0);
-      // The drift cluster anchors to the right end of the Lore row.
-      await expect(page.getByTestId('actions-row-lore').getByTestId('drift-cluster')).toBeVisible();
-      await expect(page.getByTestId('add-shortcut-project')).toBeVisible();
-      await expect(page.getByTestId('add-shortcut-lore')).toBeVisible();
-
-      await app.close();
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('the default Finder shortcut appears in the Project row', async () => {
-    const fixture = makeProject();
-    try {
-      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
-
-      // Finder is seeded with target='project' → renders in the Project row.
-      const finder = page
-        .getByTestId('actions-row-project')
-        .getByTestId('shortcut-run')
-        .filter({ hasText: 'Finder' });
-      await expect(finder).toBeVisible({ timeout: 5_000 });
-
-      await app.close();
-    } finally {
-      fixture.cleanup();
-    }
-  });
+  // (v0.5 tests for the per-row Project / Lore shortcut surfaces and the
+  // Finder default were removed in v0.6 Phase A — those surfaces no longer
+  // exist; apps live in the per-node context menu via the Apps catalog.)
 
   test('a terminal tab can be renamed by hand', async () => {
     const fixture = makeProject();
@@ -208,11 +171,15 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      // Three deliberate rows + the drift cluster — the Phase G redesign.
+      // v0.6 Phase A reshaped the header down to identity + search. The
+      // shortcut sub-rows and the drift cluster (Pill + Dismiss all) are
+      // gone; per-pane DriftPills + per-file glyphs surface drift where
+      // the user is acting.
       await expect(page.getByTestId('header-identity')).toBeVisible();
       await expect(page.getByTestId('header-search')).toBeVisible();
-      await expect(page.getByTestId('header-actions')).toBeVisible();
-      await expect(page.getByTestId('drift-cluster')).toBeVisible();
+      await expect(page.getByTestId('header-actions')).toHaveCount(0);
+      await expect(page.getByTestId('header-drift')).toHaveCount(0);
+      await expect(page.getByTestId('drift-cluster')).toHaveCount(0);
 
       // The focus and active-child titles are clickable links.
       await expect(page.getByTestId('focus-link')).toHaveText('Demo');
@@ -463,7 +430,7 @@ test.describe('window modes', () => {
       await expect(statusPane).toBeVisible({ timeout: 15_000 });
       // Both folders surface as children of the Status synthetic root.
       // Drift on either is tracked via the existing watcher + queue +
-      // per-row ack — no bespoke UI.
+      // per-row dismiss — no bespoke UI.
       await expect(statusPane).toContainText('save-points', { timeout: 5_000 });
       await expect(statusPane).toContainText('references', { timeout: 5_000 });
       await app.close();
@@ -693,4 +660,86 @@ test.describe('window modes', () => {
       fixture.cleanup();
     }
   });
+
+  // Phase E — ACK revamp + diff viewer. The per-row "ack" became "dismiss"
+  // (no git); the repo-level Ack / Save-point CTAs commit both repos.
+  // These e2e tests focus on the wire-up — the buttons exist, are tied to
+  // the right state, and the sheets open. The full git-commit flow is
+  // covered by unit tests on the materialise + write helpers.
+  // v0.6 Phase A — the header drops its shortcut sub-rows; actions live in
+  // file/folder context menus; drift cluster collapses to a passive count;
+  // Settings gains an Apps section that drives the catalog.
+  test('the header has no shortcut sub-rows, dismiss-all, or global drift cluster (v0.6 Phase A)', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      // The two per-row shortcut surfaces are gone.
+      await expect(page.getByTestId('actions-row-project')).toHaveCount(0);
+      await expect(page.getByTestId('actions-row-lore')).toHaveCount(0);
+      // Dismiss-all is gone — drift is git-truth, no parallel acknowledgement.
+      await expect(page.getByTestId('dismiss-all')).toHaveCount(0);
+      // The global drift cluster is gone too — per-pane DriftPills and
+      // per-file glyphs already surface drift where the user is acting.
+      await expect(page.getByTestId('drift-cluster')).toHaveCount(0);
+      // The repo-level commit buttons live with the AI session, not here.
+      await expect(page.getByTestId('repo-ack')).toHaveCount(0);
+      await expect(page.getByTestId('repo-save-point')).toHaveCount(0);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the Settings sheet exposes an Apps catalog section', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      await openSettingsViaMenu(app);
+      const sheet = page.getByTestId('settings-sheet');
+      await expect(sheet).toBeVisible({ timeout: 5_000 });
+      // The rail has an `Apps` section — click it to open the catalog editor.
+      await sheet.getByRole('button', { name: 'Apps', exact: true }).click();
+      await expect(page.getByTestId('settings-apps-section')).toBeVisible();
+      // Empty catalog state + the Add app button.
+      await expect(page.getByTestId('apps-add')).toBeVisible();
+      // The deprecated v0.5 Diff section is gone — its settings live in the
+      // Apps catalog (entries with role='diff') now.
+      await expect(sheet.getByRole('button', { name: 'Diff', exact: true })).toHaveCount(0);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the App picker modal opens from Settings → Apps → Add app', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      await openSettingsViaMenu(app);
+      const sheet = page.getByTestId('settings-sheet');
+      await expect(sheet).toBeVisible({ timeout: 5_000 });
+      await sheet.getByRole('button', { name: 'Apps', exact: true }).click();
+      await page.getByTestId('apps-add').click();
+
+      const modal = page.getByTestId('app-picker-modal');
+      await expect(modal).toBeVisible();
+      // The preset list is the default surface.
+      await expect(page.getByTestId('app-picker-presets')).toBeVisible();
+      // Custom toggle is always reachable.
+      await expect(page.getByTestId('app-picker-custom-toggle')).toBeVisible();
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
 });

@@ -2,10 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   type BrowserStatePayload,
   type ChainPayload,
-  type ChangePayload,
   type CockpitApi,
+  type GitStatusPayload,
   IPC,
-  type RestorePayload,
   type SettingsSnapshot,
   type Shortcut,
   type ShortcutTerminalPayload,
@@ -28,14 +27,11 @@ function makeSubscribe<T>(channel: string) {
 const api: CockpitApi = {
   onWindowInit: makeSubscribe<WindowInitPayload>(IPC.WindowInit),
   onChain: makeSubscribe<ChainPayload>(IPC.Chain),
-  onRestore: makeSubscribe<RestorePayload>(IPC.Restore),
-  onChange: makeSubscribe<ChangePayload>(IPC.Change),
+  onGitStatus: makeSubscribe<GitStatusPayload>(IPC.GitStatus),
   onTreeInit: makeSubscribe<TreeInitPayload>(IPC.TreeInit),
   onTreeUpdate: makeSubscribe<TreeUpdatePayload>(IPC.TreeUpdate),
-  ack: (id) => ipcRenderer.invoke(IPC.Ack, id),
-  ackAll: () => ipcRenderer.invoke(IPC.AckAll),
-  ackAllScope: (scope) => ipcRenderer.invoke(IPC.AckAllScope, scope),
   openPath: (path) => ipcRenderer.invoke(IPC.OpenPath, path),
+  revealInFinder: (path) => ipcRenderer.send(IPC.RevealInFinder, path),
   treeExpand: (arg) => ipcRenderer.invoke(IPC.TreeExpand, arg),
   searchFiles: (arg) => ipcRenderer.invoke(IPC.FileSearch, arg),
   openProject: (path) => ipcRenderer.invoke(IPC.OpenProject, path),
@@ -79,6 +75,9 @@ const api: CockpitApi = {
   onFocusGlobalSearch: makeSubscribe<void>(IPC.FocusGlobalSearch),
   setRegister: (arg) => ipcRenderer.invoke(IPC.SetRegister, arg),
   focusRead: (arg) => ipcRenderer.invoke(IPC.FocusRead, arg),
+  openDiff: (arg) => ipcRenderer.invoke(IPC.OpenDiff, arg),
+  appsSave: (apps) => ipcRenderer.invoke(IPC.AppsSave, apps),
+  appsInvoke: (arg) => ipcRenderer.invoke(IPC.AppsInvoke, arg),
 };
 
 contextBridge.exposeInMainWorld('cockpit', api);

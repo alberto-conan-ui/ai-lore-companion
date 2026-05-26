@@ -5,6 +5,7 @@
  * module is Electron-free and fully unit-tested.
  */
 
+import { type AppEntry, parseAppEntries } from '../apps/apps.js';
 import { type IgnoreRule, isIgnoreRule } from '../ignore.js';
 import type {
   LayoutPanel,
@@ -50,11 +51,27 @@ export const SETTINGS_REGISTRY: readonly SettingDef[] = [
     tier: 'global',
     default: true,
   },
+  // (The v0.5 `diff.externalCliPath` / `diff.externalArgvTemplate` settings
+  // were replaced in v0.6 Phase A by an entry in the Apps catalog with
+  // `role: 'diff'`. The catalog is the single source of "what app opens
+  // what" — there is no parallel diff-only setting.)
 ];
 
 /** A fresh, empty settings file at the current schema version. */
 export function emptySettingsFile(): SettingsFile {
   return { schemaVersion: SETTINGS_SCHEMA_VERSION, values: {}, ignores: [] };
+}
+
+/** A new settings file carrying `apps` as its catalog — the input is not mutated. */
+export function withApps(file: SettingsFile, apps: readonly AppEntry[]): SettingsFile {
+  const next: SettingsFile = {
+    schemaVersion: file.schemaVersion,
+    values: file.values,
+    ignores: file.ignores,
+    apps: [...apps],
+  };
+  if (file.layout) next.layout = file.layout;
+  return next;
 }
 
 /** Whether a raw value is shaped like a `LayoutTab`. Unknown fields are tolerated. */
@@ -155,8 +172,10 @@ export function parseSettingsFile(text: string | null): SettingsFile {
     }
   }
   const ignores: IgnoreRule[] = Array.isArray(obj.ignores) ? obj.ignores.filter(isIgnoreRule) : [];
+  const apps: AppEntry[] = parseAppEntries(obj.apps);
   const layout = parseWorkspaceLayout(obj.layout);
   const file: SettingsFile = { schemaVersion: version, values, ignores };
+  if (apps.length > 0) file.apps = apps;
   if (layout) file.layout = layout;
   return file;
 }
@@ -173,6 +192,7 @@ export function withSetting(file: SettingsFile, key: string, value: SettingValue
     values: { ...file.values, [key]: value },
     ignores: file.ignores,
   };
+  if (file.apps) next.apps = file.apps;
   if (file.layout) next.layout = file.layout;
   return next;
 }
@@ -184,6 +204,7 @@ export function withIgnores(file: SettingsFile, rules: readonly IgnoreRule[]): S
     values: file.values,
     ignores: [...rules],
   };
+  if (file.apps) next.apps = file.apps;
   if (file.layout) next.layout = file.layout;
   return next;
 }
@@ -198,6 +219,7 @@ export function withLayout(file: SettingsFile, layout: WorkspaceLayout | null): 
     values: file.values,
     ignores: file.ignores,
   };
+  if (file.apps) next.apps = file.apps;
   if (layout) next.layout = layout;
   return next;
 }

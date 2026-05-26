@@ -14,9 +14,14 @@ import type {
 export type Queue = {
   snapshot(): QueueEntry[];
   push(input: QueuePushInput): QueueEntry;
-  ack(id: string): boolean;
-  ackAll(): number;
-  ackAllScope(scope: ChangeScope): number;
+  /**
+   * Remove a single drift entry — the per-row dismiss. Distinct from a
+   * repo-level ack, which commits both repos. See
+   * [Phase E](../../../../.ai-lore-ai-lore-companion/memory/action-tree/companion-v0.5/E-ack-and-diff.phase.md).
+   */
+  dismiss(id: string): boolean;
+  dismissAll(): number;
+  dismissAllScope(scope: ChangeScope): number;
   on(listener: QueueListener): () => void;
 };
 
@@ -87,21 +92,21 @@ export function createQueue({ db }: { db: CockpitDb }): Queue {
     return entry;
   };
 
-  const ack = (id: string): boolean => {
+  const dismiss = (id: string): boolean => {
     const result = db.delete(queueEntries).where(eq(queueEntries.id, id)).run();
     const removed = result.changes > 0;
-    if (removed) emit({ kind: 'ack', id });
+    if (removed) emit({ kind: 'dismiss', id });
     return removed;
   };
 
-  const ackAll = (): number => {
+  const dismissAll = (): number => {
     const result = db.delete(queueEntries).run();
     const removed = result.changes;
     if (removed > 0) emit({ kind: 'clear' });
     return removed;
   };
 
-  const ackAllScope = (scope: ChangeScope): number => {
+  const dismissAllScope = (scope: ChangeScope): number => {
     const result = db.delete(queueEntries).where(eq(queueEntries.scope, scope)).run();
     const removed = result.changes;
     if (removed > 0) emit({ kind: 'clear', scope });
@@ -113,7 +118,7 @@ export function createQueue({ db }: { db: CockpitDb }): Queue {
     return () => listeners.delete(listener);
   };
 
-  return { snapshot, push, ack, ackAll, ackAllScope, on };
+  return { snapshot, push, dismiss, dismissAll, dismissAllScope, on };
 }
 
 function toEntry(row: typeof queueEntries.$inferSelect): QueueEntry {

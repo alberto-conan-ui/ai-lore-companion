@@ -42,14 +42,14 @@ test('queue entries survive across process-like restart', () => {
   }
 });
 
-test('ack persists across restart — removed entries do not come back', () => {
+test('dismiss persists across restart — removed entries do not come back', () => {
   const { path, cleanup } = makeTempDbPath();
   try {
     const first = openDb(path);
     const q1 = createQueue({ db: first.db });
     const a = q1.push({ path: 'src/a.ts', type: 'add', scope: 'payload' });
     q1.push({ path: 'src/b.ts', type: 'add', scope: 'payload' });
-    q1.ack(a.id);
+    q1.dismiss(a.id);
     first.close();
 
     const second = openDb(path);

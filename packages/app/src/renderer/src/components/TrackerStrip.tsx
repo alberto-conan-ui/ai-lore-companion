@@ -1,23 +1,14 @@
 import { type JSX, type ReactNode, useEffect, useState } from 'react';
-import {
-  type SettingsSnapshot,
-  type ShortcutTarget,
-  isChainErrorPayload,
-} from '../../../shared/ipc.js';
+import { type SettingsSnapshot, isChainErrorPayload } from '../../../shared/ipc.js';
 import { accentColor, accentTint, hueFor, projectName } from '../projectAccent.js';
-import { driftLevel, useCockpitStore } from '../store.js';
-import { ACTION_BUTTON_HEIGHT } from './ActionButton.js';
-import { DriftPill } from './DriftPill.js';
+import { useCockpitStore } from '../store.js';
 import { FocusView } from './FocusView.js';
 import { RegisterChips } from './RegisterChips.js';
 import { SettingsSheetModal, type SettingsSheetSection } from './SettingsSheet.js';
-import { ShortcutButtons } from './ShortcutButtons.js';
 
 /** `search` is the global file-search, slotted into the dedicated search row. */
 export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
   const chain = useCockpitStore((s) => s.chain);
-  const count = useCockpitStore((s) => s.entries.length);
-  const level = driftLevel(count);
 
   // The header accent is a global / per-project setting — reflect it live.
   const [showAccent, setShowAccent] = useState(true);
@@ -35,17 +26,13 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
   const [settingsSection, setSettingsSection] = useState<SettingsSheetSection | undefined>(
     undefined,
   );
-  /** Pre-populates the add-shortcut form when Settings opens via a row's `+`. */
-  const [draftTarget, setDraftTarget] = useState<ShortcutTarget | undefined>(undefined);
   const settingsOpen = settingsSection !== undefined;
   const closeSettings = (): void => {
     setSettingsSection(undefined);
-    setDraftTarget(undefined);
   };
 
   useEffect(() => {
     return window.cockpit.onSettingsOpen(() => {
-      setDraftTarget(undefined);
       setSettingsSection(null);
     });
   }, []);
@@ -53,11 +40,6 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
   // The in-app focus view — opened by the small toggle button next to the
   // active-child title, closed by Escape or backdrop click.
   const [focusViewPath, setFocusViewPath] = useState<string | null>(null);
-
-  const addShortcutFor = (target: ShortcutTarget): void => {
-    setDraftTarget(target);
-    setSettingsSection('shortcuts');
-  };
 
   if (!chain || isChainErrorPayload(chain)) {
     return (
@@ -135,31 +117,16 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
           {search}
         </div>
       ) : null}
-      <div style={actionsBlockStyle} data-testid="header-actions">
-        <div style={actionsSubRowStyle} data-testid="actions-row-project">
-          <span style={rowLabelStyle}>Project</span>
-          <ShortcutButtons row="project" />
-          <AddShortcutButton
-            testId="add-shortcut-project"
-            onClick={() => addShortcutFor('project')}
-          />
-        </div>
-        <div style={actionsSubRowStyle} data-testid="actions-row-lore">
-          <span style={rowLabelStyle}>Lore</span>
-          <ShortcutButtons row="lore" />
-          <AddShortcutButton testId="add-shortcut-lore" onClick={() => addShortcutFor('lore')} />
-          <div style={driftClusterStyle} data-testid="drift-cluster">
-            <DriftPill level={level} count={count} />
-            <AckAllButton disabled={count === 0} />
-          </div>
-        </div>
-      </div>
+      {/*
+        v0.6 Phase A: the per-folder *Project* and *Lore* shortcut sub-rows
+        were removed. Their concept moved into every file/folder context
+        menu via the Apps catalog. The global drift cluster (Pill + Dismiss
+        all) was removed in the same phase — the per-pane DriftPills and
+        per-file glyphs already show drift where the user is acting; a
+        passive global count adds nothing without a paired action.
+      */}
       {settingsOpen ? (
-        <SettingsSheetModal
-          onClose={closeSettings}
-          initialSection={settingsSection}
-          initialDraftTarget={draftTarget}
-        />
+        <SettingsSheetModal onClose={closeSettings} initialSection={settingsSection} />
       ) : null}
       {focusViewPath ? (
         <FocusView path={focusViewPath} onClose={() => setFocusViewPath(null)} />
@@ -216,60 +183,9 @@ function ChainLink({
   );
 }
 
-/** A compact `+` button that sits at the end of each shortcut row. Click
- *  opens the Settings sheet on the Shortcuts section with an add-shortcut
- *  draft pre-targeted at the row's target. */
-function AddShortcutButton({
-  onClick,
-  testId,
-}: {
-  onClick: () => void;
-  testId: string;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      data-testid={testId}
-      title="Add shortcut"
-      onClick={onClick}
-      style={addShortcutStyle}
-    >
-      +
-    </button>
-  );
-}
-
-/**
- * `Ack all` is the action half of the drift cluster — filled blue CTA when
- * there is drift, dimmed when none. Its height matches the action buttons so
- * the toolbar reads as one bar.
- */
-function AckAllButton({ disabled }: { disabled: boolean }): JSX.Element {
-  return (
-    <button
-      type="button"
-      disabled={disabled}
-      data-testid="ack-all"
-      onClick={() => {
-        void window.cockpit.ackAll();
-      }}
-      style={{
-        height: ACTION_BUTTON_HEIGHT,
-        padding: '0 0.75rem',
-        background: disabled ? '#2a323a' : '#3a78c2',
-        color: disabled ? '#7a8590' : '#ffffff',
-        border: 'none',
-        borderRadius: '5px',
-        fontSize: '0.78rem',
-        fontWeight: 600,
-        lineHeight: 1,
-        cursor: disabled ? 'default' : 'pointer',
-      }}
-    >
-      Ack all
-    </button>
-  );
-}
+// `AddShortcutButton` and `DismissAllButton` were removed in v0.6 Phase A —
+// shortcuts moved into the Apps catalog + per-node context menus, and dismiss
+// has no meaning in the git-as-truth model.
 
 const stripStyle: React.CSSProperties = {
   display: 'flex',
@@ -295,56 +211,11 @@ const searchRowStyle: React.CSSProperties = {
 
 /** Row 3 — the action toolbar. Two sub-rows stacked vertically: the project
  *  row (folder shortcuts) on top, the other row (URL + terminal + drift
- *  cluster) below. Both wrap horizontally on overflow. Each row carries a
- *  min-height so an empty group still reserves space and the header layout
- *  stays stable. */
-const actionsBlockStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.4rem',
-};
-
-const actionsSubRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  flexWrap: 'wrap',
-  gap: '0.5rem',
-  minHeight: '1.85rem',
-};
-
-/** The left-aligned row label that names what each sub-row opens —
- *  "Project" / "Payload" / "Other". Sits at a fixed width so the buttons
- *  line up vertically across rows. */
-const rowLabelStyle: React.CSSProperties = {
-  width: '4.5rem',
-  flexShrink: 0,
-  fontSize: '0.72rem',
-  fontWeight: 600,
-  letterSpacing: '0.06em',
-  textTransform: 'uppercase',
-  color: '#6c7783',
-};
-
-const addShortcutStyle: React.CSSProperties = {
-  width: ACTION_BUTTON_HEIGHT,
-  height: ACTION_BUTTON_HEIGHT,
-  background: 'transparent',
-  color: '#6c7783',
-  border: '1px dashed #2f3a45',
-  borderRadius: '5px',
-  fontSize: '1rem',
-  fontWeight: 600,
-  lineHeight: 1,
-  cursor: 'pointer',
-};
-
-/** DriftPill + Ack all read as one unit — sit adjacent, separator-free. */
-const driftClusterStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: '0.4rem',
-  marginLeft: 'auto',
-};
+ *  cluster) below. Both wrap horizontally on overflow. */
+// (v0.5 actionsBlockStyle / actionsSubRowStyle / rowLabelStyle / addShortcutStyle
+// and the v0.6-introduced driftRowStyle / driftClusterStyle were all removed in
+// v0.6 Phase A. Drift surfaces live per-pane / per-file now; the header carries
+// only identity + search.)
 
 const projectNameStyle: React.CSSProperties = {
   fontWeight: 800,

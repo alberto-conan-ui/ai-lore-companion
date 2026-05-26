@@ -17,7 +17,7 @@ export const ACTION_BUTTON_HEIGHT = '1.85rem';
 /**
  * The uniform action button used across the cockpit header toolbar — Settings,
  * Shortcuts, Finder. One height, one padding, one border colour, one font
- * weight. The drift cluster (DriftPill + Ack all) matches its height but keeps
+ * weight. The drift cluster (DriftPill + Dismiss all) matches its height but keeps
  * its own visual identity, by design.
  */
 export function ActionButton({ icon, label, onClick, title, testId }: Props): JSX.Element {

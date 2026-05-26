@@ -64,12 +64,12 @@ type WindowMode = 'loading' | 'welcome' | 'cockpit' | 'altered';
 
 export function App(): JSX.Element {
   const setChain = useCockpitStore((s) => s.setChain);
-  const setEntries = useCockpitStore((s) => s.setEntries);
-  const applyEvent = useCockpitStore((s) => s.applyEvent);
+  const applyGitStatus = useCockpitStore((s) => s.applyGitStatus);
   const setTrees = useCockpitStore((s) => s.setTrees);
   const applyTreeUpdate = useCockpitStore((s) => s.applyTreeUpdate);
+  const setApps = useCockpitStore((s) => s.setApps);
   const chain = useCockpitStore((s) => s.chain);
-  const entries = useCockpitStore((s) => s.entries);
+  const gitStatus = useCockpitStore((s) => s.gitStatus);
 
   const [mode, setMode] = useState<WindowMode>('loading');
   const [recents, setRecents] = useState<RecentProject[]>([]);
@@ -167,16 +167,18 @@ export function App(): JSX.Element {
   // Every directory the global search walks — the union of all panes' roots.
   const searchDirs = useMemo(() => paneSpecs.flatMap((p) => baseDirsOf(p.subRoot)), [paneSpecs]);
 
-  // Unacked-drift counts per pinned tab — shown as a badge on the tab strip.
+  // Drift counts per pinned tab — shown as a badge on the tab strip. Sourced
+  // from the per-scope git-status snapshot (v0.6 Phase B); filtered to each
+  // pane's sub-root.
   const tabDrift = useMemo(() => {
     const out: Record<string, number> = {};
     if (chain && !isChainErrorPayload(chain)) {
       for (const p of paneSpecs) {
-        out[p.id] = entriesInSubRoot(entries, p.scope, p.subRoot, chain.root).length;
+        out[p.id] = entriesInSubRoot(gitStatus[p.scope], p.subRoot, chain.root).length;
       }
     }
     return out;
-  }, [paneSpecs, entries, chain]);
+  }, [paneSpecs, gitStatus, chain]);
 
   useEffect(() => {
     return window.cockpit.onWindowInit((payload) => {
@@ -194,18 +196,23 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const offChain = window.cockpit.onChain(setChain);
-    const offRestore = window.cockpit.onRestore(setEntries);
-    const offChange = window.cockpit.onChange(applyEvent);
+    const offGitStatus = window.cockpit.onGitStatus(applyGitStatus);
     const offTreeInit = window.cockpit.onTreeInit(setTrees);
     const offTreeUpdate = window.cockpit.onTreeUpdate(applyTreeUpdate);
+    // Hydrate the Apps catalog from the global settings tier — context menus
+    // need it. Re-pull on every SettingsChanged push so adds/removes are live.
+    void window.cockpit.settingsGet().then((snap) => setApps(snap.global.apps ?? []));
+    const offSettings = window.cockpit.onSettingsChanged((snap) =>
+      setApps(snap.global.apps ?? []),
+    );
     return () => {
       offChain();
-      offRestore();
-      offChange();
+      offGitStatus();
       offTreeInit();
       offTreeUpdate();
+      offSettings();
     };
-  }, [setChain, setEntries, applyEvent, setTrees, applyTreeUpdate]);
+  }, [setChain, applyGitStatus, setTrees, applyTreeUpdate, setApps]);
 
   const globalSearchRef = useRef<GlobalSearchHandle>(null);
 

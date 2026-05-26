@@ -27,7 +27,12 @@ export type QueuePushInput = {
 export type QueueEvent =
   | { kind: 'add'; entry: QueueEntry }
   | { kind: 'replace'; entry: QueueEntry; replaces: string }
-  | { kind: 'ack'; id: string }
+  /**
+   * A single drift entry was dismissed — the row was removed from the queue
+   * without touching git. Distinct from a repo-level ack ([`ack`](../../../../.ai-lore-ai-lore-companion/process/verbs/ack.md))
+   * which commits both repos.
+   */
+  | { kind: 'dismiss'; id: string }
   /** `scope` set → only that side was cleared; absent → the whole queue. */
   | { kind: 'clear'; scope?: ChangeScope };
 
