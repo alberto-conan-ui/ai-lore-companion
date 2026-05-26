@@ -79,6 +79,7 @@ const api: CockpitApi = {
   onFocusGlobalSearch: makeSubscribe<void>(IPC.FocusGlobalSearch),
   setRegister: (arg) => ipcRenderer.invoke(IPC.SetRegister, arg),
   focusRead: (arg) => ipcRenderer.invoke(IPC.FocusRead, arg),
+  memoryListDir: (arg) => ipcRenderer.invoke(IPC.MemoryListDir, arg),
 };
 
 contextBridge.exposeInMainWorld('cockpit', api);

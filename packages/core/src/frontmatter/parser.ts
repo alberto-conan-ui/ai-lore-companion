@@ -21,6 +21,7 @@ const KNOWN_TYPES: ReadonlySet<MemoryFileType> = new Set<MemoryFileType>([
   'kt-node',
   'save-point',
   'index',
+  'reference',
 ]);
 
 /**
@@ -271,6 +272,21 @@ function assembleByType(
     }
     case 'index':
       return { frontmatter: { ...common, type: 'index' } };
+    case 'reference': {
+      const target_path = raw.target_path;
+      const purpose = raw.purpose;
+      const scope = raw.scope;
+      if (!isString(target_path)) {
+        return { warning: 'reference frontmatter missing `target_path` (string)' };
+      }
+      if (!isString(purpose)) {
+        return { warning: 'reference frontmatter missing `purpose` (string)' };
+      }
+      if (!isString(scope)) return { warning: 'reference frontmatter missing `scope` (string)' };
+      return {
+        frontmatter: { ...common, type: 'reference', target_path, purpose, scope },
+      };
+    }
   }
 }
 

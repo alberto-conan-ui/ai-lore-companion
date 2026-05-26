@@ -5,6 +5,7 @@ import type {
   ChangeScope,
   Commitment,
   IgnoreRule,
+  MemoryEntry,
   MemoryFrontmatter,
   MemorySections,
   Posture,
@@ -157,6 +158,14 @@ export const IPC = {
    * source. The path is validated to live inside this window's project.
    */
   FocusRead: 'cockpit:focus-read',
+
+  /**
+   * Renderer → main: list the parsed `.md` entries under a lore-relative
+   * directory — the data source for the save-points, references, and
+   * blueprint views. The relative path is validated to live inside this
+   * window's lore folder.
+   */
+  MemoryListDir: 'cockpit:memory-list-dir',
 } as const;
 
 export type ChainPayload = ChainResult;
@@ -315,6 +324,23 @@ export function isFocusReadError(result: FocusReadResult): result is { error: st
 }
 
 /**
+ * Request to list a lore-relative directory's `.md` entries — e.g.
+ * `'memory/save-points'`, `'references'`, `'memory/blueprint/contracts'`.
+ * The path is relative to the project's lore folder (`<lore>/`).
+ */
+export type MemoryListDirArg = { relPath: string };
+
+/**
+ * Listing of `.md` entries — empty when the folder is absent or has none.
+ * `MemoryEntry` comes from core and carries `{ path, name, frontmatter, body }`.
+ */
+export type MemoryListDirResult = { entries: MemoryEntry[] } | { error: string };
+
+export function isMemoryListDirError(result: MemoryListDirResult): result is { error: string } {
+  return 'error' in result;
+}
+
+/**
  * Replace the per-project workspace-layout snapshot — or clear it with `null`.
  * A global-tier window (welcome / altered) silently ignores this.
  */
@@ -392,6 +418,11 @@ export type CockpitApi = {
    * scope / watch-outs without leaving the cockpit.
    */
   focusRead: (arg: FocusReadArg) => Promise<FocusReadResult>;
+  /**
+   * List the parsed `.md` entries in a lore-relative directory. Used by
+   * the save-points, references, and blueprint views.
+   */
+  memoryListDir: (arg: MemoryListDirArg) => Promise<MemoryListDirResult>;
 };
 
 declare global {

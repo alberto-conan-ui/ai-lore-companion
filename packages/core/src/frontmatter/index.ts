@@ -1,3 +1,4 @@
+export { listMemoryDir, type MemoryEntry } from './listing.js';
 export { parseMemoryFile, parseMemoryFileSync } from './parser.js';
 export { findSection, type MemorySections, parseMemorySections } from './sections.js';
 export { updateFrontmatterField, updateFrontmatterFieldInFile } from './writer.js';
@@ -21,6 +22,7 @@ export type {
   MemoryFrontmatter,
   ParsedMemoryFile,
   Posture,
+  ReferenceFrontmatter,
   ReferenceLink,
   SavePointFrontmatter,
   StatusFrontmatter,

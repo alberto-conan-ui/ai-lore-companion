@@ -11,6 +11,8 @@ export type {
 
 export {
   findSection,
+  listMemoryDir,
+  type MemoryEntry,
   type MemorySections,
   parseMemoryFile,
   parseMemoryFileSync,
@@ -38,6 +40,7 @@ export type {
   MemoryFrontmatter,
   ParsedMemoryFile,
   Posture,
+  ReferenceFrontmatter,
   ReferenceLink,
   SavePointFrontmatter,
   StatusFrontmatter,

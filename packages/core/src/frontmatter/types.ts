@@ -14,7 +14,8 @@ export type MemoryFileType =
   | 'blueprint'
   | 'kt-node'
   | 'save-point'
-  | 'index';
+  | 'index'
+  | 'reference';
 
 export type Posture = 'chat' | 'plan' | 'reshape' | 'execute';
 export type Altitude = 'low' | 'mid' | 'high';
@@ -104,6 +105,16 @@ export type IndexFrontmatter = CommonFrontmatter & {
   type: 'index';
 };
 
+export type ReferenceFrontmatter = CommonFrontmatter & {
+  type: 'reference';
+  /** On-disk path to the referenced project (relative or absolute). */
+  target_path: string;
+  /** One-line statement of why this project is referenced. */
+  purpose: string;
+  /** What part of the referenced project matters (all, an area, a module). */
+  scope: string;
+};
+
 export type MemoryFrontmatter =
   | StatusFrontmatter
   | FocusFrontmatter
@@ -112,7 +123,8 @@ export type MemoryFrontmatter =
   | BlueprintFrontmatter
   | KTNodeFrontmatter
   | SavePointFrontmatter
-  | IndexFrontmatter;
+  | IndexFrontmatter
+  | ReferenceFrontmatter;
 
 /** Result of parsing a Memory file. Frontmatter is null when absent or malformed. */
 export type ParsedMemoryFile = {
