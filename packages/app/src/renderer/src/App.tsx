@@ -128,7 +128,18 @@ export function App(): JSX.Element {
           kind: 'synthetic',
           id: 'synthetic:status',
           name: 'Status',
-          childPaths: [`${mem}/status`, `${mem}/journal`, `${mem}/action-tree`],
+          // v0.5 brings two more first-class areas into the Status grouping:
+          // `memory/save-points/` (the milestone ledger) and `references/`
+          // (the optional cross-project pointer registry — note: lives at
+          // `<lore>/references/`, outside `memory/`). Drift on either is
+          // covered by the existing watcher + queue + per-row ack.
+          childPaths: [
+            `${mem}/status`,
+            `${mem}/journal`,
+            `${mem}/action-tree`,
+            `${mem}/save-points`,
+            `${chain.lorePath}/references`,
+          ],
         },
       },
       {

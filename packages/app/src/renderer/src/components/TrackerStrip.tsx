@@ -9,7 +9,6 @@ import { driftLevel, useCockpitStore } from '../store.js';
 import { ACTION_BUTTON_HEIGHT } from './ActionButton.js';
 import { DriftPill } from './DriftPill.js';
 import { FocusView } from './FocusView.js';
-import { BlueprintView, ReferencesView, SavePointsView } from './MemoryAreaViews.js';
 import { RegisterChips } from './RegisterChips.js';
 import { SettingsSheetModal, type SettingsSheetSection } from './SettingsSheet.js';
 import { ShortcutButtons } from './ShortcutButtons.js';
@@ -54,10 +53,6 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
   // The in-app focus view — opened by the small toggle button next to the
   // active-child title, closed by Escape or backdrop click.
   const [focusViewPath, setFocusViewPath] = useState<string | null>(null);
-
-  // First-class v0.5 areas — save-points, references, blueprint.
-  type AreaModal = 'save-points' | 'references' | 'blueprint' | null;
-  const [areaModal, setAreaModal] = useState<AreaModal>(null);
 
   const addShortcutFor = (target: ShortcutTarget): void => {
     setDraftTarget(target);
@@ -134,32 +129,6 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
             ▾
           </button>
         ) : null}
-        <span style={areaButtonsStyle} data-testid="area-buttons">
-          <button
-            type="button"
-            data-testid="area-button-save-points"
-            onClick={() => setAreaModal('save-points')}
-            style={areaButtonStyle}
-          >
-            Save-points
-          </button>
-          <button
-            type="button"
-            data-testid="area-button-references"
-            onClick={() => setAreaModal('references')}
-            style={areaButtonStyle}
-          >
-            References
-          </button>
-          <button
-            type="button"
-            data-testid="area-button-blueprint"
-            onClick={() => setAreaModal('blueprint')}
-            style={areaButtonStyle}
-          >
-            Blueprint
-          </button>
-        </span>
       </div>
       {search ? (
         <div style={searchRowStyle} data-testid="header-search">
@@ -195,9 +164,6 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
       {focusViewPath ? (
         <FocusView path={focusViewPath} onClose={() => setFocusViewPath(null)} />
       ) : null}
-      {areaModal === 'save-points' ? <SavePointsView onClose={() => setAreaModal(null)} /> : null}
-      {areaModal === 'references' ? <ReferencesView onClose={() => setAreaModal(null)} /> : null}
-      {areaModal === 'blueprint' ? <BlueprintView onClose={() => setAreaModal(null)} /> : null}
     </header>
   );
 }
@@ -402,29 +368,6 @@ const activeChild: React.CSSProperties = {
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
-};
-
-const areaButtonsStyle: React.CSSProperties = {
-  display: 'inline-flex',
-  gap: '0.35rem',
-  marginLeft: '0.4rem',
-  flexShrink: 0,
-};
-
-const areaButtonStyle: React.CSSProperties = {
-  height: '1.55rem',
-  padding: '0 0.55rem',
-  background: '#1f2933',
-  color: '#cbd5dd',
-  border: '1px solid #2f3a45',
-  borderRadius: '4px',
-  fontSize: '0.72rem',
-  fontWeight: 600,
-  lineHeight: 1,
-  cursor: 'pointer',
-  textTransform: 'uppercase',
-  letterSpacing: '0.06em',
-  whiteSpace: 'nowrap',
 };
 
 const focusViewToggleStyle: React.CSSProperties = {

@@ -413,18 +413,18 @@ test.describe('window modes', () => {
     }
   });
 
-  test('the save-points view lists entries from memory/save-points/', async () => {
+  test('the Status pane synthetic root includes save-points and references folders', async () => {
     const fixture = makeProject();
     const lore = join(fixture.root, '.ai-lore-e2e-fixture');
-    const savePointsDir = join(lore, 'memory', 'save-points');
-    // makeProject doesn't create the save-points folder by default — make it
-    // here, then drop one entry to exercise the populated path.
-    rmSync(savePointsDir, { recursive: true, force: true });
-    // mkdir + write — Node tolerates mkdir for an existing path with recursive.
     const { mkdirSync: makeDir } = await import('node:fs');
-    makeDir(savePointsDir, { recursive: true });
+    // makeProject creates status / journal / blueprint / knowledge-tree;
+    // save-points and references are absent. Create them so the Status
+    // pane's synthetic root surfaces them as children — that's where the
+    // v0.5 areas live in the cockpit (no separate modals).
+    makeDir(join(lore, 'memory', 'save-points'), { recursive: true });
+    makeDir(join(lore, 'references'), { recursive: true });
     writeFileSync(
-      join(savePointsDir, '2026-05-26_alpha.md'),
+      join(lore, 'memory', 'save-points', '2026-05-26_alpha.md'),
       [
         '---',
         'type: save-point',
@@ -436,53 +436,12 @@ test.describe('window modes', () => {
         'payload_commit: cafef00d',
         '---',
         '',
-        'first save-point of the e2e run.',
+        'first milestone.',
         '',
       ].join('\n'),
     );
-    try {
-      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-posture')).toBeVisible({ timeout: 15_000 });
-
-      await page.getByTestId('area-button-save-points').click();
-      await expect(page.getByTestId('save-points-view')).toBeVisible({ timeout: 5_000 });
-      await expect(page.getByTestId('save-point-row')).toHaveCount(1);
-      await expect(page.getByTestId('save-point-title')).toHaveText('Alpha milestone');
-      await expect(page.getByTestId('save-point-date')).toHaveText('2026-05-26');
-      await expect(page.getByTestId('save-point-commits')).toContainText('deadbee');
-      await expect(page.getByTestId('save-point-commits')).toContainText('cafef00d');
-      await expect(page.getByTestId('save-point-body')).toContainText('first save-point');
-
-      await app.close();
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('the references view shows the empty state when no references/ folder exists', async () => {
-    const fixture = makeProject();
-    try {
-      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-posture')).toBeVisible({ timeout: 15_000 });
-
-      await page.getByTestId('area-button-references').click();
-      await expect(page.getByTestId('references-view')).toBeVisible({ timeout: 5_000 });
-      await expect(page.getByTestId('references-empty')).toBeVisible();
-
-      await app.close();
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('the references view lists entries when references/ has files', async () => {
-    const fixture = makeProject();
-    const lore = join(fixture.root, '.ai-lore-e2e-fixture');
-    const referencesDir = join(lore, 'references');
-    const { mkdirSync: makeDir } = await import('node:fs');
-    makeDir(referencesDir, { recursive: true });
     writeFileSync(
-      join(referencesDir, 'sibling-project.md'),
+      join(lore, 'references', 'sibling-project.md'),
       [
         '---',
         'type: reference',
@@ -490,85 +449,23 @@ test.describe('window modes', () => {
         'updated: 2026-05-26',
         'references: []',
         'target_path: /tmp/sibling',
-        'purpose: cross-project reference for testing',
+        'purpose: cross-project context',
         'scope: all',
         '---',
         '',
-        'how to consult this reference.',
+        'how to consult.',
         '',
       ].join('\n'),
     );
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-posture')).toBeVisible({ timeout: 15_000 });
-
-      await page.getByTestId('area-button-references').click();
-      await expect(page.getByTestId('references-view')).toBeVisible({ timeout: 5_000 });
-      await expect(page.getByTestId('reference-row')).toHaveCount(1);
-      await expect(page.getByTestId('reference-title')).toHaveText('Sibling project');
-      await expect(page.getByTestId('reference-target-path')).toContainText('/tmp/sibling');
-      await expect(page.getByTestId('reference-purpose')).toContainText(
-        'cross-project reference for testing',
-      );
-      await expect(page.getByTestId('reference-scope')).toContainText('all');
-
-      await app.close();
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('the blueprint view groups entries by branch (contracts / processes / mirror)', async () => {
-    const fixture = makeProject();
-    const lore = join(fixture.root, '.ai-lore-e2e-fixture');
-    const { mkdirSync: makeDir } = await import('node:fs');
-    const contractsDir = join(lore, 'memory', 'blueprint', 'contracts');
-    const processesDir = join(lore, 'memory', 'blueprint', 'processes');
-    makeDir(contractsDir, { recursive: true });
-    makeDir(processesDir, { recursive: true });
-    writeFileSync(
-      join(contractsDir, 'frontmatter-required.md'),
-      [
-        '---',
-        'type: blueprint',
-        'title: Frontmatter required',
-        'updated: 2026-05-26',
-        'references: []',
-        'branch: contracts',
-        '---',
-        '',
-        'every Memory file carries YAML frontmatter.',
-        '',
-      ].join('\n'),
-    );
-    writeFileSync(
-      join(processesDir, 'session-open.md'),
-      [
-        '---',
-        'type: blueprint',
-        'title: Session open',
-        'updated: 2026-05-26',
-        'references: []',
-        'branch: processes',
-        '---',
-        '',
-        'walk the focus chain, surface drift.',
-        '',
-      ].join('\n'),
-    );
-    try {
-      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-posture')).toBeVisible({ timeout: 15_000 });
-
-      await page.getByTestId('area-button-blueprint').click();
-      await expect(page.getByTestId('blueprint-view')).toBeVisible({ timeout: 5_000 });
-      // contracts: one entry. processes: one entry. mirror: empty.
-      await expect(page.getByTestId('blueprint-branch-contracts')).toContainText(
-        'Frontmatter required',
-      );
-      await expect(page.getByTestId('blueprint-branch-processes')).toContainText('Session open');
-      await expect(page.getByTestId('blueprint-mirror-empty')).toBeVisible();
-
+      const statusPane = page.getByTestId('pane-status');
+      await expect(statusPane).toBeVisible({ timeout: 15_000 });
+      // Both folders surface as children of the Status synthetic root.
+      // Drift on either is tracked via the existing watcher + queue +
+      // per-row ack — no bespoke UI.
+      await expect(statusPane).toContainText('save-points', { timeout: 5_000 });
+      await expect(statusPane).toContainText('references', { timeout: 5_000 });
       await app.close();
     } finally {
       fixture.cleanup();

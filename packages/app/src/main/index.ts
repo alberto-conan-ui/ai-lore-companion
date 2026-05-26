@@ -19,7 +19,6 @@ import {
   isIgnoreRule,
   isTreeError,
   isValidValue,
-  listMemoryDir,
   mergeIgnoreRules,
   openDb,
   parseMemoryFileSync,
@@ -49,8 +48,6 @@ import {
   type FocusReadArg,
   type FocusReadResult,
   IPC,
-  type MemoryListDirArg,
-  type MemoryListDirResult,
   type SetRegisterArg,
   type SettingsSetArg,
   type SettingsSetIgnoresArg,
@@ -723,18 +720,6 @@ function registerIpcHandlers(): void {
     // Push the new chain immediately — the 5s poll's `lastSent` would
     // catch up eventually, but the chip should reflect the click now.
     ctx.refreshChain?.();
-  });
-  ipcMain.handle(IPC.MemoryListDir, (event, arg: MemoryListDirArg): MemoryListDirResult => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) return { error: 'no project context' };
-    // Resolve under the lore folder, then verify the result is still inside
-    // it — the renderer should never read outside the project's lore.
-    const abs = isAbsolute(arg.relPath) ? arg.relPath : resolve(ctx.chain.lorePath, arg.relPath);
-    const rel = relative(ctx.chain.lorePath, abs);
-    if (rel.startsWith('..') || isAbsolute(rel)) {
-      return { error: 'path is outside the project lore' };
-    }
-    return { entries: listMemoryDir(abs) };
   });
   ipcMain.handle(IPC.FocusRead, (event, arg: FocusReadArg): FocusReadResult => {
     const ctx = contextFor(event);
