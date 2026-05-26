@@ -109,6 +109,8 @@ export {
   type AppRole,
   type AppTarget,
   appsForNode,
+  cleanAppLabel,
+  dedupApps,
   findDiffApp,
   isAppEntry,
   parseAppEntries,

@@ -124,3 +124,39 @@ export function appsForNode(apps: readonly AppEntry[], nodeKind: 'file' | 'folde
     return a.target === 'both' || a.target === nodeKind;
   });
 }
+
+/**
+ * Strip the legacy "Open … in X" verb prefix from a label, leaving just the
+ * app name. v0.6 Phase A v1 migration carried the user's verbatim shortcut
+ * label ("Open project in WebStorm") into the catalog, which then stacked
+ * with the menu's "Open with " prefix ("Open with Open project in WebStorm").
+ * v0.6 Phase A v2 cleans labels through this helper so the menu reads right.
+ */
+export function cleanAppLabel(label: string): string {
+  const trimmed = label.trim();
+  const inMatch = trimmed.match(/^Open (?:the )?.+? in (.+)$/i);
+  if (inMatch && inMatch[1]) return inMatch[1].trim();
+  const openMatch = trimmed.match(/^Open (.+)$/i);
+  if (openMatch && openMatch[1]) return openMatch[1].trim();
+  return trimmed;
+}
+
+/**
+ * Dedup app entries by identity tuple — (label, kind, target, path, role).
+ * Two entries pointing at the same app for the same node kind collapse to
+ * one. Order-preserving — keeps the first occurrence. Used by the v0.6
+ * Phase A v2 migration when legacy scope-bound shortcuts (Project / Lore)
+ * collapse to a single catalog entry after label cleaning.
+ */
+export function dedupApps(apps: readonly AppEntry[]): AppEntry[] {
+  const seen = new Set<string>();
+  const out: AppEntry[] = [];
+  for (const a of apps) {
+    const path = a.appPath ?? a.cliPath ?? '';
+    const key = `${a.label.toLowerCase()}|${a.kind}|${a.target}|${path}|${a.role ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
+  }
+  return out;
+}

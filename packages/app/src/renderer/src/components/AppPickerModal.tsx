@@ -224,8 +224,12 @@ function CustomForm({
           value={draft.label}
           onChange={(e) => onChange({ ...draft, label: e.target.value })}
           style={inputStyle}
+          placeholder="e.g. WebStorm"
           data-testid="app-picker-label"
         />
+        <span style={fieldHintStyle}>
+          Just the app name — &ldquo;Open with&rdquo; is added by the menu.
+        </span>
       </label>
       <label style={fieldStyle}>
         <span style={fieldLabelStyle}>Kind</span>
@@ -476,6 +480,12 @@ const fieldLabelStyle: React.CSSProperties = {
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
   color: '#9fb1bd',
+};
+
+const fieldHintStyle: React.CSSProperties = {
+  fontSize: '0.72rem',
+  color: '#7a8794',
+  marginTop: '0.1rem',
 };
 
 const inputStyle: React.CSSProperties = {

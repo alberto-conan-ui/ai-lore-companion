@@ -67,7 +67,7 @@ import {
   type TerminalResizeArg,
   type TreeExpandArg,
 } from '../shared/ipc.js';
-import { appsWithIcons, migrateShortcutsIfNeeded } from './apps.js';
+import { appsWithIcons, runAppsMigrations } from './apps.js';
 import { resolveProjectRoot } from './args.js';
 import { loadBrowserProfile, saveBrowserProfile } from './browser-prefs.js';
 import * as browser from './browser.js';
@@ -934,9 +934,10 @@ function openLaunchWindow(): void {
 
 app.whenReady().then(() => {
   userDataDir = app.getPath('userData');
-  // v0.6 Phase A — migrate v0.5 folder shortcuts (project/lore targets) into
-  // the new Apps catalog before any window reads settings. Idempotent.
-  migrateShortcutsIfNeeded(userDataDir);
+  // v0.6 Phase A — bring the Apps catalog to the current schema version
+  // before any window reads settings. v1 folds in legacy folder shortcuts;
+  // v2 cleans labels + dedups. Idempotent + version-gated.
+  runAppsMigrations(userDataDir);
   registerIpcHandlers();
   rebuildMenu();
 

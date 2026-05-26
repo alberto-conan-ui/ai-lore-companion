@@ -742,4 +742,65 @@ test.describe('window modes', () => {
     }
   });
 
+  test('apps migration v2 cleans v1 verb-prefixed labels on launch and dedups by tuple', async () => {
+    const fixture = makeProject();
+    try {
+      // Seed the userData settings.json as if v0.6 Phase A v1 migration had run:
+      // boolean marker present, plus two entries with the legacy verb-prefix labels
+      // that share the same .app path (different scope-bound origins) — v2 must
+      // clean both labels and dedup them down to one.
+      const seeded = {
+        schemaVersion: 1,
+        values: { 'apps.migratedFromShortcuts': true },
+        ignores: [],
+        apps: [
+          {
+            id: 'a',
+            label: 'Open project in WebStorm',
+            kind: 'app',
+            target: 'folder',
+            appPath: '/Applications/WebStorm.app',
+          },
+          {
+            id: 'b',
+            label: 'Open Lore in WebStorm',
+            kind: 'app',
+            target: 'folder',
+            appPath: '/Applications/WebStorm.app',
+          },
+          {
+            id: 'c',
+            label: 'Open Lore in Obsidian',
+            kind: 'app',
+            target: 'folder',
+            appPath: '/Applications/Obsidian.app',
+          },
+        ],
+      };
+      writeFileSync(join(fixture.userData, 'settings.json'), JSON.stringify(seeded, null, 2));
+
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      await openSettingsViaMenu(app);
+      const sheet = page.getByTestId('settings-sheet');
+      await expect(sheet).toBeVisible({ timeout: 5_000 });
+      await sheet.getByRole('button', { name: 'Apps', exact: true }).click();
+
+      const section = page.getByTestId('settings-apps-section');
+      await expect(section).toBeVisible();
+      // Two WebStorm entries collapsed to one; Obsidian carries forward. Labels clean.
+      await expect(section.getByText('WebStorm', { exact: true })).toHaveCount(1);
+      await expect(section.getByText('Obsidian', { exact: true })).toHaveCount(1);
+      // The pre-cleaning labels are gone — the menu's "Open with " no longer doubles.
+      await expect(section.getByText('Open project in WebStorm')).toHaveCount(0);
+      await expect(section.getByText('Open Lore in WebStorm')).toHaveCount(0);
+      await expect(section.getByText('Open Lore in Obsidian')).toHaveCount(0);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
 });
