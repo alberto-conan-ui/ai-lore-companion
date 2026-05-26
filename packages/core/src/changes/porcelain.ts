@@ -8,19 +8,21 @@
  *
  * `X` is the index status, `Y` is the working-tree status. The `R`/`C`
  * prefix marks renames and copies, which carry the *old* path after the
- * new path. AI-Lore's drift surface needs only the new path; we keep the
+ * new path. The Changes panel needs only the new path; we keep the
  * old path on the entry for tools that want it but never show it.
  *
  * Phase B of [Companion v0.6](../../../../.ai-lore-ai-lore-companion/memory/action-tree/companion-v0.6/B-drift-is-git.phase.md).
  */
 
 /**
- * One parsed porcelain entry. `code` is the two-character status, `path` is
- * the file path relative to the repo working-tree root, `oldPath` (renames /
- * copies only) is the source path.
+ * One change entry — the unified shape used across `git status --porcelain`
+ * and `git diff --name-status`. `code` is two characters (porcelain XY or
+ * `M`/`A`/`D`/`R…`/`C…` from name-status), `path` is the file path relative
+ * to the repo working-tree root, `oldPath` (renames / copies only) is the
+ * source path.
  */
-export type PorcelainEntry = {
-  /** Two characters: `XY` from the porcelain output. */
+export type ChangeEntry = {
+  /** Two-character status code — porcelain XY or name-status code. */
   code: string;
   /** New path, repo-relative. */
   path: string;
@@ -34,10 +36,10 @@ export type PorcelainEntry = {
  * are skipped silently — porcelain is stable, but defensive parsing never
  * fails the entire status read.
  */
-export function parsePorcelainZ(text: string): PorcelainEntry[] {
+export function parsePorcelainZ(text: string): ChangeEntry[] {
   if (text.length === 0) return [];
   const parts = text.split('\0');
-  const out: PorcelainEntry[] = [];
+  const out: ChangeEntry[] = [];
   for (let i = 0; i < parts.length; i += 1) {
     const part = parts[i];
     if (!part || part.length < 4) continue;
@@ -56,17 +58,17 @@ export function parsePorcelainZ(text: string): PorcelainEntry[] {
   return out;
 }
 
-/** Whether a porcelain code marks the file as added (untracked or staged add). */
+/** Whether a change code marks the file as added (untracked or staged add). */
 export function isAdded(code: string): boolean {
   return code[0] === 'A' || code === '??';
 }
 
-/** Whether a porcelain code marks the file as deleted. */
+/** Whether a change code marks the file as deleted. */
 export function isDeleted(code: string): boolean {
   return code[0] === 'D' || code[1] === 'D';
 }
 
-/** Whether a porcelain code marks a rename or copy. */
+/** Whether a change code marks a rename or copy. */
 export function isRenamed(code: string): boolean {
   return code[0] === 'R' || code[0] === 'C';
 }

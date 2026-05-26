@@ -1,13 +1,15 @@
 import type {
   AppEntry,
-  GitStatusScope,
-  PorcelainEntry,
+  ChangeEntry,
+  ChangeScope,
   TreeNode,
 } from '@ai-lore-companion/core';
 import { create } from 'zustand';
 import type {
   ChainPayload,
-  GitStatusPayload,
+  ChangesPayload,
+  CommitListEntry,
+  CommitListPayload,
   TreeInitPayload,
   TreeUpdatePayload,
 } from '../../shared/ipc.js';
@@ -22,9 +24,9 @@ export function driftLevel(count: number): DriftLevel {
 }
 
 /**
- * The high-level kind of change a `git status --porcelain` code represents.
- * Used by the file grid + drift list to pick a glyph and colour without
- * exposing every porcelain edge case (renames, copies, conflicts).
+ * The high-level kind of change a porcelain / name-status code represents.
+ * Used by the file grid + changes list to pick a glyph and colour without
+ * exposing every git edge case (renames, copies, conflicts).
  */
 export type DriftKind = 'add' | 'change' | 'unlink';
 
@@ -37,15 +39,15 @@ export function categoriseDriftCode(code: string): DriftKind {
   return 'change';
 }
 
-/** The git-drift snapshot, kept per repo. */
-export type GitStatusState = {
-  payload: PorcelainEntry[];
-  lore: PorcelainEntry[];
+/** The changes snapshot, kept per repo. */
+export type ChangesState = {
+  payload: ChangeEntry[];
+  lore: ChangeEntry[];
 };
 
-/** Return one side of the git-drift snapshot. */
-export function entriesByScope(gitStatus: GitStatusState, scope: GitStatusScope): PorcelainEntry[] {
-  return gitStatus[scope];
+/** Return one side of the changes snapshot. */
+export function entriesByScope(changes: ChangesState, scope: ChangeScope): ChangeEntry[] {
+  return changes[scope];
 }
 
 /** Depth-first search for the node at `path` within `root`. */
@@ -64,11 +66,23 @@ type Trees = { payload: TreeNode | null; lore: TreeNode | null };
 type State = {
   chain: ChainPayload | null;
   /**
-   * Live `git status --porcelain` snapshots for both repos. Pushed by main
-   * via [`IPC.GitStatus`](../../shared/ipc.ts) — v0.6 Phase B's git-as-truth
-   * model. Replaces the v0.5 SQLite-queue `entries` + event-reducer model.
+   * Live changes snapshots for both repos, against each scope's current
+   * baseline. Pushed by main via [`IPC.Changes`](../../shared/ipc.ts) —
+   * v0.6 Phase B's git-as-truth model.
    */
-  gitStatus: GitStatusState;
+  changes: ChangesState;
+  /**
+   * The current baseline per scope — `HEAD` by default, or a commit SHA the
+   * user picked from the Changes-panel dropdown. Drives what the Changes
+   * snapshot is compared against.
+   */
+  baselineByScope: { payload: string; lore: string };
+  /**
+   * Recent commits per repo with save-point badges, for the baseline
+   * dropdown. Pushed by main via [`IPC.CommitList`](../../shared/ipc.ts)
+   * on launch and on every changes-tracker tick.
+   */
+  commitListByScope: { payload: CommitListEntry[]; lore: CommitListEntry[] };
   trees: Trees;
   /**
    * The Apps catalog — what *Open with…* menus offer. Mirrors the snapshot's
@@ -77,23 +91,35 @@ type State = {
    */
   apps: AppEntry[];
   setChain: (chain: ChainPayload) => void;
-  applyGitStatus: (payload: GitStatusPayload) => void;
+  applyChanges: (payload: ChangesPayload) => void;
+  setBaseline: (scope: ChangeScope, baseline: string) => void;
+  applyCommitList: (payload: CommitListPayload) => void;
   setTrees: (init: TreeInitPayload) => void;
   applyTreeUpdate: (update: TreeUpdatePayload) => void;
-  expandTree: (scope: GitStatusScope, path: string, children: TreeNode[]) => void;
+  expandTree: (scope: ChangeScope, path: string, children: TreeNode[]) => void;
   setApps: (apps: AppEntry[]) => void;
 };
 
 export const useCockpitStore = create<State>((set) => ({
   chain: null,
-  gitStatus: { payload: [], lore: [] },
+  changes: { payload: [], lore: [] },
+  baselineByScope: { payload: 'HEAD', lore: 'HEAD' },
+  commitListByScope: { payload: [], lore: [] },
   trees: { payload: null, lore: null },
   apps: [],
   setApps: (apps) => set({ apps }),
   setChain: (chain) => set({ chain }),
-  applyGitStatus: (payload) =>
+  applyChanges: (payload) =>
     set((state) => ({
-      gitStatus: { ...state.gitStatus, [payload.scope]: payload.entries },
+      changes: { ...state.changes, [payload.scope]: payload.entries },
+    })),
+  setBaseline: (scope, baseline) =>
+    set((state) => ({
+      baselineByScope: { ...state.baselineByScope, [scope]: baseline },
+    })),
+  applyCommitList: (payload) =>
+    set((state) => ({
+      commitListByScope: { ...state.commitListByScope, [payload.scope]: payload.commits },
     })),
   setTrees: (init) => set({ trees: { payload: init.payload, lore: init.lore } }),
   applyTreeUpdate: (update) =>
@@ -105,7 +131,7 @@ export const useCockpitStore = create<State>((set) => ({
 /** Return a new `trees` with the node at `path` on `scope` given fresh `children`. */
 function patchTree(
   trees: Trees,
-  scope: GitStatusScope,
+  scope: ChangeScope,
   path: string,
   children: TreeNode[],
 ): { trees: Trees } {

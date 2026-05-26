@@ -7,14 +7,15 @@ import {
   type AppEntry,
   type ChainResult,
   DEFAULT_IGNORE_RULES,
+  type ChangeScope,
+  type ChangesTracker,
   type DirEvent,
-  type GitStatusScope,
-  type GitStatusTracker,
   type IgnoreLists,
   SETTINGS_REGISTRY,
+  type SavePoint,
   type TreeNode,
   type WatcherHandle,
-  attachGitStatusTracker,
+  attachChangesTracker,
   attachWatcher,
   deriveIgnoreLists,
   findDiffApp,
@@ -23,11 +24,14 @@ import {
   isTreeError,
   isValidValue,
   latestSavePoint,
+  listSavePoints,
   mergeIgnoreRules,
   parseAppEntries,
   parseMemoryFileSync,
   parseMemorySections,
   readChain,
+  readCommitList,
+  readDiffText,
   readDirectory,
   resolveAll,
   updateFrontmatterFieldInFile,
@@ -49,6 +53,9 @@ import {
   type BrowserBounds,
   type BrowserProfile,
   type CockpitApi,
+  type CommitListEntry,
+  type DiffTextArg,
+  type DiffTextResult,
   type FileSearchArg,
   type FileSearchHit,
   type FocusReadArg,
@@ -56,6 +63,7 @@ import {
   IPC,
   type OpenDiffArg,
   type OpenDiffResult,
+  type SetBaselineArg,
   type SetRegisterArg,
   type SettingsSetArg,
   type SettingsSetIgnoresArg,
@@ -91,8 +99,35 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 type Wiring = {
   watcher: WatcherHandle;
-  gitStatus: GitStatusTracker;
+  changes: ChangesTracker;
+  /** Re-read commits for `scope` and push CommitList to the renderer. */
+  pushCommits: (scope: ChangeScope) => void;
 };
+
+/** How many recent commits the baseline dropdown shows per repo. */
+const COMMIT_LIST_LIMIT = 50;
+
+/**
+ * Attach save-point badges to a commit list. A commit whose SHA matches the
+ * scope-appropriate ledger SHA (`payload_commit` for the Payload repo,
+ * `lore_commit` for the Lore repo) gets the save-point's title attached so
+ * the dropdown renders the badge alongside the subject line.
+ */
+function attachSavePointBadges(
+  commits: readonly { sha: string; subject: string }[],
+  savePoints: readonly SavePoint[],
+  scope: ChangeScope,
+): CommitListEntry[] {
+  const titleBySha = new Map<string, string>();
+  for (const sp of savePoints) {
+    const sha = scope === 'payload' ? sp.payloadCommit : sp.loreCommit;
+    titleBySha.set(sha, sp.title);
+  }
+  return commits.map((c) => {
+    const title = titleBySha.get(c.sha);
+    return title ? { ...c, savePoint: { title } } : { ...c };
+  });
+}
 
 /**
  * Everything `main` holds for one project window — created when the window
@@ -137,7 +172,7 @@ function contextFor(event: IpcMainEvent | IpcMainInvokeEvent): ProjectContext | 
 }
 
 /** The Lore-folder glob — hidden from the Payload pane, which has its own. */
-function loreHide(chain: ChainResult, scope: GitStatusScope): string[] {
+function loreHide(chain: ChainResult, scope: ChangeScope): string[] {
   return scope === 'payload' && !isChainError(chain) ? [`**/${basename(chain.lorePath)}/**`] : [];
 }
 
@@ -148,7 +183,7 @@ function loreHide(chain: ChainResult, scope: GitStatusScope): string[] {
  */
 function treeHideFor(
   chain: ChainResult,
-  scope: GitStatusScope,
+  scope: ChangeScope,
   hidden: readonly string[],
 ): readonly string[] {
   return [...loreHide(chain, scope), ...hidden];
@@ -158,7 +193,7 @@ function treeHideFor(
 function readTreeNode(
   chain: ChainResult,
   absPath: string,
-  scope: GitStatusScope,
+  scope: ChangeScope,
   hidden: readonly string[],
 ): TreeNode {
   const result = readDirectory(absPath, { ignore: treeHideFor(chain, scope, hidden) });
@@ -270,23 +305,38 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
 
     const hidden = ignoreLists.hidden;
     const loreWorkingTree = join(chain.lorePath, 'memory');
-    const gitStatus = attachGitStatusTracker({
+    const savePointsDir = resolve(chain.lorePath, 'memory/save-points');
+    const pushCommits = (scope: ChangeScope): void => {
+      const repoRoot = scope === 'payload' ? root : loreWorkingTree;
+      const result = readCommitList(repoRoot, COMMIT_LIST_LIMIT);
+      const commits = result.kind === 'ok' ? result.commits : [];
+      const savePoints = listSavePoints(savePointsDir);
+      sendToWin(win, IPC.CommitList, {
+        scope,
+        commits: attachSavePointBadges(commits, savePoints, scope),
+      });
+    };
+    const changes = attachChangesTracker({
       payloadRoot: root,
       loreRoot: loreWorkingTree,
-      onChange: (scope, entries) =>
-        sendToWin(win, IPC.GitStatus, {
+      onChange: (scope, entries) => {
+        sendToWin(win, IPC.Changes, {
           scope,
           entries: projectRelativise(scope, entries, root, loreWorkingTree),
-        }),
+        });
+        // Commits also move on `git status` ticks — the commit list dropdown
+        // reflects them without a window reload.
+        pushCommits(scope);
+      },
     });
     const watcher = attachWatcher({
       root,
       lorePath: chain.lorePath,
       ignored: ignoreLists.drift,
-      onFileChange: (event) => gitStatus.scheduleRefresh(event.scope),
+      onFileChange: (event) => changes.scheduleRefresh(event.scope),
       onDirEvent: (event) => handleDirEvent(win, chain, hidden, event),
     });
-    wiring = { watcher, gitStatus };
+    wiring = { watcher, changes, pushCommits };
   }
 
   const ptyService = createPtyService({
@@ -308,7 +358,7 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
  * gives back).
  */
 function projectRelativise(
-  scope: GitStatusScope,
+  scope: ChangeScope,
   entries: readonly { code: string; path: string; oldPath?: string }[],
   projectRoot: string,
   loreWorkingTree: string,
@@ -321,6 +371,25 @@ function projectRelativise(
     path: `${prefix}/${e.path}`,
     ...(e.oldPath ? { oldPath: `${prefix}/${e.oldPath}` } : {}),
   }));
+}
+
+/**
+ * Reverse of `projectRelativise` for one path. The renderer sends paths
+ * relative to the project root (so it can share keys across panes); git
+ * commands want them relative to the repo's working tree root.
+ */
+function projectToRepoRelative(
+  scope: ChangeScope,
+  projectRelPath: string,
+  projectRoot: string,
+  loreWorkingTree: string,
+): string {
+  if (scope === 'payload') return projectRelPath;
+  const prefix = relative(projectRoot, loreWorkingTree);
+  if (!prefix) return projectRelPath;
+  if (projectRelPath === prefix) return '';
+  if (projectRelPath.startsWith(`${prefix}/`)) return projectRelPath.slice(prefix.length + 1);
+  return projectRelPath;
 }
 
 
@@ -368,16 +437,19 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       // Seed the renderer with both repos' drift snapshots. Subsequent
       // updates push from the tracker's `onChange` callback (wired in
       // `createProjectContext`).
-      const seed = ctx.wiring.gitStatus.snapshot();
+      const seed = ctx.wiring.changes.snapshot();
       const loreWorkingTree = join(chain.lorePath, 'memory');
-      sendToWin(win, IPC.GitStatus, {
+      sendToWin(win, IPC.Changes, {
         scope: 'payload',
         entries: projectRelativise('payload', seed.payload, ctx.root, loreWorkingTree),
       });
-      sendToWin(win, IPC.GitStatus, {
+      sendToWin(win, IPC.Changes, {
         scope: 'lore',
         entries: projectRelativise('lore', seed.lore, ctx.root, loreWorkingTree),
       });
+      // Seed the baseline dropdown for both repos.
+      ctx.wiring.pushCommits('payload');
+      ctx.wiring.pushCommits('lore');
     }
     sendToWin(win, IPC.TreeInit, {
       payload: readTreeNode(chain, chain.root, 'payload', ctx.ignoreLists.hidden),
@@ -544,7 +616,7 @@ function reapplyIgnores(win: BrowserWindow): void {
       root: ctx.root,
       lorePath: chain.lorePath,
       ignored: drift,
-      onFileChange: (event) => wiring.gitStatus.scheduleRefresh(event.scope),
+      onFileChange: (event) => wiring.changes.scheduleRefresh(event.scope),
       onDirEvent: (event) => handleDirEvent(win, chain, hidden, event),
     });
   });
@@ -806,6 +878,31 @@ function registerIpcHandlers(): void {
       return { error: `cannot read focus file: ${(err as Error).message}` };
     }
   });
+  ipcMain.handle(IPC.SetBaseline, (event, arg: SetBaselineArg): void => {
+    const ctx = contextFor(event);
+    if (!ctx?.wiring || isChainError(ctx.chain)) return;
+    ctx.wiring.changes.setBaseline(arg.scope, arg.baseline);
+    // setBaseline triggers an immediate tracker re-read, which fires onChange,
+    // which pushes Changes + CommitList. No separate push needed here.
+  });
+  ipcMain.handle(IPC.DiffText, (event, arg: DiffTextArg): DiffTextResult => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) {
+      return { kind: 'failed', message: 'no project context' };
+    }
+    const loreWorkingTree = join(ctx.chain.lorePath, 'memory');
+    const workingTreeRoot = arg.scope === 'payload' ? ctx.root : loreWorkingTree;
+    // Renderer sends project-relative paths; un-rebase the lore prefix so git
+    // diff sees a path relative to the repo's working tree root.
+    const repoRelPath = projectToRepoRelative(arg.scope, arg.relPath, ctx.root, loreWorkingTree);
+    if (repoRelPath.startsWith('..') || isAbsolute(repoRelPath)) {
+      return { kind: 'failed', message: 'path is outside the repo working tree' };
+    }
+    const result = readDiffText(workingTreeRoot, arg.baseline, repoRelPath);
+    return result.kind === 'ok'
+      ? { kind: 'ok', text: result.text }
+      : { kind: 'failed', message: result.message };
+  });
   ipcMain.handle(IPC.OpenDiff, (event, arg: OpenDiffArg): OpenDiffResult => {
     const ctx = contextFor(event);
     if (!ctx || isChainError(ctx.chain)) {
@@ -818,22 +915,28 @@ function registerIpcHandlers(): void {
     }
     const cli = diff.cliPath;
     const template = diff.argvTemplate;
-    const savePoint = latestSavePoint(resolve(ctx.chain.lorePath, 'memory/save-points'));
-    if (!savePoint) {
-      return { kind: 'no-save-point' };
+    // Per-repo working tree. The lore repo's .git/ lives at
+    // <lorePath>/memory/.git/, so its working tree root is <lorePath>/memory/.
+    const workingTreeRoot =
+      arg.scope === 'payload' ? ctx.root : resolve(ctx.chain.lorePath, 'memory');
+    // Resolve the baseline commit. `'HEAD'` falls back to the latest save-point
+    // — diffing working-tree-vs-HEAD opens an empty diff in the external app
+    // when the file is unmodified, which is rarely what the user wants when
+    // they ask for a Diff on a row.
+    let commit: string;
+    if (arg.baseline === 'HEAD') {
+      const savePoint = latestSavePoint(resolve(ctx.chain.lorePath, 'memory/save-points'));
+      if (!savePoint) return { kind: 'no-save-point' };
+      commit = arg.scope === 'payload' ? savePoint.payloadCommit : savePoint.loreCommit;
+    } else {
+      commit = arg.baseline;
     }
-    // The queue carries paths relative to the Payload root for both scopes.
-    // Refuse anything that escapes that root.
+    // Paths arrive project-relative; refuse anything that escapes the project.
     const absFile = isAbsolute(arg.relPath) ? arg.relPath : resolve(ctx.root, arg.relPath);
     const rootRel = relative(ctx.root, absFile);
     if (rootRel.startsWith('..') || isAbsolute(rootRel)) {
       return { kind: 'failed', message: 'path is outside the project' };
     }
-    // Per-repo working tree + commit. The lore repo's .git/ lives at
-    // <lorePath>/memory/.git/, so its working tree root is <lorePath>/memory/.
-    const workingTreeRoot =
-      arg.scope === 'payload' ? ctx.root : resolve(ctx.chain.lorePath, 'memory');
-    const commit = arg.scope === 'payload' ? savePoint.payloadCommit : savePoint.loreCommit;
     const gitRelPath = relative(workingTreeRoot, absFile);
     if (gitRelPath.startsWith('..') || isAbsolute(gitRelPath)) {
       return { kind: 'failed', message: 'path is outside the repo working tree' };
@@ -914,7 +1017,7 @@ async function teardownContext(winId: number): Promise<void> {
     } catch {
       // Best-effort — chokidar may already be torn down.
     }
-    ctx.wiring.gitStatus.close();
+    ctx.wiring.changes.close();
   }
 }
 

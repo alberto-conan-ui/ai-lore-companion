@@ -2,8 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   type BrowserStatePayload,
   type ChainPayload,
+  type ChangesPayload,
   type CockpitApi,
-  type GitStatusPayload,
+  type CommitListPayload,
   IPC,
   type SettingsSnapshot,
   type Shortcut,
@@ -27,7 +28,10 @@ function makeSubscribe<T>(channel: string) {
 const api: CockpitApi = {
   onWindowInit: makeSubscribe<WindowInitPayload>(IPC.WindowInit),
   onChain: makeSubscribe<ChainPayload>(IPC.Chain),
-  onGitStatus: makeSubscribe<GitStatusPayload>(IPC.GitStatus),
+  onChanges: makeSubscribe<ChangesPayload>(IPC.Changes),
+  onCommitList: makeSubscribe<CommitListPayload>(IPC.CommitList),
+  setBaseline: (arg) => ipcRenderer.invoke(IPC.SetBaseline, arg),
+  diffText: (arg) => ipcRenderer.invoke(IPC.DiffText, arg),
   onTreeInit: makeSubscribe<TreeInitPayload>(IPC.TreeInit),
   onTreeUpdate: makeSubscribe<TreeUpdatePayload>(IPC.TreeUpdate),
   openPath: (path) => ipcRenderer.invoke(IPC.OpenPath, path),

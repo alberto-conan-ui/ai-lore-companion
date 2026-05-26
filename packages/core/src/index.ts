@@ -46,23 +46,7 @@ export type {
   StatusFrontmatter,
 } from './frontmatter/index.js';
 
-export { openDb } from './db/db.js';
-export type { CockpitDb, DbHandle } from './db/db.js';
-export { queueEntries } from './db/schema.js';
-export type { QueueEntryInsert, QueueEntryRow } from './db/schema.js';
 
-export { createQueue } from './queue/queue.js';
-export type { Queue } from './queue/queue.js';
-export type {
-  ChangeScope,
-  ChangeType,
-  QueueEntry,
-  QueueEvent,
-  QueueListener,
-  QueuePushInput,
-  TrackerSubject,
-  TrackerSubjectKind,
-} from './queue/types.js';
 
 export {
   DEFAULT_IGNORE_RULES,
@@ -124,19 +108,24 @@ export {
 } from './diff/index.js';
 
 export {
-  type GitStatusResult,
-  type GitStatusScope,
-  type GitStatusSnapshot,
-  type GitStatusTracker,
-  type GitStatusTrackerOptions,
-  type PorcelainEntry,
-  attachGitStatusTracker,
+  type ChangeEntry,
+  type ChangesResult,
+  type ChangeScope,
+  type ChangesSnapshot,
+  type ChangesTracker,
+  type ChangesTrackerOptions,
+  type CommitListEntry,
+  type CommitListResult,
+  type DiffTextResult,
+  attachChangesTracker,
   isAdded,
   isDeleted,
   isRenamed,
   parsePorcelainZ,
-  readGitStatus,
-} from './git-status/index.js';
+  readChanges,
+  readCommitList,
+  readDiffText,
+} from './changes/index.js';
 
 export {
   attachTrackerReviewTracker,

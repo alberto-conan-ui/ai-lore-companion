@@ -64,12 +64,13 @@ type WindowMode = 'loading' | 'welcome' | 'cockpit' | 'altered';
 
 export function App(): JSX.Element {
   const setChain = useCockpitStore((s) => s.setChain);
-  const applyGitStatus = useCockpitStore((s) => s.applyGitStatus);
+  const applyChanges = useCockpitStore((s) => s.applyChanges);
+  const applyCommitList = useCockpitStore((s) => s.applyCommitList);
   const setTrees = useCockpitStore((s) => s.setTrees);
   const applyTreeUpdate = useCockpitStore((s) => s.applyTreeUpdate);
   const setApps = useCockpitStore((s) => s.setApps);
   const chain = useCockpitStore((s) => s.chain);
-  const gitStatus = useCockpitStore((s) => s.gitStatus);
+  const changes = useCockpitStore((s) => s.changes);
 
   const [mode, setMode] = useState<WindowMode>('loading');
   const [recents, setRecents] = useState<RecentProject[]>([]);
@@ -168,17 +169,17 @@ export function App(): JSX.Element {
   const searchDirs = useMemo(() => paneSpecs.flatMap((p) => baseDirsOf(p.subRoot)), [paneSpecs]);
 
   // Drift counts per pinned tab — shown as a badge on the tab strip. Sourced
-  // from the per-scope git-status snapshot (v0.6 Phase B); filtered to each
+  // from the per-scope changes snapshot (v0.6 Phase B); filtered to each
   // pane's sub-root.
   const tabDrift = useMemo(() => {
     const out: Record<string, number> = {};
     if (chain && !isChainErrorPayload(chain)) {
       for (const p of paneSpecs) {
-        out[p.id] = entriesInSubRoot(gitStatus[p.scope], p.subRoot, chain.root).length;
+        out[p.id] = entriesInSubRoot(changes[p.scope], p.subRoot, chain.root).length;
       }
     }
     return out;
-  }, [paneSpecs, gitStatus, chain]);
+  }, [paneSpecs, changes, chain]);
 
   useEffect(() => {
     return window.cockpit.onWindowInit((payload) => {
@@ -196,7 +197,8 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     const offChain = window.cockpit.onChain(setChain);
-    const offGitStatus = window.cockpit.onGitStatus(applyGitStatus);
+    const offChanges = window.cockpit.onChanges(applyChanges);
+    const offCommitList = window.cockpit.onCommitList(applyCommitList);
     const offTreeInit = window.cockpit.onTreeInit(setTrees);
     const offTreeUpdate = window.cockpit.onTreeUpdate(applyTreeUpdate);
     // Hydrate the Apps catalog from the global settings tier — context menus
@@ -207,12 +209,13 @@ export function App(): JSX.Element {
     );
     return () => {
       offChain();
-      offGitStatus();
+      offChanges();
+      offCommitList();
       offTreeInit();
       offTreeUpdate();
       offSettings();
     };
-  }, [setChain, applyGitStatus, setTrees, applyTreeUpdate, setApps]);
+  }, [setChain, applyChanges, applyCommitList, setTrees, applyTreeUpdate, setApps]);
 
   const globalSearchRef = useRef<GlobalSearchHandle>(null);
 

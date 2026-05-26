@@ -1,4 +1,4 @@
-import type { AppEntry, GitStatusScope, TreeNode } from '@ai-lore-companion/core';
+import type { AppEntry, ChangeScope, TreeNode } from '@ai-lore-companion/core';
 import {
   type CellKeyDownEvent,
   type ColDef,
@@ -21,7 +21,7 @@ import {
   useRef,
 } from 'react';
 import { type DriftKind, categoriseDriftCode } from '../store.js';
-import type { DriftRow } from './PaneQueue.js';
+import type { DriftRow } from './ChangesPanel.js';
 import { buildNodeContextMenu } from './nodeContextMenu.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the grid. */
@@ -53,7 +53,7 @@ export const cockpitGridTheme = themeQuartz.withPart(colorSchemeDark).withParams
 });
 
 type Props = {
-  scope: GitStatusScope;
+  scope: ChangeScope;
   rows: TreeNode[];
   selectedPath: string | null;
   onSelectPath: (path: string) => void;

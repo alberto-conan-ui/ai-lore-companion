@@ -1,4 +1,4 @@
-import type { AppEntry, PorcelainEntry, TreeNode } from '@ai-lore-companion/core';
+import type { AppEntry, ChangeEntry, TreeNode } from '@ai-lore-companion/core';
 import type {
   CellKeyDownEvent,
   ColDef,
@@ -16,22 +16,23 @@ import {
   useRef,
   useState,
 } from 'react';
+import type { CommitListEntry } from '../../../shared/ipc.js';
 import { type DriftKind, categoriseDriftCode } from '../store.js';
 // Importing the theme also evaluates FileGrid.tsx, which registers the AG Grid
 // modules and license — so this grid has them without repeating the setup.
 import { cockpitGridTheme } from './FileGrid.js';
 import { buildNodeContextMenu } from './nodeContextMenu.js';
 
-/** Imperative handle the Pane uses to move keyboard focus into the queue. */
-export type PaneQueueHandle = {
+/** Imperative handle the Pane uses to move keyboard focus into the panel. */
+export type ChangesPanelHandle = {
   focusMe: () => void;
 };
 
 /**
- * One row of the drift list. Wraps a `PorcelainEntry` with the absolute
+ * One row of the Changes list. Wraps a `ChangeEntry` with the absolute
  * working-tree path the menu actions need.
  */
-export type DriftRow = PorcelainEntry & {
+export type DriftRow = ChangeEntry & {
   /** Path relative to the project root — the form `displayPath` consumes. */
   projectRelPath: string;
   /** Absolute path — the form context-menu callbacks (revealInFinder, diff, openWith) consume. */
@@ -41,6 +42,12 @@ export type DriftRow = PorcelainEntry & {
 type Props = {
   label: string;
   entries: DriftRow[];
+  /** Current baseline (commit SHA or `'HEAD'`). Drives the dropdown selection. */
+  baseline: string;
+  /** Recent commits + save-point badges for the dropdown. Newest first. */
+  commitList: CommitListEntry[];
+  /** Called when the user picks a new baseline from the dropdown. */
+  onBaselineChange: (baseline: string) => void;
   onRowClick: (entry: DriftRow) => void;
   onRowDoubleClick: (entry: DriftRow) => void;
   /** Maps a project-relative path to its tab-relative display path. */
@@ -84,6 +91,19 @@ function folderRest(displayP: string): string {
   return i === -1 ? '/' : dir.slice(i + 1);
 }
 
+/** Short SHA for the dropdown — first 7 chars, the git convention. */
+function shortSha(sha: string): string {
+  return sha.slice(0, 7);
+}
+
+/** The dropdown label for one commit. Save-points lead with their title; plain
+ *  commits show short SHA + subject. */
+function commitOptionLabel(c: CommitListEntry): string {
+  return c.savePoint
+    ? `★ ${c.savePoint.title} — ${shortSha(c.sha)}`
+    : `${shortSha(c.sha)} ${c.subject}`;
+}
+
 /** Cell renderer for the per-row kind glyph. */
 function KindCell(params: { value?: string }): JSX.Element | null {
   if (!params.value) return null;
@@ -101,16 +121,19 @@ function nodeForRow(row: DriftRow): TreeNode {
 }
 
 /**
- * The pane's live drift list — a view of `git status --porcelain` filtered
- * to this pane's sub-root. Rows reflect what's currently dirty in git;
- * nothing is persisted in the cockpit (v0.6 Phase B's git-as-truth model).
- * Right-click surfaces the uniform node context menu (Open in Finder, Open
- * with…, Diff, Ignore).
+ * The pane's *Changes* surface — a baseline-aware view of what differs
+ * between the working tree and a commit the user picks. Replaces the v0.6
+ * Phase B v1 `PaneQueue` (which was hard-coded to HEAD). The baseline
+ * dropdown carries recent commits plus save-point badges; the inline diff
+ * preview (Phase B task 5) sits below this surface.
  */
-export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
+export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function ChangesPanel(
   {
     label,
     entries,
+    baseline,
+    commitList,
+    onBaselineChange,
     onRowClick,
     onRowDoubleClick,
     displayPath,
@@ -140,8 +163,7 @@ export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
   }));
 
   // Keyboard activation parity with mouse: `Enter` reveals (single-click),
-  // `⌘+Enter` opens (double-click). No `Backspace` — drift clears on commit
-  // or revert, not from inside the cockpit.
+  // `⌘+Enter` opens (double-click).
   const onCellKeyDown = useCallback(
     (e: CellKeyDownEvent<DriftRow>) => {
       const keyEvent = e.event as KeyboardEvent;
@@ -199,18 +221,41 @@ export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
     [displayPath],
   );
 
+  // `HEAD` is always the first option; recent commits follow with save-point
+  // badges where they apply. The selected value is the SHA (or `'HEAD'`).
+  const dropdownOptions = useMemo(
+    () => [
+      { value: 'HEAD', label: 'HEAD (working tree drift)' },
+      ...commitList.map((c) => ({ value: c.sha, label: commitOptionLabel(c) })),
+    ],
+    [commitList],
+  );
+
   return (
-    <section style={containerStyle} data-testid={`queue-${label.toLowerCase()}`}>
+    <section style={containerStyle} data-testid={`changes-${label.toLowerCase()}`}>
       <header style={headerStyle}>
-        <span style={labelStyle}>{label} drift</span>
+        <span style={labelStyle}>{label} changes</span>
         <span style={countStyle}>{entries.length}</span>
+        <select
+          value={baseline}
+          onChange={(e) => onBaselineChange(e.target.value)}
+          style={baselineSelectStyle}
+          data-testid={`changes-baseline-${label.toLowerCase()}`}
+          aria-label="Compare against"
+        >
+          {dropdownOptions.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         <input
           type="search"
           value={quickFilter}
           onChange={(e) => setQuickFilter(e.target.value)}
-          placeholder="Search drift…"
+          placeholder="Search changes…"
           style={searchStyle}
-          data-testid={`queue-search-${label.toLowerCase()}`}
+          data-testid={`changes-search-${label.toLowerCase()}`}
         />
       </header>
       <div style={gridWrapStyle}>
@@ -229,7 +274,7 @@ export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
           animateRows={false}
           headerHeight={28}
           rowHeight={26}
-          overlayNoRowsTemplate="No drift."
+          overlayNoRowsTemplate="No changes."
           getContextMenuItems={(
             params: GetContextMenuItemsParams<DriftRow>,
           ): (MenuItemDef | string)[] => {
@@ -289,6 +334,17 @@ const countStyle: React.CSSProperties = {
   background: '#1f2933',
   padding: '0.05rem 0.35rem',
   borderRadius: '999px',
+};
+
+const baselineSelectStyle: React.CSSProperties = {
+  flex: 'none',
+  maxWidth: '20rem',
+  padding: '0.2rem 0.4rem',
+  background: '#0c121a',
+  border: '1px solid #2f3a45',
+  borderRadius: '4px',
+  color: '#dde3ea',
+  fontSize: '0.72rem',
 };
 
 const searchStyle: React.CSSProperties = {

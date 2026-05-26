@@ -1,8 +1,8 @@
 import type {
   AppEntry,
-  GitStatusScope,
+  ChangeEntry,
+  ChangeScope,
   IgnoreRule,
-  PorcelainEntry,
   TreeNode,
 } from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -11,7 +11,7 @@ import { AppPickerModal } from './AppPickerModal.js';
 import { DriftPill } from './DriftPill.js';
 import { FileGrid, type FileGridHandle } from './FileGrid.js';
 import { FileTree, type FileTreeHandle } from './FileTree.js';
-import { type DriftRow, PaneQueue, type PaneQueueHandle } from './PaneQueue.js';
+import { ChangesPanel, type ChangesPanelHandle, type DriftRow } from './ChangesPanel.js';
 
 /** Which of the three regions inside a Pane currently owns the keyboard.
  *  Drives Tab cycling between them and the visible focus accent. */
@@ -49,12 +49,12 @@ function isUnderBases(absPath: string, bases: string[]): boolean {
 }
 
 /**
- * Filter a porcelain-entry list to the sub-root's directories, producing
- * [`DriftRow`](./PaneQueue.tsx#DriftRow) objects with the absolute and
+ * Filter a changes-entry list to the sub-root's directories, producing
+ * [`DriftRow`](./ChangesPanel.tsx#DriftRow) objects with the absolute and
  * project-relative paths the renderer needs.
  */
 export function entriesInSubRoot(
-  entries: readonly PorcelainEntry[],
+  entries: readonly ChangeEntry[],
   subRoot: SubRoot,
   projectRoot: string,
 ): DriftRow[] {
@@ -69,7 +69,7 @@ export function entriesInSubRoot(
 }
 
 type Props = {
-  scope: GitStatusScope;
+  scope: ChangeScope;
   label: string;
   /** Stable identifier for this pane — drives its `data-testid`. */
   testId: string;
@@ -99,12 +99,29 @@ export function Pane({
   revealRequest,
 }: Props): JSX.Element {
   const tree = useCockpitStore((s) => s.trees[scope]);
-  const gitStatusForScope = useCockpitStore((s) => s.gitStatus[scope]);
+  const changesForScope = useCockpitStore((s) => s.changes[scope]);
+  const baseline = useCockpitStore((s) => s.baselineByScope[scope]);
+  const commitList = useCockpitStore((s) => s.commitListByScope[scope]);
+  const storeSetBaseline = useCockpitStore((s) => s.setBaseline);
   const expandTree = useCockpitStore((s) => s.expandTree);
   const hasSavePoint = useCockpitStore((s) =>
     s.chain && !('error' in s.chain) ? s.chain.hasSavePoint : false,
   );
   const apps = useCockpitStore((s) => s.apps);
+
+  /**
+   * The Changes panel's baseline dropdown is the single source of truth for
+   * the diff baseline across this pane. Two stores stay in sync: the renderer
+   * store (drives the dropdown UI) and the main-process tracker (drives the
+   * `git diff` re-read). Wrap the IPC + store update behind one call.
+   */
+  const handleBaselineChange = useCallback(
+    (next: string) => {
+      storeSetBaseline(scope, next);
+      void window.cockpit.setBaseline({ scope, baseline: next });
+    },
+    [scope, storeSetBaseline],
+  );
 
   // Context-menu actions shared across tree, grid, and (eventually) queue.
   const handleRevealInFinder = useCallback((node: TreeNode) => {
@@ -140,8 +157,8 @@ export function Pane({
 
   // Scope entries narrowed to the ones that fall within this pane's sub-root.
   const paneEntries = useMemo(
-    () => entriesInSubRoot(gitStatusForScope, subRoot, projectRoot),
-    [gitStatusForScope, subRoot, projectRoot],
+    () => entriesInSubRoot(changesForScope, subRoot, projectRoot),
+    [changesForScope, subRoot, projectRoot],
   );
 
   const [selectedFolder, setSelectedFolder] = useState<string>(rootId);
@@ -162,7 +179,7 @@ export function Pane({
   const queueRowRef = useRef<HTMLDivElement>(null);
   const treeHandle = useRef<FileTreeHandle>(null);
   const gridHandle = useRef<FileGridHandle>(null);
-  const queueHandle = useRef<PaneQueueHandle>(null);
+  const queueHandle = useRef<ChangesPanelHandle>(null);
   const paneRef = useRef<HTMLElement>(null);
 
   // Resolve which of the three regions the given node lives in, if any.
@@ -384,14 +401,18 @@ export function Pane({
   // still sees the file.
   const handleQueueDouble = useCallback(
     async (entry: DriftRow) => {
-      const result = await window.cockpit.openDiff({ scope, relPath: entry.projectRelPath });
+      const result = await window.cockpit.openDiff({
+        scope,
+        relPath: entry.projectRelPath,
+        baseline,
+      });
       if (result.kind === 'ok') return;
       if (result.kind === 'failed') {
         console.warn('[diff]', result.message);
       }
       void window.cockpit.openPath(entry.absPath);
     },
-    [scope],
+    [scope, baseline],
   );
 
   // Diff target awaiting a freshly-picked app. When the user clicks *Diff*
@@ -406,7 +427,7 @@ export function Pane({
   const handleDiff = useCallback(
     async (node: TreeNode) => {
       if (node.isDir) return;
-      const result = await window.cockpit.openDiff({ scope, relPath: node.path });
+      const result = await window.cockpit.openDiff({ scope, relPath: node.path, baseline });
       if (result.kind === 'no-cli') {
         // First-use prompt: surface the App picker preselected to *diff* so
         // the user can pick a CLI without visiting Settings.
@@ -415,7 +436,7 @@ export function Pane({
         window.alert(`Diff failed to open: ${result.message}`);
       }
     },
-    [scope],
+    [scope, baseline],
   );
 
   const onPickerSave = useCallback(
@@ -517,10 +538,13 @@ export function Pane({
           ...(activeRegion === 'queue' ? activeRegionStyle : null),
         }}
       >
-        <PaneQueue
+        <ChangesPanel
           ref={queueHandle}
           label={label}
           entries={paneEntries}
+          baseline={baseline}
+          commitList={commitList}
+          onBaselineChange={handleBaselineChange}
           displayPath={queueDisplayPath}
           onRowClick={handleQueueClick}
           onRowDoubleClick={handleQueueDouble}

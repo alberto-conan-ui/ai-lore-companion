@@ -3,12 +3,12 @@ import type {
   AppEntry,
   ChainError,
   ChainResult,
+  ChangeEntry,
+  ChangeScope,
   Commitment,
-  GitStatusScope,
   IgnoreRule,
   MemoryFrontmatter,
   MemorySections,
-  PorcelainEntry,
   Posture,
   SettingDef,
   SettingValue,
@@ -18,14 +18,7 @@ import type {
   WriteTier,
 } from '@ai-lore-companion/core';
 
-/**
- * `ChangeScope` was the v0.5 name for which side of the project a path
- * belongs to. v0.6 Phase B renamed it to `GitStatusScope` — same values
- * (`'payload'` / `'lore'`), shorter type. Re-exported here under the legacy
- * name so the existing renderer + main wiring keeps compiling during the
- * cutover; new code should use `GitStatusScope` directly.
- */
-export type ChangeScope = GitStatusScope;
+export type { ChangeScope };
 
 /**
  * Type-only ChainResult discriminator that does not require importing
@@ -50,11 +43,30 @@ export const IPC = {
   /** Main → renderer: full chain result (sent once on renderer ready). */
   Chain: 'cockpit:chain',
   /**
-   * Main → renderer: drift snapshot for one repo. Pushed on launch (both
-   * sides) and whenever the debounced [git-status tracker](../../../core/src/git-status/tracker.ts)
-   * sees the snapshot move. Replaces the v0.5 `Restore` + `Change` channels.
+   * Main → renderer: changes snapshot for one repo against its current
+   * baseline. Pushed on launch (both sides) and whenever the debounced
+   * [changes tracker](../../../core/src/changes/tracker.ts) sees the snapshot
+   * move. The channel keeps its v0.5-era constant string for backwards
+   * compatibility with stored layouts.
    */
-  GitStatus: 'cockpit:git-status',
+  Changes: 'cockpit:git-status',
+  /**
+   * Renderer → main: flip the baseline for one scope. The changes tracker
+   * re-reads immediately and pushes the resulting snapshot via `Changes`.
+   */
+  SetBaseline: 'cockpit:set-baseline',
+  /**
+   * Main → renderer: recent commits for one repo, newest first, with
+   * save-point badges attached where a SHA matches a `lore_commit` /
+   * `payload_commit` in the save-points ledger. Pushed on launch and on
+   * every changes-tracker tick (commits move HEAD, which the tracker sees).
+   */
+  CommitList: 'cockpit:commit-list',
+  /**
+   * Renderer → main: read the unified-diff text for one path against one
+   * baseline. Used by the Changes panel's inline preview.
+   */
+  DiffText: 'cockpit:diff-text',
 
   /** Main → renderer: per-side root trees (sent once after Restore). */
   TreeInit: 'cockpit:tree-init',
@@ -194,7 +206,33 @@ export const IPC = {
 
 export type ChainPayload = ChainResult;
 /** Per-scope drift snapshot pushed from main. */
-export type GitStatusPayload = { scope: GitStatusScope; entries: PorcelainEntry[] };
+export type ChangesPayload = { scope: ChangeScope; entries: ChangeEntry[] };
+
+/** One entry in the per-scope baseline dropdown. `savePoint` is set when the
+ *  commit's SHA matches a save-point ledger entry — the dropdown shows a
+ *  badge + the save-point's title in that case. */
+export type CommitListEntry = {
+  /** Full 40-char SHA. */
+  sha: string;
+  /** Commit subject (first line of the message). */
+  subject: string;
+  /** Save-point match when present. */
+  savePoint?: { title: string };
+};
+
+/** Per-scope commit-list snapshot pushed from main. */
+export type CommitListPayload = { scope: ChangeScope; commits: CommitListEntry[] };
+
+/** Renderer → main: flip a scope's baseline. */
+export type SetBaselineArg = { scope: ChangeScope; baseline: string };
+
+/** Renderer → main: read unified-diff text for one path against one baseline. */
+export type DiffTextArg = { scope: ChangeScope; baseline: string; relPath: string };
+
+/** Result of an `IPC.DiffText` invoke. */
+export type DiffTextResult =
+  | { kind: 'ok'; text: string }
+  | { kind: 'failed'; message: string };
 
 /** A project folder the user has opened — an entry in the recents list. */
 export type RecentProject = { path: string; openedAt: number };
@@ -347,11 +385,17 @@ export function isFocusReadError(result: FocusReadResult): result is { error: st
   return 'error' in result;
 }
 
-/** The renderer's request to open a file's diff against the latest save-point. */
+/** The renderer's request to open a file's diff against a baseline. */
 export type OpenDiffArg = {
   scope: ChangeScope;
-  /** Path relative to the Payload project root — the same shape queue entries carry. */
+  /** Path relative to the Payload project root — the same shape change entries carry. */
   relPath: string;
+  /**
+   * The commit to diff against. `'HEAD'` falls back to the latest save-point
+   * when the panel has not picked a non-HEAD baseline yet — `HEAD` materialised
+   * vs working tree is a no-op diff that wastes the user's external app.
+   */
+  baseline: string;
 };
 
 /**
@@ -394,7 +438,13 @@ export type Unsubscribe = () => void;
 export type CockpitApi = {
   onWindowInit: (handler: (payload: WindowInitPayload) => void) => Unsubscribe;
   onChain: (handler: (chain: ChainPayload) => void) => Unsubscribe;
-  onGitStatus: (handler: (payload: GitStatusPayload) => void) => Unsubscribe;
+  onChanges: (handler: (payload: ChangesPayload) => void) => Unsubscribe;
+  /** Subscribe to per-scope commit-list pushes — the Changes-panel baseline dropdown. */
+  onCommitList: (handler: (payload: CommitListPayload) => void) => Unsubscribe;
+  /** Flip a scope's baseline; the next Changes push reflects the new value. */
+  setBaseline: (arg: SetBaselineArg) => Promise<void>;
+  /** Read the unified-diff text for one path against one baseline. */
+  diffText: (arg: DiffTextArg) => Promise<DiffTextResult>;
   onTreeInit: (handler: (payload: TreeInitPayload) => void) => Unsubscribe;
   onTreeUpdate: (handler: (payload: TreeUpdatePayload) => void) => Unsubscribe;
   openPath: (path: string) => Promise<string>;
