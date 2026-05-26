@@ -1,10 +1,14 @@
 import type { ChangeScope, IgnoreRule, QueueEntry, TreeNode } from '@ai-lore-companion/core';
-import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
+import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type DriftLevel, driftLevel, findTreeNode, useCockpitStore } from '../store.js';
 import { DriftPill } from './DriftPill.js';
-import { FileGrid } from './FileGrid.js';
-import { FileTree } from './FileTree.js';
-import { PaneQueue } from './PaneQueue.js';
+import { FileGrid, type FileGridHandle } from './FileGrid.js';
+import { FileTree, type FileTreeHandle } from './FileTree.js';
+import { PaneQueue, type PaneQueueHandle } from './PaneQueue.js';
+
+/** Which of the three regions inside a Pane currently owns the keyboard.
+ *  Drives Tab cycling between them and the visible focus accent. */
+type ActiveRegion = 'tree' | 'grid' | 'queue';
 
 /**
  * What a pane is rooted at, within its scope's tree.
@@ -119,6 +123,64 @@ export function Pane({
   const [treeWidth, setTreeWidth] = useState(240);
   // The tree's right-click ignore menu: the node and where to draw it.
   const [treeMenu, setTreeMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null);
+
+  // Keyboard-focus tracking inside the Pane. `activeRegion` drives the visible
+  // accent border and tells the Tab handler where to cycle to next. `null`
+  // when no region inside this Pane owns the keyboard.
+  const [activeRegion, setActiveRegion] = useState<ActiveRegion | null>(null);
+  const treeColumnRef = useRef<HTMLDivElement>(null);
+  const gridColumnRef = useRef<HTMLDivElement>(null);
+  const queueRowRef = useRef<HTMLDivElement>(null);
+  const treeHandle = useRef<FileTreeHandle>(null);
+  const gridHandle = useRef<FileGridHandle>(null);
+  const queueHandle = useRef<PaneQueueHandle>(null);
+  const paneRef = useRef<HTMLElement>(null);
+
+  // Resolve which of the three regions the given node lives in, if any.
+  const regionOf = useCallback((node: Node | null): ActiveRegion | null => {
+    if (!node) return null;
+    if (treeColumnRef.current?.contains(node)) return 'tree';
+    if (gridColumnRef.current?.contains(node)) return 'grid';
+    if (queueRowRef.current?.contains(node)) return 'queue';
+    return null;
+  }, []);
+
+  // Focus events bubble through the Pane container; we use them to drive
+  // both the visible region accent and the Tab cycle.
+  const onPaneFocus = useCallback(
+    (e: React.FocusEvent<HTMLElement>) => {
+      const region = regionOf(e.target);
+      if (region) setActiveRegion(region);
+    },
+    [regionOf],
+  );
+  const onPaneBlur = useCallback((e: React.FocusEvent<HTMLElement>) => {
+    const next = e.relatedTarget as Node | null;
+    if (!paneRef.current?.contains(next)) setActiveRegion(null);
+  }, []);
+
+  // Route a region handle's `focusMe` call by name.
+  const focusRegion = useCallback((region: ActiveRegion) => {
+    if (region === 'tree') treeHandle.current?.focusMe();
+    else if (region === 'grid') gridHandle.current?.focusMe();
+    else queueHandle.current?.focusMe();
+  }, []);
+
+  // Tab / Shift+Tab inside the Pane cycles tree → grid → queue → tree.
+  const onPaneKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLElement>) => {
+      if (e.key !== 'Tab') return;
+      const here = regionOf(document.activeElement);
+      if (!here) return;
+      e.preventDefault();
+      const order: ActiveRegion[] = ['tree', 'grid', 'queue'];
+      const idx = order.indexOf(here);
+      const step = e.shiftKey ? -1 : 1;
+      const next = order[(idx + step + order.length) % order.length];
+      if (next) focusRegion(next);
+    },
+    [focusRegion, regionOf],
+  );
 
   const entryAbsPaths = useMemo(() => paneEntries.map((e) => toAbs(e.path)), [paneEntries, toAbs]);
 
@@ -295,7 +357,15 @@ export function Pane({
   );
 
   return (
-    <section style={paneStyle} data-testid={`pane-${testId}`}>
+    <section
+      ref={paneRef}
+      style={paneStyle}
+      data-testid={`pane-${testId}`}
+      data-pane={testId}
+      onFocus={onPaneFocus}
+      onBlur={onPaneBlur}
+      onKeyDown={onPaneKeyDown}
+    >
       <header style={paneHeaderStyle}>
         <span style={paneLabelStyle}>{label}</span>
         <span style={pathStyle} title={headerPath}>
@@ -305,9 +375,17 @@ export function Pane({
       </header>
 
       <div style={paneBodyStyle}>
-        <div style={{ ...treeColumnStyle, width: treeWidth }}>
+        <div
+          ref={treeColumnRef}
+          style={{
+            ...treeColumnStyle,
+            width: treeWidth,
+            ...(activeRegion === 'tree' ? activeRegionStyle : null),
+          }}
+        >
           {renderedRoot ? (
             <FileTree
+              ref={treeHandle}
               root={renderedRoot}
               selectedPath={selectedFolder}
               onSelectFolder={handleSelectFolder}
@@ -326,8 +404,15 @@ export function Pane({
           title="Drag to resize the tree"
           data-testid={`tree-resize-${testId}`}
         />
-        <div style={gridColumnStyle}>
+        <div
+          ref={gridColumnRef}
+          style={{
+            ...gridColumnStyle,
+            ...(activeRegion === 'grid' ? activeRegionStyle : null),
+          }}
+        >
           <FileGrid
+            ref={gridHandle}
             scope={scope}
             rows={gridRows}
             selectedPath={selectedFile}
@@ -345,8 +430,16 @@ export function Pane({
         title="Drag to resize the queue"
         data-testid={`queue-resize-${testId}`}
       />
-      <div style={{ ...queueRowStyle, height: queueHeight }}>
+      <div
+        ref={queueRowRef}
+        style={{
+          ...queueRowStyle,
+          height: queueHeight,
+          ...(activeRegion === 'queue' ? activeRegionStyle : null),
+        }}
+      >
         <PaneQueue
+          ref={queueHandle}
           label={label}
           entries={paneEntries}
           displayPath={queueDisplayPath}
@@ -389,6 +482,13 @@ const paneStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
   borderRight: '1px solid #1f2933',
+};
+
+/** A 1-px accent outline on the Pane's currently-focused region (tree / grid /
+ *  queue). Outline rather than border so layout doesn't shift on focus change. */
+const activeRegionStyle: React.CSSProperties = {
+  outline: '1px solid #5a9bd4',
+  outlineOffset: '-1px',
 };
 
 const paneHeaderStyle: React.CSSProperties = {

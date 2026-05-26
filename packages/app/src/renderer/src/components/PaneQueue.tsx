@@ -1,7 +1,20 @@
 import type { QueueEntry } from '@ai-lore-companion/core';
-import type { ColDef, ValueGetterParams } from 'ag-grid-community';
+import type { CellKeyDownEvent, ColDef, ValueGetterParams } from 'ag-grid-community';
 import { AgGridReact } from 'ag-grid-react';
-import { type JSX, useMemo, useState } from 'react';
+import {
+  type JSX,
+  forwardRef,
+  useCallback,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
+/** Imperative handle the Pane uses to move keyboard focus into the queue. */
+export type PaneQueueHandle = {
+  focusMe: () => void;
+};
 // Importing the theme also evaluates FileGrid.tsx, which registers the AG Grid
 // modules and license — so this grid has them without repeating the setup.
 import { cockpitGridTheme } from './FileGrid.js';
@@ -74,16 +87,45 @@ function TypeCell(params: { value?: string }): JSX.Element | null {
  * column. Row click reveals the file, double-click opens it, and ack / ack-all
  * stay on the same callbacks the pane already wires up.
  */
-export function PaneQueue({
-  label,
-  entries,
-  onRowClick,
-  onRowDoubleClick,
-  onAck,
-  onAckAll,
-  displayPath,
-}: Props): JSX.Element {
+export const PaneQueue = forwardRef<PaneQueueHandle, Props>(function PaneQueue(
+  { label, entries, onRowClick, onRowDoubleClick, onAck, onAckAll, displayPath }: Props,
+  forwardedRef,
+): JSX.Element {
   const [quickFilter, setQuickFilter] = useState('');
+  const gridRef = useRef<AgGridReact<QueueEntry>>(null);
+
+  useImperativeHandle(forwardedRef, () => ({
+    focusMe: () => {
+      const api = gridRef.current?.api;
+      if (!api) return;
+      const focused = api.getFocusedCell();
+      if (focused) {
+        api.setFocusedCell(focused.rowIndex, focused.column.getColId());
+      } else if (api.getDisplayedRowCount() > 0) {
+        api.setFocusedCell(0, 'name');
+      }
+    },
+  }));
+
+  // Keyboard activation parity with mouse: `Enter` reveals (single-click),
+  // `⌘+Enter` opens (double-click), `Backspace`/`Delete` acks the focused row.
+  const onCellKeyDown = useCallback(
+    (e: CellKeyDownEvent<QueueEntry>) => {
+      const keyEvent = e.event as KeyboardEvent;
+      if (!e.data) return;
+      if (keyEvent.key === 'Enter') {
+        keyEvent.preventDefault();
+        if (keyEvent.metaKey) onRowDoubleClick(e.data);
+        else onRowClick(e.data);
+        return;
+      }
+      if (keyEvent.key === 'Backspace' || keyEvent.key === 'Delete') {
+        keyEvent.preventDefault();
+        onAck(e.data.id);
+      }
+    },
+    [onRowClick, onRowDoubleClick, onAck],
+  );
 
   const columns = useMemo<ColDef<QueueEntry>[]>(
     () => [
@@ -186,6 +228,7 @@ export function PaneQueue({
       </header>
       <div style={gridWrapStyle}>
         <AgGridReact<QueueEntry>
+          ref={gridRef}
           theme={cockpitGridTheme}
           rowData={entries}
           columnDefs={columns}
@@ -196,7 +239,6 @@ export function PaneQueue({
           groupDisplayType="groupRows"
           groupDefaultExpanded={1}
           rowSelection={{ mode: 'singleRow', checkboxes: false }}
-          suppressCellFocus
           animateRows={false}
           headerHeight={28}
           rowHeight={26}
@@ -207,11 +249,12 @@ export function PaneQueue({
           onRowDoubleClicked={(e) => {
             if (e.data) onRowDoubleClick(e.data);
           }}
+          onCellKeyDown={onCellKeyDown}
         />
       </div>
     </section>
   );
-}
+});
 
 const containerStyle: React.CSSProperties = {
   display: 'flex',

@@ -131,6 +131,11 @@ export const IPC = {
   SettingsSetLayout: 'settings:set-layout',
   /** Main → renderer: the macOS App menu's Settings… item (or ⌘,) was triggered. */
   SettingsOpen: 'settings:open',
+  /** Main → renderer: the user fired `⌘+N` (1..9) — select the Nth cockpit
+   *  tab in the left panel and focus its tree. Payload is the 1-based index. */
+  SelectCockpitTab: 'cockpit:select-tab',
+  /** Main → renderer: the user fired `⌘+F` — focus the global file search. */
+  FocusGlobalSearch: 'cockpit:focus-search',
 } as const;
 
 export type ChainPayload = ChainResult;
@@ -315,6 +320,10 @@ export type CockpitApi = {
   onSettingsChanged: (handler: (snapshot: SettingsSnapshot) => void) => Unsubscribe;
   /** Subscribe to the macOS App menu's Settings… item firing (also `⌘,`). */
   onSettingsOpen: (handler: () => void) => Unsubscribe;
+  /** Subscribe to ⌘+1..⌘+9 — select the Nth cockpit tab (1-based). */
+  onSelectCockpitTab: (handler: (index: number) => void) => Unsubscribe;
+  /** Subscribe to ⌘+F — focus the global file search. */
+  onFocusGlobalSearch: (handler: () => void) => Unsubscribe;
 };
 
 declare global {

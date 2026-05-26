@@ -1,5 +1,6 @@
 import type { ChangeScope, QueueEntry, TreeNode } from '@ai-lore-companion/core';
 import {
+  type CellKeyDownEvent,
   type ColDef,
   type GetContextMenuItemsParams,
   type MenuItemDef,
@@ -10,7 +11,22 @@ import {
 } from 'ag-grid-community';
 import { AllEnterpriseModule, LicenseManager } from 'ag-grid-enterprise';
 import { AgGridReact } from 'ag-grid-react';
-import { type JSX, useEffect, useMemo, useRef } from 'react';
+import {
+  type JSX,
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+} from 'react';
+
+/** Imperative handle the Pane uses to move keyboard focus into the grid. */
+export type FileGridHandle = {
+  /** Focus the grid; AG-Grid restores the last focused cell, or focuses the
+   *  first row's `name` cell on first entry. */
+  focusMe: () => void;
+};
 
 ModuleRegistry.registerModules([AllEnterpriseModule]);
 
@@ -92,16 +108,26 @@ function formatModified(ts: number | undefined): string {
   return `${days}d ago`;
 }
 
-export function FileGrid({
-  scope,
-  rows,
-  selectedPath,
-  onSelectPath,
-  onOpenFolder,
-  driftByPath,
-  onIgnore,
-}: Props): JSX.Element {
+export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
+  { scope, rows, selectedPath, onSelectPath, onOpenFolder, driftByPath, onIgnore }: Props,
+  forwardedRef,
+): JSX.Element {
   const gridRef = useRef<AgGridReact<TreeNode>>(null);
+
+  // Move keyboard focus into the grid. AG-Grid restores its last focused
+  // cell if it had one; otherwise we land on the first row's `name`.
+  useImperativeHandle(forwardedRef, () => ({
+    focusMe: () => {
+      const api = gridRef.current?.api;
+      if (!api) return;
+      const focused = api.getFocusedCell();
+      if (focused) {
+        api.setFocusedCell(focused.rowIndex, focused.column.getColId());
+      } else if (api.getDisplayedRowCount() > 0) {
+        api.setFocusedCell(0, 'name');
+      }
+    },
+  }));
 
   const columns = useMemo<ColDef<TreeNode>[]>(
     () => [
@@ -165,6 +191,55 @@ export function FileGrid({
     }
   }, [selectedPath]);
 
+  // Type-ahead buffer: printable keys accumulate and jump the row focus to
+  // the first row whose `name` starts with the buffer (case-insensitive).
+  // Idle for ~750ms resets the buffer; the user can keep typing to extend.
+  const typeBuf = useRef('');
+  const typeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typeAhead = useCallback((char: string) => {
+    typeBuf.current = `${typeBuf.current}${char.toLowerCase()}`;
+    if (typeTimer.current) clearTimeout(typeTimer.current);
+    typeTimer.current = setTimeout(() => {
+      typeBuf.current = '';
+    }, 750);
+
+    const api = gridRef.current?.api;
+    if (!api) return;
+    const buf = typeBuf.current;
+    let foundIdx: number | null = null;
+    api.forEachNodeAfterFilterAndSort((node, idx) => {
+      if (foundIdx !== null) return;
+      const name = node.data?.name?.toLowerCase() ?? '';
+      if (name.startsWith(buf)) foundIdx = idx;
+    });
+    if (foundIdx !== null) {
+      api.ensureIndexVisible(foundIdx, 'middle');
+      api.setFocusedCell(foundIdx, 'name');
+    }
+  }, []);
+
+  const onCellKeyDown = useCallback(
+    (e: CellKeyDownEvent<TreeNode>) => {
+      const keyEvent = e.event as KeyboardEvent;
+      if (keyEvent.key === 'Enter' && e.data) {
+        keyEvent.preventDefault();
+        if (e.data.isDir) onOpenFolder(e.data.path);
+        else void window.cockpit.openPath(e.data.path);
+        return;
+      }
+      if (keyEvent.key === 'Escape') {
+        typeBuf.current = '';
+        if (typeTimer.current) clearTimeout(typeTimer.current);
+        return;
+      }
+      // Printable single character — no modifiers — feeds the type-ahead buffer.
+      if (keyEvent.key.length === 1 && !keyEvent.metaKey && !keyEvent.ctrlKey && !keyEvent.altKey) {
+        typeAhead(keyEvent.key);
+      }
+    },
+    [onOpenFolder, typeAhead],
+  );
+
   return (
     <div style={containerStyle} data-testid={`grid-${scope}`}>
       <AgGridReact<TreeNode>
@@ -175,7 +250,6 @@ export function FileGrid({
         defaultColDef={{ sortable: true, resizable: true }}
         getRowId={(params) => params.data.path}
         rowSelection={{ mode: 'singleRow', checkboxes: false }}
-        suppressCellFocus
         animateRows={false}
         getContextMenuItems={(
           params: GetContextMenuItemsParams<TreeNode>,
@@ -202,10 +276,11 @@ export function FileGrid({
           if (e.data.isDir) onOpenFolder(e.data.path);
           else void window.cockpit.openPath(e.data.path);
         }}
+        onCellKeyDown={onCellKeyDown}
       />
     </div>
   );
-}
+});
 
 const containerStyle: React.CSSProperties = {
   flex: 1,

@@ -21,6 +21,20 @@ async function openSettingsViaMenu(app: ElectronApplication): Promise<void> {
   });
 }
 
+/** Click a hidden Navigate-submenu item by label — `keyboard.press` does not
+ *  fire native accelerators, so the test triggers the menu item directly. */
+async function clickNavigateItem(app: ElectronApplication, label: string): Promise<void> {
+  await app.evaluate(
+    ({ Menu }, args) => {
+      const menu = Menu.getApplicationMenu();
+      const navMenu = menu?.items.find((i) => i.label === 'Navigate')?.submenu;
+      const item = navMenu?.items.find((i) => i.label === args.label);
+      item?.click();
+    },
+    { label },
+  );
+}
+
 test.describe('window modes', () => {
   test('a valid project opens the pinned cockpit tabs', async () => {
     const fixture = makeProject();
@@ -231,6 +245,47 @@ test.describe('window modes', () => {
       // The Phase E toggle is rendered through the registry.
       await sheet.getByText('Workspace').click();
       await expect(sheet.getByTestId('setting-workspace.restoreLayout')).toBeVisible();
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('Cmd+1, Cmd+2, Cmd+3 switch the left-panel cockpit tabs', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('pane-status')).toBeVisible({ timeout: 15_000 });
+
+      // Cmd+2 — Payload tab is now active; its Pane renders.
+      await clickNavigateItem(app, 'Go to Tab 2');
+      await expect(page.getByTestId('pane-payload')).toBeVisible({ timeout: 3_000 });
+
+      // Cmd+3 — Memory tab.
+      await clickNavigateItem(app, 'Go to Tab 3');
+      await expect(page.getByTestId('pane-memory')).toBeVisible({ timeout: 3_000 });
+
+      // Cmd+1 — back to Status.
+      await clickNavigateItem(app, 'Go to Tab 1');
+      await expect(page.getByTestId('pane-status')).toBeVisible({ timeout: 3_000 });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('Cmd+F focuses the global file search', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('pane-status')).toBeVisible({ timeout: 15_000 });
+
+      // Click somewhere else first so the search input is not already focused.
+      await page.getByTestId('pane-status').getByTestId('tree-root').click();
+      await clickNavigateItem(app, 'Find File…');
+      await expect(page.getByTestId('global-search')).toBeFocused({ timeout: 3_000 });
 
       await app.close();
     } finally {

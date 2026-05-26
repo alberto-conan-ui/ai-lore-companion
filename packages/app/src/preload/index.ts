@@ -75,6 +75,8 @@ const api: CockpitApi = {
   settingsSetLayout: (arg) => ipcRenderer.invoke(IPC.SettingsSetLayout, arg),
   onSettingsChanged: makeSubscribe<SettingsSnapshot>(IPC.SettingsChanged),
   onSettingsOpen: makeSubscribe<void>(IPC.SettingsOpen),
+  onSelectCockpitTab: makeSubscribe<number>(IPC.SelectCockpitTab),
+  onFocusGlobalSearch: makeSubscribe<void>(IPC.FocusGlobalSearch),
 };
 
 contextBridge.exposeInMainWorld('cockpit', api);

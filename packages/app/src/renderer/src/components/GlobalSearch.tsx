@@ -1,4 +1,4 @@
-import { type JSX, useEffect, useRef, useState } from 'react';
+import { type JSX, forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { FileSearchHit } from '../../../shared/ipc.js';
 
 type Props = {
@@ -8,6 +8,13 @@ type Props = {
   onPick: (path: string) => void;
   /** Maps an absolute path to a short tab-relative path for display. */
   displayPath: (absPath: string) => string;
+};
+
+/** Imperative handle App uses to focus the search input from ⌘+F. */
+export type GlobalSearchHandle = {
+  /** Focus the search input, remembering the previous activeElement so Esc
+   *  can return focus there. */
+  focusMe: () => void;
 };
 
 function dirname(p: string): string {
@@ -23,13 +30,28 @@ function dirname(p: string): string {
  * `↑`/`↓` move it (wrapping), `Enter` picks the highlighted hit, hovering a
  * row updates it, `Escape` closes.
  */
-export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element {
+export const GlobalSearch = forwardRef<GlobalSearchHandle, Props>(function GlobalSearch(
+  { dirs, onPick, displayPath }: Props,
+  forwardedRef,
+): JSX.Element {
   const [query, setQuery] = useState('');
   const [hits, setHits] = useState<FileSearchHit[]>([]);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
   // Refs to the result `<li>`s so we can scroll the highlighted one into view.
   const itemRefs = useRef<Array<HTMLLIElement | null>>([]);
+  // Refs for the input itself and for the element that held focus when the
+  // search input was focused — so Esc can return focus there.
+  const inputRef = useRef<HTMLInputElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
+  useImperativeHandle(forwardedRef, () => ({
+    focusMe: () => {
+      previousFocusRef.current = document.activeElement as HTMLElement | null;
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    },
+  }));
 
   // Debounced search — one IPC round trip ~150ms after typing settles.
   useEffect(() => {
@@ -72,6 +94,7 @@ export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element 
         ⌕
       </span>
       <input
+        ref={inputRef}
         type="search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -86,6 +109,10 @@ export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element 
           if (e.key === 'Escape') {
             setOpen(false);
             (e.target as HTMLInputElement).blur();
+            // Esc returns focus to wherever the user was before ⌘+F.
+            const prev = previousFocusRef.current;
+            previousFocusRef.current = null;
+            if (prev && document.body.contains(prev)) prev.focus();
           } else if (e.key === 'ArrowDown' && hits.length > 0) {
             e.preventDefault();
             setHighlight((h) => (h + 1) % hits.length);
@@ -134,7 +161,7 @@ export function GlobalSearch({ dirs, onPick, displayPath }: Props): JSX.Element 
       ) : null}
     </div>
   );
-}
+});
 
 const wrapStyle: React.CSSProperties = {
   position: 'relative',

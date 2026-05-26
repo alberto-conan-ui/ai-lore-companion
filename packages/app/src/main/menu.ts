@@ -50,6 +50,37 @@ const viewSubmenu: MenuItemConstructorOptions[] = [
   { role: 'togglefullscreen' },
 ];
 
+/** Send a push IPC to the focused window — null-safe wrapper for the menu
+ *  click handlers, which may receive `undefined` for `win` in tests. */
+function pushToFocused(win: BrowserWindow | undefined, channel: string, ...args: unknown[]): void {
+  const target = win ?? BrowserWindow.getFocusedWindow();
+  if (target) target.webContents.send(channel, ...args);
+}
+
+/**
+ * The Navigate submenu carries the cockpit's keyboard accelerators —
+ * ⌘+F to focus the global file search, ⌘+1…⌘+9 to switch to the Nth tab
+ * in the left panel. Items are hidden so they do not clutter the menu bar;
+ * accelerators still fire. Hidden items work in stock Electron menus —
+ * `visible: false` removes the row but keeps the accelerator wired.
+ */
+const navigateSubmenu: MenuItemConstructorOptions[] = [
+  {
+    label: 'Find File…',
+    accelerator: 'CmdOrCtrl+F',
+    visible: false,
+    click: (_item, win) => pushToFocused(win, IPC.FocusGlobalSearch),
+  },
+  ...Array.from({ length: 9 }, (_, i) => i + 1).map(
+    (n): MenuItemConstructorOptions => ({
+      label: `Go to Tab ${n}`,
+      accelerator: `CmdOrCtrl+${n}`,
+      visible: false,
+      click: (_item, win) => pushToFocused(win, IPC.SelectCockpitTab, n),
+    }),
+  ),
+];
+
 /**
  * The macOS App menu, hand-built rather than `{ role: 'appMenu' }`. The stock
  * role gives the standard items (About, Services, Hide/Show, Quit) but no way
@@ -105,6 +136,7 @@ export function buildAppMenu(recents: RecentProject[], handlers: MenuHandlers): 
     },
     { role: 'editMenu' },
     { label: 'View', submenu: viewSubmenu },
+    { label: 'Navigate', submenu: navigateSubmenu, visible: false },
     { role: 'windowMenu' },
   ];
   return Menu.buildFromTemplate(template);

@@ -11,7 +11,7 @@ import {
   DOCK_MIN_SIZE,
   DockPanel,
 } from './components/DockPanel.js';
-import { GlobalSearch } from './components/GlobalSearch.js';
+import { GlobalSearch, type GlobalSearchHandle } from './components/GlobalSearch.js';
 import { Pane, type SubRoot, baseDirsOf, entriesInSubRoot } from './components/Pane.js';
 import {
   type PanelId,
@@ -195,6 +195,75 @@ export function App(): JSX.Element {
       offTreeUpdate();
     };
   }, [setChain, setEntries, applyEvent, setTrees, applyTreeUpdate]);
+
+  const globalSearchRef = useRef<GlobalSearchHandle>(null);
+
+  // ⌘+[ / ⌘+] moves the keyboard between visible Panes. Adapted from the
+  // V2 "Project ↔ Lore" model to the dockable workspace: each panel can
+  // host a Pane tab, so cycling means moving across panels rather than
+  // inside one tab. Scoped to "focus is inside a Pane already" — if the
+  // user is inside a BrowserTab's WebContentsView the keydown does not
+  // reach this listener at all, and clicks elsewhere are no-ops.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (!e.metaKey || (e.key !== '[' && e.key !== ']')) return;
+      const active = document.activeElement as HTMLElement | null;
+      const here = active?.closest('[data-pane]') as HTMLElement | null;
+      if (!here) return;
+      const panes = Array.from(document.querySelectorAll<HTMLElement>('[data-pane]'));
+      if (panes.length < 2) return;
+      e.preventDefault();
+      const idx = panes.indexOf(here);
+      const step = e.key === '[' ? -1 : 1;
+      const target = panes[(idx + step + panes.length) % panes.length];
+      if (!target) return;
+      // Restore focus to whichever row currently carries the roving
+      // tabindex inside the target Pane's tree; fall back to the tree's
+      // root row, then to the section itself.
+      const focusable =
+        target.querySelector<HTMLElement>('[tabindex="0"]') ??
+        target.querySelector<HTMLElement>('[data-testid="tree-root"]') ??
+        target;
+      focusable.focus();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // ⌘+1..⌘+9 select the Nth tab in the left panel (the cockpit pillar). The
+  // accelerator is fired from the app menu in main; main pushes the index
+  // here. Out-of-range indexes (more tabs than the left panel has) are
+  // silently ignored.
+  useEffect(() => {
+    const off = window.cockpit.onSelectCockpitTab((n) => {
+      setPanels((prev) => {
+        const left = prev.left;
+        const target = left.tabs[n - 1];
+        if (!target) return prev;
+        return { ...prev, left: { ...left, activeId: target.id } };
+      });
+      // Defer focus until after the tab switch has rendered.
+      requestAnimationFrame(() => {
+        const pane = document.querySelector<HTMLElement>('[data-pane]');
+        const focusable =
+          pane?.querySelector<HTMLElement>('[tabindex="0"]') ??
+          pane?.querySelector<HTMLElement>('[data-testid="tree-root"]') ??
+          pane;
+        focusable?.focus();
+      });
+    });
+    return off;
+  }, []);
+
+  // ⌘+F focuses the global file search. Main pushes this on the App menu
+  // accelerator. When focus is inside a BrowserTab's WebContentsView the
+  // keydown stays there (browser find) and this handler never fires.
+  useEffect(() => {
+    const off = window.cockpit.onFocusGlobalSearch(() => {
+      globalSearchRef.current?.focusMe();
+    });
+    return off;
+  }, []);
 
   // Seed the workspace layout from the per-project snapshot, exactly once per
   // window — gated on `workspace.restoreLayout`. A missing snapshot, or the
@@ -656,7 +725,12 @@ export function App(): JSX.Element {
     <div style={cockpitShell}>
       <TrackerStrip
         search={
-          <GlobalSearch dirs={searchDirs} onPick={handleSearchPick} displayPath={displayPath} />
+          <GlobalSearch
+            ref={globalSearchRef}
+            dirs={searchDirs}
+            onPick={handleSearchPick}
+            displayPath={displayPath}
+          />
         }
       />
       <div style={panelsRow}>
