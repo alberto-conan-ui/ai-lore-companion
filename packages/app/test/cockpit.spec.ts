@@ -764,6 +764,56 @@ test.describe('window modes', () => {
     }
   });
 
+  test('every file/folder surface renders a row-kebab affordance', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      // Tree row kebab — the FileTree row carries a `.row-kebab-host` wrapper
+      // that the global hover rule targets; the kebab itself is in the DOM
+      // even when hidden (opacity 0). data-testid matches the row's path.
+      const treeKebab = page.locator('[data-testid^="row-kebab-tree-"]').first();
+      await expect(treeKebab).toHaveCount(1);
+      // Grid + ChangesPanel kebabs live inside AG-Grid cells. The grid's row
+      // count depends on the fixture's tree contents; assertion is "at least
+      // one kebab exists" rather than a specific path.
+      const gridKebab = page.locator('[data-testid^="row-kebab-grid-"]').first();
+      await expect(gridKebab).toHaveCount(1);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('a project on a pre-v0.5.1 core_version opens in the altered window with an upgrade banner', async () => {
+    const fixture = makeProject();
+    try {
+      // Downgrade the fixture's manifest to a version below the cockpit's
+      // minimum so the version-too-old branch fires.
+      writeFileSync(
+        join(fixture.root, '.ai-lore-e2e-fixture', 'workspace.yaml'),
+        'project_name: e2e-fixture\ncore_version: "0.4"\n',
+      );
+
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      // The altered shell renders — not the cockpit; the version-specific
+      // hint identifies which branch fired, and the Reload button stays
+      // available for re-detection after the user runs the upgrade.
+      await expect(page.getByTestId('altered')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('altered-version-hint')).toBeVisible();
+      await expect(page.getByText(/AI-Lore v0\.4 — upgrade required/i)).toBeVisible();
+      await expect(page.getByTestId('altered-reload')).toBeVisible();
+      // The cockpit's pinned tabs must NOT have rendered.
+      await expect(page.getByTestId('tab-status')).toHaveCount(0);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('apps migration v2 cleans v1 verb-prefixed labels on launch and dedups by tuple', async () => {
     const fixture = makeProject();
     try {

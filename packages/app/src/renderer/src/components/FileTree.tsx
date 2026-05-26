@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import type { DriftLevel } from '../store.js';
+import { RowKebab } from './RowKebab.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the tree. */
 export type FileTreeHandle = {
@@ -259,6 +260,7 @@ function Node({
         type="button"
         ref={(el) => setRowRef(node.path, el)}
         tabIndex={isFocused ? 0 : -1}
+        className="row-kebab-host"
         style={rowStyle}
         onClick={() => {
           onSelectFolder(node.path);
@@ -289,6 +291,15 @@ function Node({
           >
             ↗
           </button>
+        )}
+        {synthetic || !onContextMenu ? null : (
+          <RowKebab
+            testId={`row-kebab-tree-${node.path}`}
+            onActivate={(e) => {
+              const ev = e as React.MouseEvent<HTMLButtonElement>;
+              onContextMenu(node, ev.clientX, ev.clientY);
+            }}
+          />
         )}
       </button>
       {open && childList.length > 0 ? (

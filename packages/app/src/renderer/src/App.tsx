@@ -3,6 +3,7 @@ import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { createPortal } from 'react-dom';
 import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../shared/ipc.js';
 import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
+import type { AlteredReason } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BrowserTab } from './components/BrowserTab.js';
 import {
@@ -75,6 +76,7 @@ export function App(): JSX.Element {
   const [mode, setMode] = useState<WindowMode>('loading');
   const [recents, setRecents] = useState<RecentProject[]>([]);
   const [alteredFolder, setAlteredFolder] = useState<string>('');
+  const [alteredReason, setAlteredReason] = useState<AlteredReason>({ kind: 'not-ai-lore' });
   const [panels, setPanels] = useState<Record<PanelId, Panel>>({
     left: { tabs: PANE_TABS, activeId: 'status' },
     right: { tabs: [], activeId: '' },
@@ -188,6 +190,7 @@ export function App(): JSX.Element {
         setMode('welcome');
       } else if (payload.mode === 'altered') {
         setAlteredFolder(payload.folder);
+        setAlteredReason(payload.reason);
         setMode('altered');
       } else {
         setMode('cockpit');
@@ -637,7 +640,7 @@ export function App(): JSX.Element {
   }
 
   if (mode === 'altered') {
-    return <AlteredScreen folder={alteredFolder} />;
+    return <AlteredScreen folder={alteredFolder} reason={alteredReason} />;
   }
 
   if (!chain) {

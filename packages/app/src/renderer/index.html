@@ -15,6 +15,33 @@
         src: url('./fonts/SymbolsNerdFontMono-Regular.ttf') format('truetype');
         font-display: swap;
       }
+      /* RowKebab — hover/focus-visible inline affordance per row.
+         Opacity stays 0 by default so dense rows aren't cluttered; comes up
+         on row hover (AG-Grid + custom .row-kebab-host) or kebab focus. */
+      .row-kebab {
+        background: transparent;
+        border: none;
+        color: #9fb1bd;
+        font-size: 1rem;
+        font-weight: 700;
+        cursor: pointer;
+        padding: 0 0.4rem;
+        opacity: 0;
+        transition: opacity 0.1s;
+        line-height: 1;
+      }
+      .ag-row:hover .row-kebab,
+      .ag-row.ag-row-focus .row-kebab,
+      .row-kebab-host:hover .row-kebab,
+      .row-kebab-host:focus-within .row-kebab,
+      .row-kebab:hover,
+      .row-kebab:focus-visible {
+        opacity: 1;
+      }
+      .row-kebab:hover,
+      .row-kebab:focus-visible {
+        color: #dde3ea;
+      }
     </style>
   </head>
   <body>

@@ -25,16 +25,19 @@ import {
   isValidValue,
   latestSavePoint,
   listSavePoints,
+  locateLore,
   mergeIgnoreRules,
   parseAppEntries,
   parseMemoryFileSync,
   parseMemorySections,
   readChain,
   readCommitList,
+  readCoreVersion,
   readDiffText,
   readDirectory,
   resolveAll,
   updateFrontmatterFieldInFile,
+  versionMeetsMinimum,
 } from '@ai-lore-companion/core';
 import {
   BrowserWindow,
@@ -48,6 +51,7 @@ import {
   shell,
 } from 'electron';
 import {
+  type AlteredReason,
   type AppsInvokeArg,
   type AppsInvokeResult,
   type BrowserBounds,
@@ -106,6 +110,28 @@ type Wiring = {
 
 /** How many recent commits the baseline dropdown shows per repo. */
 const COMMIT_LIST_LIMIT = 50;
+
+/**
+ * Minimum AI-Lore version the cockpit supports. Older projects open in the
+ * altered window with a version-specific banner + terminal so the user can
+ * run the upgrade playbook from inside the app.
+ */
+const MIN_CORE_VERSION = '0.5.1';
+
+/**
+ * Decide whether a folder should open as a cockpit. Returns `null` when the
+ * project is compatible (`createProjectContext` proceeds), or an
+ * `AlteredReason` when the window should render the altered view instead.
+ */
+function checkProjectCompatibility(root: string): AlteredReason | null {
+  const lore = locateLore(root);
+  if ('error' in lore) return { kind: 'not-ai-lore' };
+  const currentVersion = readCoreVersion(lore.lorePath);
+  if (!currentVersion || !versionMeetsMinimum(currentVersion, MIN_CORE_VERSION)) {
+    return { kind: 'version-too-old', currentVersion, minimumVersion: MIN_CORE_VERSION };
+  }
+  return null;
+}
 
 /**
  * Attach save-point badges to a commit list. A commit whose SHA matches the
@@ -424,10 +450,27 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
 
   win.webContents.once('did-finish-load', () => {
     if (win.isDestroyed()) return;
+    const incompatible = checkProjectCompatibility(ctx.root);
+    if (incompatible) {
+      // Either not an AI-Lore project, or on a version older than the
+      // cockpit supports — both render the altered mode (banner + terminal
+      // + Reload) so the user can bootstrap / upgrade in place.
+      sendToWin(win, IPC.WindowInit, {
+        mode: 'altered',
+        folder: ctx.root,
+        reason: incompatible,
+      });
+      return;
+    }
     if (isChainError(ctx.chain)) {
-      // Not an AI-Lore project — the window renders the altered mode: a
-      // disclaimer banner, a terminal, and a Reload that re-runs detection.
-      sendToWin(win, IPC.WindowInit, { mode: 'altered', folder: ctx.root });
+      // Compatible version but the chain couldn't be walked (malformed
+      // status / focus files). Surface as "not an AI-Lore project" — the
+      // chain error message is too internal for the user to act on.
+      sendToWin(win, IPC.WindowInit, {
+        mode: 'altered',
+        folder: ctx.root,
+        reason: { kind: 'not-ai-lore' },
+      });
       return;
     }
     const chain = ctx.chain;

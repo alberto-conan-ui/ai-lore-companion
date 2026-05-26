@@ -23,6 +23,7 @@ import {
 import { type DriftKind, categoriseDriftCode } from '../store.js';
 import type { DriftRow } from './ChangesPanel.js';
 import { buildNodeContextMenu } from './nodeContextMenu.js';
+import { RowKebab } from './RowKebab.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the grid. */
 export type FileGridHandle = {
@@ -204,6 +205,40 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
         width: 130,
         filter: 'agNumberColumnFilter',
         valueFormatter: (p: { value: number | undefined }) => formatModified(p.value),
+      },
+      {
+        // Kebab affordance — opens the same context menu the right-click does.
+        colId: 'kebab',
+        headerName: '',
+        width: 36,
+        sortable: false,
+        filter: false,
+        suppressMovable: true,
+        suppressColumnsToolPanel: true,
+        cellStyle: { padding: 0, textAlign: 'center' },
+        cellRenderer: (params: {
+          data?: TreeNode;
+          node: { group?: boolean };
+          api: { showContextMenu: (p: { rowNode: unknown; value: unknown; x: number; y: number }) => void };
+        }): JSX.Element | null => {
+          if (!params.data || params.node.group) return null;
+          const row = params.data;
+          const node = params.node;
+          return (
+            <RowKebab
+              testId={`row-kebab-grid-${row.path}`}
+              onActivate={(e) => {
+                const ev = e as React.MouseEvent<HTMLButtonElement>;
+                params.api.showContextMenu({
+                  rowNode: node,
+                  value: row,
+                  x: ev.clientX,
+                  y: ev.clientY,
+                });
+              }}
+            />
+          );
+        },
       },
     ],
     [driftByPath],

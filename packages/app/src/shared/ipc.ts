@@ -237,15 +237,21 @@ export type DiffTextResult =
 /** A project folder the user has opened — an entry in the recents list. */
 export type RecentProject = { path: string; openedAt: number };
 
+/** Why the window is in altered mode — drives the banner copy. */
+export type AlteredReason =
+  | { kind: 'not-ai-lore' }
+  | { kind: 'version-too-old'; currentVersion: string | null; minimumVersion: string };
+
 /**
  * Main → renderer, once per window on load: what the window is. A welcome
- * window carries the recents list; an altered window — a folder that is not an
- * AI-Lore project — carries the folder path for its disclaimer banner.
+ * window carries the recents list; an altered window carries the folder path
+ * and a `reason` for its disclaimer banner — either "not an AI-Lore project"
+ * or "the project is too old, upgrade required".
  */
 export type WindowInitPayload =
   | { mode: 'welcome'; recents: RecentProject[] }
   | { mode: 'cockpit' }
-  | { mode: 'altered'; folder: string };
+  | { mode: 'altered'; folder: string; reason: AlteredReason };
 
 /** Per-side root trees, each populated one level deep. */
 export type TreeInitPayload = { payload: TreeNode; lore: TreeNode };

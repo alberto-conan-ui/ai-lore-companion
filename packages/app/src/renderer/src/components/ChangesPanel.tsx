@@ -25,6 +25,7 @@ import { type DriftKind, categoriseDriftCode } from '../store.js';
 import { cockpitGridTheme } from './FileGrid.js';
 import { InlineDiffPreview } from './InlineDiffPreview.js';
 import { buildNodeContextMenu } from './nodeContextMenu.js';
+import { RowKebab } from './RowKebab.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the panel. */
 export type ChangesPanelHandle = {
@@ -269,6 +270,41 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
           p.data ? folderRest(displayPath(p.data.projectRelPath)) : '',
         filter: 'agTextColumnFilter',
         floatingFilter: true,
+      },
+      {
+        // Kebab affordance — same menu the right-click opens, one trigger
+        // away without aiming for the row's secondary click area.
+        colId: 'kebab',
+        headerName: '',
+        width: 36,
+        sortable: false,
+        filter: false,
+        suppressMovable: true,
+        suppressColumnsToolPanel: true,
+        cellStyle: { padding: 0, textAlign: 'center' },
+        cellRenderer: (params: {
+          data?: DriftRow;
+          node: { group?: boolean };
+          api: { showContextMenu: (p: { rowNode: unknown; value: unknown; x: number; y: number }) => void };
+        }): JSX.Element | null => {
+          if (!params.data || params.node.group) return null;
+          const row = params.data;
+          const node = params.node;
+          return (
+            <RowKebab
+              testId={`row-kebab-changes-${row.projectRelPath}`}
+              onActivate={(e) => {
+                const ev = e as React.MouseEvent<HTMLButtonElement>;
+                params.api.showContextMenu({
+                  rowNode: node,
+                  value: row,
+                  x: ev.clientX,
+                  y: ev.clientY,
+                });
+              }}
+            />
+          );
+        },
       },
     ],
     [displayPath],

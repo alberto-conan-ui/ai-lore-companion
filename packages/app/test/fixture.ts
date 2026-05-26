@@ -27,7 +27,7 @@ export function makeProject(): Fixture {
   mkdirSync(join(lore, 'memory', 'blueprint'), { recursive: true });
   mkdirSync(join(lore, 'memory', 'knowledge-tree'), { recursive: true });
 
-  writeFileSync(join(lore, 'workspace.yaml'), 'project_name: e2e-fixture\ncore_version: "0.5"\n');
+  writeFileSync(join(lore, 'workspace.yaml'), 'project_name: e2e-fixture\ncore_version: "0.5.1"\n');
 
   writeFileSync(
     join(lore, 'memory', 'status', 'status.index.md'),
