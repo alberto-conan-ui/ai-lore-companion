@@ -77,6 +77,8 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
     ? { ...stripStyle, background: accentTint(hue), borderTop: `4px solid ${accent}` }
     : stripStyle;
 
+  const statusPath = `${chain.lorePath}/memory/status/status.index.md`;
+
   return (
     <header style={accentHeaderStyle}>
       <div style={identityRowStyle} data-testid="header-identity">
@@ -86,6 +88,15 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
         >
           {name}
         </span>
+        <button
+          type="button"
+          data-testid="status-view-toggle"
+          title="Open status summary"
+          onClick={() => setFocusViewPath(statusPath)}
+          style={focusViewToggleStyle}
+        >
+          ▾
+        </button>
         <RegisterChips
           posture={chain.posture}
           altitude={chain.dials?.altitude ?? null}

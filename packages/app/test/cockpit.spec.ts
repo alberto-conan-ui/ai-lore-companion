@@ -413,6 +413,64 @@ test.describe('window modes', () => {
     }
   });
 
+  test('the status chevron opens the in-app view of status.index.md', async () => {
+    const fixture = makeProject();
+    // Add some prose under `## Current state` so the primary section has
+    // visible content — the test asserts a known phrase.
+    const statusPath = join(
+      fixture.root,
+      '.ai-lore-e2e-fixture',
+      'memory',
+      'status',
+      'status.index.md',
+    );
+    writeFileSync(
+      statusPath,
+      [
+        '---',
+        'type: status',
+        'title: e2e-fixture — Status',
+        'updated: 2026-05-26',
+        'references: []',
+        'active_focus: ./focus/demo.focus.md',
+        'posture: execute',
+        'dials:',
+        '  altitude: mid',
+        '  commitment: neutral',
+        '---',
+        '',
+        '# e2e-fixture — Status',
+        '',
+        '## Current state',
+        '',
+        'fixture is healthy; Phase D is next.',
+        '',
+        '## Focus stack',
+        '',
+        '1. Demo — Active',
+        '',
+      ].join('\n'),
+    );
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('chip-posture')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTestId('status-view-toggle').click();
+      await expect(page.getByTestId('focus-view')).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByTestId('focus-view-title')).toHaveText('e2e-fixture — Status');
+      // Primary section is "Current state" — the status file has no Gate.
+      const primary = page.getByTestId('focus-view-primary');
+      await expect(primary).toContainText('Current state');
+      await expect(primary).toContainText('fixture is healthy; Phase D is next.');
+      // Focus stack section also renders.
+      await expect(page.getByTestId('focus-view-section-focus-stack')).toContainText('Demo');
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('the focus view toggle opens the in-app view of the active child (at-node)', async () => {
     const fixture = makeProject();
     try {

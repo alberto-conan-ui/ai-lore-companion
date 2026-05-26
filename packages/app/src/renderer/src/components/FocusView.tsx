@@ -131,20 +131,19 @@ function FocusBody({
   frontmatter: MemoryFrontmatter | null;
   sections: MemorySections;
 }): JSX.Element {
-  const isGoal = frontmatter?.type === 'focus' && frontmatter.focus_type === 'goal';
-  // Lead with whichever the focus_type implies; show whatever the body
-  // actually carries — a build focus that lacks a Gate still gets rendered
-  // honestly, with the missing section noted.
-  const primary = isGoal ? 'Vision' : 'Gate';
-  const standard = ['Context', 'In scope', 'Out of scope', 'Watch-outs'];
+  // Lead with whichever section makes sense for this file type. Status
+  // glances open at "Current state"; a goal focus opens at "Vision"; a
+  // build focus or AT-node opens at "Gate". The body still renders
+  // honestly — a section that's missing gets a "not present" placeholder.
+  const { primary, secondary } = primaryAndSecondaryFor(frontmatter);
 
-  const renderedKeys = new Set<string>([primary, ...standard].map((k) => k.toLowerCase()));
+  const renderedKeys = new Set<string>([primary, ...secondary].map((k) => k.toLowerCase()));
   const otherKeys = Object.keys(sections).filter((k) => !renderedKeys.has(k.toLowerCase()));
 
   return (
     <div>
       <FocusSection title={primary} body={lookup(sections, primary)} testId="focus-view-primary" />
-      {standard.map((label) => (
+      {secondary.map((label) => (
         <FocusSection
           key={label}
           title={label}
@@ -162,6 +161,28 @@ function FocusBody({
       ))}
     </div>
   );
+}
+
+function primaryAndSecondaryFor(fm: MemoryFrontmatter | null): {
+  primary: string;
+  secondary: string[];
+} {
+  if (fm?.type === 'status') {
+    // Status glances open at "Current state"; "Focus stack" and "Journal
+    // trail" are the supporting picture.
+    return { primary: 'Current state', secondary: ['Focus stack', 'Journal trail'] };
+  }
+  if (fm?.type === 'focus' && fm.focus_type === 'goal') {
+    return {
+      primary: 'Vision',
+      secondary: ['Context', 'In scope', 'Out of scope', 'Watch-outs'],
+    };
+  }
+  // Default — focus (build) and at-node both lead with Gate.
+  return {
+    primary: 'Gate',
+    secondary: ['Context', 'In scope', 'Out of scope', 'Watch-outs'],
+  };
 }
 
 function FocusSection({
