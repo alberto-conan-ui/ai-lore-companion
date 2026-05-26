@@ -21,6 +21,8 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { type ChangeEntry, parsePorcelainZ } from './porcelain.js';
 
 /** Result of a single read — `ok` carries entries, `failed` carries why. */
@@ -62,29 +64,90 @@ export function readChanges(workingTreeRoot: string, baseline: string): ChangesR
 /**
  * Read the unified diff text for one path against `baseline`. Untracked and
  * deleted-at-baseline files get hand-shaped output (real `git diff` returns
- * empty for untracked, and a baseline-removed-against-working-tree diff for
- * deletes — the panel wants symmetric "new file" / "deleted file" framing).
+ * empty for untracked, since they're unknown to either index; the panel wants
+ * symmetric "new file" / "deleted file" framing instead of a blank preview).
  */
 export function readDiffText(
   workingTreeRoot: string,
   baseline: string,
   relPath: string,
 ): DiffTextResult {
-  const result = spawnSync(
+  const diff = spawnSync(
     'git',
     ['-C', workingTreeRoot, 'diff', '--no-color', baseline, '--', relPath],
     { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
   );
-  if (result.error) {
-    return { kind: 'failed', message: `git diff error: ${result.error.message}` };
+  if (diff.error) {
+    return { kind: 'failed', message: `git diff error: ${diff.error.message}` };
   }
-  if (result.status !== 0) {
+  if (diff.status !== 0) {
     return {
       kind: 'failed',
-      message: `git diff exited ${result.status}: ${result.stderr.trim()}`,
+      message: `git diff exited ${diff.status}: ${diff.stderr.trim()}`,
     };
   }
-  return { kind: 'ok', text: result.stdout };
+  if (diff.stdout.length > 0) {
+    return { kind: 'ok', text: diff.stdout };
+  }
+
+  // Empty `git diff` — three possibilities: tracked-but-unchanged, untracked
+  // (unknown to the index, so no diff produced), or deleted-and-not-in-baseline.
+  // Tracked-unchanged stays empty; the other two are synthesised so the
+  // preview shows the file's content with a "new file" / "deleted" header.
+  const absPath = join(workingTreeRoot, relPath);
+  if (existsSync(absPath)) {
+    if (isTrackedPath(workingTreeRoot, relPath)) return { kind: 'ok', text: '' };
+    return readAsNewFile(absPath, relPath);
+  }
+  // Working tree has no file — try reading at the baseline commit.
+  return readAsDeletedFile(workingTreeRoot, baseline, relPath);
+}
+
+function isTrackedPath(workingTreeRoot: string, relPath: string): boolean {
+  const result = spawnSync(
+    'git',
+    ['-C', workingTreeRoot, 'ls-files', '--error-unmatch', '--', relPath],
+    { encoding: 'utf8' },
+  );
+  return result.status === 0;
+}
+
+function readAsNewFile(absPath: string, relPath: string): DiffTextResult {
+  try {
+    const content = readFileSync(absPath, 'utf8');
+    return { kind: 'ok', text: formatAsAdditions(content, relPath) };
+  } catch (err) {
+    return { kind: 'failed', message: `cannot read file: ${(err as Error).message}` };
+  }
+}
+
+function readAsDeletedFile(
+  workingTreeRoot: string,
+  baseline: string,
+  relPath: string,
+): DiffTextResult {
+  const show = spawnSync(
+    'git',
+    ['-C', workingTreeRoot, 'show', `${baseline}:${relPath}`],
+    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
+  );
+  // `git show` exits non-zero when the path doesn't exist at the baseline —
+  // empty diff + no working-tree file + no baseline file means unchanged
+  // (file never existed at this baseline). Return empty so the preview clears.
+  if (show.error || show.status !== 0) {
+    return { kind: 'ok', text: '' };
+  }
+  return { kind: 'ok', text: formatAsDeletion(show.stdout, relPath) };
+}
+
+function formatAsAdditions(content: string, relPath: string): string {
+  const lines = content.split('\n');
+  return `+++ new file: ${relPath}\n${lines.map((l) => `+${l}`).join('\n')}`;
+}
+
+function formatAsDeletion(content: string, relPath: string): string {
+  const lines = content.split('\n');
+  return `--- deleted: ${relPath}\n${lines.map((l) => `-${l}`).join('\n')}`;
 }
 
 /**

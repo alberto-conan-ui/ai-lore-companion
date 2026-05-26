@@ -307,14 +307,16 @@ export function Pane({
     await window.cockpit.settingsSetIgnores({ tier: 'project', rules: next });
   }, []);
 
-  /** Drag the divider above the queue to resize it — dragging up grows it. */
+  /** Drag the divider above the queue to resize it — dragging up grows it.
+   *  Only the floor is enforced (120 px) so the panel keeps a usable shape;
+   *  the ceiling is whatever the pane's flex parent allows. */
   const onQueueResize = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
       const startY = e.clientY;
       const startH = queueHeight;
       const onMove = (ev: MouseEvent): void => {
-        setQueueHeight(Math.max(120, Math.min(680, startH + (startY - ev.clientY))));
+        setQueueHeight(Math.max(120, startH + (startY - ev.clientY)));
       };
       const onUp = (): void => {
         window.removeEventListener('mousemove', onMove);
@@ -541,6 +543,7 @@ export function Pane({
         <ChangesPanel
           ref={queueHandle}
           label={label}
+          scope={scope}
           entries={paneEntries}
           baseline={baseline}
           commitList={commitList}

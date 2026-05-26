@@ -173,6 +173,53 @@ test('readDiffText returns the unified diff for a modified file', () => {
   }
 });
 
+test('readDiffText synthesises a new-file preview for untracked files', () => {
+  const { dir, cleanup } = makeRepo();
+  try {
+    writeFileSync(join(dir, 'new.txt'), 'line one\nline two\n');
+    const result = readDiffText(dir, 'HEAD', 'new.txt');
+    assert.equal(result.kind, 'ok');
+    if (result.kind !== 'ok') return;
+    assert.ok(result.text.startsWith('+++ new file: new.txt'));
+    assert.ok(result.text.includes('+line one'));
+    assert.ok(result.text.includes('+line two'));
+  } finally {
+    cleanup();
+  }
+});
+
+test('readDiffText synthesises a deleted-file preview when working tree lacks the file', () => {
+  const { dir, cleanup, commit } = makeRepo();
+  try {
+    writeFileSync(join(dir, 'gone.txt'), 'first\nsecond\n');
+    const sha = commit('add gone');
+    rmSync(join(dir, 'gone.txt'));
+    commit('remove gone');
+    const result = readDiffText(dir, sha, 'gone.txt');
+    assert.equal(result.kind, 'ok');
+    if (result.kind !== 'ok') return;
+    // git diff already shows -lines for a tracked-then-deleted file; whichever
+    // branch fires, the text must convey deletion.
+    assert.ok(result.text.includes('-first') || result.text.includes('--- deleted'));
+  } finally {
+    cleanup();
+  }
+});
+
+test('readDiffText returns empty text when the path is unchanged at the baseline', () => {
+  const { dir, cleanup, commit } = makeRepo();
+  try {
+    writeFileSync(join(dir, 'stable.txt'), 'unchanged\n');
+    commit('add stable');
+    const result = readDiffText(dir, 'HEAD', 'stable.txt');
+    assert.equal(result.kind, 'ok');
+    if (result.kind !== 'ok') return;
+    assert.equal(result.text, '');
+  } finally {
+    cleanup();
+  }
+});
+
 test('readCommitList returns recent commits newest first', () => {
   const { dir, cleanup, commit } = makeRepo();
   try {

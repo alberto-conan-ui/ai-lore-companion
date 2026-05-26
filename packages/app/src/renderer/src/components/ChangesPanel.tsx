@@ -1,9 +1,10 @@
-import type { AppEntry, ChangeEntry, TreeNode } from '@ai-lore-companion/core';
+import type { AppEntry, ChangeEntry, ChangeScope, TreeNode } from '@ai-lore-companion/core';
 import type {
   CellKeyDownEvent,
   ColDef,
   GetContextMenuItemsParams,
   MenuItemDef,
+  RowClickedEvent,
   ValueGetterParams,
 } from 'ag-grid-community';
 import { AgGridReact } from 'ag-grid-react';
@@ -11,6 +12,7 @@ import {
   type JSX,
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -21,6 +23,7 @@ import { type DriftKind, categoriseDriftCode } from '../store.js';
 // Importing the theme also evaluates FileGrid.tsx, which registers the AG Grid
 // modules and license — so this grid has them without repeating the setup.
 import { cockpitGridTheme } from './FileGrid.js';
+import { InlineDiffPreview } from './InlineDiffPreview.js';
 import { buildNodeContextMenu } from './nodeContextMenu.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the panel. */
@@ -41,6 +44,8 @@ export type DriftRow = ChangeEntry & {
 
 type Props = {
   label: string;
+  /** Which repo this panel reflects — drives the inline preview's diff source. */
+  scope: ChangeScope;
   entries: DriftRow[];
   /** Current baseline (commit SHA or `'HEAD'`). Drives the dropdown selection. */
   baseline: string;
@@ -61,6 +66,11 @@ type Props = {
   onDiff: (node: TreeNode) => void;
   onIgnore: (node: TreeNode) => void;
 };
+
+/** Default share of the panel's height given to the inline diff preview. */
+const DEFAULT_PREVIEW_FRACTION = 0.4;
+const MIN_PREVIEW_FRACTION = 0.1;
+const MAX_PREVIEW_FRACTION = 0.8;
 
 const KIND_GLYPH: Record<DriftKind, { glyph: string; color: string; label: string }> = {
   add: { glyph: '+', color: '#7fc97f', label: 'added' },
@@ -130,6 +140,7 @@ function nodeForRow(row: DriftRow): TreeNode {
 export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function ChangesPanel(
   {
     label,
+    scope,
     entries,
     baseline,
     commitList,
@@ -147,7 +158,49 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
   forwardedRef,
 ): JSX.Element {
   const [quickFilter, setQuickFilter] = useState('');
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [previewFraction, setPreviewFraction] = useState(DEFAULT_PREVIEW_FRACTION);
+  const containerRef = useRef<HTMLElement>(null);
   const gridRef = useRef<AgGridReact<DriftRow>>(null);
+
+  // Clear the selected path when its row disappears (file committed, baseline
+  // flipped, etc.) so the preview doesn't stay pointed at a stale row.
+  useEffect(() => {
+    if (!selectedPath) return;
+    if (!entries.some((e) => e.projectRelPath === selectedPath)) {
+      setSelectedPath(null);
+    }
+  }, [entries, selectedPath]);
+
+  // Open-externally fallback for the truncated-diff case: synthesise a
+  // file-shaped node from the selected row and route through onDiff so the
+  // user lands in the configured external diff app.
+  const openSelectedExternally = useCallback(() => {
+    if (!selectedPath) return;
+    const row = entries.find((e) => e.projectRelPath === selectedPath);
+    if (!row) return;
+    onDiff(nodeForRow(row));
+  }, [selectedPath, entries, onDiff]);
+
+  // Splitter drag — track relative fraction inside the panel's own height.
+  const startResize = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
+    event.preventDefault();
+    const container = containerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const onMove = (ev: PointerEvent): void => {
+      const offset = ev.clientY - rect.top;
+      const fraction = 1 - offset / rect.height;
+      const clamped = Math.max(MIN_PREVIEW_FRACTION, Math.min(MAX_PREVIEW_FRACTION, fraction));
+      setPreviewFraction(clamped);
+    };
+    const onUp = (): void => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }, []);
 
   useImperativeHandle(forwardedRef, () => ({
     focusMe: () => {
@@ -231,8 +284,24 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
     [commitList],
   );
 
+  const onAnyRowClicked = useCallback(
+    (e: RowClickedEvent<DriftRow>) => {
+      if (!e.data) return;
+      setSelectedPath(e.data.projectRelPath);
+      onRowClick(e.data);
+    },
+    [onRowClick],
+  );
+
+  const previewPct = `${Math.round(previewFraction * 100)}%`;
+  const listPct = `${Math.round((1 - previewFraction) * 100)}%`;
+
   return (
-    <section style={containerStyle} data-testid={`changes-${label.toLowerCase()}`}>
+    <section
+      ref={containerRef}
+      style={containerStyle}
+      data-testid={`changes-${label.toLowerCase()}`}
+    >
       <header style={headerStyle}>
         <span style={labelStyle}>{label} changes</span>
         <span style={countStyle}>{entries.length}</span>
@@ -258,7 +327,7 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
           data-testid={`changes-search-${label.toLowerCase()}`}
         />
       </header>
-      <div style={gridWrapStyle}>
+      <div style={{ ...gridWrapStyle, height: listPct }}>
         <AgGridReact<DriftRow>
           ref={gridRef}
           theme={cockpitGridTheme}
@@ -290,13 +359,28 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
               onIgnore,
             });
           }}
-          onRowClicked={(e) => {
-            if (e.data) onRowClick(e.data);
-          }}
+          onRowClicked={onAnyRowClicked}
           onRowDoubleClicked={(e) => {
             if (e.data) onRowDoubleClick(e.data);
           }}
           onCellKeyDown={onCellKeyDown}
+        />
+      </div>
+      <div
+        style={splitterStyle}
+        onPointerDown={startResize}
+        data-testid={`changes-splitter-${label.toLowerCase()}`}
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Resize diff preview"
+      />
+      <div style={{ ...previewWrapStyle, height: previewPct }}>
+        <InlineDiffPreview
+          scope={scope}
+          label={label}
+          baseline={baseline}
+          selectedPath={selectedPath}
+          onOpenExternally={openSelectedExternally}
         />
       </div>
     </section>
@@ -360,6 +444,20 @@ const searchStyle: React.CSSProperties = {
 };
 
 const gridWrapStyle: React.CSSProperties = {
-  flex: 1,
   minHeight: 0,
+};
+
+const splitterStyle: React.CSSProperties = {
+  height: 5,
+  cursor: 'row-resize',
+  background: '#0f1620',
+  borderTop: '1px solid #1f2933',
+  borderBottom: '1px solid #1f2933',
+  flex: 'none',
+};
+
+const previewWrapStyle: React.CSSProperties = {
+  minHeight: 0,
+  display: 'flex',
+  flexDirection: 'column',
 };

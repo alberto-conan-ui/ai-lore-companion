@@ -742,6 +742,28 @@ test.describe('window modes', () => {
     }
   });
 
+  test('the Changes panel renders an inline diff preview region', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      // Preview testIDs are keyed by pane label so Status (scope=lore) and
+      // Memory (scope=lore) don't collide. The Status tab is the default on
+      // launch — its preview is rendered + visible.
+      const statusPreview = page.getByTestId('changes-preview-status');
+      await expect(statusPreview).toBeVisible({ timeout: 5_000 });
+      // No selection yet → the empty hint is visible.
+      await expect(statusPreview.getByText(/Select a row to preview its diff/i)).toBeVisible();
+      // The splitter between the file list and the preview is present.
+      await expect(page.getByTestId('changes-splitter-status')).toBeVisible();
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('apps migration v2 cleans v1 verb-prefixed labels on launch and dedups by tuple', async () => {
     const fixture = makeProject();
     try {
