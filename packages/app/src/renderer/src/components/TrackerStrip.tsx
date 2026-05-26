@@ -8,6 +8,7 @@ import { accentColor, accentTint, hueFor, projectName } from '../projectAccent.j
 import { driftLevel, useCockpitStore } from '../store.js';
 import { ACTION_BUTTON_HEIGHT } from './ActionButton.js';
 import { DriftPill } from './DriftPill.js';
+import { RegisterChips } from './RegisterChips.js';
 import { SettingsSheetModal, type SettingsSheetSection } from './SettingsSheet.js';
 import { ShortcutButtons } from './ShortcutButtons.js';
 
@@ -80,7 +81,12 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
         >
           {name}
         </span>
-        <ModeBadge mode={chain.mode} />
+        <RegisterChips
+          posture={chain.posture}
+          altitude={chain.dials?.altitude ?? null}
+          commitment={chain.dials?.commitment ?? null}
+          focusType={chain.focusType}
+        />
         {chain.focus ? (
           <ChainLink path={chain.focus.path} style={focusTitle} testId="focus-link">
             {chain.focus.title}
@@ -129,25 +135,6 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
         />
       ) : null}
     </header>
-  );
-}
-
-function ModeBadge({ mode }: { mode: string }): JSX.Element {
-  return (
-    <span
-      style={{
-        padding: '0.18rem 0.5rem',
-        borderRadius: '4px',
-        background: '#1f2933',
-        color: '#9ad0ff',
-        fontSize: '0.72rem',
-        fontWeight: 600,
-        textTransform: 'uppercase',
-        letterSpacing: '0.06em',
-      }}
-    >
-      {mode}
-    </span>
   );
 }
 

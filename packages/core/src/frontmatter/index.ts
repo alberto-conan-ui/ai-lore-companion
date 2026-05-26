@@ -1,4 +1,5 @@
 export { parseMemoryFile, parseMemoryFileSync } from './parser.js';
+export { updateFrontmatterField, updateFrontmatterFieldInFile } from './writer.js';
 export type {
   Altitude,
   ATNodeFrontmatter,

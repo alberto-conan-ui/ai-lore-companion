@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ElectronApplication, expect, test } from '@playwright/test';
@@ -324,6 +324,120 @@ test.describe('window modes', () => {
       // Re-running the search must now find nothing.
       await page.getByTestId('global-search').fill('demo');
       await expect(page.getByTestId('search-result')).toHaveCount(0, { timeout: 3_000 });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the header renders posture / altitude / commitment / focus-type chips from frontmatter', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      await expect(page.getByTestId('register-chips')).toBeVisible();
+      await expect(page.getByTestId('chip-posture')).toContainText('execute', { ignoreCase: true });
+      await expect(page.getByTestId('chip-altitude')).toContainText('mid', { ignoreCase: true });
+      await expect(page.getByTestId('chip-commitment')).toContainText('neutral', {
+        ignoreCase: true,
+      });
+      await expect(page.getByTestId('chip-focus-type')).toContainText('build', {
+        ignoreCase: true,
+      });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('clicking a posture option writes status.index.md and the chip updates', async () => {
+    const fixture = makeProject();
+    const statusPath = join(
+      fixture.root,
+      '.ai-lore-e2e-fixture',
+      'memory',
+      'status',
+      'status.index.md',
+    );
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('chip-posture')).toContainText('execute', { ignoreCase: true });
+
+      await page.getByTestId('chip-posture').click();
+      await page.getByTestId('chip-posture-option-chat').click();
+
+      await expect(page.getByTestId('chip-posture')).toContainText('chat', {
+        ignoreCase: true,
+        timeout: 5_000,
+      });
+      const onDisk = readFileSync(statusPath, 'utf8');
+      expect(onDisk).toMatch(/^posture: chat$/m);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('clicking an altitude option writes dials.altitude and the chip updates', async () => {
+    const fixture = makeProject();
+    const statusPath = join(
+      fixture.root,
+      '.ai-lore-e2e-fixture',
+      'memory',
+      'status',
+      'status.index.md',
+    );
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('chip-altitude')).toContainText('mid', { ignoreCase: true });
+
+      await page.getByTestId('chip-altitude').click();
+      await page.getByTestId('chip-altitude-option-high').click();
+
+      await expect(page.getByTestId('chip-altitude')).toContainText('high', {
+        ignoreCase: true,
+        timeout: 5_000,
+      });
+      const onDisk = readFileSync(statusPath, 'utf8');
+      expect(onDisk).toMatch(/^ {2}altitude: high$/m);
+      // The sibling commitment line is untouched.
+      expect(onDisk).toMatch(/^ {2}commitment: neutral$/m);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('clicking a commitment option writes dials.commitment and the chip updates', async () => {
+    const fixture = makeProject();
+    const statusPath = join(
+      fixture.root,
+      '.ai-lore-e2e-fixture',
+      'memory',
+      'status',
+      'status.index.md',
+    );
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('chip-commitment')).toContainText('neutral', {
+        ignoreCase: true,
+      });
+
+      await page.getByTestId('chip-commitment').click();
+      await page.getByTestId('chip-commitment-option-go').click();
+
+      await expect(page.getByTestId('chip-commitment')).toContainText('go', {
+        ignoreCase: true,
+        timeout: 5_000,
+      });
+      const onDisk = readFileSync(statusPath, 'utf8');
+      expect(onDisk).toMatch(/^ {2}commitment: go$/m);
+      expect(onDisk).toMatch(/^ {2}altitude: mid$/m);
 
       await app.close();
     } finally {

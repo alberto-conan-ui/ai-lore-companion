@@ -27,20 +27,24 @@ export function makeProject(): Fixture {
   mkdirSync(join(lore, 'memory', 'blueprint'), { recursive: true });
   mkdirSync(join(lore, 'memory', 'knowledge-tree'), { recursive: true });
 
-  writeFileSync(
-    join(lore, 'workspace.yaml'),
-    'project_name: e2e-fixture\ncore_version: "v0.4"\nplugin: sdlc\n',
-  );
+  writeFileSync(join(lore, 'workspace.yaml'), 'project_name: e2e-fixture\ncore_version: "0.5"\n');
 
   writeFileSync(
     join(lore, 'memory', 'status', 'status.index.md'),
     [
-      '# e2e-fixture — Status',
+      '---',
+      'type: status',
+      'title: e2e-fixture — Status',
+      'updated: 2026-05-26',
+      'references: []',
+      'active_focus: ./focus/demo.focus.md',
+      'posture: execute',
+      'dials:',
+      '  altitude: mid',
+      '  commitment: neutral',
+      '---',
       '',
-      '| Field            | Value                                                  |',
-      '| ---------------- | ------------------------------------------------------ |',
-      '| **Mode**         | Executing                                              |',
-      '| **Active focus** | [Demo](./focus/demo.focus.md)                          |',
+      '# e2e-fixture — Status',
       '',
     ].join('\n'),
   );
@@ -48,6 +52,15 @@ export function makeProject(): Fixture {
   writeFileSync(
     join(lore, 'memory', 'status', 'focus', 'demo.focus.md'),
     [
+      '---',
+      'type: focus',
+      'title: Demo',
+      'updated: 2026-05-26',
+      'references: []',
+      'status: Active',
+      'focus_type: build',
+      '---',
+      '',
       '# Demo',
       '',
       '> **Status:** Active',
@@ -66,6 +79,16 @@ export function makeProject(): Fixture {
   writeFileSync(
     join(lore, 'memory', 'action-tree', 'demo', 'A-phase.phase.md'),
     [
+      '---',
+      'type: at-node',
+      'title: Phase A',
+      'updated: 2026-05-26',
+      'references: []',
+      'node_kind: leaf',
+      'gated: true',
+      'status: Active',
+      '---',
+      '',
       '# Phase A — Demo phase',
       '',
       '> **Status:** Active',

@@ -1,8 +1,11 @@
 import type {
+  Altitude,
   ChainError,
   ChainResult,
   ChangeScope,
+  Commitment,
   IgnoreRule,
+  Posture,
   QueueEntry,
   QueueEvent,
   SettingDef,
@@ -136,6 +139,15 @@ export const IPC = {
   SelectCockpitTab: 'cockpit:select-tab',
   /** Main → renderer: the user fired `⌘+F` — focus the global file search. */
   FocusGlobalSearch: 'cockpit:focus-search',
+
+  /**
+   * Renderer → main: update one field of the AI-Lore conversational register
+   * — posture, altitude, or commitment — by writing the value to the active
+   * project's `status.index.md` frontmatter. Triggers an immediate
+   * `IPC.Chain` re-broadcast so the header reflects the new value without
+   * waiting for the 5-second poll.
+   */
+  SetRegister: 'cockpit:set-register',
 } as const;
 
 export type ChainPayload = ChainResult;
@@ -259,6 +271,16 @@ export type SettingsSetArg = { tier: WriteTier; key: string; value: SettingValue
 export type SettingsSetIgnoresArg = { tier: WriteTier; rules: IgnoreRule[] };
 
 /**
+ * One field of the AI-Lore conversational register. `posture` lives on
+ * `status.index.md` at the top level; `altitude` and `commitment` live
+ * nested under `dials:`.
+ */
+export type SetRegisterArg =
+  | { field: 'posture'; value: Posture }
+  | { field: 'altitude'; value: Altitude }
+  | { field: 'commitment'; value: Commitment };
+
+/**
  * Replace the per-project workspace-layout snapshot — or clear it with `null`.
  * A global-tier window (welcome / altered) silently ignores this.
  */
@@ -324,6 +346,12 @@ export type CockpitApi = {
   onSelectCockpitTab: (handler: (index: number) => void) => Unsubscribe;
   /** Subscribe to ⌘+F — focus the global file search. */
   onFocusGlobalSearch: (handler: () => void) => Unsubscribe;
+  /**
+   * Update one field of the AI-Lore register on the active project's
+   * `status.index.md` frontmatter. Resolves when the file has been written
+   * and the chain has been re-broadcast.
+   */
+  setRegister: (arg: SetRegisterArg) => Promise<void>;
 };
 
 declare global {

@@ -24,6 +24,7 @@ import {
   readChain,
   readDirectory,
   resolveAll,
+  updateFrontmatterFieldInFile,
 } from '@ai-lore-companion/core';
 import {
   BrowserWindow,
@@ -43,6 +44,7 @@ import {
   type FileSearchArg,
   type FileSearchHit,
   IPC,
+  type SetRegisterArg,
   type SettingsSetArg,
   type SettingsSetIgnoresArg,
   type SettingsSetLayoutArg,
@@ -92,6 +94,12 @@ type ProjectContext = {
   ptyService: PtyService;
   /** The project's resolved ignore lists — drift / search / hidden patterns. */
   ignoreLists: IgnoreLists;
+  /**
+   * Re-read this window's chain and push it to the renderer when it has
+   * changed. Used by the 5-second poll and by mutations (e.g. setRegister)
+   * that want their write to land in the UI immediately.
+   */
+  refreshChain?: () => void;
 };
 
 /** Project context per window, keyed by `BrowserWindow.id`. */
@@ -324,10 +332,12 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
   // / active-child edits without requiring a window reload. The chain is small
   // (status + focus + active-child paths and titles) and cheap to walk — 5s is
   // a good balance between liveness and noise. We compare via JSON to skip the
-  // IPC send when nothing changed.
+  // IPC send when nothing changed. The same logic is exposed on the context as
+  // `refreshChain` so mutations (e.g. setRegister) can push the new state to
+  // the renderer immediately without waiting for the next poll tick.
   if (!isChainError(ctx.chain)) {
     let lastSent = JSON.stringify(ctx.chain);
-    const id = setInterval(() => {
+    const refreshChain = (): void => {
       if (win.isDestroyed()) return;
       const next = readChain({ root });
       if (isChainError(next)) return;
@@ -336,7 +346,9 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       lastSent = serialised;
       ctx.chain = next;
       sendToWin(win, IPC.Chain, next);
-    }, 5_000);
+    };
+    ctx.refreshChain = refreshChain;
+    const id = setInterval(refreshChain, 5_000);
     win.once('closed', () => clearInterval(id));
   }
 }
@@ -693,6 +705,17 @@ function registerIpcHandlers(): void {
     const ctx = contextFor(event);
     if (!ctx || isChainError(ctx.chain)) return;
     saveProjectLayout(userDataDir, ctx.root, arg.layout);
+  });
+  ipcMain.handle(IPC.SetRegister, (event, arg: SetRegisterArg): void => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return;
+    const statusPath = join(ctx.chain.lorePath, 'memory/status/status.index.md');
+    const dotPath = arg.field === 'posture' ? 'posture' : `dials.${arg.field}`;
+    const written = updateFrontmatterFieldInFile(statusPath, dotPath, arg.value);
+    if (!written) return;
+    // Push the new chain immediately — the 5s poll's `lastSent` would
+    // catch up eventually, but the chip should reflect the click now.
+    ctx.refreshChain?.();
   });
 }
 

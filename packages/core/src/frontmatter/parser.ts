@@ -7,7 +7,10 @@ import type {
   ReferenceLink,
 } from './types.js';
 
-const FRONTMATTER_DELIMITER = /^---\s*\r?\n([\s\S]*?)\r?\n---\s*\r?\n?([\s\S]*)$/;
+// Matches the frontmatter fence pair exactly, without swallowing leading
+// whitespace between the closing `---\n` and the body — that blank line
+// belongs to the body.
+const FRONTMATTER_DELIMITER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*\r?\n?([\s\S]*)$/;
 
 const KNOWN_TYPES: ReadonlySet<MemoryFileType> = new Set<MemoryFileType>([
   'status',

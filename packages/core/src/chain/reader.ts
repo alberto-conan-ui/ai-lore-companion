@@ -1,8 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { parseMemoryFile } from '../frontmatter/parser.js';
+import type { Dials, FocusStatus, FocusType, Posture } from '../frontmatter/types.js';
 import { locateLore } from './lore.js';
-import { parseActiveChild, parseActiveFocus, parseMode, readTitle } from './parse.js';
+import {
+  parseActiveChild,
+  parseActiveFocus,
+  parseMode,
+  parseRegister,
+  readTitle,
+} from './parse.js';
 import type { ChainResult, NodeRef } from './types.js';
 
 const MAX_DEPTH = 16;
@@ -20,11 +27,22 @@ export function readChain({ root }: { root: string }): ChainResult {
   }
 
   const mode = parseMode(statusText) ?? 'unknown';
+  const register = parseRegister(statusText);
+  const posture: Posture | null = isPosture(register.posture) ? register.posture : null;
+  const dials: Dials | null =
+    isAltitude(register.altitude) && isCommitment(register.commitment)
+      ? { altitude: register.altitude, commitment: register.commitment }
+      : null;
+
   const focusRef = parseActiveFocus(statusText);
   if (!focusRef) {
     return {
       mode,
+      posture,
+      dials,
       focus: null,
+      focusType: null,
+      focusStatus: null,
       activeChild: null,
       root,
       lorePath: located.lorePath,
@@ -32,20 +50,22 @@ export function readChain({ root }: { root: string }): ChainResult {
   }
 
   const focusAbs = resolveLink(statusPath, focusRef.relPath);
+  const focusMeta = readFocusMeta(focusAbs);
   // Title priority: linked file's frontmatter `title:` (v0.5) > the link
   // text the parent already carried (v0.4 — the markdown link the Human
   // Lead wrote) > the file's H1 (last resort) > basename.
   const focusTitle =
-    readLinkedFrontmatterTitle(focusAbs) ??
-    nonEmpty(focusRef.title) ??
-    readLinkedTitle(focusAbs) ??
-    basename(focusAbs);
+    focusMeta.title ?? nonEmpty(focusRef.title) ?? readLinkedTitle(focusAbs) ?? basename(focusAbs);
   const focus: NodeRef = { title: focusTitle, path: focusAbs };
 
   const activeChild = walkActiveChild(focus);
   return {
     mode,
+    posture,
+    dials,
     focus,
+    focusType: focusMeta.focusType,
+    focusStatus: focusMeta.focusStatus,
     activeChild,
     root,
     lorePath: located.lorePath,
@@ -95,6 +115,28 @@ function readLinkedFrontmatterTitle(absPath: string): string | null {
   }
 }
 
+type FocusMeta = {
+  title: string | null;
+  focusType: FocusType | null;
+  focusStatus: FocusStatus | null;
+};
+
+function readFocusMeta(absPath: string): FocusMeta {
+  let text: string;
+  try {
+    text = readFileSync(absPath, 'utf8');
+  } catch {
+    return { title: null, focusType: null, focusStatus: null };
+  }
+  const fm = parseMemoryFile(text).frontmatter;
+  if (fm && fm.type === 'focus') {
+    return { title: fm.title, focusType: fm.focus_type, focusStatus: fm.status };
+  }
+  // Pre-v0.5 fallback: H1 title only — no focus_type / status without
+  // frontmatter.
+  return { title: readTitle(text), focusType: null, focusStatus: null };
+}
+
 function nonEmpty(value: string | undefined | null): string | null {
   return value && value.length > 0 ? value : null;
 }
@@ -102,4 +144,16 @@ function nonEmpty(value: string | undefined | null): string | null {
 function resolveLink(fromFile: string, relPath: string): string {
   if (isAbsolute(relPath)) return relPath;
   return resolve(dirname(fromFile), relPath);
+}
+
+function isPosture(value: string | null): value is Posture {
+  return value === 'chat' || value === 'plan' || value === 'reshape' || value === 'execute';
+}
+
+function isAltitude(value: string | null): value is 'low' | 'mid' | 'high' {
+  return value === 'low' || value === 'mid' || value === 'high';
+}
+
+function isCommitment(value: string | null): value is 'go' | 'neutral' | 'challenge' {
+  return value === 'go' || value === 'neutral' || value === 'challenge';
 }

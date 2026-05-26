@@ -9,7 +9,12 @@ export type {
   NodeRef,
 } from './chain/types.js';
 
-export { parseMemoryFile, parseMemoryFileSync } from './frontmatter/index.js';
+export {
+  parseMemoryFile,
+  parseMemoryFileSync,
+  updateFrontmatterField,
+  updateFrontmatterFieldInFile,
+} from './frontmatter/index.js';
 export type {
   Altitude,
   ATNodeFrontmatter,

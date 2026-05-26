@@ -77,6 +77,7 @@ const api: CockpitApi = {
   onSettingsOpen: makeSubscribe<void>(IPC.SettingsOpen),
   onSelectCockpitTab: makeSubscribe<number>(IPC.SelectCockpitTab),
   onFocusGlobalSearch: makeSubscribe<void>(IPC.FocusGlobalSearch),
+  setRegister: (arg) => ipcRenderer.invoke(IPC.SetRegister, arg),
 };
 
 contextBridge.exposeInMainWorld('cockpit', api);
