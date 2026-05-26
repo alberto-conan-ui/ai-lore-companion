@@ -1,0 +1,337 @@
+import { type JSX, useEffect, useState } from 'react';
+import {
+  type FocusReadResult,
+  type MemoryFrontmatter,
+  type MemorySections,
+  isFocusReadError,
+} from '../../../shared/ipc.js';
+
+/**
+ * The in-app view of a focus or AT-node Memory file.
+ *
+ * Opens as a sheet. Renders the frontmatter (title, status, focus_type or
+ * node_kind) as a small header strip, then the body's sections. A `build`
+ * focus leads with its **Gate**; a `goal` focus leads with its **Vision**.
+ * Both then show Context, In scope, Out of scope, Watch-outs in order.
+ * Anything else the section parser finds (Stack, Active child pointer,
+ * Journal trail, intent, etc.) is rendered after the standard four.
+ */
+export function FocusView({ path, onClose }: { path: string; onClose: () => void }): JSX.Element {
+  const [data, setData] = useState<FocusReadResult | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void window.cockpit.focusRead({ path }).then((result) => {
+      if (!cancelled) setData(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: the backdrop sits outside the dialog box itself; the <div role=dialog> wraps the sheet.
+    <div
+      role="dialog"
+      aria-label="Focus view"
+      data-testid="focus-view"
+      style={backdropStyle}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div style={sheetStyle} data-testid="focus-view-sheet">
+        <div style={headerStyle}>
+          <span style={titleStyle} data-testid="focus-view-title">
+            {data && !isFocusReadError(data)
+              ? (data.frontmatter?.title ?? path.split('/').pop())
+              : 'Loading…'}
+          </span>
+          {data && !isFocusReadError(data) && data.frontmatter ? (
+            <FrontmatterChips fm={data.frontmatter} />
+          ) : null}
+          <button
+            type="button"
+            onClick={onClose}
+            style={closeButtonStyle}
+            data-testid="focus-view-close"
+          >
+            Close
+          </button>
+        </div>
+        <div style={bodyStyle}>
+          {data === null ? (
+            <p style={loadingStyle}>Loading…</p>
+          ) : isFocusReadError(data) ? (
+            <p style={errorStyle}>Cannot open: {data.error}</p>
+          ) : (
+            <FocusBody frontmatter={data.frontmatter} sections={data.sections} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FrontmatterChips({ fm }: { fm: MemoryFrontmatter }): JSX.Element {
+  // Lightweight chips that describe what kind of node this is. The chip
+  // colours mirror RegisterChips so the header reads as one design system.
+  const chips: { label: string; value: string; accent: string; testId: string }[] = [];
+  if (fm.type === 'focus') {
+    chips.push({
+      label: 'Type',
+      value: fm.focus_type,
+      accent: '#e9c489',
+      testId: 'focus-view-focus-type',
+    });
+    chips.push({
+      label: 'Status',
+      value: fm.status,
+      accent: '#c4e1a8',
+      testId: 'focus-view-status',
+    });
+  } else if (fm.type === 'at-node') {
+    chips.push({
+      label: 'Kind',
+      value: fm.node_kind,
+      accent: '#e9c489',
+      testId: 'focus-view-node-kind',
+    });
+    chips.push({
+      label: 'Status',
+      value: fm.status,
+      accent: '#c4e1a8',
+      testId: 'focus-view-status',
+    });
+  }
+  return (
+    <span style={chipRowStyle}>
+      {chips.map((chip) => (
+        <span key={chip.testId} data-testid={chip.testId} style={chipPillStyle(chip.accent)}>
+          <span style={chipLabelStyle}>{chip.label}</span>
+          <span style={chipValueStyle(chip.accent)}>{chip.value}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function FocusBody({
+  frontmatter,
+  sections,
+}: {
+  frontmatter: MemoryFrontmatter | null;
+  sections: MemorySections;
+}): JSX.Element {
+  const isGoal = frontmatter?.type === 'focus' && frontmatter.focus_type === 'goal';
+  // Lead with whichever the focus_type implies; show whatever the body
+  // actually carries — a build focus that lacks a Gate still gets rendered
+  // honestly, with the missing section noted.
+  const primary = isGoal ? 'Vision' : 'Gate';
+  const standard = ['Context', 'In scope', 'Out of scope', 'Watch-outs'];
+
+  const renderedKeys = new Set<string>([primary, ...standard].map((k) => k.toLowerCase()));
+  const otherKeys = Object.keys(sections).filter((k) => !renderedKeys.has(k.toLowerCase()));
+
+  return (
+    <div>
+      <FocusSection title={primary} body={lookup(sections, primary)} testId="focus-view-primary" />
+      {standard.map((label) => (
+        <FocusSection
+          key={label}
+          title={label}
+          body={lookup(sections, label)}
+          testId={`focus-view-section-${slug(label)}`}
+        />
+      ))}
+      {otherKeys.map((key) => (
+        <FocusSection
+          key={key}
+          title={key}
+          body={lookup(sections, key)}
+          testId={`focus-view-section-${slug(key)}`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function FocusSection({
+  title,
+  body,
+  testId,
+}: {
+  title: string;
+  body: string | undefined;
+  testId: string;
+}): JSX.Element {
+  return (
+    <section style={sectionStyle} data-testid={testId}>
+      <h2 style={sectionHeadingStyle}>{title}</h2>
+      {body ? (
+        <pre style={sectionBodyStyle}>{body}</pre>
+      ) : (
+        <p style={sectionEmptyStyle}>— not present in this file</p>
+      )}
+    </section>
+  );
+}
+
+function lookup(sections: MemorySections, label: string): string | undefined {
+  const target = label.toLowerCase();
+  for (const [key, value] of Object.entries(sections)) {
+    if (key.toLowerCase() === target) return value;
+  }
+  return undefined;
+}
+
+function slug(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+const backdropStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(0, 0, 0, 0.5)',
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'center',
+  padding: '4rem 1rem 2rem',
+  zIndex: 100,
+};
+
+const sheetStyle: React.CSSProperties = {
+  background: '#0f1620',
+  color: '#e6edf3',
+  border: '1px solid #2f3a45',
+  borderRadius: '8px',
+  width: 'min(880px, 96vw)',
+  maxHeight: '90vh',
+  display: 'flex',
+  flexDirection: 'column',
+  boxShadow: '0 12px 36px rgba(0, 0, 0, 0.5)',
+};
+
+const headerStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.75rem',
+  padding: '1rem 1.1rem',
+  borderBottom: '1px solid #2f3a45',
+};
+
+const titleStyle: React.CSSProperties = {
+  fontWeight: 700,
+  fontSize: '1.05rem',
+  letterSpacing: '0.02em',
+  flex: 1,
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
+const closeButtonStyle: React.CSSProperties = {
+  background: '#1f2933',
+  color: '#cbd5dd',
+  border: '1px solid #2f3a45',
+  borderRadius: '5px',
+  fontSize: '0.78rem',
+  fontWeight: 600,
+  padding: '0.35rem 0.7rem',
+  cursor: 'pointer',
+};
+
+const bodyStyle: React.CSSProperties = {
+  overflowY: 'auto',
+  padding: '1rem 1.1rem 1.4rem',
+};
+
+const sectionStyle: React.CSSProperties = {
+  marginBottom: '1.25rem',
+};
+
+const sectionHeadingStyle: React.CSSProperties = {
+  margin: '0 0 0.45rem',
+  fontSize: '0.82rem',
+  fontWeight: 700,
+  textTransform: 'uppercase',
+  letterSpacing: '0.08em',
+  color: '#9fb1bd',
+};
+
+const sectionBodyStyle: React.CSSProperties = {
+  margin: 0,
+  padding: '0.75rem 0.9rem',
+  background: '#0a1018',
+  border: '1px solid #1f2933',
+  borderRadius: '5px',
+  fontFamily:
+    'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
+  fontSize: '0.82rem',
+  lineHeight: 1.55,
+  color: '#cbd5dd',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
+};
+
+const sectionEmptyStyle: React.CSSProperties = {
+  margin: 0,
+  color: '#6c7783',
+  fontSize: '0.8rem',
+  fontStyle: 'italic',
+};
+
+const loadingStyle: React.CSSProperties = {
+  margin: 0,
+  color: '#9fb1bd',
+};
+
+const errorStyle: React.CSSProperties = {
+  margin: 0,
+  color: '#e58a8a',
+};
+
+const chipRowStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  gap: '0.35rem',
+};
+
+function chipPillStyle(_accent: string): React.CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '0.3rem',
+    padding: '0.2rem 0.5rem',
+    background: '#1f2933',
+    border: '1px solid #2f3a45',
+    borderRadius: '4px',
+    fontSize: '0.7rem',
+    fontWeight: 600,
+    lineHeight: 1,
+  };
+}
+
+const chipLabelStyle: React.CSSProperties = {
+  color: '#6c7783',
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+};
+
+function chipValueStyle(accent: string): React.CSSProperties {
+  return {
+    color: accent,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+  };
+}

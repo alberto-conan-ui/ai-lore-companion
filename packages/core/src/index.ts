@@ -10,8 +10,11 @@ export type {
 } from './chain/types.js';
 
 export {
+  findSection,
+  type MemorySections,
   parseMemoryFile,
   parseMemoryFileSync,
+  parseMemorySections,
   updateFrontmatterField,
   updateFrontmatterFieldInFile,
 } from './frontmatter/index.js';

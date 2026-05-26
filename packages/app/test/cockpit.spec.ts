@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ElectronApplication, expect, test } from '@playwright/test';
@@ -408,6 +408,138 @@ test.describe('window modes', () => {
       expect(onDisk).toMatch(/^ {2}commitment: neutral$/m);
 
       await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the focus view toggle opens the in-app view of the active child (at-node)', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('chip-posture')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTestId('focus-view-toggle').click();
+      await expect(page.getByTestId('focus-view')).toBeVisible({ timeout: 5_000 });
+
+      // The active child is the A-phase at-node — title comes from
+      // frontmatter (`title: Phase A`), kind from `node_kind: leaf`.
+      await expect(page.getByTestId('focus-view-title')).toHaveText('Phase A');
+      await expect(page.getByTestId('focus-view-node-kind')).toContainText('leaf', {
+        ignoreCase: true,
+      });
+      // The Gate section is rendered (an AT node carries a gate too).
+      await expect(page.getByTestId('focus-view-primary')).toContainText('phase gate');
+
+      // Pressing Escape closes the sheet.
+      await page.keyboard.press('Escape');
+      await expect(page.getByTestId('focus-view')).toHaveCount(0, { timeout: 3_000 });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the focus view renders Gate for focus_type=build and Vision for focus_type=goal', async () => {
+    const fixture = makeProject();
+    // Replace the active child with `(leaf — none)` so the view opens on
+    // the focus file itself; rewrite the focus as a goal with a Vision.
+    const focusPath = join(
+      fixture.root,
+      '.ai-lore-e2e-fixture',
+      'memory',
+      'status',
+      'focus',
+      'demo.focus.md',
+    );
+    try {
+      // First: build focus with a Gate.
+      writeFileSync(
+        focusPath,
+        [
+          '---',
+          'type: focus',
+          'title: Demo',
+          'updated: 2026-05-26',
+          'references: []',
+          'status: Active',
+          'focus_type: build',
+          '---',
+          '',
+          '# Demo',
+          '',
+          '## Gate',
+          '',
+          'the gate body for build',
+          '',
+          '## Active child pointer',
+          '',
+          '(leaf — none)',
+          '',
+        ].join('\n'),
+      );
+
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('chip-focus-type')).toContainText('build', {
+        ignoreCase: true,
+        timeout: 15_000,
+      });
+
+      await page.getByTestId('focus-view-toggle').click();
+      await expect(page.getByTestId('focus-view')).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByTestId('focus-view-focus-type')).toContainText('build', {
+        ignoreCase: true,
+      });
+      // The primary section is the Gate — its heading reads "Gate".
+      const primary = page.getByTestId('focus-view-primary');
+      await expect(primary).toContainText('Gate');
+      await expect(primary).toContainText('the gate body for build');
+
+      await app.close();
+
+      // Flip to a goal focus with a Vision and re-launch the same project.
+      writeFileSync(
+        focusPath,
+        [
+          '---',
+          'type: focus',
+          'title: Demo',
+          'updated: 2026-05-26',
+          'references: []',
+          'status: Active',
+          'focus_type: goal',
+          '---',
+          '',
+          '# Demo',
+          '',
+          '## Vision',
+          '',
+          'the directional prose for a goal',
+          '',
+          '## Active child pointer',
+          '',
+          '(leaf — none)',
+          '',
+        ].join('\n'),
+      );
+
+      const second = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(second.page.getByTestId('chip-focus-type')).toContainText('goal', {
+        ignoreCase: true,
+        timeout: 15_000,
+      });
+      await second.page.getByTestId('focus-view-toggle').click();
+      await expect(second.page.getByTestId('focus-view')).toBeVisible({ timeout: 5_000 });
+      await expect(second.page.getByTestId('focus-view-focus-type')).toContainText('goal', {
+        ignoreCase: true,
+      });
+      // The primary section is now the Vision.
+      const goalPrimary = second.page.getByTestId('focus-view-primary');
+      await expect(goalPrimary).toContainText('Vision');
+      await expect(goalPrimary).toContainText('the directional prose for a goal');
+
+      await second.app.close();
     } finally {
       fixture.cleanup();
     }

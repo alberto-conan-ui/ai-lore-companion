@@ -8,6 +8,7 @@ import { accentColor, accentTint, hueFor, projectName } from '../projectAccent.j
 import { driftLevel, useCockpitStore } from '../store.js';
 import { ACTION_BUTTON_HEIGHT } from './ActionButton.js';
 import { DriftPill } from './DriftPill.js';
+import { FocusView } from './FocusView.js';
 import { RegisterChips } from './RegisterChips.js';
 import { SettingsSheetModal, type SettingsSheetSection } from './SettingsSheet.js';
 import { ShortcutButtons } from './ShortcutButtons.js';
@@ -48,6 +49,10 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
       setSettingsSection(null);
     });
   }, []);
+
+  // The in-app focus view — opened by the small toggle button next to the
+  // active-child title, closed by Escape or backdrop click.
+  const [focusViewPath, setFocusViewPath] = useState<string | null>(null);
 
   const addShortcutFor = (target: ShortcutTarget): void => {
     setDraftTarget(target);
@@ -102,6 +107,17 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
             </ChainLink>
           </>
         ) : null}
+        {chain.focus ? (
+          <button
+            type="button"
+            data-testid="focus-view-toggle"
+            title="Open focus view"
+            onClick={() => setFocusViewPath(chain.activeChild?.path ?? chain.focus?.path ?? null)}
+            style={focusViewToggleStyle}
+          >
+            ▾
+          </button>
+        ) : null}
       </div>
       {search ? (
         <div style={searchRowStyle} data-testid="header-search">
@@ -133,6 +149,9 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
           initialSection={settingsSection}
           initialDraftTarget={draftTarget}
         />
+      ) : null}
+      {focusViewPath ? (
+        <FocusView path={focusViewPath} onClose={() => setFocusViewPath(null)} />
       ) : null}
     </header>
   );
@@ -338,4 +357,22 @@ const activeChild: React.CSSProperties = {
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+};
+
+const focusViewToggleStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '1.4rem',
+  height: '1.4rem',
+  marginLeft: '0.1rem',
+  padding: 0,
+  background: 'transparent',
+  color: '#9fb1bd',
+  border: '1px solid #2f3a45',
+  borderRadius: '4px',
+  fontSize: '0.78rem',
+  fontWeight: 700,
+  lineHeight: 1,
+  cursor: 'pointer',
 };

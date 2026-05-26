@@ -5,6 +5,8 @@ import type {
   ChangeScope,
   Commitment,
   IgnoreRule,
+  MemoryFrontmatter,
+  MemorySections,
   Posture,
   QueueEntry,
   QueueEvent,
@@ -148,6 +150,13 @@ export const IPC = {
    * waiting for the 5-second poll.
    */
   SetRegister: 'cockpit:set-register',
+
+  /**
+   * Renderer → main: read a focus or AT-node Memory file and return its
+   * parsed frontmatter + body sections — the in-app focus view's data
+   * source. The path is validated to live inside this window's project.
+   */
+  FocusRead: 'cockpit:focus-read',
 } as const;
 
 export type ChainPayload = ChainResult;
@@ -281,6 +290,31 @@ export type SetRegisterArg =
   | { field: 'commitment'; value: Commitment };
 
 /**
+ * The renderer's request for a Memory file's parsed contents. The absolute
+ * `path` must live inside the requesting window's project — main rejects
+ * anything else with an `error` result.
+ */
+export type FocusReadArg = { path: string };
+
+/**
+ * Main's response to `IPC.FocusRead`. The `frontmatter` is the typed
+ * frontmatter union from core; `sections` is the body's H2 sections keyed
+ * by label (e.g. "Gate", "Vision", "Context"). On any failure the result
+ * carries `error` instead.
+ */
+export type FocusReadResult =
+  | {
+      path: string;
+      frontmatter: MemoryFrontmatter | null;
+      sections: MemorySections;
+    }
+  | { error: string };
+
+export function isFocusReadError(result: FocusReadResult): result is { error: string } {
+  return 'error' in result;
+}
+
+/**
  * Replace the per-project workspace-layout snapshot — or clear it with `null`.
  * A global-tier window (welcome / altered) silently ignores this.
  */
@@ -352,6 +386,12 @@ export type CockpitApi = {
    * and the chain has been re-broadcast.
    */
   setRegister: (arg: SetRegisterArg) => Promise<void>;
+  /**
+   * Read a focus or AT-node Memory file's parsed frontmatter + sections.
+   * Used by the in-app focus view to render gate / vision / context /
+   * scope / watch-outs without leaving the cockpit.
+   */
+  focusRead: (arg: FocusReadArg) => Promise<FocusReadResult>;
 };
 
 declare global {

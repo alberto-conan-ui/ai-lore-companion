@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type ChainResult,
@@ -21,6 +21,8 @@ import {
   isValidValue,
   mergeIgnoreRules,
   openDb,
+  parseMemoryFileSync,
+  parseMemorySections,
   readChain,
   readDirectory,
   resolveAll,
@@ -43,6 +45,8 @@ import {
   type CockpitApi,
   type FileSearchArg,
   type FileSearchHit,
+  type FocusReadArg,
+  type FocusReadResult,
   IPC,
   type SetRegisterArg,
   type SettingsSetArg,
@@ -716,6 +720,29 @@ function registerIpcHandlers(): void {
     // Push the new chain immediately — the 5s poll's `lastSent` would
     // catch up eventually, but the chip should reflect the click now.
     ctx.refreshChain?.();
+  });
+  ipcMain.handle(IPC.FocusRead, (event, arg: FocusReadArg): FocusReadResult => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) {
+      return { error: 'no project context' };
+    }
+    const abs = isAbsolute(arg.path) ? arg.path : resolve(ctx.root, arg.path);
+    // Refuse paths that escape this window's project — the renderer should
+    // never read a file outside the project's tree.
+    const rel = relative(ctx.root, abs);
+    if (rel.startsWith('..') || isAbsolute(rel)) {
+      return { error: 'path is outside the project' };
+    }
+    try {
+      const parsed = parseMemoryFileSync(abs);
+      return {
+        path: abs,
+        frontmatter: parsed.frontmatter,
+        sections: parseMemorySections(parsed.body),
+      };
+    } catch (err) {
+      return { error: `cannot read focus file: ${(err as Error).message}` };
+    }
   });
 }
 
