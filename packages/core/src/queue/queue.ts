@@ -48,10 +48,14 @@ export function createQueue({ db }: { db: CockpitDb }): Queue {
       ts,
       ...(input.subject ? { subject: input.subject } : {}),
     };
+    const subjectKind = entry.subject?.kind ?? null;
+    const subjectTitle = entry.subject?.title ?? null;
 
-    if (existing) {
-      db.delete(queueEntries).where(eq(queueEntries.id, existing.id)).run();
-    }
+    // Upsert by `path`. The dedup is atomic at the SQL level — `findByPath`
+    // above only informs the emit decision (add vs. replace); it does not
+    // guard the write. An earlier delete-then-insert version could crash
+    // with a UNIQUE-constraint error against a stale row that the read
+    // missed.
     db.insert(queueEntries)
       .values({
         id: entry.id,
@@ -59,8 +63,19 @@ export function createQueue({ db }: { db: CockpitDb }): Queue {
         type: entry.type,
         scope: entry.scope,
         ts: entry.ts,
-        subjectKind: entry.subject?.kind ?? null,
-        subjectTitle: entry.subject?.title ?? null,
+        subjectKind,
+        subjectTitle,
+      })
+      .onConflictDoUpdate({
+        target: queueEntries.path,
+        set: {
+          id: entry.id,
+          type: entry.type,
+          scope: entry.scope,
+          ts: entry.ts,
+          subjectKind,
+          subjectTitle,
+        },
       })
       .run();
 

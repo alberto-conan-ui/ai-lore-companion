@@ -9,13 +9,15 @@ import { createTransitionDetector } from '../tracker/detector.js';
 import { parseStatus, parseTitle } from '../tracker/parser.js';
 
 /**
- * A directory-level filesystem event surfaced to the host. Directory events
- * are not queue entries — they drive tree-state updates, not notifications —
- * so they bypass the queue and reach the host through `onDirEvent`.
+ * A filesystem event that affects the host's tree state. Covers directory
+ * add/remove (the listing for the parent gains/loses a folder) and file
+ * add/remove (the listing for the containing folder gains/loses a file).
+ * Tree events bypass the queue — they drive tree-state updates, not
+ * notifications — and reach the host through `onDirEvent`.
  */
 export type DirEvent = {
-  event: 'addDir' | 'unlinkDir';
-  /** Absolute path of the directory that was added or removed. */
+  event: 'add' | 'unlink' | 'addDir' | 'unlinkDir';
+  /** Absolute path of the file or directory that was added or removed. */
   absPath: string;
   scope: ChangeScope;
 };
@@ -61,13 +63,23 @@ export function attachWatcher(queue: Queue, options: WatcherOptions): WatcherHan
     },
   });
 
+  const onDirEvent = options.onDirEvent;
   const handle = (chokidarEvent: 'add' | 'change' | 'unlink', absPath: string): void => {
     const rel = relative(root, absPath);
     if (!rel || rel.startsWith('..')) return;
+    const scope = classifyScope(rel, loreRel);
+
+    // A file appearing or vanishing changes its parent's listing — the host's
+    // tree state needs the same refresh `addDir`/`unlinkDir` triggers. Fires
+    // for every file event including index files; only `change` (content
+    // edit, listing unchanged) skips it.
+    if (chokidarEvent !== 'change' && onDirEvent) {
+      onDirEvent({ event: chokidarEvent, absPath, scope });
+    }
+
     // AI-Lore index files churn constantly as Memory is reshaped — noise, not
     // drift. They stay in the tree and search; they just never reach the queue.
     if (isUntrackedFile(basename(absPath))) return;
-    const scope = classifyScope(rel, loreRel);
 
     const loreRelPath = scope === 'lore' && loreRel ? relative(lorePath, absPath) : null;
     const trackerKind = loreRelPath ? classifyTrackerFile(loreRelPath) : null;
@@ -117,8 +129,9 @@ export function attachWatcher(queue: Queue, options: WatcherOptions): WatcherHan
   watcher.on('unlink', (p) => handle('unlink', p));
 
   // Directory events bypass `handle` (the queue-push path) entirely — they
-  // drive tree-state updates, not queue notifications.
-  const onDirEvent = options.onDirEvent;
+  // are tree-state updates, not queue notifications. (File `add`/`unlink`
+  // also drive a tree update — that fires from inside `handle` above,
+  // alongside the queue push.)
   if (onDirEvent) {
     const emitDir = (event: 'addDir' | 'unlinkDir', absPath: string): void => {
       const rel = relative(root, absPath);

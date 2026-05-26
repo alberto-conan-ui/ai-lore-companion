@@ -99,23 +99,21 @@ test.describe('window modes', () => {
     }
   });
 
-  test('the action toolbar splits into three labelled rows', async () => {
+  test('the action toolbar splits into two labelled rows', async () => {
     const fixture = makeProject();
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
+      // URL + terminal shortcuts moved to each panel's tab strip as `+ <name>`
+      // creators — the header keeps Project and Lore rows only.
       await expect(page.getByTestId('actions-row-project')).toBeVisible();
       await expect(page.getByTestId('actions-row-lore')).toBeVisible();
-      await expect(page.getByTestId('actions-row-other')).toBeVisible();
-      // The drift cluster sits on the Other row (anchored right via `marginLeft: auto`).
-      await expect(
-        page.getByTestId('actions-row-other').getByTestId('drift-cluster'),
-      ).toBeVisible();
-      // Each row carries an `+ Add shortcut` affordance.
+      await expect(page.getByTestId('actions-row-other')).toHaveCount(0);
+      // The drift cluster anchors to the right end of the Lore row.
+      await expect(page.getByTestId('actions-row-lore').getByTestId('drift-cluster')).toBeVisible();
       await expect(page.getByTestId('add-shortcut-project')).toBeVisible();
       await expect(page.getByTestId('add-shortcut-lore')).toBeVisible();
-      await expect(page.getByTestId('add-shortcut-other')).toBeVisible();
 
       await app.close();
     } finally {

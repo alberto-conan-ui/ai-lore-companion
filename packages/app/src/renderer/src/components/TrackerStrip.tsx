@@ -115,11 +115,6 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
           <span style={rowLabelStyle}>Lore</span>
           <ShortcutButtons row="lore" />
           <AddShortcutButton testId="add-shortcut-lore" onClick={() => addShortcutFor('lore')} />
-        </div>
-        <div style={actionsSubRowStyle} data-testid="actions-row-other">
-          <span style={rowLabelStyle}>Other</span>
-          <ShortcutButtons row="other" />
-          <AddShortcutButton testId="add-shortcut-other" onClick={() => addShortcutFor('url')} />
           <div style={driftClusterStyle} data-testid="drift-cluster">
             <DriftPill level={level} count={count} />
             <AckAllButton disabled={count === 0} />

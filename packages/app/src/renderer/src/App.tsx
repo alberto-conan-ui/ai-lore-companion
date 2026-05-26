@@ -1,7 +1,7 @@
 import type { ChangeScope, LayoutTab, WorkspaceLayout } from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { RecentProject, TerminalForegroundStatus } from '../../shared/ipc.js';
+import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../shared/ipc.js';
 import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BrowserTab } from './components/BrowserTab.js';
@@ -91,6 +91,16 @@ export function App(): JSX.Element {
   const [terminalInitialCommands, setTerminalInitialCommands] = useState<Record<string, string>>(
     {},
   );
+  // URL + terminal shortcuts surfaced in every panel's tab strip as `+ <name>`
+  // creators. Project/lore shortcuts live in the header rows instead.
+  const [tabShortcuts, setTabShortcuts] = useState<Shortcut[]>([]);
+  useEffect(() => {
+    const apply = (list: Shortcut[]): void => {
+      setTabShortcuts(list.filter((s) => s.target === 'url' || s.target === 'terminal'));
+    };
+    void window.cockpit.shortcutsList().then(apply);
+    return window.cockpit.onShortcutsChanged(apply);
+  }, []);
   const [slots, setSlots] = useState<Record<PanelId, HTMLDivElement | null>>({
     left: null,
     right: null,
@@ -338,30 +348,55 @@ export function App(): JSX.Element {
     setDockOpen(panelId, true);
   };
 
-  /** Spawn a terminal tab from a shortcut: bottom dock, titled after the
+  /** Create a terminal tab on `panelId` from a tab shortcut — titled after the
    *  shortcut, with the command queued for the PTY once it spawns. */
-  const spawnTerminalShortcut = useCallback((label: string, command: string): void => {
-    const id = crypto.randomUUID();
-    setTerminalInitialCommands((prev) => ({ ...prev, [id]: command }));
-    setPanels((p) => {
-      const tab: WorkspaceTab = {
-        id,
-        kind: 'terminal',
-        title: label,
-        baseTitle: label,
-        status: 'idle',
-      };
-      return { ...p, bottom: { tabs: [...p.bottom.tabs, tab], activeId: id } };
-    });
-    setBottomOpen(true);
-  }, []);
+  const createTerminalShortcutTab = useCallback(
+    (panelId: PanelId, command: string, label: string): void => {
+      const id = crypto.randomUUID();
+      setTerminalInitialCommands((prev) => ({ ...prev, [id]: command }));
+      setPanels((p) => {
+        const tab: WorkspaceTab = {
+          id,
+          kind: 'terminal',
+          title: label,
+          baseTitle: label,
+          status: 'idle',
+        };
+        return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
+      });
+      // Mirror `setDockOpen` inline so the callback has no unstable deps.
+      if (panelId === 'right') setRightOpen(true);
+      else if (panelId === 'bottom') setBottomOpen(true);
+    },
+    [],
+  );
 
-  // Terminal shortcuts: main sends a payload whenever one fires.
+  /** Create a browser tab on `panelId` from a URL tab shortcut — titled after
+   *  the shortcut, pre-navigated to `url`. */
+  const createBrowserShortcutTab = useCallback(
+    (panelId: PanelId, url: string, label: string): void => {
+      const id = crypto.randomUUID();
+      setBrowserInitialUrls((prev) => ({ ...prev, [id]: url }));
+      setPanels((p) => {
+        const tab: WorkspaceTab = { id, kind: 'browser', title: label, baseTitle: label };
+        return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
+      });
+      // Mirror `setDockOpen` inline so the callback has no unstable deps.
+      if (panelId === 'right') setRightOpen(true);
+      else if (panelId === 'bottom') setBottomOpen(true);
+    },
+    [],
+  );
+
+  // Legacy: terminal shortcuts fired from the header (Phase F's header trigger,
+  // since removed) sent a payload via main. The tab-strip shortcuts (this
+  // session) handle terminal targets directly in the renderer, so this
+  // subscription is dormant — kept defensively for any future main-side trigger.
   useEffect(() => {
     return window.cockpit.onOpenTerminalShortcut((payload) => {
-      spawnTerminalShortcut(payload.label, payload.command);
+      createTerminalShortcutTab('bottom', payload.command, payload.label);
     });
-  }, [spawnTerminalShortcut]);
+  }, [createTerminalShortcutTab]);
 
   /** Rename a tab by hand. A non-empty name wins and freezes terminal
    *  auto-rename; an empty name reverts to the auto-managed default. */
@@ -561,6 +596,10 @@ export function App(): JSX.Element {
       onMoveTab={moveTab}
       slotRef={slotRefs[panelId]}
       tabDrift={panelId === 'left' ? tabDrift : undefined}
+      tabShortcuts={tabShortcuts}
+      onCreateBrowserTab={(url, label) => createBrowserShortcutTab(panelId, url, label)}
+      onCreateTerminalTab={(command, label) => createTerminalShortcutTab(panelId, command, label)}
+      onLaunchUrlExternal={(id) => window.cockpit.shortcutsRun(id)}
     />
   );
 

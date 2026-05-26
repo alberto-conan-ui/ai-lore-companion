@@ -319,6 +319,26 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
     const off = ctx.wiring.queue.on((event) => sendToWin(win, IPC.Change, event));
     win.once('closed', off);
   }
+
+  // Re-read the chain on a slow interval so the header reflects status / focus
+  // / active-child edits without requiring a window reload. The chain is small
+  // (status + focus + active-child paths and titles) and cheap to walk — 5s is
+  // a good balance between liveness and noise. We compare via JSON to skip the
+  // IPC send when nothing changed.
+  if (!isChainError(ctx.chain)) {
+    let lastSent = JSON.stringify(ctx.chain);
+    const id = setInterval(() => {
+      if (win.isDestroyed()) return;
+      const next = readChain({ root });
+      if (isChainError(next)) return;
+      const serialised = JSON.stringify(next);
+      if (serialised === lastSent) return;
+      lastSent = serialised;
+      ctx.chain = next;
+      sendToWin(win, IPC.Chain, next);
+    }, 5_000);
+    win.once('closed', () => clearInterval(id));
+  }
 }
 
 /** Open a folder as a new project window. */

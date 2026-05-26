@@ -1,5 +1,5 @@
 import { type JSX, useState } from 'react';
-import type { TerminalForegroundStatus } from '../../../shared/ipc.js';
+import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { type DriftLevel, driftLevel } from '../store.js';
 
 /** A tab's kind selects which surface it renders. `pane` tabs are the pinned
@@ -39,6 +39,15 @@ type Props = {
   slotRef: (el: HTMLDivElement | null) => void;
   /** Per-tab unacked-drift counts, keyed by tab id — shown as a badge on the tab. */
   tabDrift?: Record<string, number>;
+  /** Configured URL + terminal shortcuts — surfaced as `+ <name>` creators in
+   *  the strip after the bare `+term`/`+web` defaults. */
+  tabShortcuts: Shortcut[];
+  /** Open a new browser tab in this panel, pre-navigated to `url`, titled `label`. */
+  onCreateBrowserTab: (url: string, label: string) => void;
+  /** Open a new terminal tab in this panel, running `command`, titled `label`. */
+  onCreateTerminalTab: (command: string, label: string) => void;
+  /** Launch a URL shortcut externally (Chrome) — used by the `↗` arrow. */
+  onLaunchUrlExternal: (id: string) => void;
 };
 
 /** Drift badge on a pinned tab — count plus the four-level colour scale. */
@@ -95,6 +104,10 @@ export function TabbedPanel({
   onMoveTab,
   slotRef,
   tabDrift,
+  tabShortcuts,
+  onCreateBrowserTab,
+  onCreateTerminalTab,
+  onLaunchUrlExternal,
 }: Props): JSX.Element {
   // The tab currently being renamed inline, plus its draft text.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -215,6 +228,49 @@ export function TabbedPanel({
         >
           + web
         </button>
+        {tabShortcuts.map((s) => {
+          if (s.target === 'terminal' && s.command) {
+            return (
+              <button
+                key={s.id}
+                type="button"
+                style={newBtn}
+                title={`Run ${s.command} in a new terminal tab`}
+                data-testid="tab-shortcut-terminal"
+                onClick={() => onCreateTerminalTab(s.command ?? '', s.label)}
+              >
+                + {s.label}
+              </button>
+            );
+          }
+          if (s.target === 'url' && s.url) {
+            // URL shortcuts are split: `+ <name>` opens an in-app browser tab;
+            // `↗` opens the URL externally in Chrome via the existing launcher.
+            return (
+              <span key={s.id} style={splitBtnGroup}>
+                <button
+                  type="button"
+                  style={newBtnSplitLeft}
+                  title={`Open ${s.url} in a new browser tab`}
+                  data-testid="tab-shortcut-url"
+                  onClick={() => onCreateBrowserTab(s.url ?? '', s.label)}
+                >
+                  + {s.label}
+                </button>
+                <button
+                  type="button"
+                  style={newBtnSplitRight}
+                  title={`Open ${s.url} externally in Chrome`}
+                  data-testid="tab-shortcut-url-external"
+                  onClick={() => onLaunchUrlExternal(s.id)}
+                >
+                  ↗
+                </button>
+              </span>
+            );
+          }
+          return null;
+        })}
       </div>
       <div ref={slotRef} style={contentSlot} />
     </div>
@@ -334,4 +390,24 @@ const newBtn: React.CSSProperties = {
   fontWeight: 600,
   whiteSpace: 'nowrap',
   cursor: 'pointer',
+};
+
+/** URL tab shortcuts render as a split button — `+ <name>` on the left,
+ *  `↗` (external) on the right — sharing visual styling so they read as one. */
+const splitBtnGroup: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+};
+
+const newBtnSplitLeft: React.CSSProperties = {
+  ...newBtn,
+  paddingRight: '0.25rem',
+};
+
+const newBtnSplitRight: React.CSSProperties = {
+  ...newBtn,
+  paddingLeft: '0.15rem',
+  paddingRight: '0.5rem',
+  color: '#6c7783',
+  fontSize: '0.78rem',
 };

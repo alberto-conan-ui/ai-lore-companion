@@ -190,6 +190,67 @@ test('watcher fires onDirEvent on directory add and remove, scoped per side', as
   }
 });
 
+test('watcher fires onDirEvent on file add and unlink so the tree refreshes', async () => {
+  const { root, lorePath, cleanup } = setupTempProject();
+  const handle = openDb(':memory:');
+  try {
+    const queue = createQueue({ db: handle.db });
+    const dirEvents: DirEvent[] = [];
+    const watcher = attachWatcher(queue, {
+      root,
+      lorePath,
+      onDirEvent: (e) => dirEvents.push(e),
+    });
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const target = join(root, 'src', 'new.ts');
+    writeFileSync(target, 'export const x = 1;\n');
+
+    await waitFor(() => dirEvents.some((e) => e.event === 'add' && e.absPath === target), 2000);
+    assert.equal(dirEvents.find((e) => e.absPath === target)?.scope, 'payload');
+
+    rmSync(target);
+    await waitFor(() => dirEvents.some((e) => e.event === 'unlink' && e.absPath === target), 2000);
+
+    await watcher.close();
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
+test('watcher fires onDirEvent on index-file add so the tree refreshes even when the queue ignores it', async () => {
+  const { root, lorePath, cleanup } = setupTempProject();
+  const handle = openDb(':memory:');
+  try {
+    const queue = createQueue({ db: handle.db });
+    const dirEvents: DirEvent[] = [];
+    const watcher = attachWatcher(queue, {
+      root,
+      lorePath,
+      onDirEvent: (e) => dirEvents.push(e),
+    });
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const target = join(lorePath, 'memory.index.md');
+    writeFileSync(target, '# memory\n');
+
+    await waitFor(() => dirEvents.some((e) => e.event === 'add' && e.absPath === target), 2000);
+    // Index files are untracked in the queue but still appear in the tree.
+    assert.equal(
+      queue.snapshot().some((entry) => entry.path.endsWith('memory.index.md')),
+      false,
+    );
+
+    await watcher.close();
+  } finally {
+    handle.close();
+    cleanup();
+  }
+});
+
 test('watcher ignores upstream/ and process/ paths', async () => {
   const { root, lorePath, cleanup } = setupTempProject();
   mkdirSync(join(lorePath, 'upstream', 'core-0.4'), { recursive: true });
