@@ -9,6 +9,32 @@ export type {
   NodeRef,
 } from './chain/types.js';
 
+export { parseMemoryFile, parseMemoryFileSync } from './frontmatter/index.js';
+export type {
+  Altitude,
+  ATNodeFrontmatter,
+  ATNodeKind,
+  BlueprintBranch,
+  BlueprintFrontmatter,
+  Commitment,
+  CommonFrontmatter,
+  Dials,
+  FocusFrontmatter,
+  FocusStatus,
+  FocusType,
+  IndexFrontmatter,
+  JournalFrontmatter,
+  KTBranch,
+  KTNodeFrontmatter,
+  MemoryFileType,
+  MemoryFrontmatter,
+  ParsedMemoryFile,
+  Posture,
+  ReferenceLink,
+  SavePointFrontmatter,
+  StatusFrontmatter,
+} from './frontmatter/index.js';
+
 export { openDb } from './db/db.js';
 export type { CockpitDb, DbHandle } from './db/db.js';
 export { queueEntries } from './db/schema.js';

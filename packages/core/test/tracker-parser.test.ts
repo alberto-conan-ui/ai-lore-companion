@@ -3,9 +3,32 @@ import { test } from 'node:test';
 import { createTransitionDetector } from '../src/tracker/detector.js';
 import { parseStatus, parseTitle } from '../src/tracker/parser.js';
 
-test('parseStatus reads the convention block', () => {
+test('parseStatus reads the convention block (v0.4 body fallback)', () => {
   const text = '# Title\n\n> **Status:** Achieved\n\n> **References**\n';
   assert.equal(parseStatus(text), 'Achieved');
+});
+
+test('parseStatus reads frontmatter `status:` for v0.5 focus files', () => {
+  const text =
+    '---\ntype: focus\ntitle: x\nupdated: 2026-05-26\nreferences: []\n' +
+    'status: Review\nfocus_type: build\n---\n\n# x\n\n' +
+    '> **Status:** Active\n';
+  // Frontmatter wins over the (now-redundant) body quote.
+  assert.equal(parseStatus(text), 'Review');
+});
+
+test('parseStatus reads frontmatter `status:` for v0.5 at-node files', () => {
+  const text =
+    '---\ntype: at-node\ntitle: phase\nupdated: 2026-05-26\nreferences: []\n' +
+    'node_kind: leaf\ngated: true\nstatus: Achieved\n---\n\n# phase\n';
+  assert.equal(parseStatus(text), 'Achieved');
+});
+
+test('parseTitle reads frontmatter `title:` for v0.5 files', () => {
+  const text =
+    '---\ntype: focus\ntitle: From Frontmatter\nupdated: 2026-05-26\nreferences: []\n' +
+    'status: Active\nfocus_type: build\n---\n\n# Different H1\n';
+  assert.equal(parseTitle(text), 'From Frontmatter');
 });
 
 test('parseStatus returns null when no Status block is present', () => {
