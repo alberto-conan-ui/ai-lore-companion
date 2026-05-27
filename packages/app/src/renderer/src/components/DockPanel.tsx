@@ -1,4 +1,4 @@
-import { type JSX, type ReactNode, useCallback, useRef } from 'react';
+import { type JSX, type ReactNode, useCallback, useEffect, useRef } from 'react';
 
 type Side = 'right' | 'bottom';
 
@@ -50,10 +50,18 @@ export function DockPanel({
       movedRef.current = false;
       const start = side === 'right' ? e.clientX : e.clientY;
       const startSize = size;
+      // Cap the dock at ~65% of the available axis so it can never crush the
+      // main area to zero. Re-read on every move so a window resize mid-drag
+      // is respected. The min ensures a tiny window still leaves room.
+      const maxSize = (): number => {
+        const axis = side === 'right' ? window.innerWidth : window.innerHeight;
+        return Math.max(DOCK_MIN_SIZE, Math.floor(axis * 0.65));
+      };
       const onMove = (ev: MouseEvent): void => {
         const cur = side === 'right' ? ev.clientX : ev.clientY;
         if (Math.abs(cur - start) > 3) movedRef.current = true;
-        onResize(Math.max(DOCK_MIN_SIZE, startSize + (start - cur)));
+        const next = startSize + (start - cur);
+        onResize(Math.max(DOCK_MIN_SIZE, Math.min(maxSize(), next)));
       };
       const onUp = (): void => {
         window.removeEventListener('mousemove', onMove);
@@ -64,6 +72,21 @@ export function DockPanel({
     },
     [open, side, size, onResize],
   );
+
+  // If the window shrinks while the dock is open, clamp the stored size so
+  // the dock can't outgrow its container. Bad persisted state (the v0.6 bug
+  // where rightSize drifted to thousands of pixels) gets healed on open too.
+  useEffect(() => {
+    if (!open) return;
+    const clamp = (): void => {
+      const axis = side === 'right' ? window.innerWidth : window.innerHeight;
+      const cap = Math.max(DOCK_MIN_SIZE, Math.floor(axis * 0.65));
+      if (size > cap) onResize(cap);
+    };
+    clamp();
+    window.addEventListener('resize', clamp);
+    return () => window.removeEventListener('resize', clamp);
+  }, [open, side, size, onResize]);
 
   const onHandleClick = useCallback(() => {
     // A drag that moved is a resize, not a toggle.
@@ -125,7 +148,7 @@ const bottomAside: React.CSSProperties = {
 
 const rightHandle: React.CSSProperties = {
   flexShrink: 0,
-  width: '16px',
+  width: '22px',
   height: '100%',
   display: 'flex',
   alignItems: 'center',
@@ -133,8 +156,9 @@ const rightHandle: React.CSSProperties = {
   background: '#0f1620',
   border: 'none',
   borderLeft: '1px solid #1f2933',
-  color: '#6c7783',
-  fontSize: '0.8rem',
+  color: '#cbd2da',
+  fontSize: '1rem',
+  fontWeight: 700,
   cursor: 'ew-resize',
   padding: 0,
 };
@@ -142,15 +166,16 @@ const rightHandle: React.CSSProperties = {
 const bottomHandle: React.CSSProperties = {
   flexShrink: 0,
   width: '100%',
-  height: '16px',
+  height: '22px',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
   background: '#0f1620',
   border: 'none',
   borderTop: '1px solid #1f2933',
-  color: '#6c7783',
-  fontSize: '0.8rem',
+  color: '#cbd2da',
+  fontSize: '1rem',
+  fontWeight: 700,
   cursor: 'ns-resize',
   padding: 0,
 };

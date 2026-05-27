@@ -12,8 +12,10 @@ import { createPortal } from 'react-dom';
 import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../shared/ipc.js';
 import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
 import type { AlteredReason } from '../../shared/ipc.js';
+import { AiTab } from './components/AiTab.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BrowserTab } from './components/BrowserTab.js';
+import { PinnedPanesRow } from './components/PinnedPanesRow.js';
 import {
   DOCK_DEFAULT_BOTTOM,
   DOCK_DEFAULT_RIGHT,
@@ -47,24 +49,28 @@ const PANE_TABS: WorkspaceTab[] = [
 ];
 const PANEL_IDS = ['left', 'right', 'bottom'] as const;
 
-const TAB_KINDS = new Set<TabKind>(['pane', 'terminal', 'browser']);
+const TAB_KINDS = new Set<TabKind>(['pane', 'shell', 'ai', 'browser']);
 
 /** Convert a runtime `WorkspaceTab` into its persisted form — drops live state. */
 function tabToLayout(tab: WorkspaceTab): LayoutTab {
   const out: LayoutTab = { id: tab.id, kind: tab.kind, title: tab.title };
   if (tab.baseTitle !== undefined) out.baseTitle = tab.baseTitle;
   if (tab.manualTitle !== undefined) out.manualTitle = tab.manualTitle;
+  if (tab.engine !== undefined) out.engine = tab.engine;
   return out;
 }
 
 /** Lift a persisted `LayoutTab` into a runtime `WorkspaceTab`, or drop it if its kind is unknown. */
 function tabFromLayout(t: LayoutTab): WorkspaceTab | null {
-  if (!TAB_KINDS.has(t.kind as TabKind)) return null;
-  const out: WorkspaceTab = { id: t.id, kind: t.kind as TabKind, title: t.title };
+  // Pre-v0.7 layouts persisted `kind: 'terminal'`; lift those into 'shell'.
+  const kind = t.kind === 'terminal' ? 'shell' : (t.kind as TabKind);
+  if (!TAB_KINDS.has(kind)) return null;
+  const out: WorkspaceTab = { id: t.id, kind, title: t.title };
   if (t.baseTitle !== undefined) out.baseTitle = t.baseTitle;
   if (t.manualTitle !== undefined) out.manualTitle = t.manualTitle;
-  // Terminal tabs always restore as idle — their PTY is fresh.
-  if (out.kind === 'terminal') out.status = 'idle';
+  if (t.engine !== undefined) out.engine = t.engine;
+  // Shell tabs always restore as idle — their PTY is fresh.
+  if (out.kind === 'shell') out.status = 'idle';
   return out;
 }
 
@@ -310,49 +316,10 @@ export function App(): JSX.Element {
     return off;
   }, []);
 
-  // Seed the workspace layout from the per-project snapshot, exactly once per
-  // window — gated on `workspace.restoreLayout`. A missing snapshot, or the
-  // toggle off, leaves the defaults in place.
-  const seededRef = useRef(false);
-  useEffect(() => {
-    if (seededRef.current) return;
-    if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
-    seededRef.current = true;
-    void window.cockpit.settingsGet().then((snap) => {
-      if (snap.resolved['workspace.restoreLayout'] === false) return;
-      const layout = snap.project?.layout;
-      if (!layout) return;
-      const liftPanel = (p: { tabs: LayoutTab[]; activeId: string }): Panel => {
-        const tabs = p.tabs.flatMap((t) => {
-          const lifted = tabFromLayout(t);
-          return lifted ? [lifted] : [];
-        });
-        // The persisted activeId might be a tab that got dropped on lift —
-        // fall back to the last surviving tab so the panel stays usable.
-        const stillThere = tabs.some((t) => t.id === p.activeId);
-        return {
-          tabs,
-          activeId: stillThere ? p.activeId : (tabs[tabs.length - 1]?.id ?? ''),
-        };
-      };
-      // The left panel always carries the pinned panes, even when a stale
-      // snapshot lost them — drop the snapshot rather than ship a cockpit
-      // with no Status/Payload/Memory.
-      const left = liftPanel(layout.panels.left);
-      const hasAllPanes = PANE_TABS.every((p) => left.tabs.some((t) => t.id === p.id));
-      if (!hasAllPanes) return;
-      setPanels({
-        left,
-        right: liftPanel(layout.panels.right),
-        bottom: liftPanel(layout.panels.bottom),
-      });
-      setRightOpen(layout.rightOpen);
-      setBottomOpen(layout.bottomOpen);
-      setRightSize(Math.max(DOCK_MIN_SIZE, layout.rightWidth));
-      setBottomSize(Math.max(DOCK_MIN_SIZE, layout.bottomHeight));
-      setBrowserInitialUrls(layout.browserUrls);
-    });
-  }, [mode, chain]);
+  // Layout restore is disabled: every launch starts with the default layout
+  // (pinned panes in the left, both docks closed at default size). The
+  // `captureLayout` write path below still snapshots state to disk so the
+  // restore can be re-enabled in one place when the UX is ready for it.
 
   // Whether this window currently has OS focus — only the focused window
   // writes layout. The blurred window keeps its in-memory state but stops
@@ -401,7 +368,6 @@ export function App(): JSX.Element {
   // project context is in place — pre-cockpit state is not a real layout.
   useEffect(() => {
     if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
-    if (!seededRef.current) return; // wait until the seed pass has run
     if (!hasFocus) return;
     const handle = window.setTimeout(() => {
       void captureLayout().then((layout) => {
@@ -448,13 +414,13 @@ export function App(): JSX.Element {
     bottom: setBottomSlot,
   };
 
-  const addTab = (panelId: PanelId, kind: 'terminal' | 'browser'): void => {
+  const addTab = (panelId: PanelId, kind: 'shell' | 'browser'): void => {
     const id = crypto.randomUUID();
     setPanels((p) => {
       const n = p[panelId].tabs.filter((t) => t.kind === kind).length + 1;
-      const title = `${kind === 'terminal' ? 'Terminal' : 'Browser'} ${n}`;
+      const title = `${kind === 'shell' ? 'Shell' : 'Browser'} ${n}`;
       const tab: WorkspaceTab =
-        kind === 'terminal'
+        kind === 'shell'
           ? { id, kind, title, baseTitle: title, status: 'idle' }
           : { id, kind, title, baseTitle: title };
       return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
@@ -462,7 +428,20 @@ export function App(): JSX.Element {
     setDockOpen(panelId, true);
   };
 
-  /** Create a terminal tab on `panelId` from a tab shortcut — titled after the
+  /** Create an `kind: 'ai'` tab bound to `engine`. No spawn yet — Phase B
+   *  adds the Start button + engine picker on the empty state. */
+  const addAiTab = (panelId: PanelId, engine: string): void => {
+    const id = crypto.randomUUID();
+    setPanels((p) => {
+      const n = p[panelId].tabs.filter((t) => t.kind === 'ai').length + 1;
+      const title = `AI ${n}`;
+      const tab: WorkspaceTab = { id, kind: 'ai', title, baseTitle: title, engine };
+      return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
+    });
+    setDockOpen(panelId, true);
+  };
+
+  /** Create a shell tab on `panelId` from a tab shortcut — titled after the
    *  shortcut, with the command queued for the PTY once it spawns. */
   const createTerminalShortcutTab = useCallback(
     (panelId: PanelId, command: string, label: string): void => {
@@ -471,7 +450,7 @@ export function App(): JSX.Element {
       setPanels((p) => {
         const tab: WorkspaceTab = {
           id,
-          kind: 'terminal',
+          kind: 'shell',
           title: label,
           baseTitle: label,
           status: 'idle',
@@ -596,9 +575,9 @@ export function App(): JSX.Element {
   const closeTab = (panelId: PanelId, tabId: string): void => {
     const panel = panels[panelId];
     const tab = panel.tabs.find((t) => t.id === tabId);
-    // A terminal tab running a task confirms before closing — the whole-window
+    // A shell tab running a task confirms before closing — the whole-window
     // close has the same guard, but closing a single tab bypassed it.
-    if (tab?.kind === 'terminal' && tab.status === 'running') {
+    if (tab?.kind === 'shell' && tab.status === 'running') {
       const proceed = window.confirm(
         'This terminal is running a task. Closing the tab will end it.\n\nClose anyway?',
       );
@@ -765,7 +744,8 @@ export function App(): JSX.Element {
       activeTabId={panels[panelId].activeId}
       onSelectTab={(id) => selectTab(panelId, id)}
       onCloseTab={(id) => closeTab(panelId, id)}
-      onNewTerminal={() => addTab(panelId, 'terminal')}
+      onNewShell={() => addTab(panelId, 'shell')}
+      onNewAi={(engine) => addAiTab(panelId, engine)}
       onNewBrowser={() => addTab(panelId, 'browser')}
       onRenameTab={(id, name) => renameTab(panelId, id, name)}
       onMoveTab={moveTab}
@@ -796,7 +776,7 @@ export function App(): JSX.Element {
           />
         );
       }
-    } else if (tab.kind === 'terminal') {
+    } else if (tab.kind === 'shell') {
       body = (
         <TerminalTab
           active={visible}
@@ -805,6 +785,8 @@ export function App(): JSX.Element {
           initialCommand={terminalInitialCommands[tab.id]}
         />
       );
+    } else if (tab.kind === 'ai') {
+      body = <AiTab engine={tab.engine ?? ''} />;
     } else {
       body = (
         <BrowserTab tabId={tab.id} visible={visible} initialUrl={browserInitialUrls[tab.id]} />
@@ -826,7 +808,15 @@ export function App(): JSX.Element {
         }
       />
       <div style={panelsRow}>
-        <div style={appColumn}>{panel('left')}</div>
+        <div style={appColumn}>
+          <PinnedPanesRow
+            panes={PANE_TABS.map((p) => ({ id: p.id, title: p.title }))}
+            activeId={panels.left.activeId}
+            drift={tabDrift}
+            onSelect={(id) => selectTab('left', id)}
+          />
+          {panel('left')}
+        </div>
         <DockPanel
           side="right"
           open={rightOpen}

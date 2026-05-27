@@ -48,8 +48,8 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('pane-status')).toBeVisible();
 
       // The panel/tab workspace: a new terminal opens in the left panel.
-      await page.getByTestId('tab-strip').first().getByTestId('new-terminal').click();
-      await expect(page.getByTestId('tab-terminal').first()).toBeVisible({ timeout: 5_000 });
+      await page.getByTestId('tab-strip').first().getByTestId('new-shell').click();
+      await expect(page.getByTestId('tab-shell').first()).toBeVisible({ timeout: 5_000 });
 
       await app.close();
     } finally {
@@ -123,8 +123,8 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTestId('tab-strip').first().getByTestId('new-terminal').click();
-      const tab = page.getByTestId('tab-terminal').first();
+      await page.getByTestId('tab-strip').first().getByTestId('new-shell').click();
+      const tab = page.getByTestId('tab-shell').first();
       await expect(tab).toBeVisible({ timeout: 5_000 });
 
       // Double-click the tab to make its title editable; a typed name sticks.
@@ -134,6 +134,39 @@ test.describe('window modes', () => {
       await input.fill('My shell');
       await input.press('Enter');
       await expect(tab.getByText('My shell')).toBeVisible();
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  // v0.7 Phase A — typed tabs. `+ AI ▾` opens an engine popover; picking an
+  // engine creates a `kind: 'ai'` tab with the engine recorded on it. No spawn
+  // yet (Phase B adds the Start button on the empty state).
+  test('the + AI opener picks an engine and creates an AI tab', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      const leftStrip = page.getByTestId('tab-strip').first();
+      await leftStrip.getByTestId('new-ai').click();
+      const popover = page.getByTestId('new-ai-popover');
+      await expect(popover).toBeVisible();
+      await expect(popover.getByTestId('new-ai-engine-claude')).toBeVisible();
+      await expect(popover.getByTestId('new-ai-engine-gemini')).toBeVisible();
+
+      await popover.getByTestId('new-ai-engine-claude').click();
+      const aiTab = leftStrip.getByTestId('tab-ai');
+      await expect(aiTab).toBeVisible({ timeout: 5_000 });
+      // The chosen engine is recorded on the tab — exposed as the button's
+      // title attribute (visible name stays the short "AI N").
+      await expect(aiTab.locator('button[title*="claude"]')).toHaveCount(1);
+      // The AI surface renders the engine in its placeholder, identifying it
+      // by the data-ai-engine attribute (so this test still passes once the
+      // placeholder is replaced in Phase B).
+      await expect(page.locator('[data-ai-engine="claude"]')).toHaveCount(1);
 
       await app.close();
     } finally {
@@ -154,8 +187,8 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
       const leftStrip = page.getByTestId('tab-strip').first();
-      await leftStrip.getByTestId('new-terminal').click();
-      const terminalTab = leftStrip.getByTestId('tab-terminal');
+      await leftStrip.getByTestId('new-shell').click();
+      const terminalTab = leftStrip.getByTestId('tab-shell');
       await expect(terminalTab).toBeVisible({ timeout: 5_000 });
 
       // Read the terminal's stable host id. Pane hosts have known string ids
@@ -180,8 +213,8 @@ test.describe('window modes', () => {
       await terminalTab.dragTo(bottomStrip);
 
       // The terminal tab now lives in the bottom strip.
-      await expect(bottomStrip.getByTestId('tab-terminal')).toBeVisible({ timeout: 5_000 });
-      await expect(leftStrip.getByTestId('tab-terminal')).toHaveCount(0);
+      await expect(bottomStrip.getByTestId('tab-shell')).toBeVisible({ timeout: 5_000 });
+      await expect(leftStrip.getByTestId('tab-shell')).toHaveCount(0);
 
       // The same host element still exists with the same UUID — a remount
       // would have torn the host down with its React subtree (and killed the

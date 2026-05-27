@@ -64,11 +64,17 @@ export type SettingsFile = {
 /** The persisted shape of a tab in the layout snapshot. */
 export type LayoutTab = {
   id: string;
-  /** `'pane' | 'terminal' | 'browser'` — matched against the runtime tab kinds. */
+  /**
+   * `'pane' | 'shell' | 'ai' | 'browser'` — matched against the runtime tab
+   * kinds. Older snapshots may carry `'terminal'`; the renderer migrates that
+   * to `'shell'` on lift.
+   */
   kind: string;
   title: string;
   baseTitle?: string;
   manualTitle?: boolean;
+  /** For `kind === 'ai'`: the engine chosen when the tab was opened (e.g. `'claude'`). */
+  engine?: string;
 };
 
 /** One panel in the layout snapshot — its ordered tabs and the active one. */

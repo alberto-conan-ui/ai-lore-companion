@@ -83,6 +83,7 @@ function isLayoutTab(value: unknown): value is LayoutTab {
   }
   if (o.baseTitle !== undefined && typeof o.baseTitle !== 'string') return false;
   if (o.manualTitle !== undefined && typeof o.manualTitle !== 'boolean') return false;
+  if (o.engine !== undefined && typeof o.engine !== 'string') return false;
   return true;
 }
 
@@ -97,6 +98,7 @@ function parseLayoutPanel(value: unknown): LayoutPanel | null {
     const t: LayoutTab = { id: raw.id, kind: raw.kind, title: raw.title };
     if (raw.baseTitle !== undefined) t.baseTitle = raw.baseTitle;
     if (raw.manualTitle !== undefined) t.manualTitle = raw.manualTitle;
+    if (raw.engine !== undefined) t.engine = raw.engine;
     tabs.push(t);
   }
   return { tabs, activeId: o.activeId };

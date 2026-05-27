@@ -327,3 +327,50 @@ test('parseSettingsFile drops non-string browserUrls entries', () => {
   const parsed = parseSettingsFile(text);
   assert.deepEqual(parsed.layout?.browserUrls, { 'tab-1': 'https://example.com/' });
 });
+
+test('parseSettingsFile keeps the engine field on an ai-kind tab', () => {
+  const layout: WorkspaceLayout = sampleLayout();
+  layout.panels.right.tabs.push({
+    id: 'tab-ai-1',
+    kind: 'ai',
+    title: 'AI 1',
+    baseTitle: 'AI 1',
+    engine: 'claude',
+  });
+  layout.panels.right.activeId = 'tab-ai-1';
+  const text = JSON.stringify({ schemaVersion: 1, values: {}, ignores: [], layout });
+  const parsed = parseSettingsFile(text);
+  const aiTab = parsed.layout?.panels.right.tabs.find((t) => t.id === 'tab-ai-1');
+  assert.equal(aiTab?.kind, 'ai');
+  assert.equal(aiTab?.engine, 'claude');
+});
+
+test('parseSettingsFile drops a tab with a non-string engine field', () => {
+  const layout: WorkspaceLayout = sampleLayout();
+  // biome-ignore lint/suspicious/noExplicitAny: stuffing a malformed entry on purpose.
+  (layout.panels.right.tabs as any).push({
+    id: 'tab-ai-bad',
+    kind: 'ai',
+    title: 'AI bad',
+    engine: 42,
+  });
+  const text = JSON.stringify({ schemaVersion: 1, values: {}, ignores: [], layout });
+  const parsed = parseSettingsFile(text);
+  assert.equal(
+    parsed.layout?.panels.right.tabs.find((t) => t.id === 'tab-ai-bad'),
+    undefined,
+  );
+});
+
+test('parseSettingsFile preserves a pre-v0.7 tab kind so the renderer can migrate it', () => {
+  // Pre-v0.7 layouts persisted shell tabs as `kind: 'terminal'`. The core parser
+  // keeps that string as-is; the renderer's `tabFromLayout` lifts it to `'shell'`.
+  const layout: WorkspaceLayout = sampleLayout();
+  layout.panels.right.tabs.push({ id: 'tab-old', kind: 'terminal', title: 'Terminal 1' });
+  const text = JSON.stringify({ schemaVersion: 1, values: {}, ignores: [], layout });
+  const parsed = parseSettingsFile(text);
+  assert.equal(
+    parsed.layout?.panels.right.tabs.find((t) => t.id === 'tab-old')?.kind,
+    'terminal',
+  );
+});

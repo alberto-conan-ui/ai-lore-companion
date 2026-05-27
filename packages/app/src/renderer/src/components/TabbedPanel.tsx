@@ -1,24 +1,33 @@
-import { type JSX, useState } from 'react';
+import { type JSX, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { type DriftLevel, driftLevel } from '../store.js';
 
 /** A tab's kind selects which surface it renders. `pane` tabs are the pinned
- *  cockpit panes — not closable, not movable. */
-export type TabKind = 'pane' | 'terminal' | 'browser';
+ *  cockpit panes — not closable, not movable. `shell` and `ai` both back onto
+ *  the integrated terminal pane; `shell` is a plain PTY, `ai` is the host for
+ *  a structured AI session (Phase B onwards). */
+export type TabKind = 'pane' | 'shell' | 'ai' | 'browser';
 
 /** A tab in a panel — `id` is stable for the tab's lifetime. */
 export type WorkspaceTab = {
   id: string;
   kind: TabKind;
-  /** The displayed title — auto-managed for terminals unless renamed by hand. */
+  /** The displayed title — auto-managed for shell/ai/browser unless renamed by hand. */
   title: string;
-  /** The default name a terminal/browser tab reverts to (`Terminal N`). */
+  /** The default name a shell/ai/browser tab reverts to (`Shell N`, `AI N`, ...). */
   baseTitle?: string;
-  /** True once the title was set by hand — freezes terminal auto-rename. */
+  /** True once the title was set by hand — freezes auto-rename. */
   manualTitle?: boolean;
-  /** A terminal tab's foreground status — drives the idle/running dot. */
+  /** A shell tab's foreground status — drives the idle/running dot. */
   status?: TerminalForegroundStatus;
+  /** For `kind === 'ai'`: the engine chosen when the tab was opened. */
+  engine?: string;
 };
+
+/** Engines offered by the `+ AI ▾` opener. Stubbed in Phase A; Phase B sources
+ *  this from Settings → Apps and detects which binaries are on PATH. */
+export const PHASE_A_ENGINES = ['claude', 'gemini'] as const;
 
 /** The three docks of the workspace. */
 export type PanelId = 'left' | 'right' | 'bottom';
@@ -29,7 +38,11 @@ type Props = {
   activeTabId: string;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
-  onNewTerminal: () => void;
+  /** Create a plain `kind: 'shell'` tab — today's PTY behaviour. */
+  onNewShell: () => void;
+  /** Create a new `kind: 'ai'` tab bound to the chosen engine. No spawn yet
+   *  (Phase B adds that); the engine is recorded on the tab. */
+  onNewAi: (engine: string) => void;
   onNewBrowser: () => void;
   /** Rename a tab — an empty name reverts to the auto-managed default. */
   onRenameTab: (id: string, name: string) => void;
@@ -70,7 +83,7 @@ function DriftBadge({ count }: { count: number }): JSX.Element {
   );
 }
 
-/** Idle/running dot on a terminal tab — lit while a foreground task runs. */
+/** Idle/running dot on a shell tab — lit while a foreground task runs. */
 function StatusDot({ status }: { status: TerminalForegroundStatus }): JSX.Element {
   const running = status === 'running';
   return (
@@ -82,6 +95,16 @@ function StatusDot({ status }: { status: TerminalForegroundStatus }): JSX.Elemen
       }}
       aria-label={running ? 'running' : 'idle'}
     />
+  );
+}
+
+/** Filled-glyph badge on an AI tab — the kind marker (Phase B will overlay an
+ *  idle/running indicator on top of it). */
+function AiBadge(): JSX.Element {
+  return (
+    <span style={aiBadgeStyle} aria-label="AI tab">
+      ✦
+    </span>
   );
 }
 
@@ -98,7 +121,8 @@ export function TabbedPanel({
   activeTabId,
   onSelectTab,
   onCloseTab,
-  onNewTerminal,
+  onNewShell,
+  onNewAi,
   onNewBrowser,
   onRenameTab,
   onMoveTab,
@@ -112,6 +136,30 @@ export function TabbedPanel({
   // The tab currently being renamed inline, plus its draft text.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  // The `+ AI ▾` engine-picker popover — open state, anchor button, body-
+  // portaled popover, and the coords the popover lands at (measured from
+  // the anchor's `getBoundingClientRect`). Body-portaled so the strip's
+  // flex / overflow context can't clip or mis-stack it.
+  const [aiPickerOpen, setAiPickerOpen] = useState(false);
+  const aiAnchorRef = useRef<HTMLButtonElement>(null);
+  const aiPopoverRef = useRef<HTMLDivElement>(null);
+  const [aiPickerCoords, setAiPickerCoords] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    if (!aiPickerOpen) {
+      setAiPickerCoords(null);
+      return;
+    }
+    const rect = aiAnchorRef.current?.getBoundingClientRect();
+    if (rect) setAiPickerCoords({ left: rect.left, top: rect.bottom + 2 });
+    const onAway = (e: MouseEvent): void => {
+      const tgt = e.target as Node;
+      if (aiAnchorRef.current?.contains(tgt)) return;
+      if (aiPopoverRef.current?.contains(tgt)) return;
+      setAiPickerOpen(false);
+    };
+    document.addEventListener('mousedown', onAway);
+    return () => document.removeEventListener('mousedown', onAway);
+  }, [aiPickerOpen]);
 
   const startEdit = (tab: WorkspaceTab): void => {
     setEditingId(tab.id);
@@ -150,14 +198,17 @@ export function TabbedPanel({
         onDrop={(e) => handleDrop(e, tabs.length)}
       >
         {tabs.map((tab, i) => {
+          // Pinned panes (Status / Payload / Memory) render in PinnedPanesRow
+          // above this strip — they are navigation chips, not documents.
+          if (tab.kind === 'pane') return null;
           const active = tab.id === activeTabId;
-          const pinned = tab.kind === 'pane';
           return (
             <div
               key={tab.id}
               style={{ ...tabStyle, ...(active ? activeTabStyle : null) }}
-              data-testid={pinned ? `tab-${tab.id}` : `tab-${tab.kind}`}
-              draggable={!pinned}
+              data-testid={`tab-${tab.kind}`}
+              data-tab-kind={tab.kind}
+              draggable={true}
               onDragStart={(e) => {
                 e.dataTransfer.setData(
                   'text/plain',
@@ -187,37 +238,77 @@ export function TabbedPanel({
                 <button
                   type="button"
                   style={{ ...tabLabelBtn, color: active ? '#e6edf3' : '#8a96a2' }}
-                  title={tab.title}
+                  title={tab.kind === 'ai' && tab.engine ? `${tab.title} · ${tab.engine}` : tab.title}
                   onClick={() => onSelectTab(tab.id)}
-                  // Pinned panes keep fixed names; terminal/browser tabs rename.
-                  onDoubleClick={pinned ? undefined : () => startEdit(tab)}
+                  onDoubleClick={() => startEdit(tab)}
                 >
-                  {tab.kind === 'terminal' ? <StatusDot status={tab.status ?? 'idle'} /> : null}
+                  {tab.kind === 'shell' ? <StatusDot status={tab.status ?? 'idle'} /> : null}
+                  {tab.kind === 'ai' ? <AiBadge /> : null}
                   <span style={tabTitleStyle}>{tab.title}</span>
                   {tabDrift && tab.id in tabDrift ? <DriftBadge count={tabDrift[tab.id]} /> : null}
                 </button>
               )}
-              {pinned ? null : (
-                <button
-                  type="button"
-                  style={closeBtn}
-                  title="Close tab"
-                  onClick={() => onCloseTab(tab.id)}
-                >
-                  ×
-                </button>
-              )}
+              <button
+                type="button"
+                style={closeBtn}
+                title="Close tab"
+                onClick={() => onCloseTab(tab.id)}
+              >
+                ×
+              </button>
             </div>
           );
         })}
+        <span style={stripDividerStyle} aria-hidden="true" />
+        <button
+          ref={aiAnchorRef}
+          type="button"
+          style={{ ...newBtn, ...(aiPickerOpen ? newBtnOpen : null) }}
+          title="New AI session — pick an engine"
+          data-testid="new-ai"
+          onClick={() => setAiPickerOpen((o) => !o)}
+        >
+          + AI ▾
+        </button>
+        {aiPickerOpen && aiPickerCoords
+          ? createPortal(
+              <div
+                ref={aiPopoverRef}
+                style={{
+                  ...aiPickerPopover,
+                  left: aiPickerCoords.left,
+                  top: aiPickerCoords.top,
+                }}
+                data-testid="new-ai-popover"
+                role="menu"
+              >
+                {PHASE_A_ENGINES.map((engine) => (
+                  <button
+                    key={engine}
+                    type="button"
+                    style={aiPickerItem}
+                    role="menuitem"
+                    data-testid={`new-ai-engine-${engine}`}
+                    onClick={() => {
+                      setAiPickerOpen(false);
+                      onNewAi(engine);
+                    }}
+                  >
+                    {engine}
+                  </button>
+                ))}
+              </div>,
+              document.body,
+            )
+          : null}
         <button
           type="button"
           style={newBtn}
-          title="New terminal"
-          data-testid="new-terminal"
-          onClick={onNewTerminal}
+          title="New shell"
+          data-testid="new-shell"
+          onClick={onNewShell}
         >
-          + term
+          + shell
         </button>
         <button
           type="button"
@@ -228,6 +319,9 @@ export function TabbedPanel({
         >
           + web
         </button>
+        {tabShortcuts.length > 0 ? (
+          <span style={stripDividerStyle} aria-hidden="true" />
+        ) : null}
         {tabShortcuts.map((s) => {
           if (s.target === 'terminal' && s.command) {
             return (
@@ -295,31 +389,33 @@ const contentSlot: React.CSSProperties = {
 const stripStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'stretch',
-  gap: '1px',
   background: '#0c121a',
   borderBottom: '1px solid #1f2933',
   padding: '0 0.3rem',
-  minHeight: '32px',
+  minHeight: '30px',
   flexShrink: 0,
+  // Don't clip the engine-picker popover when it drops below the strip.
+  overflow: 'visible',
 };
 
 const tabStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   background: 'transparent',
-  borderRight: '1px solid #161c25',
+  borderRight: '1px solid #1a2230',
+  position: 'relative',
 };
 
 const activeTabStyle: React.CSSProperties = {
   background: '#0a0f17',
-  boxShadow: 'inset 0 -2px 0 #5a9bd4',
+  boxShadow: 'inset 0 2px 0 #5a9bd4',
 };
 
 const tabLabelBtn: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  gap: '0.4rem',
-  padding: '0.35rem 0.7rem',
+  gap: '0.45rem',
+  padding: '0.4rem 0.75rem',
   background: 'transparent',
   border: 'none',
   font: 'inherit',
@@ -342,6 +438,49 @@ const statusDotStyle: React.CSSProperties = {
   width: '7px',
   height: '7px',
   borderRadius: '50%',
+};
+
+const aiBadgeStyle: React.CSSProperties = {
+  flexShrink: 0,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '14px',
+  fontSize: '0.95rem',
+  fontWeight: 700,
+  lineHeight: 1,
+  color: '#c7b3ff',
+  textShadow: '0 0 6px rgba(199, 179, 255, 0.35)',
+};
+
+const newBtnOpen: React.CSSProperties = {
+  background: '#1a2230',
+  color: '#dde3ea',
+};
+
+const aiPickerPopover: React.CSSProperties = {
+  position: 'fixed',
+  background: '#101822',
+  border: '1px solid #243044',
+  borderRadius: '5px',
+  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.55)',
+  zIndex: 50,
+  display: 'flex',
+  flexDirection: 'column',
+  minWidth: '8rem',
+  padding: '0.2rem',
+};
+
+const aiPickerItem: React.CSSProperties = {
+  padding: '0.4rem 0.7rem',
+  background: 'transparent',
+  border: 'none',
+  color: '#dde3ea',
+  font: 'inherit',
+  fontSize: '0.8rem',
+  textAlign: 'left',
+  cursor: 'pointer',
+  borderRadius: '3px',
 };
 
 const tabEditInput: React.CSSProperties = {
@@ -382,15 +521,25 @@ const closeBtn: React.CSSProperties = {
   cursor: 'pointer',
 };
 
+const stripDividerStyle: React.CSSProperties = {
+  flexShrink: 0,
+  width: '1px',
+  alignSelf: 'center',
+  height: '18px',
+  background: '#243044',
+  margin: '0 0.5rem',
+};
+
 const newBtn: React.CSSProperties = {
-  padding: '0 0.5rem',
+  padding: '0.25rem 0.55rem',
   background: 'transparent',
   border: 'none',
-  color: '#9fb1bd',
+  color: '#7f8c98',
   fontSize: '0.72rem',
   fontWeight: 600,
   whiteSpace: 'nowrap',
   cursor: 'pointer',
+  borderRadius: '3px',
 };
 
 /** URL tab shortcuts render as a split button — `+ <name>` on the left,
