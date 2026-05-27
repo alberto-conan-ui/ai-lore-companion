@@ -141,6 +141,59 @@ test.describe('window modes', () => {
     }
   });
 
+  // A terminal tab carries a live PTY. Dragging the tab between panels must
+  // not remount the React subtree that owns the PTY — otherwise long-running
+  // CLI sessions (claude, gemini, tail -f) die on every move. The fix is the
+  // stable [data-tab-host] container: one DOM node per tab.id, reparented
+  // imperatively. This test pins it: the same UUID-tagged host element must
+  // survive the move.
+  test('a terminal tab survives being dragged between panels', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      const leftStrip = page.getByTestId('tab-strip').first();
+      await leftStrip.getByTestId('new-terminal').click();
+      const terminalTab = leftStrip.getByTestId('tab-terminal');
+      await expect(terminalTab).toBeVisible({ timeout: 5_000 });
+
+      // Read the terminal's stable host id. Pane hosts have known string ids
+      // (status / payload / memory); the terminal's host is the one with a
+      // UUID-shaped attribute.
+      const PANE_IDS = ['status', 'payload', 'memory'];
+      const terminalHostId = await page.evaluate((panes: string[]) => {
+        for (const el of Array.from(document.querySelectorAll('[data-tab-host]'))) {
+          const id = el.getAttribute('data-tab-host');
+          if (id && !panes.includes(id)) return id;
+        }
+        return null;
+      }, PANE_IDS);
+      expect(terminalHostId).toBeTruthy();
+
+      // Open the bottom dock so it has a drop target.
+      await page.getByTestId('dock-handle-bottom').click();
+      const bottomStrip = page.getByTestId('tab-strip').nth(2);
+      await expect(bottomStrip).toBeVisible({ timeout: 5_000 });
+
+      // Drag the terminal tab from the left strip onto the bottom strip.
+      await terminalTab.dragTo(bottomStrip);
+
+      // The terminal tab now lives in the bottom strip.
+      await expect(bottomStrip.getByTestId('tab-terminal')).toBeVisible({ timeout: 5_000 });
+      await expect(leftStrip.getByTestId('tab-terminal')).toHaveCount(0);
+
+      // The same host element still exists with the same UUID — a remount
+      // would have torn the host down with its React subtree (and killed the
+      // PTY), then created a fresh one on remount under a new tab.id.
+      await expect(page.locator(`[data-tab-host="${terminalHostId}"]`)).toHaveCount(1);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('launching with no project opens the welcome window', async () => {
     const userData = scratchUserData();
     try {

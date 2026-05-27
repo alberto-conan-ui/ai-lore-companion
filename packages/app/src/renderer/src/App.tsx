@@ -1,5 +1,13 @@
 import type { ChangeScope, LayoutTab, WorkspaceLayout } from '@ai-lore-companion/core';
-import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type JSX,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../shared/ipc.js';
 import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
@@ -635,6 +643,67 @@ export function App(): JSX.Element {
     }
   };
 
+  // Each tab's content lives in a stable host `<div>` (one per tab.id) that
+  // is created imperatively and lives outside React's tree. The host stays
+  // the same for the tab's lifetime; only its DOM parent changes when the
+  // tab moves between panels. The layout effect below reparents each host
+  // into its active panel's slot via `appendChild` — a plain DOM move that
+  // does not trigger React lifecycle.
+  //
+  // The stable host is load-bearing: `createPortal`'s `container` argument
+  // changing forces React to unmount + remount the children, which would
+  // kill a long-running PTY on every tab move. Portaling into the host (one
+  // per tab, never re-targeted) instead of directly into the panel slot
+  // (different per panel) is what keeps `claude` and friends alive.
+  const tabPlacements = useMemo(() => {
+    const out: { tab: WorkspaceTab; panelId: PanelId; visible: boolean }[] = [];
+    for (const panelId of PANEL_IDS) {
+      const p = panels[panelId];
+      for (const tab of p.tabs) {
+        const active = p.activeId === tab.id;
+        const open = panelId === 'left' || (panelId === 'right' ? rightOpen : bottomOpen);
+        out.push({ tab, panelId, visible: active && open });
+      }
+    }
+    return out;
+  }, [panels, rightOpen, bottomOpen]);
+
+  const tabHostsRef = useRef<Map<string, HTMLDivElement>>(new Map());
+  const getOrCreateTabHost = (tabId: string): HTMLDivElement => {
+    let host = tabHostsRef.current.get(tabId);
+    if (!host) {
+      host = document.createElement('div');
+      host.dataset.tabHost = tabId;
+      Object.assign(host.style, {
+        flex: '1',
+        minWidth: '0',
+        minHeight: '0',
+        display: 'none',
+      });
+      tabHostsRef.current.set(tabId, host);
+    }
+    return host;
+  };
+
+  // Park each tab host in its panel's slot and toggle visibility. Runs before
+  // paint so panel moves don't flicker. Drops hosts for closed tabs.
+  useLayoutEffect(() => {
+    const alive = new Set(tabPlacements.map((p) => p.tab.id));
+    for (const { tab, panelId, visible } of tabPlacements) {
+      const slot = slots[panelId];
+      const host = tabHostsRef.current.get(tab.id);
+      if (!host) continue;
+      if (slot && host.parentNode !== slot) slot.appendChild(host);
+      host.style.display = visible ? 'flex' : 'none';
+    }
+    for (const [id, host] of tabHostsRef.current) {
+      if (!alive.has(id)) {
+        host.remove();
+        tabHostsRef.current.delete(id);
+      }
+    }
+  }, [tabPlacements, slots]);
+
   if (mode === 'loading') {
     return (
       <main style={fullCenter} data-testid="loading">
@@ -709,53 +778,39 @@ export function App(): JSX.Element {
     />
   );
 
-  // Every tab's content is rendered once, keyed by tab id, and portaled into
-  // its panel's slot — so dragging a tab between panels keeps its component
-  // (terminal scrollback, browser page) rather than remounting it.
-  const contentPortals = PANEL_IDS.flatMap((panelId) => {
-    const slot = slots[panelId];
-    if (!slot) return [];
-    return panels[panelId].tabs.map((tab) => {
-      const active = panels[panelId].activeId === tab.id;
-      const visible = active && dockOpen(panelId);
-      let body: JSX.Element | null = null;
-      if (tab.kind === 'pane') {
-        const spec = paneSpecById.get(tab.id);
-        if (spec) {
-          body = (
-            <Pane
-              testId={spec.id}
-              scope={spec.scope}
-              label={spec.title}
-              subRoot={spec.subRoot}
-              projectRoot={chain.root}
-              displayPath={displayPath}
-              revealRequest={revealTarget?.paneId === spec.id ? revealTarget : undefined}
-            />
-          );
-        }
-      } else if (tab.kind === 'terminal') {
+  const contentPortals = tabPlacements.map(({ tab, visible }) => {
+    const host = getOrCreateTabHost(tab.id);
+    let body: JSX.Element | null = null;
+    if (tab.kind === 'pane') {
+      const spec = paneSpecById.get(tab.id);
+      if (spec) {
         body = (
-          <TerminalTab
-            active={visible}
-            tabId={tab.id}
-            onStatus={handleTerminalStatus}
-            initialCommand={terminalInitialCommands[tab.id]}
+          <Pane
+            testId={spec.id}
+            scope={spec.scope}
+            label={spec.title}
+            subRoot={spec.subRoot}
+            projectRoot={chain.root}
+            displayPath={displayPath}
+            revealRequest={revealTarget?.paneId === spec.id ? revealTarget : undefined}
           />
         );
-      } else {
-        body = (
-          <BrowserTab tabId={tab.id} visible={visible} initialUrl={browserInitialUrls[tab.id]} />
-        );
       }
-      return createPortal(
-        <div style={{ display: active ? 'flex' : 'none', flex: 1, minWidth: 0, minHeight: 0 }}>
-          {body}
-        </div>,
-        slot,
-        tab.id,
+    } else if (tab.kind === 'terminal') {
+      body = (
+        <TerminalTab
+          active={visible}
+          tabId={tab.id}
+          onStatus={handleTerminalStatus}
+          initialCommand={terminalInitialCommands[tab.id]}
+        />
       );
-    });
+    } else {
+      body = (
+        <BrowserTab tabId={tab.id} visible={visible} initialUrl={browserInitialUrls[tab.id]} />
+      );
+    }
+    return createPortal(body, host, tab.id);
   });
 
   return (
