@@ -84,6 +84,15 @@ import { loadBrowserProfile, saveBrowserProfile } from './browser-prefs.js';
 import * as browser from './browser.js';
 import { launchDiff, materialiseBaseline } from './diff.js';
 import { buildAppMenu } from './menu.js';
+import {
+  COMMIT_LIST_LIMIT,
+  attachSavePointBadges,
+  loreHide,
+  projectRelativise,
+  projectToRepoRelative,
+  readTreeNode,
+  treeHideFor,
+} from './path-mapping.js';
 import { type PtyService, createPtyService } from './pty.js';
 import { addRecent, clearRecents, loadRecents } from './recents.js';
 import {
@@ -108,9 +117,6 @@ type Wiring = {
   pushCommits: (scope: ChangeScope) => void;
 };
 
-/** How many recent commits the baseline dropdown shows per repo. */
-const COMMIT_LIST_LIMIT = 50;
-
 /**
  * Minimum AI-Lore version the cockpit supports. Older projects open in the
  * altered window with a version-specific banner + terminal so the user can
@@ -131,28 +137,6 @@ function checkProjectCompatibility(root: string): AlteredReason | null {
     return { kind: 'version-too-old', currentVersion, minimumVersion: MIN_CORE_VERSION };
   }
   return null;
-}
-
-/**
- * Attach save-point badges to a commit list. A commit whose SHA matches the
- * scope-appropriate ledger SHA (`payload_commit` for the Payload repo,
- * `lore_commit` for the Lore repo) gets the save-point's title attached so
- * the dropdown renders the badge alongside the subject line.
- */
-function attachSavePointBadges(
-  commits: readonly { sha: string; subject: string }[],
-  savePoints: readonly SavePoint[],
-  scope: ChangeScope,
-): CommitListEntry[] {
-  const titleBySha = new Map<string, string>();
-  for (const sp of savePoints) {
-    const sha = scope === 'payload' ? sp.payloadCommit : sp.loreCommit;
-    titleBySha.set(sha, sp.title);
-  }
-  return commits.map((c) => {
-    const title = titleBySha.get(c.sha);
-    return title ? { ...c, savePoint: { title } } : { ...c };
-  });
 }
 
 /**
@@ -195,38 +179,6 @@ function sendToWin(win: BrowserWindow, channel: string, payload: unknown): void 
 function contextFor(event: IpcMainEvent | IpcMainInvokeEvent): ProjectContext | undefined {
   const win = BrowserWindow.fromWebContents(event.sender);
   return win ? contexts.get(win.id) : undefined;
-}
-
-/** The Lore-folder glob — hidden from the Payload pane, which has its own. */
-function loreHide(chain: ChainResult, scope: ChangeScope): string[] {
-  return scope === 'payload' && !isChainError(chain) ? [`**/${basename(chain.lorePath)}/**`] : [];
-}
-
-/**
- * What a tree read on `scope` omits: the Lore folder, plus the project's
- * `hidden`-level ignore patterns. `no-drift` and `no-search` ignores are not
- * here — they silence the watcher and the search, but do not hide the tree.
- */
-function treeHideFor(
-  chain: ChainResult,
-  scope: ChangeScope,
-  hidden: readonly string[],
-): readonly string[] {
-  return [...loreHide(chain, scope), ...hidden];
-}
-
-/** Read a directory one level deep; on error, fall back to an empty node. */
-function readTreeNode(
-  chain: ChainResult,
-  absPath: string,
-  scope: ChangeScope,
-  hidden: readonly string[],
-): TreeNode {
-  const result = readDirectory(absPath, { ignore: treeHideFor(chain, scope, hidden) });
-  if (isTreeError(result)) {
-    return { name: basename(absPath), path: absPath, isDir: true, children: [] };
-  }
-  return result;
 }
 
 /**
@@ -386,48 +338,6 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
   return { root, chain, wiring, ptyService, ignoreLists };
 }
 
-/**
- * Re-base porcelain entry paths onto the project root. Porcelain returns
- * paths relative to each repo's working tree; the renderer expects every
- * drift path to share one base (the project root) so it can group entries
- * by pane sub-root. For the Payload scope this is a no-op; for Lore we
- * prefix `<basename(lorePath)>/memory/` (or whatever `relative(root, …)`
- * gives back).
- */
-function projectRelativise(
-  scope: ChangeScope,
-  entries: readonly { code: string; path: string; oldPath?: string }[],
-  projectRoot: string,
-  loreWorkingTree: string,
-): { code: string; path: string; oldPath?: string }[] {
-  if (scope === 'payload') return [...entries];
-  const prefix = relative(projectRoot, loreWorkingTree);
-  if (!prefix) return [...entries];
-  return entries.map((e) => ({
-    ...e,
-    path: `${prefix}/${e.path}`,
-    ...(e.oldPath ? { oldPath: `${prefix}/${e.oldPath}` } : {}),
-  }));
-}
-
-/**
- * Reverse of `projectRelativise` for one path. The renderer sends paths
- * relative to the project root (so it can share keys across panes); git
- * commands want them relative to the repo's working tree root.
- */
-function projectToRepoRelative(
-  scope: ChangeScope,
-  projectRelPath: string,
-  projectRoot: string,
-  loreWorkingTree: string,
-): string {
-  if (scope === 'payload') return projectRelPath;
-  const prefix = relative(projectRoot, loreWorkingTree);
-  if (!prefix) return projectRelPath;
-  if (projectRelPath === prefix) return '';
-  if (projectRelPath.startsWith(`${prefix}/`)) return projectRelPath.slice(prefix.length + 1);
-  return projectRelPath;
-}
 
 
 /** Open a welcome window — no project, just Open / Open Recent. */
