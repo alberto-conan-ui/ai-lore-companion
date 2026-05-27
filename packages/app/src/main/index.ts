@@ -446,12 +446,7 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       ctx.wiring.pushCommits('payload');
       ctx.wiring.pushCommits('lore');
     }
-    sendToWin(win, IPC.TreeInit, {
-      payload: readTreeNode(chain, chain.root, 'payload', ctx.ignoreLists.hidden),
-      // The Lore pane is rooted at memory/ — process/ and upstream/ sit
-      // outside memory/, so the pane never lists them.
-      lore: readTreeNode(chain, join(chain.lorePath, 'memory'), 'lore', ctx.ignoreLists.hidden),
-    });
+    sendToWin(win, IPC.TreeInit, buildTreeInitPayload(chain, ctx.ignoreLists.hidden));
   });
 
   // Re-read the chain on a slow interval so the header reflects status / focus
@@ -624,10 +619,41 @@ function reapplyIgnores(win: BrowserWindow): void {
   });
 
   // Re-send the trees with the new hidden set — a clear, visible refresh.
-  sendToWin(win, IPC.TreeInit, {
-    payload: readTreeNode(chain, chain.root, 'payload', hidden),
+  sendToWin(win, IPC.TreeInit, buildTreeInitPayload(chain, hidden));
+}
+
+/**
+ * Build the TreeInit payload for a project. Default-shape projects get
+ * the existing `payload` + `lore` trees; publishing-shape projects also
+ * carry a `publish` tree rooted at `<project>/publish/`.
+ */
+function buildTreeInitPayload(
+  chain: import('@ai-lore-companion/core').ChainSuccess,
+  hidden: readonly string[],
+): import('../shared/ipc.js').TreeInitPayload {
+  // v0.8 Phase C — in publishing shape the Payload tree roots at
+  // `<project>/payload/` (the workshop) rather than the project root. The
+  // methodology pairs `payload/` (workshop) with the deliverable named
+  // by `workspace.yaml`'s `publish:` block (typically `publish/`). The
+  // git repo for the Payload remains the project-root repo, so drift
+  // events keep firing — only the tree the Payload pane displays narrows.
+  const payloadRoot =
+    chain.shape === 'publishing' ? join(chain.root, 'payload') : chain.root;
+  const out: import('../shared/ipc.js').TreeInitPayload = {
+    payload: readTreeNode(chain, payloadRoot, 'payload', hidden),
+    // The Lore pane is rooted at memory/ — process/ and upstream/ sit
+    // outside memory/, so the pane never lists them.
     lore: readTreeNode(chain, join(chain.lorePath, 'memory'), 'lore', hidden),
-  });
+  };
+  if (chain.shape === 'publishing' && chain.publish) {
+    // The publish/ folder is named by `workspace.yaml`'s `publish:` block
+    // (typically `./publish`). `readTreeNode` reads one level deep; the
+    // 'lore' scope sentinel means no Lore-folder hides apply (correct,
+    // publish/ doesn't contain the Lore folder).
+    const publishRoot = join(chain.root, chain.publish.path);
+    out.publish = readTreeNode(chain, publishRoot, 'lore', hidden);
+  }
+  return out;
 }
 
 function registerIpcHandlers(): void {

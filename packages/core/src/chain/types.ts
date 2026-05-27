@@ -1,4 +1,5 @@
 import type { Dials, FocusStatus, FocusType, Posture } from '../frontmatter/types.js';
+import type { ProjectShape, PublishConfig } from '../workspace/shape.js';
 
 export type NodeRef = {
   title: string;
@@ -33,6 +34,23 @@ export type ChainSuccess = {
    * no baseline. The latest save-point itself is read on demand.
    */
   hasSavePoint: boolean;
+  /**
+   * v0.8 Phase A — the project's lore version from `workspace.yaml.core_version`.
+   * `null` for legacy manifests that don't carry the field; the header chip
+   * hides in that case.
+   */
+  coreVersion: string | null;
+  /**
+   * v0.8 Phase A — the project's declared shape. `'default'` when the
+   * Payload sits at the project root; `'publishing'` when `workspace.yaml`
+   * declares a `publish:` block and the Payload lives in `payload/`.
+   */
+  shape: ProjectShape;
+  /**
+   * v0.8 Phase A — the parsed `publish:` block, set when `shape === 'publishing'`.
+   * Absent in the default shape.
+   */
+  publish?: PublishConfig;
 };
 
 export type ChainError = {

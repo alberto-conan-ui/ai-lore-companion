@@ -61,7 +61,21 @@ export function findTreeNode(root: TreeNode | null, path: string): TreeNode | nu
   return null;
 }
 
-type Trees = { payload: TreeNode | null; lore: TreeNode | null };
+type Trees = {
+  payload: TreeNode | null;
+  lore: TreeNode | null;
+  /**
+   * Publishing-shape projects (v0.8) get a third tree for `<project>/publish/`.
+   * `null` when the project is default-shape — the Publish pane only exists
+   * in publishing shape, so this stays `null` everywhere else.
+   */
+  publish: TreeNode | null;
+};
+/** The pane subjects v0.8 introduces — extends `ChangeScope` (`payload` /
+ *  `lore`) with `publish` for the view-only Publish pane. The Pane reads its
+ *  tree from `trees[scope]` using this union; the changes tracker never
+ *  emits a `publish` scope. */
+export type PaneScope = ChangeScope | 'publish';
 
 type State = {
   chain: ChainPayload | null;
@@ -113,7 +127,7 @@ export const useCockpitStore = create<State>((set) => ({
   changes: { payload: [], lore: [] },
   baselineByScope: { payload: 'HEAD', lore: 'HEAD' },
   commitListByScope: { payload: [], lore: [] },
-  trees: { payload: null, lore: null },
+  trees: { payload: null, lore: null, publish: null },
   apps: [],
   showIndexFiles: false,
   setApps: (apps) => set({ apps }),
@@ -135,7 +149,16 @@ export const useCockpitStore = create<State>((set) => ({
     set((state) => ({
       commitListByScope: { ...state.commitListByScope, [payload.scope]: payload.commits },
     })),
-  setTrees: (init) => set({ trees: { payload: init.payload, lore: init.lore } }),
+  setTrees: (init) =>
+    set({
+      trees: {
+        payload: init.payload,
+        lore: init.lore,
+        // Publishing-shape projects carry a third tree; default-shape inits
+        // omit the field and the publish slot stays null.
+        publish: init.publish ?? null,
+      },
+    }),
   applyTreeUpdate: (update) =>
     set((state) => patchTree(state.trees, update.scope, update.path, update.children)),
   expandTree: (scope, path, children) =>

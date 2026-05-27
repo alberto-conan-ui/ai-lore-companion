@@ -15,6 +15,7 @@ import type { AlteredReason } from '../../shared/ipc.js';
 import { AiTab } from './components/AiTab.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BrowserTab } from './components/BrowserTab.js';
+import { PublishPane } from './components/PublishPane.js';
 import {
   DOCK_DEFAULT_BOTTOM,
   DOCK_DEFAULT_RIGHT,
@@ -40,12 +41,28 @@ type Panel = { tabs: WorkspaceTab[]; activeId: string };
 /** One of the four pinned cockpit panes — its tab, plus how to root and scope it. */
 type PaneSpec = { id: string; title: string; scope: ChangeScope; subRoot: SubRoot };
 
-/** The three pinned cockpit tabs. Always open in the left panel, in this order. */
-const PANE_TABS: WorkspaceTab[] = [
-  { id: 'status', kind: 'pane', title: 'Status' },
-  { id: 'payload', kind: 'pane', title: 'Payload' },
-  { id: 'memory', kind: 'pane', title: 'Memory' },
-];
+/** v0.8 Phase B — the pinned cockpit tabs adapt to the project's shape.
+ *  Default-shape projects get three (Status / Payload / Memory). Publishing-
+ *  shape projects also get a `publish` pane sandwiched between Payload and
+ *  Memory — workshop → deliverable → record. The tabs are otherwise
+ *  identical: pinned, unclosable, unmovable.
+ */
+function panesForShape(shape: 'default' | 'publishing'): WorkspaceTab[] {
+  if (shape === 'publishing') {
+    return [
+      { id: 'status', kind: 'pane', title: 'Status' },
+      { id: 'payload', kind: 'pane', title: 'Payload' },
+      { id: 'publish', kind: 'pane', title: 'Publish' },
+      { id: 'memory', kind: 'pane', title: 'Memory' },
+    ];
+  }
+  return [
+    { id: 'status', kind: 'pane', title: 'Status' },
+    { id: 'payload', kind: 'pane', title: 'Payload' },
+    { id: 'memory', kind: 'pane', title: 'Memory' },
+  ];
+}
+
 const PANEL_IDS = ['left', 'right', 'bottom'] as const;
 
 const TAB_KINDS = new Set<TabKind>(['pane', 'shell', 'ai', 'browser']);
@@ -104,7 +121,10 @@ export function App(): JSX.Element {
   const [alteredFolder, setAlteredFolder] = useState<string>('');
   const [alteredReason, setAlteredReason] = useState<AlteredReason>({ kind: 'not-ai-lore' });
   const [panels, setPanels] = useState<Record<PanelId, Panel>>({
-    left: { tabs: PANE_TABS, activeId: 'status' },
+    // Seeded with the default-shape pinned tabs. When the first chain push
+    // arrives and reports `shape: 'publishing'`, an effect below reconciles
+    // the left strip to include the Publish pane between Payload and Memory.
+    left: { tabs: panesForShape('default'), activeId: 'status' },
     right: { tabs: [], activeId: '' },
     bottom: { tabs: [], activeId: '' },
   });
@@ -168,12 +188,17 @@ export function App(): JSX.Element {
     token: number;
   } | null>(null);
 
-  // The three pinned panes, rooted against the resolved chain. Status and
-  // Memory each group sibling memory folders via a synthetic sub-root.
+  // The pinned panes, rooted against the resolved chain. Default-shape
+  // projects get three; publishing-shape adds a fourth `publish` pane
+  // sub-rooted to `<project>/publish/`. Status and Memory each group sibling
+  // memory folders via a synthetic sub-root. The `publish` pane is rendered
+  // by its own component (`PublishPane`) — its spec carries no scope, since
+  // by methodology contract `publish/` is write-restricted to the publish
+  // verb and the companion never tracks drift against it.
   const paneSpecs = useMemo<PaneSpec[]>(() => {
     if (!chain || isChainErrorPayload(chain)) return [];
     const mem = `${chain.lorePath}/memory`;
-    return [
+    const base: PaneSpec[] = [
       {
         id: 'status',
         title: 'Status',
@@ -200,7 +225,16 @@ export function App(): JSX.Element {
         id: 'payload',
         title: 'Payload',
         scope: 'payload',
-        subRoot: { kind: 'path', path: chain.root },
+        // v0.8 Phase C — in publishing shape the Payload pane sub-roots to
+        // `<project>/payload/` (the workshop), not the project root. The
+        // methodology pairs the workshop with the deliverable named by the
+        // `publish:` block; the workshop folder is always `payload/`. The
+        // underlying Payload git repo still lives at the project root, so
+        // drift / changes / save-points keep working unchanged.
+        subRoot: {
+          kind: 'path',
+          path: chain.shape === 'publishing' ? `${chain.root}/payload` : chain.root,
+        },
       },
       {
         id: 'memory',
@@ -214,7 +248,41 @@ export function App(): JSX.Element {
         },
       },
     ];
+    return base;
   }, [chain]);
+
+  // v0.8 Phase B — when the chain reports a shape change, reconcile the
+  // left strip's pinned pane tabs. Adds the Publish tab in publishing mode
+  // between Payload and Memory; removes it in default mode. Preserves all
+  // other tabs (shell / AI / browser) and the active tab when possible.
+  const shape = chain && !isChainErrorPayload(chain) ? chain.shape : 'default';
+  useEffect(() => {
+    setPanels((prev) => {
+      const expected = panesForShape(shape);
+      const expectedIds = expected.map((t) => t.id);
+      const leftTabs = prev.left.tabs;
+      // Existing pane tabs that survive the shape transition.
+      const surviving = leftTabs.filter(
+        (t) => t.kind !== 'pane' || expectedIds.includes(t.id),
+      );
+      // Pane tabs in the new shape that aren't on the strip yet.
+      const missing = expected.filter((t) => !leftTabs.some((x) => x.id === t.id));
+      if (missing.length === 0 && surviving.length === leftTabs.length) return prev;
+      // Splice the missing tabs into their methodology-defined order; keep
+      // non-pane tabs (shell / AI / browser) at the end where they sit today.
+      const paneSurvivors = surviving.filter((t) => t.kind === 'pane');
+      const nonPane = surviving.filter((t) => t.kind !== 'pane');
+      const orderedPane: WorkspaceTab[] = expected.map((t) => {
+        const carry = paneSurvivors.find((p) => p.id === t.id);
+        return carry ?? t;
+      });
+      const nextTabs = [...orderedPane, ...nonPane];
+      const activeId = nextTabs.some((t) => t.id === prev.left.activeId)
+        ? prev.left.activeId
+        : nextTabs[0]?.id ?? '';
+      return { ...prev, left: { tabs: nextTabs, activeId } };
+    });
+  }, [shape]);
 
   const paneSpecById = useMemo(() => new Map(paneSpecs.map((p) => [p.id, p])), [paneSpecs]);
 
@@ -863,19 +931,23 @@ export function App(): JSX.Element {
     const host = getOrCreateTabHost(tab.id);
     let body: JSX.Element | null = null;
     if (tab.kind === 'pane') {
-      const spec = paneSpecById.get(tab.id);
-      if (spec) {
-        body = (
-          <Pane
-            testId={spec.id}
-            scope={spec.scope}
-            label={spec.title}
-            subRoot={spec.subRoot}
-            projectRoot={chain.root}
-            displayPath={displayPath}
-            revealRequest={revealTarget?.paneId === spec.id ? revealTarget : undefined}
-          />
-        );
+      if (tab.id === 'publish') {
+        body = <PublishPane />;
+      } else {
+        const spec = paneSpecById.get(tab.id);
+        if (spec) {
+          body = (
+            <Pane
+              testId={spec.id}
+              scope={spec.scope}
+              label={spec.title}
+              subRoot={spec.subRoot}
+              projectRoot={chain.root}
+              displayPath={displayPath}
+              revealRequest={revealTarget?.paneId === spec.id ? revealTarget : undefined}
+            />
+          );
+        }
       }
     } else if (tab.kind === 'shell') {
       body = (

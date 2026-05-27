@@ -6,6 +6,7 @@ import {
   launchApp,
   makeFakeEngineBinary,
   makeProject,
+  makePublishingShape,
   seedEngines,
   seedLoreChanges,
   seedVerbs,
@@ -406,6 +407,115 @@ test.describe('window modes', () => {
       const statusTab = leftStrip.getByTestId('tab-status');
       await expect(statusTab.locator('button[title="Close tab"]')).toHaveCount(0);
 
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  // v0.8 Phase A — header chips for lore version and project shape. The
+  // identity row reads `coreVersion` + `shape` from the chain push and
+  // renders two informational chips: the Lore version chip is always
+  // visible when the manifest carries `core_version`; the Shape chip is
+  // visible only when the project declares a `publish:` block.
+  test('default-shape project shows the lore version chip but not the shape chip', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('chip-lore-version')).toBeVisible();
+      await expect(page.getByTestId('chip-lore-version')).toContainText('v0.5.1');
+      await expect(page.getByTestId('chip-shape')).toHaveCount(0);
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('publishing-shape project shows both the lore version chip and the shape chip', async () => {
+    const fixture = makeProject();
+    makePublishingShape(fixture.root);
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('chip-lore-version')).toBeVisible();
+      await expect(page.getByTestId('chip-lore-version')).toContainText('v0.5.1');
+      await expect(page.getByTestId('chip-shape')).toBeVisible();
+      await expect(page.getByTestId('chip-shape')).toContainText('Publishing');
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  // v0.8 Phase B — pane model adapts to the project shape. A publishing-shape
+  // project gets a fourth pane (Publish) sandwiched between Payload and
+  // Memory; the pane is view-only — no Diff, no Ignore, no write affordances.
+  test('publishing-shape project renders the four pinned panes including Publish', async () => {
+    const fixture = makeProject();
+    makePublishingShape(fixture.root, {
+      publishFiles: ['index.html', 'README.md'],
+    });
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      // All four pinned tabs render in the left strip in the methodology
+      // order: Status, Payload, Publish, Memory.
+      const leftStrip = page.getByTestId('tab-strip').first();
+      await expect(leftStrip.getByTestId('tab-status')).toBeVisible();
+      await expect(leftStrip.getByTestId('tab-payload')).toBeVisible();
+      await expect(leftStrip.getByTestId('tab-publish')).toBeVisible();
+      await expect(leftStrip.getByTestId('tab-memory')).toBeVisible();
+      // Click into the Publish tab — its view-only body renders, and the
+      // seeded files surface in the file list.
+      await leftStrip.getByTestId('tab-publish').click();
+      await expect(page.getByTestId('pane-publish')).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByTestId('publish-file-list')).toContainText('index.html');
+      await expect(page.getByTestId('publish-file-list')).toContainText('README.md');
+      // The Publish pane carries no ChangesPanel — drift surfaces are absent.
+      await expect(page.getByTestId('pane-publish').locator('[data-testid^="changes-"]')).toHaveCount(0);
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  // v0.8 Phase C — Payload re-root. In publishing shape the Payload pane
+  // sub-roots to `<project>/payload/` instead of the project root.
+  test('publishing-shape Payload pane lists files under payload/, not at the project root', async () => {
+    const fixture = makeProject();
+    makePublishingShape(fixture.root, {
+      payloadFiles: ['workshop.md'],
+      publishFiles: ['shipped.html'],
+    });
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      const leftStrip = page.getByTestId('tab-strip').first();
+      await expect(leftStrip.getByTestId('tab-payload')).toBeVisible({ timeout: 15_000 });
+      await leftStrip.getByTestId('tab-payload').click();
+      // The Payload pane renders; its tree shows the workshop file.
+      await expect(page.getByTestId('pane-payload')).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByTestId('pane-payload')).toContainText('workshop.md');
+      // The publish-only file does NOT appear in the Payload pane (the
+      // sub-root narrows to `payload/`).
+      await expect(page.getByTestId('pane-payload')).not.toContainText('shipped.html');
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  // v0.8 Phase B — default-shape projects are unaffected; the Publish tab
+  // does not appear.
+  test('default-shape project still shows three pinned panes (no Publish)', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      const leftStrip = page.getByTestId('tab-strip').first();
+      await expect(leftStrip.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      await expect(leftStrip.getByTestId('tab-payload')).toBeVisible();
+      await expect(leftStrip.getByTestId('tab-memory')).toBeVisible();
+      await expect(leftStrip.getByTestId('tab-publish')).toHaveCount(0);
       await app.close();
     } finally {
       fixture.cleanup();

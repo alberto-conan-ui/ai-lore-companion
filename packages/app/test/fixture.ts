@@ -151,6 +151,46 @@ export function seedLoreChanges(root: string): void {
 }
 
 /**
+ * Convert an existing default-shape fixture into a publishing-shape project.
+ * v0.8 Phase A introduces shape awareness — when `workspace.yaml` declares a
+ * `publish:` block, the companion treats the project as having a `payload/`
+ * sibling for the workshop and a `publish/` sibling for the deliverable.
+ *
+ * - Rewrites `workspace.yaml` with the `publish:` block + the same project
+ *   name/core_version the default fixture used.
+ * - Ensures `<root>/payload/` and `<root>/publish/` exist (the methodology's
+ *   `init` would create these; the fixture mirrors that on demand).
+ * - Optionally seeds files inside each so e2e can assert what's visible.
+ */
+export function makePublishingShape(
+  root: string,
+  opts?: { payloadFiles?: string[]; publishFiles?: string[] },
+): void {
+  const lore = join(root, '.ai-lore-e2e-fixture');
+  const payload = join(root, 'payload');
+  const publish = join(root, 'publish');
+  mkdirSync(payload, { recursive: true });
+  mkdirSync(publish, { recursive: true });
+  writeFileSync(
+    join(lore, 'workspace.yaml'),
+    [
+      'project_name: e2e-fixture',
+      'core_version: "0.5.1"',
+      '',
+      'publish:',
+      '  path: ./publish',
+      '',
+    ].join('\n'),
+  );
+  for (const name of opts?.payloadFiles ?? []) {
+    writeFileSync(join(payload, name), `# ${name}\n`);
+  }
+  for (const name of opts?.publishFiles ?? []) {
+    writeFileSync(join(publish, name), `# ${name}\n`);
+  }
+}
+
+/**
  * Seed the vendored methodology under `<lore>/process/verbs/` so an AI tab's
  * Phase D prompts column has something to read. Writes the minimal set the
  * curated taxonomy expects (`orient`, `chat`, `plan`, `execute`, `ack`,

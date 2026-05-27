@@ -1,7 +1,15 @@
 export const CORE_VERSION = '0.1.0' as const;
 
 export { readChain } from './chain/reader.js';
-export { compareVersions, readCoreVersion, versionMeetsMinimum } from './workspace/index.js';
+export {
+  compareVersions,
+  type ProjectShape,
+  type ProjectShapeResult,
+  type PublishConfig,
+  readCoreVersion,
+  readProjectShape,
+  versionMeetsMinimum,
+} from './workspace/index.js';
 export { locateLore, type LoreLocation } from './chain/lore.js';
 export { isChainError } from './chain/types.js';
 export type {

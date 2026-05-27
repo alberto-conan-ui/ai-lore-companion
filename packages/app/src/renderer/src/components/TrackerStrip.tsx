@@ -5,6 +5,7 @@ import { useCockpitStore } from '../store.js';
 import { FocusView } from './FocusView.js';
 import { RegisterChips } from './RegisterChips.js';
 import { SettingsSheetModal, type SettingsSheetSection } from './SettingsSheet.js';
+import { ShapeChips } from './ShapeChips.js';
 
 /** `search` is the global file-search, slotted into the dedicated search row. */
 export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
@@ -85,6 +86,7 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
           commitment={chain.dials?.commitment ?? null}
           focusType={chain.focusType}
         />
+        <ShapeChips coreVersion={chain.coreVersion} shape={chain.shape} />
         {chain.focus ? (
           <ChainLink path={chain.focus.path} style={focusTitle} testId="focus-link">
             {chain.focus.title}

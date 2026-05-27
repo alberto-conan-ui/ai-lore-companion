@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { parseMemoryFile } from '../frontmatter/parser.js';
 import type { Dials, FocusStatus, FocusType, Posture } from '../frontmatter/types.js';
 import { latestSavePoint } from '../save-points/save-points.js';
+import { readProjectShape } from '../workspace/shape.js';
 import { locateLore } from './lore.js';
 import {
   parseActiveChild,
@@ -37,9 +38,14 @@ export function readChain({ root }: { root: string }): ChainResult {
 
   const hasSavePoint = latestSavePoint(resolve(located.lorePath, 'memory/save-points')) !== null;
 
+  // v0.8 Phase A — read the project's shape declaration. Tolerant of a
+  // missing or malformed `publish:` block (returns `'default'` + console
+  // warning); never blocks the chain on it.
+  const shapeInfo = readProjectShape(located.lorePath);
+
   const focusRef = parseActiveFocus(statusText);
   if (!focusRef) {
-    return {
+    const base = {
       mode,
       posture,
       dials,
@@ -50,7 +56,10 @@ export function readChain({ root }: { root: string }): ChainResult {
       root,
       lorePath: located.lorePath,
       hasSavePoint,
-    };
+      coreVersion: shapeInfo.coreVersion,
+      shape: shapeInfo.shape,
+    } as const;
+    return shapeInfo.publish ? { ...base, publish: shapeInfo.publish } : base;
   }
 
   const focusAbs = resolveLink(statusPath, focusRef.relPath);
@@ -63,7 +72,7 @@ export function readChain({ root }: { root: string }): ChainResult {
   const focus: NodeRef = { title: focusTitle, path: focusAbs };
 
   const activeChild = walkActiveChild(focus);
-  return {
+  const base = {
     mode,
     posture,
     dials,
@@ -74,7 +83,10 @@ export function readChain({ root }: { root: string }): ChainResult {
     root,
     lorePath: located.lorePath,
     hasSavePoint,
-  };
+    coreVersion: shapeInfo.coreVersion,
+    shape: shapeInfo.shape,
+  } as const;
+  return shapeInfo.publish ? { ...base, publish: shapeInfo.publish } : base;
 }
 
 function walkActiveChild(start: NodeRef): NodeRef {

@@ -295,7 +295,15 @@ export type WindowInitPayload =
   | { mode: 'altered'; folder: string; reason: AlteredReason };
 
 /** Per-side root trees, each populated one level deep. */
-export type TreeInitPayload = { payload: TreeNode; lore: TreeNode };
+export type TreeInitPayload = {
+  payload: TreeNode;
+  lore: TreeNode;
+  /**
+   * v0.8 Phase B — Publishing-shape projects carry a third tree, rooted at
+   * `<project>/publish/`. Absent for default-shape projects.
+   */
+  publish?: TreeNode;
+};
 /** Refreshed children for `path` on the given side. */
 export type TreeUpdatePayload = { scope: ChangeScope; path: string; children: TreeNode[] };
 /** Argument to a `tree-expand` request. */
