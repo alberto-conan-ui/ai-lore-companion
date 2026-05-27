@@ -9,11 +9,12 @@
  * Phase E of the [Companion v0.5 focus](../../../../.ai-lore-ai-lore-companion/memory/action-tree/companion-v0.5/E-ack-and-diff.phase.md).
  */
 
-import { type SpawnSyncReturns, spawn, spawnSync } from 'node:child_process';
+import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { buildDiffArgv } from '@ai-lore-companion/core';
+import { spawnDetached } from './spawn-detached.js';
 
 export type MaterialiseBaselineInput = {
   /** Absolute path to the git working tree the file belongs to. */
@@ -75,7 +76,8 @@ export type LaunchDiffInput = {
 /**
  * Spawn the configured diff CLI detached, with argv built from the template
  * via [`buildDiffArgv`](../../../core/src/diff/argv.ts). Detached so closing
- * the cockpit does not take the diff window with it.
+ * the cockpit does not take the diff window with it. PATH augmentation and
+ * async-error handling live in [`spawnDetached`](./spawn-detached.ts).
  */
 export function launchDiff(
   input: LaunchDiffInput,
@@ -85,14 +87,5 @@ export function launchDiff(
     baseline: input.baseline,
     current: input.current,
   });
-  try {
-    const child = spawn(input.cli, argv, {
-      detached: true,
-      stdio: 'ignore',
-    });
-    child.unref();
-    return { kind: 'ok' };
-  } catch (err) {
-    return { kind: 'failed', message: `spawn failed: ${(err as Error).message}` };
-  }
+  return spawnDetached(input.cli, argv);
 }

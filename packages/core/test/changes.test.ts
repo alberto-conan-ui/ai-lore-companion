@@ -395,3 +395,4 @@ test('setBaseline triggers an immediate re-read against the new baseline', () =>
     lore.cleanup();
   }
 });
+

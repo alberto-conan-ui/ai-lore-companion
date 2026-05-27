@@ -16,7 +16,7 @@ test('DEFAULT_IGNORE_RULES covers the build/scratch folders at no-search level',
     DEFAULT_IGNORE_RULES.map((r) => r.pattern),
     [
       '**/upstream/**',
-      '**/process/**',
+      '**/.ai-lore-*/process/**',
       '**/.git/**',
       '**/node_modules/**',
       '**/dist/**',

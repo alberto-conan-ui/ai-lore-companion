@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -112,6 +113,41 @@ export function makeProject(): Fixture {
       rmSync(userData, { recursive: true, force: true });
     },
   };
+}
+
+/**
+ * Add a Lore-repo git history to an existing fixture so the Changes panel has
+ * something to show. Seeds two new files at `<lore>/memory/blueprint/`:
+ *
+ *   - `blueprint/contracts/example.md` — a real content file (should appear).
+ *   - `blueprint/contracts/contracts.index.md` — an index file (should be
+ *      filtered out by `attachChangesTracker`'s index-file silencing).
+ *
+ * Both arrive as untracked files at HEAD, so `git status --porcelain` reports
+ * both — exercising the filter end-to-end through the renderer's grid.
+ */
+export function seedLoreChanges(root: string): void {
+  const lore = join(root, '.ai-lore-e2e-fixture');
+  const repo = join(lore, 'memory');
+  const contracts = join(repo, 'blueprint', 'contracts');
+  mkdirSync(contracts, { recursive: true });
+  const git = (...args: string[]): void => {
+    execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+  };
+  git('init', '-q', '-b', 'main');
+  git(
+    '-c',
+    'user.email=t@t',
+    '-c',
+    'user.name=T',
+    'commit',
+    '--allow-empty',
+    '-q',
+    '-m',
+    'seed',
+  );
+  writeFileSync(join(contracts, 'example.md'), '# example contract\n');
+  writeFileSync(join(contracts, 'contracts.index.md'), '# contracts index\n');
 }
 
 /**

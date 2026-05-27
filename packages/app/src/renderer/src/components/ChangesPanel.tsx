@@ -66,6 +66,10 @@ type Props = {
   onRevealInFinder: (node: TreeNode) => void;
   onDiff: (node: TreeNode) => void;
   onIgnore: (node: TreeNode) => void;
+  /** Whether the grid renders as a flat list or as a file-explorer tree. */
+  viewMode: 'list' | 'tree';
+  /** Setter for the List / Tree dropdown in the header. */
+  onViewModeChange: (mode: 'list' | 'tree') => void;
 };
 
 /** Default share of the panel's height given to the inline diff preview. */
@@ -155,6 +159,8 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
     onRevealInFinder,
     onDiff,
     onIgnore,
+    viewMode,
+    onViewModeChange,
   }: Props,
   forwardedRef,
 ): JSX.Element {
@@ -231,6 +237,9 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
     [onRowClick, onRowDoubleClick],
   );
 
+  // Tree mode renders the project-relative path as an AG Grid tree, so the
+  // List-mode Location / Name / Folder columns are dropped — the path tree
+  // makes them redundant. Kind glyph + kebab stay in both modes.
   const columns = useMemo<ColDef<DriftRow>[]>(
     () => [
       {
@@ -242,35 +251,39 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
         filter: 'agSetColumnFilter',
         cellStyle: { textAlign: 'center' },
       },
-      {
-        colId: 'location',
-        headerName: 'Location',
-        width: 140,
-        valueGetter: (p: ValueGetterParams<DriftRow>) =>
-          p.data ? firstSegment(displayPath(p.data.projectRelPath)) : '',
-        rowGroup: true,
-        filter: 'agSetColumnFilter',
-      },
-      {
-        colId: 'name',
-        headerName: 'Name',
-        flex: 2,
-        minWidth: 160,
-        valueGetter: (p: ValueGetterParams<DriftRow>) =>
-          p.data ? basename(p.data.projectRelPath) : '',
-        filter: 'agTextColumnFilter',
-        floatingFilter: true,
-      },
-      {
-        colId: 'folder',
-        headerName: 'Folder',
-        flex: 3,
-        minWidth: 140,
-        valueGetter: (p: ValueGetterParams<DriftRow>) =>
-          p.data ? folderRest(displayPath(p.data.projectRelPath)) : '',
-        filter: 'agTextColumnFilter',
-        floatingFilter: true,
-      },
+      ...(viewMode === 'list'
+        ? ([
+            {
+              colId: 'location',
+              headerName: 'Location',
+              width: 140,
+              valueGetter: (p: ValueGetterParams<DriftRow>) =>
+                p.data ? firstSegment(displayPath(p.data.projectRelPath)) : '',
+              rowGroup: true,
+              filter: 'agSetColumnFilter',
+            },
+            {
+              colId: 'name',
+              headerName: 'Name',
+              flex: 2,
+              minWidth: 160,
+              valueGetter: (p: ValueGetterParams<DriftRow>) =>
+                p.data ? basename(p.data.projectRelPath) : '',
+              filter: 'agTextColumnFilter',
+              floatingFilter: true,
+            },
+            {
+              colId: 'folder',
+              headerName: 'Folder',
+              flex: 3,
+              minWidth: 140,
+              valueGetter: (p: ValueGetterParams<DriftRow>) =>
+                p.data ? folderRest(displayPath(p.data.projectRelPath)) : '',
+              filter: 'agTextColumnFilter',
+              floatingFilter: true,
+            },
+          ] as ColDef<DriftRow>[])
+        : ([] as ColDef<DriftRow>[])),
       {
         // Kebab affordance — same menu the right-click opens, one trigger
         // away without aiming for the row's secondary click area.
@@ -307,7 +320,7 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
         },
       },
     ],
-    [displayPath],
+    [displayPath, viewMode],
   );
 
   // `HEAD` is always the first option; recent commits follow with save-point
@@ -342,6 +355,16 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
         <span style={labelStyle}>{label} changes</span>
         <span style={countStyle}>{entries.length}</span>
         <select
+          value={viewMode}
+          onChange={(e) => onViewModeChange(e.target.value as 'list' | 'tree')}
+          style={viewModeSelectStyle}
+          data-testid={`changes-view-mode-${label.toLowerCase()}`}
+          aria-label="View mode"
+        >
+          <option value="list">List</option>
+          <option value="tree">Tree</option>
+        </select>
+        <select
           value={baseline}
           onChange={(e) => onBaselineChange(e.target.value)}
           style={baselineSelectStyle}
@@ -372,9 +395,34 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
           defaultColDef={{ sortable: true, resizable: true, enableRowGroup: true }}
           getRowId={(p) => p.data.projectRelPath}
           quickFilterText={quickFilter}
-          rowGroupPanelShow="always"
-          groupDisplayType="groupRows"
-          groupDefaultExpanded={1}
+          // List mode groups by Location and shows the group as the parent row;
+          // tree mode treats the pane-rooted display path as a file-explorer
+          // hierarchy — so the Memory pane's tree starts at `blueprint/…` not
+          // at the full `.ai-lore-<project>/memory/blueprint/…` prefix.
+          treeData={viewMode === 'tree'}
+          getDataPath={
+            viewMode === 'tree'
+              ? (data: DriftRow) => displayPath(data.projectRelPath).split('/')
+              : undefined
+          }
+          autoGroupColumnDef={
+            viewMode === 'tree'
+              ? {
+                  headerName: 'Path',
+                  minWidth: 240,
+                  flex: 3,
+                  // Counts ride next to each folder (e.g. `blueprint (3)`) so
+                  // the user can see how much drift sits under a collapsed
+                  // folder without expanding it.
+                  cellRendererParams: { suppressCount: false },
+                }
+              : undefined
+          }
+          rowGroupPanelShow={viewMode === 'tree' ? 'never' : 'always'}
+          groupDisplayType={viewMode === 'tree' ? undefined : 'groupRows'}
+          // Tree mode starts fully collapsed (`0`) so the user opens just the
+          // branches they care about; List mode keeps its one-level seed.
+          groupDefaultExpanded={viewMode === 'tree' ? 0 : 1}
           rowSelection={{ mode: 'singleRow', checkboxes: false }}
           animateRows={false}
           headerHeight={28}
@@ -454,6 +502,16 @@ const countStyle: React.CSSProperties = {
   background: '#1f2933',
   padding: '0.05rem 0.35rem',
   borderRadius: '999px',
+};
+
+const viewModeSelectStyle: React.CSSProperties = {
+  flex: 'none',
+  padding: '0.2rem 0.4rem',
+  background: '#0c121a',
+  border: '1px solid #2f3a45',
+  borderRadius: '4px',
+  color: '#dde3ea',
+  fontSize: '0.72rem',
 };
 
 const baselineSelectStyle: React.CSSProperties = {

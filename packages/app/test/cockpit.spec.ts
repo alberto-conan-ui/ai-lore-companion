@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ElectronApplication, expect, test } from '@playwright/test';
-import { launchApp, makeProject } from './fixture';
+import { launchApp, makeProject, seedLoreChanges } from './fixture';
 
 /** A throwaway userData dir so a test never touches real cockpit state. */
 function scratchUserData(): string {
@@ -868,6 +868,90 @@ test.describe('window modes', () => {
       await expect(section.getByText('Open project in WebStorm')).toHaveCount(0);
       await expect(section.getByText('Open Lore in WebStorm')).toHaveCount(0);
       await expect(section.getByText('Open Lore in Obsidian')).toHaveCount(0);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the Changes panel grid excludes *.index.md rows by default and the toggle reveals them', async () => {
+    const fixture = makeProject();
+    try {
+      // Seed a Lore git history with two untracked files in blueprint/contracts/:
+      // a regular file (must surface) and an index file (filtered out unless
+      // the user toggles the index-files visibility on).
+      seedLoreChanges(fixture.root);
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      // The two seeded files live under memory/blueprint/, which the Memory
+      // pane sub-roots to — switch to that tab and read its Changes panel.
+      await page.getByTestId('tab-memory').click();
+      const panel = page.getByTestId('changes-memory');
+      await expect(panel).toBeVisible({ timeout: 5_000 });
+
+      // Default state: index file hidden, real file visible. Asserting on the
+      // panel as a whole catches every render path — grid row, count badge,
+      // group label — without coupling to AG-Grid's internal DOM shape.
+      await expect(panel.getByText('example.md', { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+      await expect(panel.getByText('contracts.index.md', { exact: false })).toHaveCount(0);
+
+      // Toggle on. The `.idx` pill lives in each pane's header beside the
+      // DriftPill; state is global so clicking from any pane flips them all.
+      await page.getByTestId('pane-memory').getByTestId('header-show-index').click();
+      await expect(panel.getByText('contracts.index.md', { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+      await expect(panel.getByText('example.md', { exact: false })).toBeVisible();
+
+      // Toggle off again: index file hidden, real one still visible.
+      await page.getByTestId('pane-memory').getByTestId('header-show-index').click();
+      await expect(panel.getByText('contracts.index.md', { exact: false })).toHaveCount(0);
+      await expect(panel.getByText('example.md', { exact: false })).toBeVisible();
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the Changes panel List/Tree dropdown swaps between flat list and tree-data layout', async () => {
+    const fixture = makeProject();
+    try {
+      seedLoreChanges(fixture.root);
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      await page.getByTestId('tab-memory').click();
+      const panel = page.getByTestId('changes-memory');
+      await expect(panel).toBeVisible({ timeout: 5_000 });
+      await expect(panel.getByText('example.md', { exact: false })).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // List mode (default) renders the Location / Name / Folder header — the
+      // 'Path' auto-group header is the tree-mode signature, so it should be
+      // absent here.
+      await expect(panel.getByRole('columnheader', { name: 'Path', exact: true })).toHaveCount(0);
+
+      // Swap to Tree mode — the auto-group column with the path tree replaces
+      // the flat columns. The Path header is the cheapest tree-mode tell. The
+      // tree starts collapsed, so the leaf file is not visible until expanded;
+      // the root `blueprint` folder is shown with its count instead.
+      await panel.getByTestId('changes-view-mode-memory').selectOption('tree');
+      await expect(
+        panel.getByRole('columnheader', { name: 'Path', exact: true }),
+      ).toBeVisible({ timeout: 5_000 });
+      await expect(panel.getByText('blueprint', { exact: false })).toBeVisible();
+      // Leaf rows are hidden by the collapsed default — opening them is the
+      // user's choice, not a guarantee the test should make.
+      await expect(panel.getByText('example.md', { exact: false })).toHaveCount(0);
+
+      // Swap back to List — the Path header disappears again.
+      await panel.getByTestId('changes-view-mode-memory').selectOption('list');
+      await expect(panel.getByRole('columnheader', { name: 'Path', exact: true })).toHaveCount(0);
 
       await app.close();
     } finally {

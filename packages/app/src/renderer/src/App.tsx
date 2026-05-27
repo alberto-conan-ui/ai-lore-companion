@@ -71,7 +71,20 @@ export function App(): JSX.Element {
   const applyTreeUpdate = useCockpitStore((s) => s.applyTreeUpdate);
   const setApps = useCockpitStore((s) => s.setApps);
   const chain = useCockpitStore((s) => s.chain);
-  const changes = useCockpitStore((s) => s.changes);
+  const rawChanges = useCockpitStore((s) => s.changes);
+  const showIndexFiles = useCockpitStore((s) => s.showIndexFiles);
+  // Match the per-pane filter so tab badges count the same rows the panel
+  // shows. Index files appear in counts only when the toggle is on.
+  const changes = useMemo(
+    () =>
+      showIndexFiles
+        ? rawChanges
+        : {
+            payload: rawChanges.payload.filter((e) => !e.path.endsWith('.index.md')),
+            lore: rawChanges.lore.filter((e) => !e.path.endsWith('.index.md')),
+          },
+    [rawChanges, showIndexFiles],
+  );
 
   const [mode, setMode] = useState<WindowMode>('loading');
   const [recents, setRecents] = useState<RecentProject[]>([]);

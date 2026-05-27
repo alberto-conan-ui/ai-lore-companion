@@ -40,9 +40,10 @@ export type ChangesTrackerOptions = {
   /**
    * Called when the snapshot for a side changes. Equality is checked via the
    * serialised entries — re-emits do not fire when a re-read returned the
-   * same dirty set.
+   * same dirty set. The current baseline for `scope` is passed alongside so
+   * the host can ship it to its UI without re-querying.
    */
-  onChange: (scope: ChangeScope, entries: ChangeEntry[]) => void;
+  onChange: (scope: ChangeScope, entries: ChangeEntry[], baseline: string) => void;
 };
 
 export type ChangesTracker = {
@@ -89,7 +90,7 @@ export function attachChangesTracker(options: ChangesTrackerOptions): ChangesTra
     if (!force && nextSerialised === serialised[scope]) return;
     state[scope] = entries;
     serialised[scope] = nextSerialised;
-    options.onChange(scope, entries);
+    options.onChange(scope, entries, baselines[scope]);
   };
 
   const scheduleRefresh = (scope: ChangeScope): void => {

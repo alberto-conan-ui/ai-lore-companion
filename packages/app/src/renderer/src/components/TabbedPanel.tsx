@@ -371,6 +371,7 @@ const tabBadgeStyle: React.CSSProperties = {
   fontVariantNumeric: 'tabular-nums',
 };
 
+
 const closeBtn: React.CSSProperties = {
   padding: '0 0.4rem 0 0',
   background: 'transparent',

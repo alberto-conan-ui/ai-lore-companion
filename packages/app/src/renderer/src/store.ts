@@ -90,6 +90,13 @@ type State = {
    * `onSettingsChanged` subscription.
    */
   apps: AppEntry[];
+  /**
+   * Whether AI-Lore index files (`<name>.index.md`) are shown in the Changes
+   * panel. Off by default — they churn every time Memory is reshaped and
+   * dominate the panel when on. Toggle from any Changes-panel header. Global
+   * across panes so a single click reveals or hides them everywhere.
+   */
+  showIndexFiles: boolean;
   setChain: (chain: ChainPayload) => void;
   applyChanges: (payload: ChangesPayload) => void;
   setBaseline: (scope: ChangeScope, baseline: string) => void;
@@ -98,6 +105,7 @@ type State = {
   applyTreeUpdate: (update: TreeUpdatePayload) => void;
   expandTree: (scope: ChangeScope, path: string, children: TreeNode[]) => void;
   setApps: (apps: AppEntry[]) => void;
+  setShowIndexFiles: (value: boolean) => void;
 };
 
 export const useCockpitStore = create<State>((set) => ({
@@ -107,11 +115,17 @@ export const useCockpitStore = create<State>((set) => ({
   commitListByScope: { payload: [], lore: [] },
   trees: { payload: null, lore: null },
   apps: [],
+  showIndexFiles: false,
   setApps: (apps) => set({ apps }),
+  setShowIndexFiles: (value) => set({ showIndexFiles: value }),
   setChain: (chain) => set({ chain }),
   applyChanges: (payload) =>
     set((state) => ({
       changes: { ...state.changes, [payload.scope]: payload.entries },
+      // Mirror the main-side baseline so the dropdown reflects the seeded
+      // default (latest save-point) on first paint, and stays in sync after
+      // any tracker-driven re-read.
+      baselineByScope: { ...state.baselineByScope, [payload.scope]: payload.baseline },
     })),
   setBaseline: (scope, baseline) =>
     set((state) => ({

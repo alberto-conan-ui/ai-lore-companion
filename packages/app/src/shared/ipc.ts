@@ -206,7 +206,14 @@ export const IPC = {
 
 export type ChainPayload = ChainResult;
 /** Per-scope drift snapshot pushed from main. */
-export type ChangesPayload = { scope: ChangeScope; entries: ChangeEntry[] };
+export type ChangesPayload = {
+  scope: ChangeScope;
+  entries: ChangeEntry[];
+  /** The baseline these entries were read against — `'HEAD'` or a commit SHA.
+   *  The renderer mirrors it into `baselineByScope` so the dropdown stays in
+   *  sync with the main-side tracker (which seeds to the latest save-point). */
+  baseline: string;
+};
 
 /** One entry in the per-scope baseline dropdown. `savePoint` is set when the
  *  commit's SHA matches a save-point ledger entry — the dropdown shows a

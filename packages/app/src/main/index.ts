@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -98,6 +97,7 @@ import {
   saveProjectSetting,
 } from './settings.js';
 import { launchApp, launchUrl, loadShortcuts, saveShortcuts, withIcons } from './shortcuts.js';
+import { spawnDetached } from './spawn-detached.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -342,13 +342,24 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
         commits: attachSavePointBadges(commits, savePoints, scope),
       });
     };
+    // Per the v0.6 Phase B gate: when a save-point is recorded, the default
+    // baseline is the latest one — what differs between the working tree and
+    // the last marked milestone. HEAD is the fallback when no save-points
+    // exist. Both scopes derive from the same save-point (each picking its
+    // own commit field) so the two panes start aligned to the same milestone.
+    const latestSp = latestSavePoint(savePointsDir);
+    const initialBaselineByScope = latestSp
+      ? { payload: latestSp.payloadCommit, lore: latestSp.loreCommit }
+      : undefined;
     const changes = attachChangesTracker({
       payloadRoot: root,
       loreRoot: loreWorkingTree,
-      onChange: (scope, entries) => {
+      baselineByScope: initialBaselineByScope,
+      onChange: (scope, entries, baseline) => {
         sendToWin(win, IPC.Changes, {
           scope,
           entries: projectRelativise(scope, entries, root, loreWorkingTree),
+          baseline,
         });
         // Commits also move on `git status` ticks — the commit list dropdown
         // reflects them without a window reload.
@@ -479,16 +490,21 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
     if (ctx.wiring) {
       // Seed the renderer with both repos' drift snapshots. Subsequent
       // updates push from the tracker's `onChange` callback (wired in
-      // `createProjectContext`).
+      // `createProjectContext`). The baseline travels with the entries so
+      // the renderer dropdown lands on the tracker-seeded default (latest
+      // save-point, or HEAD) on first paint without an extra round-trip.
       const seed = ctx.wiring.changes.snapshot();
+      const seedBaselines = ctx.wiring.changes.baselines();
       const loreWorkingTree = join(chain.lorePath, 'memory');
       sendToWin(win, IPC.Changes, {
         scope: 'payload',
         entries: projectRelativise('payload', seed.payload, ctx.root, loreWorkingTree),
+        baseline: seedBaselines.payload,
       });
       sendToWin(win, IPC.Changes, {
         scope: 'lore',
         entries: projectRelativise('lore', seed.lore, ctx.root, loreWorkingTree),
+        baseline: seedBaselines.lore,
       });
       // Seed the baseline dropdown for both repos.
       ctx.wiring.pushCommits('payload');
@@ -1010,18 +1026,9 @@ function registerIpcHandlers(): void {
     if (!app) return { kind: 'not-found' };
     if (app.kind === 'app') {
       if (!app.appPath) return { kind: 'failed', message: 'app entry missing appPath' };
-      try {
-        // `open -a` is the canonical macOS way to target a specific app; the
-        // path argument is passed as argv, never shell-interpolated.
-        const child = spawn('open', ['-a', app.appPath, arg.path], {
-          detached: true,
-          stdio: 'ignore',
-        });
-        child.unref();
-        return { kind: 'ok' };
-      } catch (err) {
-        return { kind: 'failed', message: `open -a failed: ${(err as Error).message}` };
-      }
+      // `open -a` is the canonical macOS way to target a specific app; the
+      // path argument is passed as argv, never shell-interpolated.
+      return spawnDetached('open', ['-a', app.appPath, arg.path]);
     }
     // kind === 'cli'
     if (!app.cliPath || !app.argvTemplate) {
@@ -1033,13 +1040,7 @@ function registerIpcHandlers(): void {
       .split(/\s+/)
       .filter((t) => t.length > 0)
       .map((t) => (t === '{path}' ? arg.path : t));
-    try {
-      const child = spawn(app.cliPath, argv, { detached: true, stdio: 'ignore' });
-      child.unref();
-      return { kind: 'ok' };
-    } catch (err) {
-      return { kind: 'failed', message: `spawn failed: ${(err as Error).message}` };
-    }
+    return spawnDetached(app.cliPath, argv);
   });
 }
 

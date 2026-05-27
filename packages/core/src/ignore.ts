@@ -39,7 +39,11 @@ export type IgnoreLists = { drift: string[]; search: string[]; hidden: string[] 
  */
 export const DEFAULT_IGNORE_RULES: readonly IgnoreRule[] = [
   { pattern: '**/upstream/**', level: 'no-search' },
-  { pattern: '**/process/**', level: 'no-search' },
+  // Scoped to the vendored methodology under any Lore folder, not all `process/`
+  // folders. In self-hosting projects (e.g. ai-sdlc) the canonical `/process/`
+  // at the project root IS the Payload — a broader `**/process/**` would
+  // silence it from the Changes panel and stop watcher refreshes on edits.
+  { pattern: '**/.ai-lore-*/process/**', level: 'no-search' },
   { pattern: '**/.git/**', level: 'no-search' },
   { pattern: '**/node_modules/**', level: 'no-search' },
   { pattern: '**/dist/**', level: 'no-search' },

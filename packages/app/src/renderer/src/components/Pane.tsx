@@ -99,11 +99,21 @@ export function Pane({
   revealRequest,
 }: Props): JSX.Element {
   const tree = useCockpitStore((s) => s.trees[scope]);
-  const changesForScope = useCockpitStore((s) => s.changes[scope]);
+  const rawChangesForScope = useCockpitStore((s) => s.changes[scope]);
   const baseline = useCockpitStore((s) => s.baselineByScope[scope]);
   const commitList = useCockpitStore((s) => s.commitListByScope[scope]);
   const storeSetBaseline = useCockpitStore((s) => s.setBaseline);
   const expandTree = useCockpitStore((s) => s.expandTree);
+  const showIndexFiles = useCockpitStore((s) => s.showIndexFiles);
+  const setShowIndexFiles = useCockpitStore((s) => s.setShowIndexFiles);
+  // AI-Lore index files (`<name>.index.md`) churn on every Memory reshape;
+  // hide them by default and let the user reveal them via the toggle in the
+  // Changes panel header.
+  const changesForScope = useMemo(
+    () =>
+      showIndexFiles ? rawChangesForScope : rawChangesForScope.filter((e) => !e.path.endsWith('.index.md')),
+    [rawChangesForScope, showIndexFiles],
+  );
   const hasSavePoint = useCockpitStore((s) =>
     s.chain && !('error' in s.chain) ? s.chain.hasSavePoint : false,
   );
@@ -167,6 +177,10 @@ export function Pane({
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([rootId]));
   const [queueHeight, setQueueHeight] = useState(220);
   const [treeWidth, setTreeWidth] = useState(240);
+  // Per-pane Changes-panel view mode — List (default, grouped by location) or
+  // Tree (file-explorer hierarchy). User asked for this on the Payload pane
+  // specifically; making it per-pane keeps each panel's preference independent.
+  const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
   // The tree's right-click ignore menu: the node and where to draw it.
   const [treeMenu, setTreeMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null);
 
@@ -469,6 +483,24 @@ export function Pane({
           {headerPath}
         </span>
         <DriftPill level={driftLevel(paneEntries.length)} count={paneEntries.length} />
+        <button
+          type="button"
+          role="switch"
+          aria-checked={showIndexFiles}
+          aria-label={
+            showIndexFiles ? 'Hide *.index.md from Changes' : 'Show *.index.md in Changes'
+          }
+          data-testid="header-show-index"
+          onClick={() => setShowIndexFiles(!showIndexFiles)}
+          style={showIndexFiles ? indexPillOnStyle : indexPillStyle}
+          title={
+            showIndexFiles
+              ? 'Hide *.index.md files (default — they churn on every Memory reshape)'
+              : 'Show *.index.md files in the panel and counts'
+          }
+        >
+          .idx
+        </button>
       </header>
 
       <div style={paneBodyStyle}>
@@ -557,6 +589,8 @@ export function Pane({
           onRevealInFinder={handleRevealInFinder}
           onDiff={(node) => void handleDiff(node)}
           onIgnore={(node) => void ignorePath(node)}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
         />
       </div>
 
@@ -659,6 +693,31 @@ const paneHeaderStyle: React.CSSProperties = {
   padding: '0.5rem 0.8rem',
   background: '#0f1620',
   borderBottom: '1px solid #1f2933',
+};
+
+// Same height/shape as the DriftPill it sits next to so they read as one
+// control group. Off mirrors the DriftPill's `idle` palette; on uses `live`
+// so the active hint is unmistakable.
+const indexPillStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  height: '1.6rem',
+  padding: '0 0.65rem',
+  borderRadius: '999px',
+  fontSize: '0.72rem',
+  fontFamily: 'monospace',
+  fontWeight: 700,
+  letterSpacing: '0.04em',
+  background: '#2d3a44',
+  color: '#9fb1bd',
+  border: '1px solid transparent',
+  cursor: 'pointer',
+};
+
+const indexPillOnStyle: React.CSSProperties = {
+  ...indexPillStyle,
+  background: '#2c5b3f',
+  color: '#bcefcd',
 };
 
 const paneLabelStyle: React.CSSProperties = {
