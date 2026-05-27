@@ -1,12 +1,14 @@
+import type { EngineEntry } from '@ai-lore-companion/core';
 import { type JSX, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { type DriftLevel, driftLevel } from '../store.js';
 
-/** A tab's kind selects which surface it renders. `pane` tabs are the pinned
- *  cockpit panes — not closable, not movable. `shell` and `ai` both back onto
- *  the integrated terminal pane; `shell` is a plain PTY, `ai` is the host for
- *  a structured AI session (Phase B onwards). */
+/** A tab's kind selects which surface it renders. `pane` tabs are the
+ *  cockpit's pinned sub-rooted file views (Status / Payload / Memory) — they
+ *  live alongside the user-created tabs in the strip but cannot be closed or
+ *  reordered. `shell` and `ai` both back onto the integrated terminal pane;
+ *  `shell` is a plain PTY, `ai` is the host for a structured AI session. */
 export type TabKind = 'pane' | 'shell' | 'ai' | 'browser';
 
 /** A tab in a panel — `id` is stable for the tab's lifetime. */
@@ -25,9 +27,22 @@ export type WorkspaceTab = {
   engine?: string;
 };
 
-/** Engines offered by the `+ AI ▾` opener. Stubbed in Phase A; Phase B sources
- *  this from Settings → Apps and detects which binaries are on PATH. */
-export const PHASE_A_ENGINES = ['claude', 'gemini'] as const;
+// (The Phase A `PHASE_A_ENGINES` stub was removed in Phase B — the popover
+// now sources the engine list from the global engines store via `engines`
+// prop, populated from `EnginesList` / `EnginesChanged` in `App`.)
+
+/** Move `lastEngineId` (if any, and present in the list) to the front. The
+ *  popover surfaces the user's most recent pick first; everything else keeps
+ *  its store order. */
+function orderedEngines(
+  engines: readonly EngineEntry[],
+  lastEngineId: string | null,
+): readonly EngineEntry[] {
+  if (!lastEngineId) return engines;
+  const idx = engines.findIndex((e) => e.id === lastEngineId);
+  if (idx <= 0) return engines;
+  return [engines[idx], ...engines.slice(0, idx), ...engines.slice(idx + 1)];
+}
 
 /** The three docks of the workspace. */
 export type PanelId = 'left' | 'right' | 'bottom';
@@ -40,9 +55,15 @@ type Props = {
   onCloseTab: (id: string) => void;
   /** Create a plain `kind: 'shell'` tab — today's PTY behaviour. */
   onNewShell: () => void;
-  /** Create a new `kind: 'ai'` tab bound to the chosen engine. No spawn yet
-   *  (Phase B adds that); the engine is recorded on the tab. */
-  onNewAi: (engine: string) => void;
+  /** Create a new `kind: 'ai'` tab bound to the chosen engine id. The tab
+   *  opens in empty state; the user clicks Start to spawn the engine. */
+  onNewAi: (engineId: string) => void;
+  /** Engines offered by the `+ AI ▾` popover — sourced from the global
+   *  engines store. Empty list disables the opener. */
+  engines: readonly EngineEntry[];
+  /** The id of the engine last picked in this project — surfaced first in
+   *  the popover so the user's most recent choice is the easiest target. */
+  lastEngineId: string | null;
   onNewBrowser: () => void;
   /** Rename a tab — an empty name reverts to the auto-managed default. */
   onRenameTab: (id: string, name: string) => void;
@@ -108,6 +129,7 @@ function AiBadge(): JSX.Element {
   );
 }
 
+
 /**
  * A panel: a strip of typed, draggable tabs over a content slot. The strip is
  * a drop target — dropping a tab moves it here. The content slot stays empty;
@@ -123,6 +145,8 @@ export function TabbedPanel({
   onCloseTab,
   onNewShell,
   onNewAi,
+  engines,
+  lastEngineId,
   onNewBrowser,
   onRenameTab,
   onMoveTab,
@@ -198,18 +222,19 @@ export function TabbedPanel({
         onDrop={(e) => handleDrop(e, tabs.length)}
       >
         {tabs.map((tab, i) => {
-          // Pinned panes (Status / Payload / Memory) render in PinnedPanesRow
-          // above this strip — they are navigation chips, not documents.
-          if (tab.kind === 'pane') return null;
           const active = tab.id === activeTabId;
           return (
             <div
               key={tab.id}
               style={{ ...tabStyle, ...(active ? activeTabStyle : null) }}
-              data-testid={`tab-${tab.kind}`}
+              data-testid={tab.kind === 'pane' ? `tab-${tab.id}` : `tab-${tab.kind}`}
               data-tab-kind={tab.kind}
-              draggable={true}
+              draggable={tab.kind !== 'pane'}
               onDragStart={(e) => {
+                if (tab.kind === 'pane') {
+                  e.preventDefault();
+                  return;
+                }
                 e.dataTransfer.setData(
                   'text/plain',
                   JSON.stringify({ fromPanel: panelId, tabId: tab.id }),
@@ -237,10 +262,17 @@ export function TabbedPanel({
               ) : (
                 <button
                   type="button"
-                  style={{ ...tabLabelBtn, color: active ? '#e6edf3' : '#8a96a2' }}
+                  style={{
+                    ...tabLabelBtn,
+                    color: active ? '#e6edf3' : '#8a96a2',
+                    // Pinned panes don't carry the drag-cursor hint other tabs do.
+                    cursor: tab.kind === 'pane' ? 'pointer' : 'grab',
+                  }}
                   title={tab.kind === 'ai' && tab.engine ? `${tab.title} · ${tab.engine}` : tab.title}
                   onClick={() => onSelectTab(tab.id)}
-                  onDoubleClick={() => startEdit(tab)}
+                  onDoubleClick={() => {
+                    if (tab.kind !== 'pane') startEdit(tab);
+                  }}
                 >
                   {tab.kind === 'shell' ? <StatusDot status={tab.status ?? 'idle'} /> : null}
                   {tab.kind === 'ai' ? <AiBadge /> : null}
@@ -248,14 +280,16 @@ export function TabbedPanel({
                   {tabDrift && tab.id in tabDrift ? <DriftBadge count={tabDrift[tab.id]} /> : null}
                 </button>
               )}
-              <button
-                type="button"
-                style={closeBtn}
-                title="Close tab"
-                onClick={() => onCloseTab(tab.id)}
-              >
-                ×
-              </button>
+              {tab.kind === 'pane' ? null : (
+                <button
+                  type="button"
+                  style={closeBtn}
+                  title="Close tab"
+                  onClick={() => onCloseTab(tab.id)}
+                >
+                  ×
+                </button>
+              )}
             </div>
           );
         })}
@@ -264,8 +298,13 @@ export function TabbedPanel({
           ref={aiAnchorRef}
           type="button"
           style={{ ...newBtn, ...(aiPickerOpen ? newBtnOpen : null) }}
-          title="New AI session — pick an engine"
+          title={
+            engines.length === 0
+              ? 'Add an engine in Settings → Engines to enable AI tabs'
+              : 'New AI session — pick an engine'
+          }
           data-testid="new-ai"
+          disabled={engines.length === 0}
           onClick={() => setAiPickerOpen((o) => !o)}
         >
           + AI ▾
@@ -282,19 +321,19 @@ export function TabbedPanel({
                 data-testid="new-ai-popover"
                 role="menu"
               >
-                {PHASE_A_ENGINES.map((engine) => (
+                {orderedEngines(engines, lastEngineId).map((engine) => (
                   <button
-                    key={engine}
+                    key={engine.id}
                     type="button"
                     style={aiPickerItem}
                     role="menuitem"
-                    data-testid={`new-ai-engine-${engine}`}
+                    data-testid={`new-ai-engine-${engine.id}`}
                     onClick={() => {
                       setAiPickerOpen(false);
-                      onNewAi(engine);
+                      onNewAi(engine.id);
                     }}
                   >
-                    {engine}
+                    {engine.name}
                   </button>
                 ))}
               </div>,
@@ -452,6 +491,7 @@ const aiBadgeStyle: React.CSSProperties = {
   color: '#c7b3ff',
   textShadow: '0 0 6px rgba(199, 179, 255, 0.35)',
 };
+
 
 const newBtnOpen: React.CSSProperties = {
   background: '#1a2230',

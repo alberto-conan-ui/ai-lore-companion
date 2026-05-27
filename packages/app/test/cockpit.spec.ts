@@ -2,7 +2,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ElectronApplication, expect, test } from '@playwright/test';
-import { launchApp, makeProject, seedLoreChanges } from './fixture';
+import {
+  launchApp,
+  makeFakeEngineBinary,
+  makeProject,
+  seedEngines,
+  seedLoreChanges,
+  seedVerbs,
+} from './fixture';
 
 /** A throwaway userData dir so a test never touches real cockpit state. */
 function scratchUserData(): string {
@@ -141,11 +148,16 @@ test.describe('window modes', () => {
     }
   });
 
-  // v0.7 Phase A — typed tabs. `+ AI ▾` opens an engine popover; picking an
-  // engine creates a `kind: 'ai'` tab with the engine recorded on it. No spawn
-  // yet (Phase B adds the Start button on the empty state).
+  // v0.7 Phase A — typed tabs. `+ AI ▾` opens an engine popover sourced from
+  // the engines store; picking one creates a `kind: 'ai'` tab with the engine
+  // recorded on it. Phase B's Start button lives on the empty state — this
+  // test stops short of clicking it.
   test('the + AI opener picks an engine and creates an AI tab', async () => {
     const fixture = makeProject();
+    seedEngines(fixture.userData, [
+      { id: 'claude', name: 'Claude', binary: 'claude' },
+      { id: 'gemini', name: 'Gemini', binary: 'gemini' },
+    ]);
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
@@ -161,11 +173,9 @@ test.describe('window modes', () => {
       const aiTab = leftStrip.getByTestId('tab-ai');
       await expect(aiTab).toBeVisible({ timeout: 5_000 });
       // The chosen engine is recorded on the tab — exposed as the button's
-      // title attribute (visible name stays the short "AI N").
+      // title attribute, which is `${tab.title} · ${engine}` for AI tabs.
       await expect(aiTab.locator('button[title*="claude"]')).toHaveCount(1);
-      // The AI surface renders the engine in its placeholder, identifying it
-      // by the data-ai-engine attribute (so this test still passes once the
-      // placeholder is replaced in Phase B).
+      // The empty-state body identifies the active engine via data-ai-engine.
       await expect(page.locator('[data-ai-engine="claude"]')).toHaveCount(1);
 
       await app.close();
@@ -174,7 +184,234 @@ test.describe('window modes', () => {
     }
   });
 
+  // v0.7 Phase B — the AI-tab empty state. After + AI picks an engine, the
+  // empty state shows a Start button + engine dropdown; clicking Start spawns
+  // the engine binary in the tab's PTY (via `zsh -l -c '<binary>'`) and the
+  // body transitions to the running xterm view. We seed a fake "engine" that
+  // prints a unique marker so the test can confirm the binary actually ran.
+  test('Start launches the chosen engine in the AI tab PTY', async () => {
+    const fixture = makeProject();
+    const fake = makeFakeEngineBinary('PHASE_B_ENGINE_RAN');
+    seedEngines(fixture.userData, [
+      { id: 'fake', name: 'Fake', binary: fake.binary },
+    ]);
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      const leftStrip = page.getByTestId('tab-strip').first();
+      await leftStrip.getByTestId('new-ai').click();
+      await page.getByTestId('new-ai-engine-fake').click();
+
+      const aiTab = leftStrip.getByTestId('tab-ai');
+      await expect(aiTab).toBeVisible({ timeout: 5_000 });
+      // Empty state: the Start button and the engine dropdown are visible,
+      // with the fake engine preselected.
+      const emptyState = page.locator('[data-ai-state="empty"]');
+      await expect(emptyState).toBeVisible();
+      await expect(page.getByTestId('ai-engine-picker')).toBeVisible();
+      await expect(page.getByTestId('ai-start')).toBeVisible();
+
+      await page.getByTestId('ai-start').click();
+
+      // Running state: the empty pane is gone and the xterm view writes the
+      // engine's marker — proof the binary actually spawned in the PTY.
+      await expect(page.locator('[data-ai-state="running"]')).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator('[data-ai-state="empty"]')).toHaveCount(0);
+      // The marker text lands in the xterm view as the binary echoes it.
+      await expect(page.locator('.xterm-rows')).toContainText('PHASE_B_ENGINE_RAN', {
+        timeout: 10_000,
+      });
+
+      await app.close();
+    } finally {
+      fake.cleanup();
+      fixture.cleanup();
+    }
+  });
+
+  // v0.7 Phase C — the two-column running view. Once Start fires, the AI
+  // tab body splits into a prompts column on the left and the xterm PTY on
+  // the right, with a draggable resize handle between them. Phase C just
+  // builds the structural layout; the prompts column is a placeholder until
+  // Phase D fills it.
+  test('the running AI tab renders the two-column split with a resize handle', async () => {
+    const fixture = makeProject();
+    const fake = makeFakeEngineBinary('PHASE_C_SPLIT_VISIBLE');
+    seedEngines(fixture.userData, [
+      { id: 'fake', name: 'Fake', binary: fake.binary },
+    ]);
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      const leftStrip = page.getByTestId('tab-strip').first();
+      await leftStrip.getByTestId('new-ai').click();
+      await page.getByTestId('new-ai-engine-fake').click();
+      await page.getByTestId('ai-start').click();
+
+      // The split's three pieces are all present in the running tab.
+      await expect(page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId('ai-prompts-resizer')).toBeVisible();
+      await expect(page.locator('.xterm-rows')).toBeVisible();
+
+      // The prompts column reports the default width on first open (no
+      // persisted value yet).
+      const initialWidth = await page
+        .getByTestId('ai-prompts-column')
+        .getAttribute('data-prompts-width');
+      expect(Number(initialWidth)).toBe(220);
+
+      await app.close();
+    } finally {
+      fake.cleanup();
+      fixture.cleanup();
+    }
+  });
+
+  // v0.7 Phase C — width persistence. The user drags the resize handle; the
+  // new width is written to the per-project engine-state.json sidecar and
+  // applied on the next launch. We exercise the IPC handler directly
+  // (mirroring the drag handler's mouseup callback), then re-open the app
+  // and open a fresh AI tab — layout restore is disabled today, so a fresh
+  // tab is the realistic restore vehicle. The width is per-project, not
+  // per-tab, so a new tab still picks up the persisted value.
+  test('the prompts column width persists across launches', async () => {
+    const fixture = makeProject();
+    const fake = makeFakeEngineBinary('PHASE_C_WIDTH_PERSISTS');
+    seedEngines(fixture.userData, [
+      { id: 'fake', name: 'Fake', binary: fake.binary },
+    ]);
+    try {
+      // First launch: open an AI tab, start, write a custom width via the
+      // same IPC the drag handler invokes on mouseup.
+      const first = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(first.page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      await first.page.getByTestId('tab-strip').first().getByTestId('new-ai').click();
+      await first.page.getByTestId('new-ai-engine-fake').click();
+      await first.page.getByTestId('ai-start').click();
+      await expect(first.page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
+
+      await first.page.evaluate(() => window.cockpit.aiPromptsWidthSet(310));
+      await first.app.close();
+
+      // Second launch: same userData + project. Open a fresh AI tab and
+      // click Start — the running view's prompts column adopts the
+      // persisted per-project width.
+      const second = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(second.page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      await second.page.getByTestId('tab-strip').first().getByTestId('new-ai').click();
+      await second.page.getByTestId('new-ai-engine-fake').click();
+      await second.page.getByTestId('ai-start').click();
+
+      await expect(second.page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
+      // The width may briefly show the default before the IPC read resolves;
+      // poll on the attribute rather than reading it once.
+      await expect
+        .poll(
+          async () =>
+            Number(
+              await second.page
+                .getByTestId('ai-prompts-column')
+                .getAttribute('data-prompts-width'),
+            ),
+          { timeout: 5_000 },
+        )
+        .toBe(310);
+
+      await second.app.close();
+    } finally {
+      fake.cleanup();
+      fixture.cleanup();
+    }
+  });
+
+  // v0.7 Phase D — the prompts catalog. The running AI tab's left column
+  // reads `<lore>/process/verbs/*.md` + `verbs.index.md` and renders rows
+  // grouped by the curated taxonomy. Clicking a row writes
+  // `<slash-form>\n` into the engine's PTY stdin — the test confirms the
+  // injected text reaches the xterm view.
+  test('the prompts catalog renders grouped verbs and click injects the slash', async () => {
+    const fixture = makeProject();
+    seedVerbs(fixture.root);
+    const fake = makeFakeEngineBinary('PHASE_D_PROMPTS_READY');
+    seedEngines(fixture.userData, [
+      { id: 'fake', name: 'Fake', binary: fake.binary },
+    ]);
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      await page.getByTestId('tab-strip').first().getByTestId('new-ai').click();
+      await page.getByTestId('new-ai-engine-fake').click();
+      await page.getByTestId('ai-start').click();
+      await expect(page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
+
+      // Curated-taxonomy verbs show by default.
+      await expect(page.getByTestId('prompt-row-orient')).toBeVisible();
+      await expect(page.getByTestId('prompt-row-chat')).toBeVisible();
+      await expect(page.getByTestId('prompt-row-plan')).toBeVisible();
+      await expect(page.getByTestId('prompt-row-save-point')).toBeVisible();
+      await expect(page.getByTestId('prompt-row-close-session')).toBeVisible();
+      // The lifecycle verbs land in the Advanced section, which is collapsed
+      // by default — so `install` is in the DOM only after the toggle fires.
+      await expect(page.getByTestId('prompt-row-install')).toHaveCount(0);
+      await page.getByTestId('prompts-advanced-toggle').click();
+      await expect(page.getByTestId('prompt-row-install')).toBeVisible();
+
+      // Clear the engine's banner output so the injection lands cleanly,
+      // then click `/ai-lore-orient`. The slash form arrives in the xterm
+      // view (the PTY echoes input back).
+      await page.getByTestId('prompt-row-orient').click();
+      await expect(page.locator('.xterm-rows')).toContainText('/ai-lore-orient', {
+        timeout: 10_000,
+      });
+
+      await app.close();
+    } finally {
+      fake.cleanup();
+      fixture.cleanup();
+    }
+  });
+
   // A terminal tab carries a live PTY. Dragging the tab between panels must
+  // v0.7.2 — three pinned cockpit tabs live in the tab strip directly. They
+  // sit alongside shell / AI / browser tabs but are unclosable, unmovable, and
+  // un-renameable. Clicking the tab swaps the active pane content.
+  test('the three pinned cockpit tabs render in the strip and switch pane content', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      // All three pinned tabs appear in the left strip on launch.
+      const leftStrip = page.getByTestId('tab-strip').first();
+      await expect(leftStrip.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      await expect(leftStrip.getByTestId('tab-payload')).toBeVisible();
+      await expect(leftStrip.getByTestId('tab-memory')).toBeVisible();
+      // Default: Status pane is shown. All three panes are mounted (the
+      // hidden ones are display:none via the tab-host portal contract), so
+      // the assertion targets visibility, not count.
+      await expect(page.getByTestId('pane-status')).toBeVisible();
+
+      // Click Payload — its pane becomes the visible one.
+      await leftStrip.getByTestId('tab-payload').click();
+      await expect(page.getByTestId('pane-payload')).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByTestId('pane-status')).toBeHidden();
+
+      // Click Memory.
+      await leftStrip.getByTestId('tab-memory').click();
+      await expect(page.getByTestId('pane-memory')).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByTestId('pane-payload')).toBeHidden();
+
+      // The pinned tabs carry no close button (unlike shell / AI / browser).
+      const statusTab = leftStrip.getByTestId('tab-status');
+      await expect(statusTab.locator('button[title="Close tab"]')).toHaveCount(0);
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   // not remount the React subtree that owns the PTY — otherwise long-running
   // CLI sessions (claude, gemini, tail -f) die on every move. The fix is the
   // stable [data-tab-host] container: one DOM node per tab.id, reparented

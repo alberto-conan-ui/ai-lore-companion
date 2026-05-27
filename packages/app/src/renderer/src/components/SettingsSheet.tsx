@@ -1,5 +1,6 @@
 import type {
   AppEntry,
+  EngineEntry,
   IgnoreLevel,
   IgnoreRule,
   SettingDef,
@@ -26,6 +27,8 @@ const IGNORE_SECTION = 'Ignore rules';
 const SHORTCUTS_SECTION = 'Shortcuts';
 /** The rail section that hosts the Apps catalog editor — global-only. */
 const APPS_SECTION = 'Apps';
+/** The rail section that hosts the AI engines editor — global-only. */
+const ENGINES_SECTION = 'Engines';
 
 /** The ignore levels, with their human labels. */
 const LEVEL_OPTIONS: { value: IgnoreLevel; label: string }[] = [
@@ -119,6 +122,7 @@ function SettingsSheet({
     const set = new Set<string>([IGNORE_SECTION]);
     if (scope === 'global') {
       set.add(APPS_SECTION);
+      set.add(ENGINES_SECTION);
       set.add(SHORTCUTS_SECTION);
     }
     for (const def of snap.registry) {
@@ -136,7 +140,8 @@ function SettingsSheet({
       activeSection === null ||
       activeSection === IGNORE_SECTION ||
       activeSection === SHORTCUTS_SECTION ||
-      activeSection === APPS_SECTION
+      activeSection === APPS_SECTION ||
+      activeSection === ENGINES_SECTION
     ) {
       return [];
     }
@@ -209,6 +214,8 @@ function SettingsSheet({
               <IgnoreRulesSection snapshot={snap} scope={scope} onWrite={writeIgnores} />
             ) : activeSection === APPS_SECTION ? (
               <AppsCatalogSection snapshot={snap} />
+            ) : activeSection === ENGINES_SECTION ? (
+              <EnginesSection />
             ) : activeSection === SHORTCUTS_SECTION ? (
               <ShortcutsSection />
             ) : rows.length === 0 ? (
@@ -1110,4 +1117,171 @@ const appRemoveStyle: React.CSSProperties = {
   fontSize: '0.74rem',
   padding: '0.2rem 0.55rem',
   cursor: 'pointer',
+};
+
+/**
+ * The AI engines editor. Each row shows the engine's display name, binary,
+ * and (optional) args. "Add engine" appends a draft row the user fills in.
+ * Defaults (`Claude` / `Gemini`) are back-filled by main when their binary
+ * resolves on PATH; removing them records the id so the seed does not
+ * respawn on next launch.
+ */
+function EnginesSection(): JSX.Element {
+  const [engines, setEngines] = useState<EngineEntry[]>([]);
+  const [draft, setDraft] = useState<EngineEntry | null>(null);
+
+  useEffect(() => {
+    void window.cockpit.enginesList().then(setEngines);
+    return window.cockpit.onEnginesChanged(setEngines);
+  }, []);
+
+  const persist = (next: EngineEntry[]): void => {
+    void window.cockpit.enginesSave(next).then(setEngines);
+  };
+
+  const removeEngine = (id: string): void => {
+    persist(engines.filter((e) => e.id !== id));
+  };
+
+  const startDraft = (): void => {
+    setDraft({ id: crypto.randomUUID(), name: '', binary: '', args: [] });
+  };
+
+  const commitDraft = (): void => {
+    if (!draft || !draft.name.trim() || !draft.binary.trim()) return;
+    const entry: EngineEntry = {
+      id: draft.id,
+      name: draft.name.trim(),
+      binary: draft.binary.trim(),
+    };
+    if (draft.args && draft.args.length > 0) entry.args = draft.args;
+    persist([...engines, entry]);
+    setDraft(null);
+  };
+
+  return (
+    <div style={appsCatalogStyle} data-testid="settings-engines-section">
+      <div style={appsHintStyle}>
+        AI engines appear in every panel&apos;s <strong>+ AI ▾</strong> opener. Each entry is a
+        binary the cockpit spawns in the tab&apos;s shell — bare names resolve on your login
+        PATH. Defaults are seeded automatically when <code>claude</code> or <code>gemini</code>
+        are on PATH.
+      </div>
+      {engines.length === 0 ? (
+        <div style={appsEmptyStyle}>No engines configured yet.</div>
+      ) : (
+        <ul style={appsListStyle}>
+          {engines.map((engine) => (
+            <li key={engine.id} style={appRowStyle} data-testid={`engine-row-${engine.id}`}>
+              <span style={appIconPlaceholder}>✦</span>
+              <div style={appLabelColumnStyle}>
+                <span style={appLabelStyle}>{engine.name}</span>
+                <span style={appMetaStyle}>{engineMetaSummary(engine)}</span>
+              </div>
+              <button
+                type="button"
+                style={appRemoveStyle}
+                onClick={() => removeEngine(engine.id)}
+                data-testid={`engine-remove-${engine.id}`}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {draft ? (
+        <div style={engineDraftStyle} data-testid="engine-draft">
+          <input
+            style={engineInputStyle}
+            placeholder="Display name (e.g. Claude)"
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            data-testid="engine-draft-name"
+          />
+          <input
+            style={engineInputStyle}
+            placeholder="Binary (e.g. claude, /usr/local/bin/claude)"
+            value={draft.binary}
+            onChange={(e) => setDraft({ ...draft, binary: e.target.value })}
+            data-testid="engine-draft-binary"
+          />
+          <input
+            style={engineInputStyle}
+            placeholder="Args, space-separated (optional)"
+            value={(draft.args ?? []).join(' ')}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                args: e.target.value
+                  .split(/\s+/)
+                  .map((s) => s.trim())
+                  .filter((s) => s.length > 0),
+              })
+            }
+            data-testid="engine-draft-args"
+          />
+          <div style={engineDraftButtonRow}>
+            <button
+              type="button"
+              style={shortcutAddBtnStyle}
+              onClick={commitDraft}
+              data-testid="engine-draft-save"
+              disabled={!draft.name.trim() || !draft.binary.trim()}
+            >
+              Save engine
+            </button>
+            <button
+              type="button"
+              style={appRemoveStyle}
+              onClick={() => setDraft(null)}
+              data-testid="engine-draft-cancel"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          style={shortcutAddBtnStyle}
+          onClick={startDraft}
+          data-testid="engine-add"
+        >
+          Add engine
+        </button>
+      )}
+    </div>
+  );
+}
+
+function engineMetaSummary(engine: EngineEntry): string {
+  const args = engine.args && engine.args.length > 0 ? ` ${engine.args.join(' ')}` : '';
+  return `${engine.binary}${args}`;
+}
+
+const engineDraftStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.45rem',
+  padding: '0.55rem',
+  background: '#0c121a',
+  border: '1px solid #243044',
+  borderRadius: '5px',
+};
+
+const engineInputStyle: React.CSSProperties = {
+  background: '#0a0f17',
+  border: '1px solid #1f2933',
+  borderRadius: '4px',
+  color: '#dde3ea',
+  font: 'inherit',
+  fontSize: '0.82rem',
+  padding: '0.35rem 0.55rem',
+};
+
+const engineDraftButtonRow: React.CSSProperties = {
+  display: 'flex',
+  gap: '0.4rem',
+  alignItems: 'center',
 };

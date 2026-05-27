@@ -104,6 +104,14 @@ export {
 } from './apps/index.js';
 
 export {
+  type EngineEntry,
+  dedupEngines,
+  isEngineEntry,
+  parseEngineEntries,
+  parseEngineEntry,
+} from './engines/index.js';
+
+export {
   type BuildDiffArgvInput,
   buildDiffArgv,
   templateUsesBothPlaceholders,

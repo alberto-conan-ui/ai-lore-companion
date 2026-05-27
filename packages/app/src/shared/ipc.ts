@@ -6,6 +6,7 @@ import type {
   ChangeEntry,
   ChangeScope,
   Commitment,
+  EngineEntry,
   IgnoreRule,
   MemoryFrontmatter,
   MemorySections,
@@ -116,6 +117,13 @@ export const IPC = {
 
   /** Renderer → main: spawn a terminal PTY; resolves to its id. */
   TerminalSpawn: 'terminal:spawn',
+  /**
+   * Renderer → main: spawn a terminal PTY running a specific engine binary
+   * (the AI tab's Start button). The engine command and argv are passed
+   * through a login shell so PATH resolves the binary by name. Resolves to
+   * the PTY id, same as `TerminalSpawn`.
+   */
+  TerminalSpawnEngine: 'terminal:spawn-engine',
   /** Renderer → main: keystrokes for a terminal. */
   TerminalInput: 'terminal:input',
   /** Renderer → main: resize a terminal. */
@@ -202,6 +210,32 @@ export const IPC = {
    * source. The path is validated to live inside this window's project.
    */
   FocusRead: 'cockpit:focus-read',
+
+  /** Renderer → main: list configured AI engines. */
+  EnginesList: 'engines:list',
+  /** Renderer → main: replace the global engines list. */
+  EnginesSave: 'engines:save',
+  /** Main → renderer: the configured engines list changed. */
+  EnginesChanged: 'engines:changed',
+  /**
+   * Renderer → main: read the engine id last picked in this window's project,
+   * or `null` if none. Used to preselect the AI tab's engine dropdown.
+   */
+  EngineLastGet: 'engines:last-get',
+  /** Renderer → main: persist the engine id picked in this window's project. */
+  EngineLastSet: 'engines:last-set',
+  /** Renderer → main: read the persisted prompts-column width for this
+   *  project's AI tabs (Phase C), or `null` when none has been set. */
+  AiPromptsWidthGet: 'engines:prompts-width-get',
+  /** Renderer → main: persist the prompts-column width for this project. */
+  AiPromptsWidthSet: 'engines:prompts-width-set',
+  /** Renderer → main: read the prompts catalog (verbs vendored under
+   *  `<lore>/process/verbs/`) for this window's project. */
+  PromptsList: 'prompts:list',
+  /** Main → renderer: the prompts catalog changed (a verb file was
+   *  added/edited/removed under `<lore>/process/verbs/`). The renderer
+   *  re-fetches via `PromptsList`. */
+  PromptsChanged: 'prompts:changed',
 } as const;
 
 export type ChainPayload = ChainResult;
@@ -446,6 +480,32 @@ export type AppsInvokeResult =
  */
 export type SettingsSetLayoutArg = { layout: WorkspaceLayout | null };
 
+/**
+ * Renderer → main: spawn a PTY running an AI engine (the AI tab's Start
+ * button). The engine binary may be a bare name (resolved on the user's
+ * login-shell PATH at spawn) or an absolute path.
+ */
+export type TerminalSpawnEngineArg = {
+  /** Engine binary — bare name or absolute path. */
+  binary: string;
+  /** Optional argv passed after the binary. */
+  args?: string[];
+};
+
+/** One verb in the prompts catalog (Phase D). Surfaces in the AI tab's left
+ *  column; a click writes `${slash}\n` to the running engine's stdin. */
+export type PromptEntry = {
+  /** Filename stem of the verb — e.g. `orient`, `save-point`. */
+  name: string;
+  /** Slash form injected on click — `/ai-lore-<name>`. */
+  slash: string;
+  /** One-line description from `verbs.index.md`; empty when missing. */
+  description: string;
+  /** From `verbs.index.md`'s Kind column; `unknown` when the table is absent
+   *  or this verb is not listed. */
+  kind: 'verb' | 'bookend' | 'unknown';
+};
+
 export type Unsubscribe = () => void;
 
 export type CockpitApi = {
@@ -468,6 +528,8 @@ export type CockpitApi = {
   openExternal: (url: string) => Promise<void>;
   reload: () => Promise<void>;
   spawnTerminal: () => Promise<string>;
+  /** Spawn a PTY running an AI engine — resolves to the PTY id. */
+  spawnTerminalEngine: (arg: TerminalSpawnEngineArg) => Promise<string>;
   sendTerminalInput: (arg: TerminalInputArg) => void;
   resizeTerminal: (arg: TerminalResizeArg) => void;
   killTerminal: (id: string) => void;
@@ -531,6 +593,24 @@ export type CockpitApi = {
   appsSave: (apps: AppEntry[]) => Promise<SettingsSnapshot>;
   /** Invoke a catalog app on a node path. */
   appsInvoke: (arg: AppsInvokeArg) => Promise<AppsInvokeResult>;
+  /** List configured AI engines — back-filled with PATH-resolvable defaults. */
+  enginesList: () => Promise<EngineEntry[]>;
+  /** Replace the global engines list; resolves to the new list. */
+  enginesSave: (engines: EngineEntry[]) => Promise<EngineEntry[]>;
+  /** Subscribe to engine-list changes. */
+  onEnginesChanged: (handler: (engines: EngineEntry[]) => void) => Unsubscribe;
+  /** The engine id last picked in this window's project, or null. */
+  engineLastGet: () => Promise<string | null>;
+  /** Persist the engine id just picked in this window's project. */
+  engineLastSet: (engineId: string) => Promise<void>;
+  /** The prompts-column width persisted for this window's project, or null. */
+  aiPromptsWidthGet: () => Promise<number | null>;
+  /** Persist the prompts-column width for this window's project. */
+  aiPromptsWidthSet: (width: number) => Promise<void>;
+  /** Read the prompts catalog (vendored verbs) for this window's project. */
+  promptsList: () => Promise<PromptEntry[]>;
+  /** Subscribe to prompts-catalog changes — fires when a verb file changes. */
+  onPromptsChanged: (handler: () => void) => Unsubscribe;
 };
 
 declare global {

@@ -1,4 +1,4 @@
-import type { ChangeScope, LayoutTab, WorkspaceLayout } from '@ai-lore-companion/core';
+import type { ChangeScope, EngineEntry, LayoutTab, WorkspaceLayout } from '@ai-lore-companion/core';
 import {
   type JSX,
   useCallback,
@@ -15,7 +15,6 @@ import type { AlteredReason } from '../../shared/ipc.js';
 import { AiTab } from './components/AiTab.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BrowserTab } from './components/BrowserTab.js';
-import { PinnedPanesRow } from './components/PinnedPanesRow.js';
 import {
   DOCK_DEFAULT_BOTTOM,
   DOCK_DEFAULT_RIGHT,
@@ -131,6 +130,31 @@ export function App(): JSX.Element {
     void window.cockpit.shortcutsList().then(apply);
     return window.cockpit.onShortcutsChanged(apply);
   }, []);
+  // Configured AI engines — populates the `+ AI ▾` popover and the AI tab's
+  // empty-state engine dropdown. Sourced from the global store; back-filled
+  // with `claude` / `gemini` defaults when their binaries are on PATH.
+  const [engines, setEngines] = useState<EngineEntry[]>([]);
+  useEffect(() => {
+    void window.cockpit.enginesList().then(setEngines);
+    return window.cockpit.onEnginesChanged(setEngines);
+  }, []);
+  // The engine id this project last picked — used to order the `+ AI ▾`
+  // popover so the user's recent choice surfaces first. Stored per project
+  // in `projectDataDir/engine-state.json`; reads at mount, refreshes
+  // whenever the engine on any AI tab is changed.
+  const [lastEngineId, setLastEngineId] = useState<string | null>(null);
+  useEffect(() => {
+    if (chain && !isChainErrorPayload(chain)) {
+      void window.cockpit.engineLastGet().then(setLastEngineId);
+    }
+  }, [chain]);
+  // Lookup helper: engine display name for the tab title. Falls back to the
+  // id when the engine was removed by the user after this AI tab was created.
+  const engineName = useCallback(
+    (engineId: string): string =>
+      engines.find((e) => e.id === engineId)?.name ?? engineId,
+    [engines],
+  );
   const [slots, setSlots] = useState<Record<PanelId, HTMLDivElement | null>>({
     left: null,
     right: null,
@@ -428,18 +452,84 @@ export function App(): JSX.Element {
     setDockOpen(panelId, true);
   };
 
-  /** Create an `kind: 'ai'` tab bound to `engine`. No spawn yet — Phase B
-   *  adds the Start button + engine picker on the empty state. */
-  const addAiTab = (panelId: PanelId, engine: string): void => {
+  /** Create an `kind: 'ai'` tab bound to `engineId`. The tab opens in empty
+   *  state with the engine preselected; the user clicks Start to spawn the
+   *  engine. The pick is persisted as this project's last-picked engine so
+   *  the next new AI tab defaults to the same engine. */
+  const addAiTab = (panelId: PanelId, engineId: string): void => {
     const id = crypto.randomUUID();
+    const title = `AI (${engineName(engineId)})`;
     setPanels((p) => {
-      const n = p[panelId].tabs.filter((t) => t.kind === 'ai').length + 1;
-      const title = `AI ${n}`;
-      const tab: WorkspaceTab = { id, kind: 'ai', title, baseTitle: title, engine };
+      const tab: WorkspaceTab = { id, kind: 'ai', title, baseTitle: title, engine: engineId };
       return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
     });
     setDockOpen(panelId, true);
+    void window.cockpit.engineLastSet(engineId);
+    setLastEngineId(engineId);
   };
+
+  /** Change the engine bound to an AI tab. Updates the tab's `engine` field
+   *  and (when its title was not user-renamed) refreshes the auto-managed
+   *  title to match. Persisted as the project's last-picked engine. */
+  const setAiTabEngine = useCallback(
+    (tabId: string, engineId: string): void => {
+      setPanels((prev) => {
+        for (const panelId of PANEL_IDS) {
+          const tabs = prev[panelId].tabs;
+          const idx = tabs.findIndex((t) => t.id === tabId);
+          if (idx === -1) continue;
+          const tab = tabs[idx];
+          if (tab.engine === engineId) return prev;
+          const baseTitle = `AI (${engineName(engineId)})`;
+          const next = [...tabs];
+          next[idx] = {
+            ...tab,
+            engine: engineId,
+            baseTitle,
+            title: tab.manualTitle ? tab.title : baseTitle,
+          };
+          return { ...prev, [panelId]: { ...prev[panelId], tabs: next } };
+        }
+        return prev;
+      });
+      void window.cockpit.engineLastSet(engineId);
+      setLastEngineId(engineId);
+    },
+    [engineName],
+  );
+
+  /** Flip an AI tab's running state — the engine just started or just exited.
+   *  Drives the auto-managed title: `AI (engine)` while empty, `engine` while
+   *  running. The `running` flag itself does not persist; the next session's
+   *  AI tabs always restore in the empty state. */
+  const setAiTabRunning = useCallback(
+    (tabId: string, running: boolean): void => {
+      setPanels((prev) => {
+        for (const panelId of PANEL_IDS) {
+          const tabs = prev[panelId].tabs;
+          const idx = tabs.findIndex((t) => t.id === tabId);
+          if (idx === -1) continue;
+          const tab = tabs[idx];
+          if (tab.kind !== 'ai') continue;
+          const name = tab.engine ? engineName(tab.engine) : '';
+          const baseTitle = running ? name : `AI (${name})`;
+          if (tab.baseTitle === baseTitle && (tab.manualTitle || tab.title === baseTitle)) {
+            return prev;
+          }
+          const next = [...tabs];
+          next[idx] = {
+            ...tab,
+            baseTitle,
+            title: tab.manualTitle ? tab.title : baseTitle,
+          };
+          return { ...prev, [panelId]: { ...prev[panelId], tabs: next } };
+        }
+        return prev;
+      });
+    },
+    [engineName],
+  );
+
 
   /** Create a shell tab on `panelId` from a tab shortcut — titled after the
    *  shortcut, with the command queued for the PTY once it spawns. */
@@ -507,7 +597,10 @@ export function App(): JSX.Element {
   };
 
   /** Apply a terminal's foreground status: light the dot, and auto-rename the
-   *  tab to the running command unless its title was set by hand. */
+   *  tab. **Shell tabs** show the running command (today's behaviour).
+   *  **AI tabs** show `engine · status` — e.g. `claude · running` — because
+   *  the engine command surfaced by `ps` is typically a long node path and
+   *  the running/idle suffix is what the user actually cares about. */
   const handleTerminalStatus = useCallback(
     (tabId: string, status: TerminalForegroundStatus, command: string): void => {
       setPanels((prev) => {
@@ -516,11 +609,17 @@ export function App(): JSX.Element {
           const idx = tabs.findIndex((t) => t.id === tabId);
           if (idx === -1) continue;
           const tab = tabs[idx];
+          const aiTitle = (): string => {
+            const name = tab.engine ? engineName(tab.engine) : 'AI';
+            return `${name} · ${status}`;
+          };
           const title = tab.manualTitle
             ? tab.title
-            : status === 'running' && command
-              ? command
-              : (tab.baseTitle ?? tab.title);
+            : tab.kind === 'ai'
+              ? aiTitle()
+              : status === 'running' && command
+                ? command
+                : (tab.baseTitle ?? tab.title);
           if (tab.status === status && tab.title === title) return prev;
           const next = [...tabs];
           next[idx] = { ...tab, status, title };
@@ -529,7 +628,7 @@ export function App(): JSX.Element {
         return prev;
       });
     },
-    [],
+    [engineName],
   );
 
   const selectTab = (panelId: PanelId, tabId: string): void => {
@@ -747,6 +846,8 @@ export function App(): JSX.Element {
       onNewShell={() => addTab(panelId, 'shell')}
       onNewAi={(engine) => addAiTab(panelId, engine)}
       onNewBrowser={() => addTab(panelId, 'browser')}
+      engines={engines}
+      lastEngineId={lastEngineId}
       onRenameTab={(id, name) => renameTab(panelId, id, name)}
       onMoveTab={moveTab}
       slotRef={slotRefs[panelId]}
@@ -786,7 +887,17 @@ export function App(): JSX.Element {
         />
       );
     } else if (tab.kind === 'ai') {
-      body = <AiTab engine={tab.engine ?? ''} />;
+      body = (
+        <AiTab
+          active={visible}
+          tabId={tab.id}
+          engine={tab.engine ?? ''}
+          engines={engines}
+          onEngineChange={(engineId) => setAiTabEngine(tab.id, engineId)}
+          onStatus={handleTerminalStatus}
+          onRunningChange={setAiTabRunning}
+        />
+      );
     } else {
       body = (
         <BrowserTab tabId={tab.id} visible={visible} initialUrl={browserInitialUrls[tab.id]} />
@@ -808,15 +919,7 @@ export function App(): JSX.Element {
         }
       />
       <div style={panelsRow}>
-        <div style={appColumn}>
-          <PinnedPanesRow
-            panes={PANE_TABS.map((p) => ({ id: p.id, title: p.title }))}
-            activeId={panels.left.activeId}
-            drift={tabDrift}
-            onSelect={(id) => selectTab('left', id)}
-          />
-          {panel('left')}
-        </div>
+        <div style={appColumn}>{panel('left')}</div>
         <DockPanel
           side="right"
           open={rightOpen}
@@ -883,6 +986,7 @@ const appColumn: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
 };
+
 
 const fullCenter: React.CSSProperties = {
   ...appLayout,

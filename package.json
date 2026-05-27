@@ -1,6 +1,6 @@
 {
   "name": "ai-lore-companion",
-  "version": "0.6.1",
+  "version": "0.7.3",
   "private": true,
   "description": "Human Lead cockpit for AI-Lore projects",
   "workspaces": ["packages/*"],

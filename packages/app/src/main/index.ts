@@ -9,6 +9,7 @@ import {
   type ChangeScope,
   type ChangesTracker,
   type DirEvent,
+  type EngineEntry,
   type IgnoreLists,
   SETTINGS_REGISTRY,
   type SavePoint,
@@ -27,6 +28,7 @@ import {
   locateLore,
   mergeIgnoreRules,
   parseAppEntries,
+  parseEngineEntries,
   parseMemoryFileSync,
   parseMemorySections,
   readChain,
@@ -76,9 +78,19 @@ import {
   type ShortcutInput,
   type TerminalInputArg,
   type TerminalResizeArg,
+  type TerminalSpawnEngineArg,
   type TreeExpandArg,
 } from '../shared/ipc.js';
 import { appsWithIcons, runAppsMigrations } from './apps.js';
+import {
+  loadEngines,
+  loadLastEngine,
+  loadPromptsColumnWidth,
+  saveEngines,
+  saveLastEngine,
+  savePromptsColumnWidth,
+} from './engines.js';
+import { type PromptEntry, readPrompts, watchPrompts } from './prompts.js';
 import { resolveProjectRoot } from './args.js';
 import { loadBrowserProfile, saveBrowserProfile } from './browser-prefs.js';
 import * as browser from './browser.js';
@@ -158,6 +170,11 @@ type ProjectContext = {
    * that want their write to land in the UI immediately.
    */
   refreshChain?: () => void;
+  /**
+   * Teardown for the Phase D prompts watcher — closes the chokidar instance
+   * subscribed to `<lore>/process/verbs/`. Null for non-AI-Lore windows.
+   */
+  promptsWatcherClose?: () => Promise<void>;
 };
 
 /** Project context per window, keyed by `BrowserWindow.id`. */
@@ -335,7 +352,16 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
     onStatus: (id, status, command) => sendToWin(win, IPC.TerminalStatus, { id, status, command }),
   });
 
-  return { root, chain, wiring, ptyService, ignoreLists };
+  // Phase D — watch the vendored verbs folder so methodology upgrades surface
+  // new verbs in any live AI tab without an app restart. The renderer
+  // re-fetches via `PromptsList` on each `PromptsChanged` push.
+  const promptsWatcherClose = isChainError(chain)
+    ? undefined
+    : watchPrompts(chain.lorePath, () => {
+        sendToWin(win, IPC.PromptsChanged, undefined);
+      });
+
+  return { root, chain, wiring, ptyService, ignoreLists, promptsWatcherClose };
 }
 
 
@@ -559,6 +585,13 @@ function broadcastSettings(): void {
   }
 }
 
+/** Push the engines list to every window — engines are user-wide. */
+function broadcastEngines(list: EngineEntry[]): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    sendToWin(win, IPC.EnginesChanged, list);
+  }
+}
+
 /**
  * Re-apply a window's ignore rules after they changed: re-derive the three
  * lists, re-attach the watcher with the new drift filter, and re-send the
@@ -677,6 +710,18 @@ function registerIpcHandlers(): void {
     const ctx = contextFor(event);
     return Promise.resolve(ctx ? ctx.ptyService.spawn() : '');
   });
+  ipcMain.handle(
+    IPC.TerminalSpawnEngine,
+    (
+      event,
+      arg: TerminalSpawnEngineArg,
+    ): ReturnType<CockpitApi['spawnTerminalEngine']> => {
+      const ctx = contextFor(event);
+      if (!ctx) return Promise.resolve('');
+      const id = ctx.ptyService.spawn({ binary: arg.binary, args: arg.args });
+      return Promise.resolve(id);
+    },
+  );
   ipcMain.on(IPC.TerminalInput, (event, arg: TerminalInputArg) => {
     contextFor(event)?.ptyService.write(arg.id, arg.data);
   });
@@ -952,6 +997,42 @@ function registerIpcHandlers(): void {
       .map((t) => (t === '{path}' ? arg.path : t));
     return spawnDetached(app.cliPath, argv);
   });
+
+  ipcMain.handle(IPC.EnginesList, (): EngineEntry[] => loadEngines(userDataDir));
+  ipcMain.handle(IPC.EnginesSave, (_event, engines: EngineEntry[]): EngineEntry[] => {
+    const parsed = parseEngineEntries(engines);
+    saveEngines(userDataDir, parsed);
+    const list = loadEngines(userDataDir);
+    broadcastEngines(list);
+    return list;
+  });
+  ipcMain.handle(IPC.EngineLastGet, (event): string | null => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return null;
+    return loadLastEngine(userDataDir, ctx.root);
+  });
+  ipcMain.handle(IPC.EngineLastSet, (event, engineId: string): void => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return;
+    if (typeof engineId !== 'string' || engineId.length === 0) return;
+    saveLastEngine(userDataDir, ctx.root, engineId);
+  });
+  ipcMain.handle(IPC.AiPromptsWidthGet, (event): number | null => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return null;
+    return loadPromptsColumnWidth(userDataDir, ctx.root);
+  });
+  ipcMain.handle(IPC.AiPromptsWidthSet, (event, width: number): void => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return;
+    if (typeof width !== 'number' || !Number.isFinite(width)) return;
+    savePromptsColumnWidth(userDataDir, ctx.root, width);
+  });
+  ipcMain.handle(IPC.PromptsList, (event): PromptEntry[] => {
+    const ctx = contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return [];
+    return readPrompts(ctx.chain.lorePath);
+  });
 }
 
 /** Tear down one window's context — kill its PTYs, close its watcher + trackers. */
@@ -972,6 +1053,13 @@ async function teardownContext(winId: number): Promise<void> {
       // Best-effort — chokidar may already be torn down.
     }
     ctx.wiring.changes.close();
+  }
+  if (ctx.promptsWatcherClose) {
+    try {
+      await ctx.promptsWatcherClose();
+    } catch {
+      // Best-effort — chokidar may already be torn down.
+    }
   }
 }
 

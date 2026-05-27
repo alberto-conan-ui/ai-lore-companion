@@ -14,9 +14,18 @@ export type PtyServiceCallbacks = {
   onStatus: (id: string, status: TerminalForegroundStatus, command: string) => void;
 };
 
+/**
+ * Optional engine to run inside the PTY's login shell. When set, the PTY
+ * spawns `zsh -l -c '<binary> <args...>'` so the engine inherits the user's
+ * full PATH (resolving bare names like `claude`) without the cockpit
+ * re-implementing shell PATH discovery.
+ */
+export type PtySpawnEngine = { binary: string; args?: readonly string[] };
+
 export type PtyService = {
-  /** Spawn a shell; returns its id. */
-  spawn: () => string;
+  /** Spawn a shell; returns its id. When `engine` is set, the login shell
+   *  executes the engine command on first prompt (`zsh -l -c '<cmd>'`). */
+  spawn: (engine?: PtySpawnEngine) => string;
   write: (id: string, data: string) => void;
   resize: (id: string, cols: number, rows: number) => void;
   kill: (id: string) => void;
@@ -30,6 +39,18 @@ export type PtyService = {
 };
 
 const DEFAULT_SHELL = process.env.SHELL ?? '/bin/zsh';
+
+/**
+ * Quote a token for safe single-line shell interpolation. Used to build the
+ * `zsh -l -c '<binary> <args>'` payload when launching an AI engine — a path
+ * containing spaces, or an arg with shell metacharacters, would otherwise be
+ * mis-parsed. POSIX single-quote rules: wrap in `'…'`, escape any embedded
+ * single quotes by closing-then-`\''`-then-reopening.
+ */
+function quoteForShell(token: string): string {
+  if (/^[A-Za-z0-9_\-./]+$/.test(token)) return token;
+  return `'${token.replace(/'/g, "'\\''")}'`;
+}
 
 /** How often each live PTY's foreground process is polled. */
 const POLL_MS = 1000;
@@ -129,14 +150,24 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
   scheduleNext();
 
   return {
-    spawn: () => {
+    spawn: (engine?: PtySpawnEngine) => {
       const id = randomUUID();
       // A login shell ('-l') sources the full profile chain — /etc/zprofile
       // (path_helper), ~/.zprofile, ~/.zshrc — so the terminal has the same
       // PATH and environment as Terminal.app. Without it, a Finder-launched
       // app inherits only macOS's minimal env and tools like `docker` or
       // Homebrew binaries are missing.
-      const pty = spawn(DEFAULT_SHELL, ['-l'], {
+      //
+      // When `engine` is set, the login shell additionally runs the engine
+      // command via `-c`. The user sees the engine launching (its banner,
+      // its prompt) directly — no intermediate shell prompt. If the engine
+      // exits, the PTY exits too; the AI tab UI reverts to its empty state.
+      const args = ['-l'];
+      if (engine) {
+        const tokens = [engine.binary, ...(engine.args ?? [])].map(quoteForShell);
+        args.push('-c', tokens.join(' '));
+      }
+      const pty = spawn(DEFAULT_SHELL, args, {
         name: 'xterm-color',
         cols: 80,
         rows: 24,

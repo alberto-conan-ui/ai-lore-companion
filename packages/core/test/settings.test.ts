@@ -374,3 +374,4 @@ test('parseSettingsFile preserves a pre-v0.7 tab kind so the renderer can migrat
     'terminal',
   );
 });
+

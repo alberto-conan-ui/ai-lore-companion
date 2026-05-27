@@ -151,6 +151,97 @@ export function seedLoreChanges(root: string): void {
 }
 
 /**
+ * Seed the vendored methodology under `<lore>/process/verbs/` so an AI tab's
+ * Phase D prompts column has something to read. Writes the minimal set the
+ * curated taxonomy expects (`orient`, `chat`, `plan`, `execute`, `ack`,
+ * `save-point`, `close-session`) plus an unknown verb to exercise the
+ * Advanced group, and a `verbs.index.md` carrying their descriptions in the
+ * operations-table shape the parser reads.
+ */
+export function seedVerbs(root: string): void {
+  const lore = join(root, '.ai-lore-e2e-fixture');
+  const verbs = join(lore, 'process', 'verbs');
+  mkdirSync(verbs, { recursive: true });
+  const rows: { name: string; kind: 'verb' | 'bookend'; desc: string }[] = [
+    { name: 'orient', kind: 'bookend', desc: 'Session open — load the methodology, walk the focus chain' },
+    { name: 'chat', kind: 'verb', desc: 'Set posture to Chat — converse only, touch nothing' },
+    { name: 'redial', kind: 'verb', desc: 'Set the dials — the conversational register' },
+    { name: 'plan', kind: 'verb', desc: 'Set posture to Planning' },
+    { name: 'execute', kind: 'verb', desc: 'Set posture to Executing' },
+    { name: 'reshape', kind: 'verb', desc: 'Set posture to Reshaping' },
+    { name: 'write-lore', kind: 'verb', desc: 'Write or update Memory' },
+    { name: 'ack', kind: 'verb', desc: 'Commit both repos with a focused message' },
+    { name: 'save-point', kind: 'verb', desc: 'Formal milestone — commit + ledger entry' },
+    { name: 'close-session', kind: 'bookend', desc: 'Session close — write the journal, surface drift' },
+    { name: 'install', kind: 'verb', desc: 'Bind AI-Lore into a specific AI engine' },
+  ];
+  for (const r of rows) {
+    writeFileSync(join(verbs, `${r.name}.md`), `# ${r.name}\n`);
+  }
+  const tableLines = [
+    '# Verbs',
+    '',
+    '| Operation | Kind | What it does |',
+    '|---|---|---|',
+    ...rows.map((r) => `| [\`${r.name}\`](./${r.name}.md) | ${r.kind} | ${r.desc} |`),
+    '',
+  ];
+  writeFileSync(join(verbs, 'verbs.index.md'), tableLines.join('\n'));
+}
+
+/**
+ * Seed the engines store inside a fresh test `userData` directory. The cockpit
+ * reads `<userData>/engines.json` at launch and back-fills `claude` / `gemini`
+ * only when their binaries resolve on PATH — which they generally don't in a
+ * CI environment. Writing the file directly skips the probe and pins the test
+ * to known engine ids.
+ */
+export function seedEngines(
+  userData: string,
+  engines: { id: string; name: string; binary: string; args?: string[] }[],
+): void {
+  mkdirSync(userData, { recursive: true });
+  // `removedDefaults` lists *all* default ids so the back-fill on load doesn't
+  // try to re-add `default.claude` / `default.gemini` on top of these.
+  writeFileSync(
+    join(userData, 'engines.json'),
+    JSON.stringify(
+      {
+        engines,
+        removedDefaults: ['default.claude', 'default.gemini'],
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+/**
+ * Build a fake "engine" — a shell script that prints a marker, then sleeps
+ * forever so the PTY stays alive long enough for the test to assert. The
+ * returned absolute path is what to set as the engine's `binary`.
+ */
+export function makeFakeEngineBinary(marker: string): { dir: string; binary: string; cleanup: () => void } {
+  const dir = mkdtempSync(join(tmpdir(), 'cockpit-e2e-engine-'));
+  const binary = join(dir, 'fake-engine.sh');
+  // `tail -f /dev/null` keeps the PTY open without burning CPU; the echo
+  // lands the marker the test waits for.
+  writeFileSync(binary, `#!/bin/sh\necho ${marker}\nexec tail -f /dev/null\n`);
+  execFileSync('chmod', ['+x', binary]);
+  return {
+    dir,
+    binary,
+    cleanup: () => {
+      try {
+        rmSync(dir, { recursive: true, force: true });
+      } catch {
+        // Best-effort cleanup.
+      }
+    },
+  };
+}
+
+/**
  * Launch the AI-Lore Electron app. With `root`, the window opens that folder —
  * a project window for an AI-Lore project, the altered window otherwise.
  * Without `root`, the app opens its welcome window.

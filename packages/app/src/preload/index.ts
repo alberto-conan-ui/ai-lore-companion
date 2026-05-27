@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
+import type { EngineEntry } from '@ai-lore-companion/core';
 import {
   type BrowserStatePayload,
   type ChainPayload,
@@ -16,6 +17,14 @@ import {
   type TreeUpdatePayload,
   type WindowInitPayload,
 } from '../shared/ipc.js';
+
+function makeVoidSubscribe(channel: string) {
+  return (handler: () => void) => {
+    const listener = (): void => handler();
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  };
+}
 
 function makeSubscribe<T>(channel: string) {
   return (handler: (payload: T) => void) => {
@@ -42,6 +51,7 @@ const api: CockpitApi = {
   openExternal: (url) => ipcRenderer.invoke(IPC.OpenExternal, url),
   reload: () => ipcRenderer.invoke(IPC.Reload),
   spawnTerminal: () => ipcRenderer.invoke(IPC.TerminalSpawn),
+  spawnTerminalEngine: (arg) => ipcRenderer.invoke(IPC.TerminalSpawnEngine, arg),
   sendTerminalInput: (arg) => ipcRenderer.send(IPC.TerminalInput, arg),
   resizeTerminal: (arg) => ipcRenderer.send(IPC.TerminalResize, arg),
   killTerminal: (id) => ipcRenderer.send(IPC.TerminalKill, id),
@@ -82,6 +92,15 @@ const api: CockpitApi = {
   openDiff: (arg) => ipcRenderer.invoke(IPC.OpenDiff, arg),
   appsSave: (apps) => ipcRenderer.invoke(IPC.AppsSave, apps),
   appsInvoke: (arg) => ipcRenderer.invoke(IPC.AppsInvoke, arg),
+  enginesList: () => ipcRenderer.invoke(IPC.EnginesList),
+  enginesSave: (engines) => ipcRenderer.invoke(IPC.EnginesSave, engines),
+  onEnginesChanged: makeSubscribe<EngineEntry[]>(IPC.EnginesChanged),
+  engineLastGet: () => ipcRenderer.invoke(IPC.EngineLastGet),
+  engineLastSet: (engineId) => ipcRenderer.invoke(IPC.EngineLastSet, engineId),
+  aiPromptsWidthGet: () => ipcRenderer.invoke(IPC.AiPromptsWidthGet),
+  aiPromptsWidthSet: (width) => ipcRenderer.invoke(IPC.AiPromptsWidthSet, width),
+  promptsList: () => ipcRenderer.invoke(IPC.PromptsList),
+  onPromptsChanged: makeVoidSubscribe(IPC.PromptsChanged),
 };
 
 contextBridge.exposeInMainWorld('cockpit', api);
