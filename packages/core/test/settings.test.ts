@@ -6,8 +6,6 @@ import {
   SETTINGS_SCHEMA_VERSION,
   type SettingDef,
   type SettingsFile,
-  WORKSPACE_LAYOUT_SCHEMA_VERSION,
-  type WorkspaceLayout,
   emptySettingsFile,
   isValidValue,
   parseSettingsFile,
@@ -17,7 +15,6 @@ import {
   validateRegistry,
   withApps,
   withIgnores,
-  withLayout,
   withSetting,
 } from '../src/index.js';
 
@@ -203,59 +200,6 @@ test('withSetting preserves the file ignore rules', () => {
   assert.deepEqual(after.ignores, [{ pattern: 'dist', level: 'hidden' }]);
 });
 
-const sampleLayout = (): WorkspaceLayout => ({
-  schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
-  panels: {
-    left: {
-      tabs: [{ id: 'status', kind: 'pane', title: 'Status' }],
-      activeId: 'status',
-    },
-    right: { tabs: [], activeId: '' },
-    bottom: {
-      tabs: [{ id: 'tab-1', kind: 'browser', title: 'Browser 1', baseTitle: 'Browser 1' }],
-      activeId: 'tab-1',
-    },
-  },
-  rightOpen: false,
-  bottomOpen: true,
-  rightWidth: 480,
-  bottomHeight: 300,
-  browserUrls: { 'tab-1': 'https://example.com/' },
-});
-
-test('SETTINGS_REGISTRY carries the workspace.restoreLayout toggle', () => {
-  const def = SETTINGS_REGISTRY.find((d) => d.key === 'workspace.restoreLayout');
-  assert.ok(def, 'expected the workspace.restoreLayout setting');
-  assert.equal(def?.type, 'boolean');
-  assert.equal(def?.tier, 'global');
-  assert.equal(def?.default, true);
-});
-
-test('withLayout attaches a snapshot without mutating the input', () => {
-  const before = emptySettingsFile();
-  const after = withLayout(before, sampleLayout());
-  assert.equal(before.layout, undefined);
-  assert.equal(after.layout?.bottomHeight, 300);
-});
-
-test('withLayout(null) clears an existing snapshot', () => {
-  const before = withLayout(emptySettingsFile(), sampleLayout());
-  const after = withLayout(before, null);
-  assert.equal(after.layout, undefined);
-});
-
-test('withSetting and withIgnores preserve an attached layout', () => {
-  const base = withLayout(emptySettingsFile(), sampleLayout());
-  assert.equal(withSetting(base, 'a.toggle', true).layout?.rightWidth, 480);
-  assert.equal(withIgnores(base, [{ pattern: 'dist', level: 'hidden' }]).layout?.rightWidth, 480);
-});
-
-test('parseSettingsFile round-trips a layout through serialize', () => {
-  const original = withLayout(emptySettingsFile(), sampleLayout());
-  const parsed = parseSettingsFile(serializeSettingsFile(original));
-  assert.deepEqual(parsed.layout, original.layout);
-});
-
 const sampleApp: AppEntry = {
   id: 'vscode',
   label: 'VS Code',
@@ -272,14 +216,10 @@ test('withApps attaches the catalog without mutating the input', () => {
   assert.equal(after.apps?.[0]?.id, 'vscode');
 });
 
-test('withApps replacing the catalog preserves layout + ignores', () => {
-  const base = withIgnores(
-    withLayout(emptySettingsFile(), sampleLayout()),
-    [{ pattern: 'dist', level: 'hidden' }],
-  );
+test('withApps replacing the catalog preserves ignores', () => {
+  const base = withIgnores(emptySettingsFile(), [{ pattern: 'dist', level: 'hidden' }]);
   const after = withApps(base, [sampleApp]);
   assert.equal(after.apps?.length, 1);
-  assert.equal(after.layout?.rightWidth, 480);
   assert.equal(after.ignores.length, 1);
 });
 
@@ -288,90 +228,5 @@ test('parseSettingsFile round-trips Apps through serialize', () => {
   const parsed = parseSettingsFile(serializeSettingsFile(original));
   assert.equal(parsed.apps?.length, 1);
   assert.equal(parsed.apps?.[0]?.label, 'VS Code');
-});
-
-test('parseSettingsFile drops a layout at an unknown version', () => {
-  const text = JSON.stringify({
-    schemaVersion: 1,
-    values: {},
-    ignores: [],
-    layout: { ...sampleLayout(), schemaVersion: 999 },
-  });
-  assert.equal(parseSettingsFile(text).layout, undefined);
-});
-
-test('parseSettingsFile drops a layout with a missing panel', () => {
-  const broken = sampleLayout() as unknown as Record<string, unknown>;
-  (broken.panels as Record<string, unknown>).right = undefined;
-  const text = JSON.stringify({ schemaVersion: 1, values: {}, ignores: [], layout: broken });
-  assert.equal(parseSettingsFile(text).layout, undefined);
-});
-
-test('parseSettingsFile drops malformed tabs but keeps the good ones', () => {
-  const layout: WorkspaceLayout = sampleLayout();
-  // biome-ignore lint/suspicious/noExplicitAny: stuffing a malformed entry on purpose.
-  (layout.panels.left.tabs as any).push({ id: 42, kind: 'pane', title: 'bad' });
-  const text = JSON.stringify({ schemaVersion: 1, values: {}, ignores: [], layout });
-  const parsed = parseSettingsFile(text);
-  const got = parsed.layout;
-  if (!got) throw new Error('expected a layout');
-  assert.equal(got.panels.left.tabs.length, 1);
-  const first = got.panels.left.tabs[0];
-  assert.equal(first?.id, 'status');
-});
-
-test('parseSettingsFile drops non-string browserUrls entries', () => {
-  const layout: WorkspaceLayout = sampleLayout();
-  (layout.browserUrls as Record<string, unknown>)['tab-bad'] = 42 as unknown as string;
-  const text = JSON.stringify({ schemaVersion: 1, values: {}, ignores: [], layout });
-  const parsed = parseSettingsFile(text);
-  assert.deepEqual(parsed.layout?.browserUrls, { 'tab-1': 'https://example.com/' });
-});
-
-test('parseSettingsFile keeps the engine field on an ai-kind tab', () => {
-  const layout: WorkspaceLayout = sampleLayout();
-  layout.panels.right.tabs.push({
-    id: 'tab-ai-1',
-    kind: 'ai',
-    title: 'AI 1',
-    baseTitle: 'AI 1',
-    engine: 'claude',
-  });
-  layout.panels.right.activeId = 'tab-ai-1';
-  const text = JSON.stringify({ schemaVersion: 1, values: {}, ignores: [], layout });
-  const parsed = parseSettingsFile(text);
-  const aiTab = parsed.layout?.panels.right.tabs.find((t) => t.id === 'tab-ai-1');
-  assert.equal(aiTab?.kind, 'ai');
-  assert.equal(aiTab?.engine, 'claude');
-});
-
-test('parseSettingsFile drops a tab with a non-string engine field', () => {
-  const layout: WorkspaceLayout = sampleLayout();
-  // biome-ignore lint/suspicious/noExplicitAny: stuffing a malformed entry on purpose.
-  (layout.panels.right.tabs as any).push({
-    id: 'tab-ai-bad',
-    kind: 'ai',
-    title: 'AI bad',
-    engine: 42,
-  });
-  const text = JSON.stringify({ schemaVersion: 1, values: {}, ignores: [], layout });
-  const parsed = parseSettingsFile(text);
-  assert.equal(
-    parsed.layout?.panels.right.tabs.find((t) => t.id === 'tab-ai-bad'),
-    undefined,
-  );
-});
-
-test('parseSettingsFile preserves a pre-v0.7 tab kind so the renderer can migrate it', () => {
-  // Pre-v0.7 layouts persisted shell tabs as `kind: 'terminal'`. The core parser
-  // keeps that string as-is; the renderer's `tabFromLayout` lifts it to `'shell'`.
-  const layout: WorkspaceLayout = sampleLayout();
-  layout.panels.right.tabs.push({ id: 'tab-old', kind: 'terminal', title: 'Terminal 1' });
-  const text = JSON.stringify({ schemaVersion: 1, values: {}, ignores: [], layout });
-  const parsed = parseSettingsFile(text);
-  assert.equal(
-    parsed.layout?.panels.right.tabs.find((t) => t.id === 'tab-old')?.kind,
-    'terminal',
-  );
 });
 

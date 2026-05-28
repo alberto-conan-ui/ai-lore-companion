@@ -15,7 +15,6 @@ import type {
   SettingValue,
   SettingsFile,
   TreeNode,
-  WorkspaceLayout,
   WriteTier,
 } from '@ai-lore-companion/core';
 
@@ -29,14 +28,6 @@ export type { ChangeScope };
 export function isChainErrorPayload(chain: ChainResult): chain is ChainError {
   return 'error' in chain;
 }
-
-/**
- * Renderer-safe mirror of `WORKSPACE_LAYOUT_SCHEMA_VERSION` from core. The
- * renderer cannot value-import from `@ai-lore-companion/core` (its runtime
- * pulls in chokidar / better-sqlite3); this constant must stay in sync with
- * `packages/core/src/settings/settings.ts`.
- */
-export const WORKSPACE_LAYOUT_SCHEMA_VERSION = 1;
 
 export const IPC = {
   /** Main → renderer: the window's mode — welcome or cockpit — sent once on load. */
@@ -185,8 +176,6 @@ export const IPC = {
   SettingsChanged: 'settings:changed',
   /** Renderer → main: replace a tier's ignore rules; resolves to the fresh snapshot. */
   SettingsSetIgnores: 'settings:set-ignores',
-  /** Renderer → main: replace the per-project workspace-layout snapshot. */
-  SettingsSetLayout: 'settings:set-layout',
   /** Main → renderer: the macOS App menu's Settings… item (or ⌘,) was triggered. */
   SettingsOpen: 'settings:open',
   /** Main → renderer: the user fired `⌘+N` (1..9) — select the Nth cockpit
@@ -483,12 +472,6 @@ export type AppsInvokeResult =
   | { kind: 'failed'; message: string };
 
 /**
- * Replace the per-project workspace-layout snapshot — or clear it with `null`.
- * A global-tier window (welcome / altered) silently ignores this.
- */
-export type SettingsSetLayoutArg = { layout: WorkspaceLayout | null };
-
-/**
  * Renderer → main: spawn a PTY running an AI engine (the AI tab's Start
  * button). The engine binary may be a bare name (resolved on the user's
  * login-shell PATH at spawn) or an absolute path.
@@ -570,8 +553,6 @@ export type CockpitApi = {
   settingsGet: () => Promise<SettingsSnapshot>;
   settingsSet: (arg: SettingsSetArg) => Promise<SettingsSnapshot>;
   settingsSetIgnores: (arg: SettingsSetIgnoresArg) => Promise<SettingsSnapshot>;
-  /** Replace the per-project workspace-layout snapshot — silently no-ops on non-project windows. */
-  settingsSetLayout: (arg: SettingsSetLayoutArg) => Promise<void>;
   onSettingsChanged: (handler: (snapshot: SettingsSnapshot) => void) => Unsubscribe;
   /** Subscribe to the macOS App menu's Settings… item firing (also `⌘,`). */
   onSettingsOpen: (handler: () => void) => Unsubscribe;

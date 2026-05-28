@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -72,7 +72,6 @@ import {
   type SetRegisterArg,
   type SettingsSetArg,
   type SettingsSetIgnoresArg,
-  type SettingsSetLayoutArg,
   type SettingsSnapshot,
   type Shortcut,
   type ShortcutInput,
@@ -114,7 +113,6 @@ import {
   saveGlobalIgnores,
   saveGlobalSetting,
   saveProjectIgnores,
-  saveProjectLayout,
   saveProjectSetting,
 } from './settings.js';
 import { launchApp, launchUrl, loadShortcuts, saveShortcuts, withIcons } from './shortcuts.js';
@@ -632,24 +630,30 @@ function buildTreeInitPayload(
   hidden: readonly string[],
 ): import('../shared/ipc.js').TreeInitPayload {
   // v0.8 Phase C — in publishing shape the Payload tree roots at
-  // `<project>/payload/` (the workshop) rather than the project root. The
-  // methodology pairs `payload/` (workshop) with the deliverable named
-  // by `workspace.yaml`'s `publish:` block (typically `publish/`). The
-  // git repo for the Payload remains the project-root repo, so drift
-  // events keep firing — only the tree the Payload pane displays narrows.
+  // `<project>/payload/` (the workshop) rather than the project root.
   const payloadRoot =
     chain.shape === 'publishing' ? join(chain.root, 'payload') : chain.root;
+  // The Lore tree carries two first-class children of `<lore>/`: `memory/`
+  // (always) and `references/` (when present). A synthetic root at
+  // `chain.lorePath` lets pane sub-roots walk to either side — `memory/...`
+  // for the Status / Memory panes' synthetic children, and `references` for
+  // the v0.5 Phase D references registry surfaced inside the Status pane.
+  const memoryNode = readTreeNode(chain, join(chain.lorePath, 'memory'), 'lore', hidden);
+  const referencesPath = join(chain.lorePath, 'references');
+  const referencesNode = existsSync(referencesPath)
+    ? readTreeNode(chain, referencesPath, 'lore', hidden)
+    : null;
+  const loreTree: import('@ai-lore-companion/core').TreeNode = {
+    name: 'lore',
+    path: chain.lorePath,
+    isDir: true,
+    children: referencesNode ? [memoryNode, referencesNode] : [memoryNode],
+  };
   const out: import('../shared/ipc.js').TreeInitPayload = {
     payload: readTreeNode(chain, payloadRoot, 'payload', hidden),
-    // The Lore pane is rooted at memory/ — process/ and upstream/ sit
-    // outside memory/, so the pane never lists them.
-    lore: readTreeNode(chain, join(chain.lorePath, 'memory'), 'lore', hidden),
+    lore: loreTree,
   };
   if (chain.shape === 'publishing' && chain.publish) {
-    // The publish/ folder is named by `workspace.yaml`'s `publish:` block
-    // (typically `./publish`). `readTreeNode` reads one level deep; the
-    // 'lore' scope sentinel means no Lore-folder hides apply (correct,
-    // publish/ doesn't contain the Lore folder).
     const publishRoot = join(chain.root, chain.publish.path);
     out.publish = readTreeNode(chain, publishRoot, 'lore', hidden);
   }
@@ -876,13 +880,6 @@ function registerIpcHandlers(): void {
     }
     broadcastSettings();
     return settingsSnapshot(ctx);
-  });
-  // Workspace-layout writes do not broadcast — the snapshot is a window's own
-  // capture of its own arrangement; no other window needs to react.
-  ipcMain.handle(IPC.SettingsSetLayout, (event, arg: SettingsSetLayoutArg): void => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) return;
-    saveProjectLayout(userDataDir, ctx.root, arg.layout);
   });
   ipcMain.handle(IPC.SetRegister, (event, arg: SetRegisterArg): void => {
     const ctx = contextFor(event);

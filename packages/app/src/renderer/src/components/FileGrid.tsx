@@ -208,9 +208,15 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
       },
       {
         // Kebab affordance — opens the same context menu the right-click does.
+        // Pinned right so it stays visible regardless of grid width — without
+        // this, AG-Grid's column virtualisation drops the column DOM when the
+        // grid is narrower than the sum of its column widths (e.g. when the
+        // leftRail is at its default 400px width and the grid only gets
+        // ~150px after the tree column).
         colId: 'kebab',
         headerName: '',
         width: 36,
+        pinned: 'right',
         sortable: false,
         filter: false,
         suppressMovable: true,

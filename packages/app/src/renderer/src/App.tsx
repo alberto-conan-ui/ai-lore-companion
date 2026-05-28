@@ -1,4 +1,4 @@
-import type { ChangeScope, EngineEntry, LayoutTab, WorkspaceLayout } from '@ai-lore-companion/core';
+import type { ChangeScope, EngineEntry } from '@ai-lore-companion/core';
 import {
   type JSX,
   useCallback,
@@ -10,26 +10,16 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../shared/ipc.js';
-import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
+import { isChainErrorPayload } from '../../shared/ipc.js';
 import type { AlteredReason } from '../../shared/ipc.js';
 import { AiTab } from './components/AiTab.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BrowserTab } from './components/BrowserTab.js';
 import { PublishPane } from './components/PublishPane.js';
-import {
-  DOCK_DEFAULT_BOTTOM,
-  DOCK_DEFAULT_RIGHT,
-  DOCK_MIN_SIZE,
-  DockPanel,
-} from './components/DockPanel.js';
+import { DockPanel } from './components/DockPanel.js';
 import { GlobalSearch, type GlobalSearchHandle } from './components/GlobalSearch.js';
 import { Pane, type SubRoot, baseDirsOf, entriesInSubRoot } from './components/Pane.js';
-import {
-  type PanelId,
-  type TabKind,
-  TabbedPanel,
-  type WorkspaceTab,
-} from './components/TabbedPanel.js';
+import { type PanelId, TabbedPanel, type WorkspaceTab } from './components/TabbedPanel.js';
 import { TerminalTab } from './components/TerminalTab.js';
 import { TrackerStrip } from './components/TrackerStrip.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
@@ -63,32 +53,22 @@ function panesForShape(shape: 'default' | 'publishing'): WorkspaceTab[] {
   ];
 }
 
-const PANEL_IDS = ['left', 'right', 'bottom'] as const;
+const PANEL_IDS = [
+  'leftRail',
+  'centre',
+  'right',
+  'leftRailBottom',
+  'centreBottom',
+  'rightBottom',
+] as const;
 
-const TAB_KINDS = new Set<TabKind>(['pane', 'shell', 'ai', 'browser']);
+/** First-launch default widths/heights, in px. leftRail lands near ~33% on a
+ *  1200-1400px window; centre flexes; right is closed by default and opens to
+ *  this width. */
+const DEFAULT_LEFT_RAIL_WIDTH = 400;
+const DEFAULT_RIGHT_WIDTH = 480;
+const DEFAULT_BOTTOM_HEIGHT = 240;
 
-/** Convert a runtime `WorkspaceTab` into its persisted form — drops live state. */
-function tabToLayout(tab: WorkspaceTab): LayoutTab {
-  const out: LayoutTab = { id: tab.id, kind: tab.kind, title: tab.title };
-  if (tab.baseTitle !== undefined) out.baseTitle = tab.baseTitle;
-  if (tab.manualTitle !== undefined) out.manualTitle = tab.manualTitle;
-  if (tab.engine !== undefined) out.engine = tab.engine;
-  return out;
-}
-
-/** Lift a persisted `LayoutTab` into a runtime `WorkspaceTab`, or drop it if its kind is unknown. */
-function tabFromLayout(t: LayoutTab): WorkspaceTab | null {
-  // Pre-v0.7 layouts persisted `kind: 'terminal'`; lift those into 'shell'.
-  const kind = t.kind === 'terminal' ? 'shell' : (t.kind as TabKind);
-  if (!TAB_KINDS.has(kind)) return null;
-  const out: WorkspaceTab = { id: t.id, kind, title: t.title };
-  if (t.baseTitle !== undefined) out.baseTitle = t.baseTitle;
-  if (t.manualTitle !== undefined) out.manualTitle = t.manualTitle;
-  if (t.engine !== undefined) out.engine = t.engine;
-  // Shell tabs always restore as idle — their PTY is fresh.
-  if (out.kind === 'shell') out.status = 'idle';
-  return out;
-}
 
 /** What this window is — set once by main via `onWindowInit`. */
 type WindowMode = 'loading' | 'welcome' | 'cockpit' | 'altered';
@@ -121,20 +101,32 @@ export function App(): JSX.Element {
   const [alteredFolder, setAlteredFolder] = useState<string>('');
   const [alteredReason, setAlteredReason] = useState<AlteredReason>({ kind: 'not-ai-lore' });
   const [panels, setPanels] = useState<Record<PanelId, Panel>>({
-    // Seeded with the default-shape pinned tabs. When the first chain push
-    // arrives and reports `shape: 'publishing'`, an effect below reconciles
-    // the left strip to include the Publish pane between Payload and Memory.
-    left: { tabs: panesForShape('default'), activeId: 'status' },
+    // v0.9: leftRail is seeded with the pinned panes; the other five panels
+    // are empty workspaces. When the first chain push reports
+    // `shape: 'publishing'`, an effect below reconciles leftRail to include
+    // the Publish pane.
+    leftRail: { tabs: panesForShape('default'), activeId: 'status' },
+    centre: { tabs: [], activeId: '' },
     right: { tabs: [], activeId: '' },
-    bottom: { tabs: [], activeId: '' },
+    leftRailBottom: { tabs: [], activeId: '' },
+    centreBottom: { tabs: [], activeId: '' },
+    rightBottom: { tabs: [], activeId: '' },
   });
+  // leftRail and centre are unconditionally visible. The right column is
+  // toggleable — closed by default; the chevron sits at the window's right
+  // edge until the user opens it.
   const [rightOpen, setRightOpen] = useState(false);
-  const [bottomOpen, setBottomOpen] = useState(false);
-  const [rightSize, setRightSize] = useState(DOCK_DEFAULT_RIGHT);
-  const [bottomSize, setBottomSize] = useState(DOCK_DEFAULT_BOTTOM);
-  // Per-tab URLs the restored layout seeded. Consumed by `BrowserTab` on
-  // mount to override the browser companion's default home page.
-  const [browserInitialUrls, setBrowserInitialUrls] = useState<Record<string, string>>({});
+  // Per-column bottom-dock visibility, all closed by default.
+  const [leftRailBottomOpen, setLeftRailBottomOpen] = useState(false);
+  const [centreBottomOpen, setCentreBottomOpen] = useState(false);
+  const [rightBottomOpen, setRightBottomOpen] = useState(false);
+  // leftRail's fixed width; right's width when open. Centre flexes.
+  const [leftRailWidth, setLeftRailWidth] = useState(DEFAULT_LEFT_RAIL_WIDTH);
+  const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
+  // Per-column bottom-dock heights.
+  const [leftRailBottomHeight, setLeftRailBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
+  const [centreBottomHeight, setCentreBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
+  const [rightBottomHeight, setRightBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
   // Per-tab one-shot commands a terminal shortcut seeded. Consumed by
   // `TerminalTab` on mount; written to the PTY once the shell is up.
   const [terminalInitialCommands, setTerminalInitialCommands] = useState<Record<string, string>>(
@@ -176,9 +168,12 @@ export function App(): JSX.Element {
     [engines],
   );
   const [slots, setSlots] = useState<Record<PanelId, HTMLDivElement | null>>({
-    left: null,
+    leftRail: null,
+    centre: null,
     right: null,
-    bottom: null,
+    leftRailBottom: null,
+    centreBottom: null,
+    rightBottom: null,
   });
   // A global-search pick: which pane should reveal which file. The token makes
   // picking the same file twice re-trigger the reveal.
@@ -260,14 +255,14 @@ export function App(): JSX.Element {
     setPanels((prev) => {
       const expected = panesForShape(shape);
       const expectedIds = expected.map((t) => t.id);
-      const leftTabs = prev.left.tabs;
+      const railTabs = prev.leftRail.tabs;
       // Existing pane tabs that survive the shape transition.
-      const surviving = leftTabs.filter(
+      const surviving = railTabs.filter(
         (t) => t.kind !== 'pane' || expectedIds.includes(t.id),
       );
       // Pane tabs in the new shape that aren't on the strip yet.
-      const missing = expected.filter((t) => !leftTabs.some((x) => x.id === t.id));
-      if (missing.length === 0 && surviving.length === leftTabs.length) return prev;
+      const missing = expected.filter((t) => !railTabs.some((x) => x.id === t.id));
+      if (missing.length === 0 && surviving.length === railTabs.length) return prev;
       // Splice the missing tabs into their methodology-defined order; keep
       // non-pane tabs (shell / AI / browser) at the end where they sit today.
       const paneSurvivors = surviving.filter((t) => t.kind === 'pane');
@@ -277,10 +272,10 @@ export function App(): JSX.Element {
         return carry ?? t;
       });
       const nextTabs = [...orderedPane, ...nonPane];
-      const activeId = nextTabs.some((t) => t.id === prev.left.activeId)
-        ? prev.left.activeId
+      const activeId = nextTabs.some((t) => t.id === prev.leftRail.activeId)
+        ? prev.leftRail.activeId
         : nextTabs[0]?.id ?? '';
-      return { ...prev, left: { tabs: nextTabs, activeId } };
+      return { ...prev, leftRail: { tabs: nextTabs, activeId } };
     });
   }, [shape]);
 
@@ -380,10 +375,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     const off = window.cockpit.onSelectCockpitTab((n) => {
       setPanels((prev) => {
-        const left = prev.left;
-        const target = left.tabs[n - 1];
+        const rail = prev.leftRail;
+        const target = rail.tabs[n - 1];
         if (!target) return prev;
-        return { ...prev, left: { ...left, activeId: target.id } };
+        return { ...prev, leftRail: { ...rail, activeId: target.id } };
       });
       // Defer focus until after the tab switch has rendered.
       requestAnimationFrame(() => {
@@ -408,102 +403,71 @@ export function App(): JSX.Element {
     return off;
   }, []);
 
-  // Layout restore is disabled: every launch starts with the default layout
-  // (pinned panes in the left, both docks closed at default size). The
-  // `captureLayout` write path below still snapshots state to disk so the
-  // restore can be re-enabled in one place when the UX is ready for it.
-
-  // Whether this window currently has OS focus — only the focused window
-  // writes layout. The blurred window keeps its in-memory state but stops
-  // writing, so two windows on the same project do not race their writes.
-  const [hasFocus, setHasFocus] = useState<boolean>(() =>
-    typeof document === 'undefined' ? true : document.hasFocus(),
-  );
-  useEffect(() => {
-    const onFocus = (): void => setHasFocus(true);
-    const onBlur = (): void => setHasFocus(false);
-    window.addEventListener('focus', onFocus);
-    window.addEventListener('blur', onBlur);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      window.removeEventListener('blur', onBlur);
-    };
-  }, []);
-
-  /** Snapshot the current layout — asks main for each browser tab's URL. */
-  const captureLayout = useCallback(async (): Promise<WorkspaceLayout> => {
-    const browserUrls: Record<string, string> = {};
-    for (const panelId of PANEL_IDS) {
-      for (const tab of panels[panelId].tabs) {
-        if (tab.kind !== 'browser') continue;
-        const url = await window.cockpit.browserGetUrl(tab.id);
-        if (typeof url === 'string' && url.length > 0) browserUrls[tab.id] = url;
-      }
+  /** Whether a panel is currently visible. leftRail and centre are always on;
+   *  the right column and the three bottoms carry explicit open flags. */
+  const dockOpen = (id: PanelId): boolean => {
+    switch (id) {
+      case 'leftRail':
+      case 'centre':
+        return true;
+      case 'right':
+        return rightOpen;
+      case 'leftRailBottom':
+        return leftRailBottomOpen;
+      case 'centreBottom':
+        return centreBottomOpen;
+      case 'rightBottom':
+        return rightBottomOpen;
     }
-    return {
-      schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
-      panels: {
-        left: { tabs: panels.left.tabs.map(tabToLayout), activeId: panels.left.activeId },
-        right: { tabs: panels.right.tabs.map(tabToLayout), activeId: panels.right.activeId },
-        bottom: { tabs: panels.bottom.tabs.map(tabToLayout), activeId: panels.bottom.activeId },
-      },
-      rightOpen,
-      bottomOpen,
-      rightWidth: rightSize,
-      bottomHeight: bottomSize,
-      browserUrls,
-    };
-  }, [panels, rightOpen, bottomOpen, rightSize, bottomSize]);
-
-  // Capture the layout on changes, debounced to 300ms, and only from the
-  // focused window. A final flush goes out on `beforeunload`. Skipped until a
-  // project context is in place — pre-cockpit state is not a real layout.
-  useEffect(() => {
-    if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
-    if (!hasFocus) return;
-    const handle = window.setTimeout(() => {
-      void captureLayout().then((layout) => {
-        void window.cockpit.settingsSetLayout({ layout });
-      });
-    }, 300);
-    return () => window.clearTimeout(handle);
-  }, [mode, chain, hasFocus, captureLayout]);
-
-  // Final flush on window close — fire-and-forget; main records what reaches it.
-  useEffect(() => {
-    if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
-    const onUnload = (): void => {
-      void captureLayout().then((layout) => {
-        void window.cockpit.settingsSetLayout({ layout });
-      });
-    };
-    window.addEventListener('beforeunload', onUnload);
-    return () => window.removeEventListener('beforeunload', onUnload);
-  }, [mode, chain, captureLayout]);
-
-  const dockOpen = (id: PanelId): boolean =>
-    id === 'left' || (id === 'right' ? rightOpen : bottomOpen);
+  };
 
   const setDockOpen = (id: PanelId, open: boolean): void => {
-    if (id === 'right') setRightOpen(open);
-    else if (id === 'bottom') setBottomOpen(open);
+    switch (id) {
+      case 'leftRail':
+      case 'centre':
+        return; // always open
+      case 'right':
+        setRightOpen(open);
+        return;
+      case 'leftRailBottom':
+        setLeftRailBottomOpen(open);
+        return;
+      case 'centreBottom':
+        setCentreBottomOpen(open);
+        return;
+      case 'rightBottom':
+        setRightBottomOpen(open);
+        return;
+    }
   };
 
   // Stable ref callbacks — a fresh callback each render would make React
   // detach/reattach the slot every render and loop on setState.
-  const setLeftSlot = useCallback((el: HTMLDivElement | null) => {
-    setSlots((s) => (s.left === el ? s : { ...s, left: el }));
+  const setLeftRailSlot = useCallback((el: HTMLDivElement | null) => {
+    setSlots((s) => (s.leftRail === el ? s : { ...s, leftRail: el }));
+  }, []);
+  const setCentreSlot = useCallback((el: HTMLDivElement | null) => {
+    setSlots((s) => (s.centre === el ? s : { ...s, centre: el }));
   }, []);
   const setRightSlot = useCallback((el: HTMLDivElement | null) => {
     setSlots((s) => (s.right === el ? s : { ...s, right: el }));
   }, []);
-  const setBottomSlot = useCallback((el: HTMLDivElement | null) => {
-    setSlots((s) => (s.bottom === el ? s : { ...s, bottom: el }));
+  const setLeftRailBottomSlot = useCallback((el: HTMLDivElement | null) => {
+    setSlots((s) => (s.leftRailBottom === el ? s : { ...s, leftRailBottom: el }));
+  }, []);
+  const setCentreBottomSlot = useCallback((el: HTMLDivElement | null) => {
+    setSlots((s) => (s.centreBottom === el ? s : { ...s, centreBottom: el }));
+  }, []);
+  const setRightBottomSlot = useCallback((el: HTMLDivElement | null) => {
+    setSlots((s) => (s.rightBottom === el ? s : { ...s, rightBottom: el }));
   }, []);
   const slotRefs: Record<PanelId, (el: HTMLDivElement | null) => void> = {
-    left: setLeftSlot,
+    leftRail: setLeftRailSlot,
+    centre: setCentreSlot,
     right: setRightSlot,
-    bottom: setBottomSlot,
+    leftRailBottom: setLeftRailBottomSlot,
+    centreBottom: setCentreBottomSlot,
+    rightBottom: setRightBottomSlot,
   };
 
   const addTab = (panelId: PanelId, kind: 'shell' | 'browser'): void => {
@@ -615,26 +579,13 @@ export function App(): JSX.Element {
         };
         return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
       });
-      // Mirror `setDockOpen` inline so the callback has no unstable deps.
+      // Inline the open-on-create mirror of `setDockOpen` — useState setters
+      // are stable, so the surrounding `useCallback([])` is still honest.
+      // leftRail and centre are always open — no toggle needed.
       if (panelId === 'right') setRightOpen(true);
-      else if (panelId === 'bottom') setBottomOpen(true);
-    },
-    [],
-  );
-
-  /** Create a browser tab on `panelId` from a URL tab shortcut — titled after
-   *  the shortcut, pre-navigated to `url`. */
-  const createBrowserShortcutTab = useCallback(
-    (panelId: PanelId, url: string, label: string): void => {
-      const id = crypto.randomUUID();
-      setBrowserInitialUrls((prev) => ({ ...prev, [id]: url }));
-      setPanels((p) => {
-        const tab: WorkspaceTab = { id, kind: 'browser', title: label, baseTitle: label };
-        return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
-      });
-      // Mirror `setDockOpen` inline so the callback has no unstable deps.
-      if (panelId === 'right') setRightOpen(true);
-      else if (panelId === 'bottom') setBottomOpen(true);
+      else if (panelId === 'leftRailBottom') setLeftRailBottomOpen(true);
+      else if (panelId === 'centreBottom') setCentreBottomOpen(true);
+      else if (panelId === 'rightBottom') setRightBottomOpen(true);
     },
     [],
   );
@@ -643,9 +594,11 @@ export function App(): JSX.Element {
   // since removed) sent a payload via main. The tab-strip shortcuts (this
   // session) handle terminal targets directly in the renderer, so this
   // subscription is dormant — kept defensively for any future main-side trigger.
+  // Default target is `rightBottom` (closest v0.9 analogue of the old full-
+  // width bottom dock).
   useEffect(() => {
     return window.cockpit.onOpenTerminalShortcut((payload) => {
-      createTerminalShortcutTab('bottom', payload.command, payload.label);
+      createTerminalShortcutTab('rightBottom', payload.command, payload.label);
     });
   }, [createTerminalShortcutTab]);
 
@@ -720,7 +673,7 @@ export function App(): JSX.Element {
       }
       if (!best) return;
       const picked = best.spec;
-      setPanels((p) => ({ ...p, left: { ...p.left, activeId: picked.id } }));
+      setPanels((p) => ({ ...p, leftRail: { ...p.leftRail, activeId: picked.id } }));
       setRevealTarget((prev) => ({ paneId: picked.id, path, token: (prev?.token ?? 0) + 1 }));
     },
     [paneSpecs],
@@ -757,7 +710,7 @@ export function App(): JSX.Element {
         p[panelId].activeId === tabId ? (tabs[tabs.length - 1]?.id ?? '') : p[panelId].activeId;
       return { ...p, [panelId]: { tabs, activeId } };
     });
-    if (panelId !== 'left' && panel.tabs.length === 1) setDockOpen(panelId, false);
+    if (panelId !== 'leftRail' && panel.tabs.length === 1) setDockOpen(panelId, false);
   };
 
   /** Move a tab between panels (or reorder within one). Pinned panes stay put. */
@@ -785,7 +738,7 @@ export function App(): JSX.Element {
     });
     if (fromPanel !== toPanel) {
       setDockOpen(toPanel, true);
-      if (fromPanel !== 'left' && fromTabsBefore.length === 1) setDockOpen(fromPanel, false);
+      if (fromPanel !== 'leftRail' && fromTabsBefore.length === 1) setDockOpen(fromPanel, false);
     }
   };
 
@@ -803,16 +756,36 @@ export function App(): JSX.Element {
   // (different per panel) is what keeps `claude` and friends alive.
   const tabPlacements = useMemo(() => {
     const out: { tab: WorkspaceTab; panelId: PanelId; visible: boolean }[] = [];
+    const openOf = (id: PanelId): boolean => {
+      switch (id) {
+        case 'leftRail':
+        case 'centre':
+          return true;
+        case 'right':
+          return rightOpen;
+        case 'leftRailBottom':
+          return leftRailBottomOpen;
+        case 'centreBottom':
+          return centreBottomOpen;
+        case 'rightBottom':
+          return rightBottomOpen;
+      }
+    };
     for (const panelId of PANEL_IDS) {
       const p = panels[panelId];
       for (const tab of p.tabs) {
         const active = p.activeId === tab.id;
-        const open = panelId === 'left' || (panelId === 'right' ? rightOpen : bottomOpen);
-        out.push({ tab, panelId, visible: active && open });
+        out.push({ tab, panelId, visible: active && openOf(panelId) });
       }
     }
     return out;
-  }, [panels, rightOpen, bottomOpen]);
+  }, [
+    panels,
+    rightOpen,
+    leftRailBottomOpen,
+    centreBottomOpen,
+    rightBottomOpen,
+  ]);
 
   const tabHostsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const getOrCreateTabHost = (tabId: string): HTMLDivElement => {
@@ -919,11 +892,8 @@ export function App(): JSX.Element {
       onRenameTab={(id, name) => renameTab(panelId, id, name)}
       onMoveTab={moveTab}
       slotRef={slotRefs[panelId]}
-      tabDrift={panelId === 'left' ? tabDrift : undefined}
-      tabShortcuts={tabShortcuts}
-      onCreateBrowserTab={(url, label) => createBrowserShortcutTab(panelId, url, label)}
-      onCreateTerminalTab={(command, label) => createTerminalShortcutTab(panelId, command, label)}
-      onLaunchUrlExternal={(id) => window.cockpit.shortcutsRun(id)}
+      tabDrift={panelId === 'leftRail' ? tabDrift : undefined}
+      locked={panelId === 'leftRail'}
     />
   );
 
@@ -956,6 +926,7 @@ export function App(): JSX.Element {
           tabId={tab.id}
           onStatus={handleTerminalStatus}
           initialCommand={terminalInitialCommands[tab.id]}
+          tabShortcuts={tabShortcuts}
         />
       );
     } else if (tab.kind === 'ai') {
@@ -972,12 +943,19 @@ export function App(): JSX.Element {
       );
     } else {
       body = (
-        <BrowserTab tabId={tab.id} visible={visible} initialUrl={browserInitialUrls[tab.id]} />
+        <BrowserTab
+          tabId={tab.id}
+          visible={visible}
+          tabShortcuts={tabShortcuts}
+          onLaunchUrlExternal={(id) => window.cockpit.shortcutsRun(id)}
+        />
       );
     }
     return createPortal(body, host, tab.id);
   });
 
+  const accent = accentColor(projectHue);
+  const tint = accentTint(projectHue);
   return (
     <div style={cockpitShell}>
       <TrackerStrip
@@ -991,31 +969,170 @@ export function App(): JSX.Element {
         }
       />
       <div style={panelsRow}>
-        <div style={appColumn}>{panel('left')}</div>
+        <Column
+          name="leftRail"
+          width={leftRailWidth}
+          flex={false}
+          top={panel('leftRail')}
+          bottom={panel('leftRailBottom')}
+          bottomOpen={leftRailBottomOpen}
+          onBottomToggle={setLeftRailBottomOpen}
+          bottomHeight={leftRailBottomHeight}
+          onBottomResize={setLeftRailBottomHeight}
+          accent={accent}
+          tint={tint}
+        />
+        {/* Resizable accent-coloured divider between leftRail and centre.
+         *  Drag horizontally to adjust leftRail's width; the value persists
+         *  via the captureLayout effect. */}
+        <RailSash
+          size={leftRailWidth}
+          onResize={setLeftRailWidth}
+          accent={accent}
+        />
+        <Column
+          name="centre"
+          flex
+          top={panel('centre')}
+          bottom={panel('centreBottom')}
+          bottomOpen={centreBottomOpen}
+          onBottomToggle={setCentreBottomOpen}
+          bottomHeight={centreBottomHeight}
+          onBottomResize={setCentreBottomHeight}
+          accent={accent}
+          tint={tint}
+        />
+        {/*
+          The toggleable third column (`right`) lives inside a DockPanel
+          side="right" so its chevron handle behaves exactly like the existing
+          right/bottom docks — click to toggle, drag to resize. Closed by
+          default; the chevron sits at the window's right edge until opened.
+         */}
         <DockPanel
           side="right"
           open={rightOpen}
           onToggle={setRightOpen}
-          size={rightSize}
-          onResize={setRightSize}
-          accent={accentColor(projectHue)}
-          tint={accentTint(projectHue)}
+          size={rightWidth}
+          onResize={setRightWidth}
+          accent={accent}
+          tint={tint}
         >
-          {panel('right')}
+          <Column
+            name="right"
+            flex
+            top={panel('right')}
+            bottom={panel('rightBottom')}
+            bottomOpen={rightBottomOpen}
+            onBottomToggle={setRightBottomOpen}
+            bottomHeight={rightBottomHeight}
+            onBottomResize={setRightBottomHeight}
+            accent={accent}
+            tint={tint}
+          />
         </DockPanel>
       </div>
+      {contentPortals}
+    </div>
+  );
+}
+
+/** A 4-px-wide draggable sash between leftRail and centre — the 1-px accent
+ *  line sits over a hit area thick enough to grab. Drag adjusts the leftRail
+ *  width; the value clamps so the rail can't crush the centre. */
+function RailSash({
+  size,
+  onResize,
+  accent,
+}: {
+  size: number;
+  onResize: (size: number) => void;
+  accent: string;
+}): JSX.Element {
+  const onMouseDown = (e: React.MouseEvent): void => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startSize = size;
+    const onMove = (ev: MouseEvent): void => {
+      const next = startSize + (ev.clientX - startX);
+      onResize(Math.max(200, Math.min(window.innerWidth * 0.6, next)));
+    };
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+  return (
+    <div
+      style={{ ...railSashHit }}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize left rail"
+      onMouseDown={onMouseDown}
+      data-testid="left-rail-sash"
+    >
+      <div style={{ ...railDivider, background: accent }} />
+    </div>
+  );
+}
+
+/** A workspace column — its top TabbedPanel, plus an optional column-width
+ *  bottom dock under it. The bottom uses today's `DockPanel` (which knows how
+ *  to be column-width thanks to its parent's flex constraints). When `flex`
+ *  is true the column flexes to fill remaining space; otherwise it carries
+ *  the supplied fixed `width`. */
+function Column({
+  width,
+  flex,
+  top,
+  bottom,
+  bottomOpen,
+  onBottomToggle,
+  bottomHeight,
+  onBottomResize,
+  accent,
+  tint,
+  name,
+}: {
+  width?: number;
+  flex: boolean;
+  top: JSX.Element;
+  bottom: JSX.Element;
+  bottomOpen: boolean;
+  onBottomToggle: (open: boolean) => void;
+  bottomHeight: number;
+  onBottomResize: (h: number) => void;
+  accent: string;
+  tint: string;
+  /** A short identifier for test scoping — surfaces as `data-column-id`. */
+  name: string;
+}): JSX.Element {
+  const style: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    minHeight: 0,
+    // Any wide child (e.g. ChangesPanel's baseline dropdown carrying a long
+    // commit subject) must clip inside the column rather than bleeding into
+    // neighbouring columns.
+    overflow: 'hidden',
+    ...(flex ? { flex: 1 } : { width, flexShrink: 0 }),
+  };
+  return (
+    <div style={style} data-column-id={name}>
+      <div style={columnTopWrap}>{top}</div>
       <DockPanel
         side="bottom"
         open={bottomOpen}
-        onToggle={setBottomOpen}
-        size={bottomSize}
-        onResize={setBottomSize}
-        accent={accentColor(projectHue)}
-        tint={accentTint(projectHue)}
+        onToggle={onBottomToggle}
+        size={bottomHeight}
+        onResize={onBottomResize}
+        accent={accent}
+        tint={tint}
       >
-        {panel('bottom')}
+        {bottom}
       </DockPanel>
-      {contentPortals}
     </div>
   );
 }
@@ -1043,7 +1160,7 @@ const cockpitShell: React.CSSProperties = {
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
 };
 
-/** The panel row beneath the header: the left panel plus the right dock. */
+/** The panel row beneath the header: the three workspace columns side by side. */
 const panelsRow: React.CSSProperties = {
   display: 'flex',
   flex: 1,
@@ -1051,7 +1168,24 @@ const panelsRow: React.CSSProperties = {
   minWidth: 0,
 };
 
-const appColumn: React.CSSProperties = {
+const railSashHit: React.CSSProperties = {
+  flexShrink: 0,
+  // The hit area is wider than the visible line so the user can grab it
+  // without pixel-precise aim. Centred 1-px accent line is rendered inside.
+  width: '5px',
+  height: '100%',
+  cursor: 'col-resize',
+  display: 'flex',
+  justifyContent: 'center',
+  alignItems: 'stretch',
+};
+
+const railDivider: React.CSSProperties = {
+  flexShrink: 0,
+  width: '1px',
+};
+
+const columnTopWrap: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   flex: 1,

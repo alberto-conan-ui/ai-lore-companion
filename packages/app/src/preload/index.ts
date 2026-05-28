@@ -82,7 +82,6 @@ const api: CockpitApi = {
   settingsGet: () => ipcRenderer.invoke(IPC.SettingsGet),
   settingsSet: (arg) => ipcRenderer.invoke(IPC.SettingsSet, arg),
   settingsSetIgnores: (arg) => ipcRenderer.invoke(IPC.SettingsSetIgnores, arg),
-  settingsSetLayout: (arg) => ipcRenderer.invoke(IPC.SettingsSetLayout, arg),
   onSettingsChanged: makeSubscribe<SettingsSnapshot>(IPC.SettingsChanged),
   onSettingsOpen: makeSubscribe<void>(IPC.SettingsOpen),
   onSelectCockpitTab: makeSubscribe<number>(IPC.SelectCockpitTab),

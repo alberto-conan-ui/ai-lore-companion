@@ -4,6 +4,7 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { type JSX, useCallback, useEffect, useRef, useState } from 'react';
 import type { PromptEntry, TerminalForegroundStatus } from '../../../shared/ipc.js';
+import { SidebarTab } from './SidebarTab.js';
 
 const TERMINAL_THEME = {
   background: '#0a0f17',
@@ -218,10 +219,9 @@ function EmptyState({
 // --- Running state --------------------------------------------------------
 
 /**
- * The two-column running view (Phase C): scrollable prompts column + draggable
- * resizer + xterm PTY. The prompts column width is loaded from the per-project
- * store on mount and persisted on drag-end; column splits survive engine
- * restarts because the width lives outside the AI-tab body's lifecycle.
+ * The two-column running view: prompts catalog on the left, xterm PTY on the
+ * right. Built on the generic `SidebarTab` shell, which provides the
+ * resize/collapse/×-close mechanics shared with the Shell tab.
  */
 function RunningSplit({
   active,
@@ -234,85 +234,42 @@ function RunningSplit({
   ptyId: string;
   onStatus: (tabId: string, status: TerminalForegroundStatus, command: string) => void;
 }): JSX.Element {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [columnWidth, setColumnWidth] = useState<number>(PROMPTS_DEFAULT_WIDTH);
-  // A handle the PTY publishes so the prompts column can refocus it after a
-  // click — so the user can keep typing without a trip back to the terminal.
+  // The PTY publishes a focus handle so clicking a verb in the prompts
+  // column hands focus back to the terminal — no extra trip to type the
+  // continuation.
   const focusPtyRef = useRef<() => void>(() => {});
   const focusPty = useCallback((): void => focusPtyRef.current(), []);
-
-  useEffect(() => {
-    void window.cockpit.aiPromptsWidthGet().then((w) => {
-      if (w !== null && Number.isFinite(w) && w >= PROMPTS_MIN_WIDTH) {
-        setColumnWidth(w);
-      }
-    });
-  }, []);
-
-  /** Clamp a candidate width against (a) the prompts-column floor and (b) the
-   *  PTY's minimum, computed live from the container's measured width. */
-  const clamp = useCallback((candidate: number): number => {
-    const container = containerRef.current;
-    const max = container ? container.clientWidth - PTY_MIN_WIDTH : candidate;
-    return Math.max(PROMPTS_MIN_WIDTH, Math.min(candidate, max));
-  }, []);
-
-  const handleResizeStart = (e: React.MouseEvent): void => {
-    e.preventDefault();
-    const container = containerRef.current;
-    if (!container) return;
-    const containerLeft = container.getBoundingClientRect().left;
-    const onMove = (ev: MouseEvent): void => {
-      setColumnWidth(clamp(ev.clientX - containerLeft));
-    };
-    const onUp = (): void => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      // Persist on drag-end — reading the latest state via the setter form so
-      // the closure doesn't capture a stale value.
-      setColumnWidth((current) => {
-        void window.cockpit.aiPromptsWidthSet(current);
-        return current;
-      });
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  };
-
   return (
-    <div
-      ref={containerRef}
-      style={splitContainerStyle}
-      data-testid="ai-tab"
-      data-ai-state="running"
-    >
-      <div
-        style={{ ...promptsColumnStyle, width: columnWidth }}
-        data-testid="ai-prompts-column"
-        data-prompts-width={columnWidth}
-      >
-        <PromptsColumn ptyId={ptyId} focusPty={focusPty} />
-      </div>
-      <div
-        style={resizerStyle}
-        data-testid="ai-prompts-resizer"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize prompts column"
-        onMouseDown={handleResizeStart}
+    <div style={aiRunningWrapperStyle} data-testid="ai-tab" data-ai-state="running">
+      <SidebarTab
+        testIdPrefix="ai-prompts"
+        defaultWidth={PROMPTS_DEFAULT_WIDTH}
+        loadWidth={() => window.cockpit.aiPromptsWidthGet()}
+        saveWidth={(w) => window.cockpit.aiPromptsWidthSet(w)}
+        expandTitle="Show prompts"
+        collapseTitle="Hide prompts"
+        hideTitle="Hide prompts"
+        sidebar={<PromptsColumn ptyId={ptyId} focusPty={focusPty} />}
+        content={
+          <RunningPty
+            active={active}
+            tabId={tabId}
+            ptyId={ptyId}
+            onStatus={onStatus}
+            focusPtyRef={focusPtyRef}
+          />
+        }
       />
-      <div style={ptyColumnStyle}>
-        <RunningPty
-          active={active}
-          tabId={tabId}
-          ptyId={ptyId}
-          onStatus={onStatus}
-          focusPtyRef={focusPtyRef}
-        />
-      </div>
     </div>
   );
 }
+
+const aiRunningWrapperStyle: React.CSSProperties = {
+  display: 'flex',
+  flex: 1,
+  minHeight: 0,
+  minWidth: 0,
+};
 
 /**
  * The verbs catalog (Phase D). Reads the project's vendored verbs via
@@ -624,34 +581,6 @@ const enginePickerStyle: React.CSSProperties = {
   fontSize: '0.85rem',
   fontWeight: 500,
   cursor: 'pointer',
-};
-
-const splitContainerStyle: React.CSSProperties = {
-  display: 'flex',
-  flex: 1,
-  minHeight: 0,
-  minWidth: 0,
-  background: '#0a0f17',
-};
-
-const promptsColumnStyle: React.CSSProperties = {
-  flexShrink: 0,
-  overflowY: 'auto',
-  background: '#0c121a',
-  borderRight: '1px solid #1a2230',
-};
-
-const resizerStyle: React.CSSProperties = {
-  flexShrink: 0,
-  width: '4px',
-  background: '#1a2230',
-  cursor: 'col-resize',
-};
-
-const ptyColumnStyle: React.CSSProperties = {
-  display: 'flex',
-  flex: 1,
-  minWidth: 0,
 };
 
 const promptsListStyle: React.CSSProperties = {

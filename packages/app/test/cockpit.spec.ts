@@ -55,8 +55,9 @@ test.describe('window modes', () => {
       // Status is the default tab — its pane is shown.
       await expect(page.getByTestId('pane-status')).toBeVisible();
 
-      // The panel/tab workspace: a new terminal opens in the left panel.
-      await page.getByTestId('tab-strip').first().getByTestId('new-shell').click();
+      // The panel/tab workspace: in v0.9 creators live on the centre column;
+      // leftRail is a locked nav rail.
+      await page.locator('[data-column-id="centre"]').getByTestId('new-shell').first().click();
       await expect(page.getByTestId('tab-shell').first()).toBeVisible({ timeout: 5_000 });
 
       await app.close();
@@ -131,7 +132,7 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTestId('tab-strip').first().getByTestId('new-shell').click();
+      await page.locator('[data-column-id="centre"]').getByTestId('new-shell').first().click();
       const tab = page.getByTestId('tab-shell').first();
       await expect(tab).toBeVisible({ timeout: 5_000 });
 
@@ -164,13 +165,13 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      const leftStrip = page.getByTestId('tab-strip').first();
+      const centre = page.locator('[data-column-id="centre"]');
       // Single click — no popover step.
-      await leftStrip.getByTestId('new-ai').click();
+      await centre.getByTestId('new-ai').first().click();
       // No popover renders at any point.
       await expect(page.getByTestId('new-ai-popover')).toHaveCount(0);
 
-      const aiTab = leftStrip.getByTestId('tab-ai');
+      const aiTab = centre.getByTestId('tab-ai');
       await expect(aiTab).toBeVisible({ timeout: 5_000 });
       // The chosen engine is recorded on the tab — exposed as the button's
       // title attribute, which is `${tab.title} · ${engine}` for AI tabs.
@@ -201,12 +202,12 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      const leftStrip = page.getByTestId('tab-strip').first();
+      const centre = page.locator('[data-column-id="centre"]');
       // v0.9: `+ AI` opens the tab directly with the only seeded engine
       // (fake) preselected — no popover.
-      await leftStrip.getByTestId('new-ai').click();
+      await centre.getByTestId('new-ai').first().click();
 
-      const aiTab = leftStrip.getByTestId('tab-ai');
+      const aiTab = centre.getByTestId('tab-ai');
       await expect(aiTab).toBeVisible({ timeout: 5_000 });
       // Empty state: the Start button and the engine dropdown are visible,
       // with the fake engine preselected.
@@ -248,10 +249,10 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      const leftStrip = page.getByTestId('tab-strip').first();
+      const centre = page.locator('[data-column-id="centre"]');
       // v0.9: `+ AI` opens the tab directly with the only seeded engine
       // (fake) preselected — no popover.
-      await leftStrip.getByTestId('new-ai').click();
+      await centre.getByTestId('new-ai').first().click();
       await page.getByTestId('ai-start').click();
 
       // The split's three pieces are all present in the running tab.
@@ -263,7 +264,7 @@ test.describe('window modes', () => {
       // persisted value yet).
       const initialWidth = await page
         .getByTestId('ai-prompts-column')
-        .getAttribute('data-prompts-width');
+        .getAttribute('data-sidebar-width');
       expect(Number(initialWidth)).toBe(220);
 
       await app.close();
@@ -292,7 +293,7 @@ test.describe('window modes', () => {
       const first = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(first.page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
       // v0.9: `+ AI` opens the tab directly with the only seeded engine.
-      await first.page.getByTestId('tab-strip').first().getByTestId('new-ai').click();
+      await first.page.locator('[data-column-id="centre"]').getByTestId('new-ai').first().click();
       await first.page.getByTestId('ai-start').click();
       await expect(first.page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
 
@@ -304,7 +305,7 @@ test.describe('window modes', () => {
       // persisted per-project width.
       const second = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(second.page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
-      await second.page.getByTestId('tab-strip').first().getByTestId('new-ai').click();
+      await second.page.locator('[data-column-id="centre"]').getByTestId('new-ai').first().click();
       await second.page.getByTestId('ai-start').click();
 
       await expect(second.page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
@@ -316,7 +317,7 @@ test.describe('window modes', () => {
             Number(
               await second.page
                 .getByTestId('ai-prompts-column')
-                .getAttribute('data-prompts-width'),
+                .getAttribute('data-sidebar-width'),
             ),
           { timeout: 5_000 },
         )
@@ -345,7 +346,7 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTestId('tab-strip').first().getByTestId('new-ai').click();
+      await page.locator('[data-column-id="centre"]').getByTestId('new-ai').first().click();
       await page.getByTestId('ai-start').click();
       await expect(page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
 
@@ -534,9 +535,12 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      const leftStrip = page.getByTestId('tab-strip').first();
-      await leftStrip.getByTestId('new-shell').click();
-      const terminalTab = leftStrip.getByTestId('tab-shell');
+      // v0.9: shells live on the workspace columns; create in centre's top,
+      // then drag down to centre's bottom dock.
+      const centre = page.locator('[data-column-id="centre"]');
+      const centreTopStrip = centre.getByTestId('tab-strip').first();
+      await centre.getByTestId('new-shell').first().click();
+      const terminalTab = centreTopStrip.getByTestId('tab-shell');
       await expect(terminalTab).toBeVisible({ timeout: 5_000 });
 
       // Read the terminal's stable host id. Pane hosts have known string ids
@@ -552,17 +556,18 @@ test.describe('window modes', () => {
       }, PANE_IDS);
       expect(terminalHostId).toBeTruthy();
 
-      // Open the bottom dock so it has a drop target.
-      await page.getByTestId('dock-handle-bottom').click();
-      const bottomStrip = page.getByTestId('tab-strip').nth(2);
-      await expect(bottomStrip).toBeVisible({ timeout: 5_000 });
+      // Open centre's bottom dock so it has a drop target. Each column has
+      // its own bottom dock in v0.9; scope by `data-column-id`.
+      await centre.getByTestId('dock-handle-bottom').click();
+      const centreBottomStrip = centre.getByTestId('tab-strip').nth(1);
+      await expect(centreBottomStrip).toBeVisible({ timeout: 5_000 });
 
-      // Drag the terminal tab from the left strip onto the bottom strip.
-      await terminalTab.dragTo(bottomStrip);
+      // Drag the terminal tab from centre's top strip onto its bottom strip.
+      await terminalTab.dragTo(centreBottomStrip);
 
-      // The terminal tab now lives in the bottom strip.
-      await expect(bottomStrip.getByTestId('tab-shell')).toBeVisible({ timeout: 5_000 });
-      await expect(leftStrip.getByTestId('tab-shell')).toHaveCount(0);
+      // The terminal tab now lives in centre's bottom strip.
+      await expect(centreBottomStrip.getByTestId('tab-shell')).toBeVisible({ timeout: 5_000 });
+      await expect(centreTopStrip.getByTestId('tab-shell')).toHaveCount(0);
 
       // The same host element still exists with the same UUID — a remount
       // would have torn the host down with its React subtree (and killed the
@@ -642,10 +647,6 @@ test.describe('window modes', () => {
       await expect(sheet.getByTestId('settings-scope-project')).toBeVisible();
       await expect(sheet.getByText('Ignore rules')).toBeVisible();
       await expect(sheet.getByText('Shortcuts')).toBeVisible();
-
-      // The Phase E toggle is rendered through the registry.
-      await sheet.getByText('Workspace').click();
-      await expect(sheet.getByTestId('setting-workspace.restoreLayout')).toBeVisible();
 
       await app.close();
     } finally {
@@ -867,6 +868,15 @@ test.describe('window modes', () => {
       // per-row dismiss — no bespoke UI.
       await expect(statusPane).toContainText('save-points', { timeout: 5_000 });
       await expect(statusPane).toContainText('references', { timeout: 5_000 });
+      // Stronger assertion: the grid lists `references` as a row of its own
+      // (not just the synthetic-root header text). This is the regression
+      // gate for the v0.6 bug HL reported on 2026-05-28 — references files
+      // surface in the Status pane's tree, not silently absent.
+      const grid = statusPane.getByTestId('grid-lore');
+      await expect(grid.locator('.ag-row').filter({ hasText: 'references' })).toBeVisible({
+        timeout: 5_000,
+      });
+      await expect(grid.locator('.ag-row').filter({ hasText: 'save-points' })).toBeVisible();
       await app.close();
     } finally {
       fixture.cleanup();
