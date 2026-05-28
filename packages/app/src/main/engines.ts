@@ -62,28 +62,30 @@ function writeStore(userDataDir: string, store: StoreFile): void {
   writeFileSync(file, JSON.stringify(store, null, 2));
 }
 
-/** Bin directories often missing from a Finder-launched .app's PATH —
- *  mirror of `spawn-detached.ts`'s `EXTRA_PATH_DIRS` so the `which` probe
- *  sees what a real login shell would. */
-const EXTRA_PATH_DIRS = ['/usr/local/bin', '/opt/homebrew/bin'];
+const DEFAULT_SHELL = process.env.SHELL ?? '/bin/zsh';
 
-function augmentedPath(): string {
-  const current = process.env.PATH ?? '';
-  const segments = current.split(':').filter((s) => s.length > 0);
-  const present = new Set(segments);
-  const missing = EXTRA_PATH_DIRS.filter((p) => !present.has(p));
-  return missing.length ? [...missing, ...segments].join(':') : current;
+/** Quote a token for safe single-line shell interpolation in the `-c`
+ *  payload. Mirror of `pty.ts`'s `quoteForShell`. */
+function shellQuote(token: string): string {
+  if (/^[A-Za-z0-9_\-./]+$/.test(token)) return token;
+  return `'${token.replace(/'/g, "'\\''")}'`;
 }
 
-/** True when `binary` resolves on the (augmented) PATH, or is an existing
- *  absolute path. Used only for default-engine seeding — actual spawning
- *  re-resolves at launch through `zsh -l`. */
+/** True when `binary` resolves on the user's login shell PATH. Probes via
+ *  `zsh -i -l -c 'command -v <binary>'` — the same PATH source the engine
+ *  spawn uses in `pty.ts`. `-i` is what sources `~/.zshrc`, where most
+ *  users keep their PATH additions (`$HOME/.local/bin`, where Claude
+ *  installs); a Finder-launched Electron app's `process.env.PATH` is the
+ *  minimal launchd default and would miss them. One source of PATH truth
+ *  across seed and spawn — if the user's shell can find it, the cockpit
+ *  can find it. */
 function binaryResolves(binary: string): boolean {
   try {
-    execFileSync('which', [binary], {
-      env: { ...process.env, PATH: augmentedPath() },
-      stdio: 'ignore',
-    });
+    execFileSync(
+      DEFAULT_SHELL,
+      ['-i', '-l', '-c', `command -v ${shellQuote(binary)}`],
+      { stdio: 'ignore' },
+    );
     return true;
   } catch {
     return false;

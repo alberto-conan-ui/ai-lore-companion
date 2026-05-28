@@ -149,11 +149,12 @@ test.describe('window modes', () => {
     }
   });
 
-  // v0.7 Phase A — typed tabs. `+ AI ▾` opens an engine popover sourced from
-  // the engines store; picking one creates a `kind: 'ai'` tab with the engine
-  // recorded on it. Phase B's Start button lives on the empty state — this
-  // test stops short of clicking it.
-  test('the + AI opener picks an engine and creates an AI tab', async () => {
+  // v0.9 Phase A — `+ AI` opens a new AI tab directly, no popover. The tab
+  // opens with the first available engine preselected (or the project's
+  // last-picked one when persisted); the user changes the engine in the
+  // tab's empty-state dropdown if they want. The dropdown also carries an
+  // "+ Add engine…" item that deep-links Settings → Engines.
+  test('+ AI opens a new AI tab with the first engine preselected', async () => {
     const fixture = makeProject();
     seedEngines(fixture.userData, [
       { id: 'claude', name: 'Claude', binary: 'claude' },
@@ -164,13 +165,11 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
       const leftStrip = page.getByTestId('tab-strip').first();
+      // Single click — no popover step.
       await leftStrip.getByTestId('new-ai').click();
-      const popover = page.getByTestId('new-ai-popover');
-      await expect(popover).toBeVisible();
-      await expect(popover.getByTestId('new-ai-engine-claude')).toBeVisible();
-      await expect(popover.getByTestId('new-ai-engine-gemini')).toBeVisible();
+      // No popover renders at any point.
+      await expect(page.getByTestId('new-ai-popover')).toHaveCount(0);
 
-      await popover.getByTestId('new-ai-engine-claude').click();
       const aiTab = leftStrip.getByTestId('tab-ai');
       await expect(aiTab).toBeVisible({ timeout: 5_000 });
       // The chosen engine is recorded on the tab — exposed as the button's
@@ -178,6 +177,8 @@ test.describe('window modes', () => {
       await expect(aiTab.locator('button[title*="claude"]')).toHaveCount(1);
       // The empty-state body identifies the active engine via data-ai-engine.
       await expect(page.locator('[data-ai-engine="claude"]')).toHaveCount(1);
+      // The engine dropdown surfaces the "+ Add engine…" deep-link item.
+      await expect(page.getByTestId('ai-engine-picker-add')).toHaveCount(1);
 
       await app.close();
     } finally {
@@ -201,8 +202,9 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
       const leftStrip = page.getByTestId('tab-strip').first();
+      // v0.9: `+ AI` opens the tab directly with the only seeded engine
+      // (fake) preselected — no popover.
       await leftStrip.getByTestId('new-ai').click();
-      await page.getByTestId('new-ai-engine-fake').click();
 
       const aiTab = leftStrip.getByTestId('tab-ai');
       await expect(aiTab).toBeVisible({ timeout: 5_000 });
@@ -247,8 +249,9 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
       const leftStrip = page.getByTestId('tab-strip').first();
+      // v0.9: `+ AI` opens the tab directly with the only seeded engine
+      // (fake) preselected — no popover.
       await leftStrip.getByTestId('new-ai').click();
-      await page.getByTestId('new-ai-engine-fake').click();
       await page.getByTestId('ai-start').click();
 
       // The split's three pieces are all present in the running tab.
@@ -288,8 +291,8 @@ test.describe('window modes', () => {
       // same IPC the drag handler invokes on mouseup.
       const first = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(first.page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+      // v0.9: `+ AI` opens the tab directly with the only seeded engine.
       await first.page.getByTestId('tab-strip').first().getByTestId('new-ai').click();
-      await first.page.getByTestId('new-ai-engine-fake').click();
       await first.page.getByTestId('ai-start').click();
       await expect(first.page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
 
@@ -302,7 +305,6 @@ test.describe('window modes', () => {
       const second = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(second.page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
       await second.page.getByTestId('tab-strip').first().getByTestId('new-ai').click();
-      await second.page.getByTestId('new-ai-engine-fake').click();
       await second.page.getByTestId('ai-start').click();
 
       await expect(second.page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
@@ -344,7 +346,6 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
       await page.getByTestId('tab-strip').first().getByTestId('new-ai').click();
-      await page.getByTestId('new-ai-engine-fake').click();
       await page.getByTestId('ai-start').click();
       await expect(page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
 

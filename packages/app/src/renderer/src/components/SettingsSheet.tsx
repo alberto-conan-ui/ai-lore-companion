@@ -64,7 +64,7 @@ function valueForScope(def: SettingDef, snap: SettingsSnapshot, scope: Scope): S
 }
 
 /** Open the Settings sheet at a specific section, or with no section preference. */
-export type SettingsSheetSection = 'shortcuts' | null;
+export type SettingsSheetSection = 'shortcuts' | 'engines' | null;
 
 /**
  * The Settings sheet modal — controlled by the parent. `initialSection`
@@ -95,7 +95,11 @@ function SettingsSheet({
   const [snap, setSnap] = useState<SettingsSnapshot | null>(null);
   const [scope, setScope] = useState<Scope>('global');
   const [section, setSection] = useState<string | null>(
-    initialSection === 'shortcuts' ? SHORTCUTS_SECTION : null,
+    initialSection === 'shortcuts'
+      ? SHORTCUTS_SECTION
+      : initialSection === 'engines'
+        ? ENGINES_SECTION
+        : null,
   );
 
   useEffect(() => {

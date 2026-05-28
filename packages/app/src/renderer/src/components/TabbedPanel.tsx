@@ -1,6 +1,5 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
-import { type JSX, useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { type JSX, useState } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { type DriftLevel, driftLevel } from '../store.js';
 
@@ -27,21 +26,15 @@ export type WorkspaceTab = {
   engine?: string;
 };
 
-// (The Phase A `PHASE_A_ENGINES` stub was removed in Phase B — the popover
-// now sources the engine list from the global engines store via `engines`
-// prop, populated from `EnginesList` / `EnginesChanged` in `App`.)
-
-/** Move `lastEngineId` (if any, and present in the list) to the front. The
- *  popover surfaces the user's most recent pick first; everything else keeps
- *  its store order. */
-function orderedEngines(
+/** Pick the engine id the strip's `+ AI` button creates a tab with. The
+ *  project's last pick if it still exists; otherwise the first available; an
+ *  empty string when no engines exist (the button is disabled in that case). */
+function defaultEngineId(
   engines: readonly EngineEntry[],
   lastEngineId: string | null,
-): readonly EngineEntry[] {
-  if (!lastEngineId) return engines;
-  const idx = engines.findIndex((e) => e.id === lastEngineId);
-  if (idx <= 0) return engines;
-  return [engines[idx], ...engines.slice(0, idx), ...engines.slice(idx + 1)];
+): string {
+  if (lastEngineId && engines.some((e) => e.id === lastEngineId)) return lastEngineId;
+  return engines[0]?.id ?? '';
 }
 
 /** The three docks of the workspace. */
@@ -58,11 +51,13 @@ type Props = {
   /** Create a new `kind: 'ai'` tab bound to the chosen engine id. The tab
    *  opens in empty state; the user clicks Start to spawn the engine. */
   onNewAi: (engineId: string) => void;
-  /** Engines offered by the `+ AI ▾` popover — sourced from the global
-   *  engines store. Empty list disables the opener. */
+  /** Configured engines — used to resolve the default engine the strip's
+   *  `+ AI` button creates a tab with. Empty list disables the button. */
   engines: readonly EngineEntry[];
-  /** The id of the engine last picked in this project — surfaced first in
-   *  the popover so the user's most recent choice is the easiest target. */
+  /** The id of the engine last picked in this project — preferred default for
+   *  the strip's `+ AI` button so the user's most recent choice is the easiest
+   *  target. The user picks a different engine in the AI tab's dropdown if
+   *  they want one, before clicking Start. */
   lastEngineId: string | null;
   onNewBrowser: () => void;
   /** Rename a tab — an empty name reverts to the auto-managed default. */
@@ -160,30 +155,10 @@ export function TabbedPanel({
   // The tab currently being renamed inline, plus its draft text.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  // The `+ AI ▾` engine-picker popover — open state, anchor button, body-
-  // portaled popover, and the coords the popover lands at (measured from
-  // the anchor's `getBoundingClientRect`). Body-portaled so the strip's
-  // flex / overflow context can't clip or mis-stack it.
-  const [aiPickerOpen, setAiPickerOpen] = useState(false);
-  const aiAnchorRef = useRef<HTMLButtonElement>(null);
-  const aiPopoverRef = useRef<HTMLDivElement>(null);
-  const [aiPickerCoords, setAiPickerCoords] = useState<{ left: number; top: number } | null>(null);
-  useEffect(() => {
-    if (!aiPickerOpen) {
-      setAiPickerCoords(null);
-      return;
-    }
-    const rect = aiAnchorRef.current?.getBoundingClientRect();
-    if (rect) setAiPickerCoords({ left: rect.left, top: rect.bottom + 2 });
-    const onAway = (e: MouseEvent): void => {
-      const tgt = e.target as Node;
-      if (aiAnchorRef.current?.contains(tgt)) return;
-      if (aiPopoverRef.current?.contains(tgt)) return;
-      setAiPickerOpen(false);
-    };
-    document.addEventListener('mousedown', onAway);
-    return () => document.removeEventListener('mousedown', onAway);
-  }, [aiPickerOpen]);
+  // The engine `+ AI` opens a new tab with — last-picked if still available,
+  // first otherwise. The user can change it in the new tab's empty-state
+  // dropdown before clicking Start.
+  const newAiEngineId = defaultEngineId(engines, lastEngineId);
 
   const startEdit = (tab: WorkspaceTab): void => {
     setEditingId(tab.id);
@@ -295,51 +270,19 @@ export function TabbedPanel({
         })}
         <span style={stripDividerStyle} aria-hidden="true" />
         <button
-          ref={aiAnchorRef}
           type="button"
-          style={{ ...newBtn, ...(aiPickerOpen ? newBtnOpen : null) }}
+          style={newBtn}
           title={
             engines.length === 0
               ? 'Add an engine in Settings → Engines to enable AI tabs'
-              : 'New AI session — pick an engine'
+              : 'New AI session'
           }
           data-testid="new-ai"
           disabled={engines.length === 0}
-          onClick={() => setAiPickerOpen((o) => !o)}
+          onClick={() => onNewAi(newAiEngineId)}
         >
-          + AI ▾
+          + AI
         </button>
-        {aiPickerOpen && aiPickerCoords
-          ? createPortal(
-              <div
-                ref={aiPopoverRef}
-                style={{
-                  ...aiPickerPopover,
-                  left: aiPickerCoords.left,
-                  top: aiPickerCoords.top,
-                }}
-                data-testid="new-ai-popover"
-                role="menu"
-              >
-                {orderedEngines(engines, lastEngineId).map((engine) => (
-                  <button
-                    key={engine.id}
-                    type="button"
-                    style={aiPickerItem}
-                    role="menuitem"
-                    data-testid={`new-ai-engine-${engine.id}`}
-                    onClick={() => {
-                      setAiPickerOpen(false);
-                      onNewAi(engine.id);
-                    }}
-                  >
-                    {engine.name}
-                  </button>
-                ))}
-              </div>,
-              document.body,
-            )
-          : null}
         <button
           type="button"
           style={newBtn}
@@ -492,36 +435,6 @@ const aiBadgeStyle: React.CSSProperties = {
   textShadow: '0 0 6px rgba(199, 179, 255, 0.35)',
 };
 
-
-const newBtnOpen: React.CSSProperties = {
-  background: '#1a2230',
-  color: '#dde3ea',
-};
-
-const aiPickerPopover: React.CSSProperties = {
-  position: 'fixed',
-  background: '#101822',
-  border: '1px solid #243044',
-  borderRadius: '5px',
-  boxShadow: '0 8px 20px rgba(0, 0, 0, 0.55)',
-  zIndex: 50,
-  display: 'flex',
-  flexDirection: 'column',
-  minWidth: '8rem',
-  padding: '0.2rem',
-};
-
-const aiPickerItem: React.CSSProperties = {
-  padding: '0.4rem 0.7rem',
-  background: 'transparent',
-  border: 'none',
-  color: '#dde3ea',
-  font: 'inherit',
-  fontSize: '0.8rem',
-  textAlign: 'left',
-  cursor: 'pointer',
-  borderRadius: '3px',
-};
 
 const tabEditInput: React.CSSProperties = {
   margin: '0.2rem 0.45rem',

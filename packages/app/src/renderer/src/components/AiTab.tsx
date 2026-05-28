@@ -22,6 +22,10 @@ const PROMPTS_MIN_WIDTH = 160;
  *  comfortably; the drag handler enforces it against the parent's width. */
 const PTY_MIN_WIDTH = 240;
 
+/** Sentinel `<option>` value for the "+ Add engine…" item in the engine
+ *  dropdown — picking it routes to Settings → Engines, not an engine select. */
+const ADD_ENGINE_SENTINEL = '__add-engine__';
+
 /**
  * An AI-session tab. Two states:
  *
@@ -173,7 +177,20 @@ function EmptyState({
           <select
             style={enginePickerStyle}
             value={selected?.id ?? ''}
-            onChange={(e) => onSelect(e.target.value)}
+            onChange={(e) => {
+              if (e.target.value === ADD_ENGINE_SENTINEL) {
+                // Deep-link Settings → Engines via the renderer-side signal
+                // TrackerStrip listens for. The dropdown's value prop snaps
+                // back to the previously selected engine on re-render.
+                window.dispatchEvent(
+                  new CustomEvent('ai-lore:open-settings', {
+                    detail: { section: 'engines' },
+                  }),
+                );
+                return;
+              }
+              onSelect(e.target.value);
+            }}
             data-testid="ai-engine-picker"
             aria-label="AI engine"
           >
@@ -182,6 +199,10 @@ function EmptyState({
                 {eng.name}
               </option>
             ))}
+            <option disabled>──────────</option>
+            <option value={ADD_ENGINE_SENTINEL} data-testid="ai-engine-picker-add">
+              + Add engine…
+            </option>
           </select>
         </div>
         <div style={hintStyle}>
@@ -215,6 +236,10 @@ function RunningSplit({
 }): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const [columnWidth, setColumnWidth] = useState<number>(PROMPTS_DEFAULT_WIDTH);
+  // A handle the PTY publishes so the prompts column can refocus it after a
+  // click — so the user can keep typing without a trip back to the terminal.
+  const focusPtyRef = useRef<() => void>(() => {});
+  const focusPty = useCallback((): void => focusPtyRef.current(), []);
 
   useEffect(() => {
     void window.cockpit.aiPromptsWidthGet().then((w) => {
@@ -266,7 +291,7 @@ function RunningSplit({
         data-testid="ai-prompts-column"
         data-prompts-width={columnWidth}
       >
-        <PromptsColumn ptyId={ptyId} />
+        <PromptsColumn ptyId={ptyId} focusPty={focusPty} />
       </div>
       <div
         style={resizerStyle}
@@ -277,7 +302,13 @@ function RunningSplit({
         onMouseDown={handleResizeStart}
       />
       <div style={ptyColumnStyle}>
-        <RunningPty active={active} tabId={tabId} ptyId={ptyId} onStatus={onStatus} />
+        <RunningPty
+          active={active}
+          tabId={tabId}
+          ptyId={ptyId}
+          onStatus={onStatus}
+          focusPtyRef={focusPtyRef}
+        />
       </div>
     </div>
   );
@@ -295,7 +326,13 @@ function RunningSplit({
  * functional split. Any verb not in the taxonomy lands in Advanced, which is
  * collapsed by default so the curated groups stay visible.
  */
-function PromptsColumn({ ptyId }: { ptyId: string }): JSX.Element {
+function PromptsColumn({
+  ptyId,
+  focusPty,
+}: {
+  ptyId: string;
+  focusPty: () => void;
+}): JSX.Element {
   const [prompts, setPrompts] = useState<PromptEntry[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
@@ -311,6 +348,9 @@ function PromptsColumn({ ptyId }: { ptyId: string }): JSX.Element {
     // verb in place (e.g. tack on `--challenge` or a free-form note) and
     // catches the case where they clicked the wrong one by accident.
     window.cockpit.sendTerminalInput({ id: ptyId, data: slash });
+    // Send focus back to the PTY so the user can keep typing without an
+    // extra click on the terminal area.
+    focusPty();
   };
 
   const grouped = groupPrompts(prompts);
@@ -407,17 +447,21 @@ function groupPrompts(prompts: readonly PromptEntry[]): Record<string, PromptEnt
 }
 
 /** The xterm host. Identical to TerminalTab's surface in shape; mounted only
- *  inside `RunningSplit` so it never has to negotiate its parent layout. */
+ *  inside `RunningSplit` so it never has to negotiate its parent layout.
+ *  Publishes a focus handle through `focusPtyRef` so siblings (the prompts
+ *  column) can hand focus back to the terminal after a click. */
 function RunningPty({
   active,
   tabId,
   ptyId,
   onStatus,
+  focusPtyRef,
 }: {
   active: boolean;
   tabId: string;
   ptyId: string;
   onStatus: (tabId: string, status: TerminalForegroundStatus, command: string) => void;
+  focusPtyRef: React.MutableRefObject<() => void>;
 }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -475,6 +519,10 @@ function RunningPty({
     term.onData((data) => window.cockpit.sendTerminalInput({ id: ptyId, data }));
     term.focus();
 
+    // Publish the focus handle so siblings (PromptsColumn) can refocus the
+    // terminal after a click — caller invokes it via the ref's `.current`.
+    focusPtyRef.current = () => term.focus();
+
     const onResize = (): void => doFit();
     window.addEventListener('resize', onResize);
     // Refit on container resize — covers both window resize and the prompts
@@ -491,8 +539,9 @@ function RunningPty({
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      focusPtyRef.current = () => {};
     };
-  }, [ptyId, doFit, onStatus, tabId]);
+  }, [ptyId, doFit, onStatus, tabId, focusPtyRef]);
 
   useEffect(() => {
     if (active) {

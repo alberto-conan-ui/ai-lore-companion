@@ -33,9 +33,21 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
   };
 
   useEffect(() => {
-    return window.cockpit.onSettingsOpen(() => {
+    const off = window.cockpit.onSettingsOpen(() => {
       setSettingsSection(null);
     });
+    // In-renderer signal — other components (e.g. AiTab's "+ Add engine…"
+    // item) dispatch this to deep-link a Settings section without a main
+    // round-trip. `detail.section` is one of `SettingsSheetSection`.
+    const onOpenSection = (e: Event): void => {
+      const detail = (e as CustomEvent<{ section: SettingsSheetSection }>).detail;
+      setSettingsSection(detail?.section ?? null);
+    };
+    window.addEventListener('ai-lore:open-settings', onOpenSection);
+    return () => {
+      off();
+      window.removeEventListener('ai-lore:open-settings', onOpenSection);
+    };
   }, []);
 
   // The in-app focus view — opened by the small toggle button next to the
