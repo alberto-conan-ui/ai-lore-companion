@@ -168,11 +168,16 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
         args.push('-c', tokens.join(' '));
       }
       const pty = spawn(DEFAULT_SHELL, args, {
-        name: 'xterm-color',
+        // 'xterm-256color' is what node-pty publishes as $TERM. The legacy
+        // 'xterm-color' terminfo entry is 16-colour, so any CLI that probes
+        // $TERM (gemini, claude, neovim, htop, ls --color) caps its palette
+        // and skips truecolor SGR sequences. COLORTERM=truecolor is the
+        // companion convention modern CLIs read to enable their 24-bit paths.
+        name: 'xterm-256color',
         cols: 80,
         rows: 24,
         cwd: opts.cwd,
-        env: process.env as Record<string, string>,
+        env: { ...process.env, COLORTERM: 'truecolor' } as Record<string, string>,
       });
       ptys.set(id, { pty, tty: null, ttyResolved: false, last: IDLE });
       pty.onData((data) => opts.onData(id, data));

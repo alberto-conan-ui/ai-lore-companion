@@ -1,4 +1,5 @@
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { type JSX, useCallback, useEffect, useRef } from 'react';
@@ -6,7 +7,7 @@ import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js'
 import { SidebarTab } from './SidebarTab.js';
 
 const TERMINAL_THEME = {
-  background: '#0a0f17',
+  background: '#15191f',
   foreground: '#dde3ea',
   cursor: '#5a9bd4',
   selectionBackground: '#1d2c3d',
@@ -74,6 +75,26 @@ export function TerminalTab({
     fit.fit();
     termRef.current = term;
     fitRef.current = fit;
+
+    // WebGL renderer eliminates the visible flicker the default DOM renderer
+    // shows under high-update-rate TUIs (gemini's thinking spinner is the
+    // motivating case). Mount-time try/catch covers GPU-context-creation
+    // failure (older / virtualised macs); onContextLoss disposes the addon
+    // so xterm.js falls back to its DOM renderer if the GPU context is lost
+    // mid-session (laptop sleep/wake, dGPU switching).
+    //
+    // Skip in Playwright-driven runs: WebGL renders into a <canvas>, so the
+    // .xterm-rows DOM nodes our e2e tests assert against disappear. Production
+    // users see WebGL; tests see the DOM renderer they're written against.
+    if (!navigator.webdriver) {
+      try {
+        const webgl = new WebglAddon();
+        webgl.onContextLoss(() => webgl.dispose());
+        term.loadAddon(webgl);
+      } catch {
+        // WebGL unavailable — DOM renderer stays in place.
+      }
+    }
 
     // Shift+Enter must insert a newline, not submit. xterm sends a bare `\r`
     // for both Enter and Shift+Enter, and Claude Code reads `\r` as submit.
