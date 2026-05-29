@@ -29,12 +29,14 @@ export type SubRoot =
   | { kind: 'path'; path: string }
   | { kind: 'synthetic'; id: string; name: string; childPaths: string[] };
 
-/** Resolve the `TreeNode` a pane renders, given its scope's tree and sub-root. */
-function resolveSubRoot(tree: TreeNode | null, subRoot: SubRoot): TreeNode | null {
-  if (subRoot.kind === 'path') return findTreeNode(tree, subRoot.path);
+/** Resolve the `TreeNode` a pane renders, given its scope's path index and
+ *  sub-root. Lookups are O(1) against the index (Focus 5). A synthetic sub-root
+ *  composes a fresh parent node over the real child nodes it names. */
+function resolveSubRoot(index: Map<string, TreeNode>, subRoot: SubRoot): TreeNode | null {
+  if (subRoot.kind === 'path') return index.get(subRoot.path) ?? null;
   const children = subRoot.childPaths
-    .map((p) => findTreeNode(tree, p))
-    .filter((n): n is TreeNode => n !== null);
+    .map((p) => index.get(p))
+    .filter((n): n is TreeNode => n !== undefined);
   if (children.length === 0) return null;
   return { name: subRoot.name, path: subRoot.id, isDir: true, children };
 }
@@ -98,7 +100,7 @@ export function Pane({
   displayPath,
   revealRequest,
 }: Props): JSX.Element {
-  const tree = useCockpitStore((s) => s.trees[scope]);
+  const index = useCockpitStore((s) => s.treeIndex[scope]);
   const rawChangesForScope = useCockpitStore((s) => s.changes[scope]);
   const baseline = useCockpitStore((s) => s.baselineByScope[scope]);
   const commitList = useCockpitStore((s) => s.commitListByScope[scope]);
@@ -144,7 +146,7 @@ export function Pane({
     }
   }, []);
 
-  const renderedRoot = useMemo(() => resolveSubRoot(tree, subRoot), [tree, subRoot]);
+  const renderedRoot = useMemo(() => resolveSubRoot(index, subRoot), [index, subRoot]);
   const bases = useMemo(() => baseDirsOf(subRoot), [subRoot]);
 
   // `rootId` is the rendered root node's path — a real path, or the synthetic
@@ -270,13 +272,13 @@ export function Pane({
   // children unloaded — the tree is sent one level deep. Load them once.
   useEffect(() => {
     if (subRoot.kind !== 'path') return;
-    const node = findTreeNode(tree, subRoot.path);
+    const node = index.get(subRoot.path);
     if (node?.isDir && node.children === undefined) {
       void window.cockpit.treeExpand({ scope, path: subRoot.path }).then((children) => {
         expandTree(scope, subRoot.path, children);
       });
     }
-  }, [tree, subRoot, scope, expandTree]);
+  }, [index, subRoot, scope, expandTree]);
 
   const handleSelectFolder = useCallback(
     (path: string) => {

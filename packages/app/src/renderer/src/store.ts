@@ -50,7 +50,10 @@ export function entriesByScope(changes: ChangesState, scope: ChangeScope): Chang
   return changes[scope];
 }
 
-/** Depth-first search for the node at `path` within `root`. */
+/** Depth-first search for the node at `path` within `root`. Kept for searches
+ *  scoped to a *subtree* (e.g. a synthetic sub-root whose own `path` is a
+ *  non-filesystem id) where the scope-wide path index does not apply. For
+ *  whole-scope lookups by absolute path, prefer the O(1) `treeIndex` (Focus 5). */
 export function findTreeNode(root: TreeNode | null, path: string): TreeNode | null {
   if (!root) return null;
   if (root.path === path) return root;
@@ -60,6 +63,27 @@ export function findTreeNode(root: TreeNode | null, path: string): TreeNode | nu
   }
   return null;
 }
+
+/** Build a `path → node` index for O(1) whole-scope lookups, replacing the
+ *  O(n) `findTreeNode` DFS on the hot path (Focus 5 — Reactive Store At Scale).
+ *  Rebuilt when a scope's tree changes; one O(n) build amortises across the many
+ *  per-render lookups between updates. */
+export function indexTree(root: TreeNode | null): Map<string, TreeNode> {
+  const index = new Map<string, TreeNode>();
+  const walk = (node: TreeNode): void => {
+    index.set(node.path, node);
+    for (const child of node.children ?? []) walk(child);
+  };
+  if (root) walk(root);
+  return index;
+}
+
+/** A path → node index per scope, mirroring `trees`. */
+export type TreeIndex = {
+  payload: Map<string, TreeNode>;
+  lore: Map<string, TreeNode>;
+  publish: Map<string, TreeNode>;
+};
 
 type Trees = {
   payload: TreeNode | null;
@@ -98,6 +122,8 @@ type State = {
    */
   commitListByScope: { payload: CommitListEntry[]; lore: CommitListEntry[] };
   trees: Trees;
+  /** O(1) path → node lookup per scope, kept in sync with `trees` (Focus 5). */
+  treeIndex: TreeIndex;
   /**
    * The Apps catalog — what *Open with…* menus offer. Mirrors the snapshot's
    * `global.apps`. Populated via `settingsGet` on launch and refreshed by the
@@ -128,6 +154,7 @@ export const useCockpitStore = create<State>((set) => ({
   baselineByScope: { payload: 'HEAD', lore: 'HEAD' },
   commitListByScope: { payload: [], lore: [] },
   trees: { payload: null, lore: null, publish: null },
+  treeIndex: { payload: new Map(), lore: new Map(), publish: new Map() },
   apps: [],
   showIndexFiles: false,
   setApps: (apps) => set({ apps }),
@@ -149,32 +176,39 @@ export const useCockpitStore = create<State>((set) => ({
     set((state) => ({
       commitListByScope: { ...state.commitListByScope, [payload.scope]: payload.commits },
     })),
-  setTrees: (init) =>
-    set({
-      trees: {
-        payload: init.payload,
-        lore: init.lore,
-        // Publishing-shape projects carry a third tree; default-shape inits
-        // omit the field and the publish slot stays null.
-        publish: init.publish ?? null,
+  setTrees: (init) => {
+    // Publishing-shape projects carry a third tree; default-shape inits omit
+    // the field and the publish slot stays null.
+    const publish = init.publish ?? null;
+    return set({
+      trees: { payload: init.payload, lore: init.lore, publish },
+      treeIndex: {
+        payload: indexTree(init.payload),
+        lore: indexTree(init.lore),
+        publish: indexTree(publish),
       },
-    }),
+    });
+  },
   applyTreeUpdate: (update) =>
-    set((state) => patchTree(state.trees, update.scope, update.path, update.children)),
-  expandTree: (scope, path, children) =>
-    set((state) => patchTree(state.trees, scope, path, children)),
+    set((state) => patchTree(state, update.scope, update.path, update.children)),
+  expandTree: (scope, path, children) => set((state) => patchTree(state, scope, path, children)),
 }));
 
-/** Return a new `trees` with the node at `path` on `scope` given fresh `children`. */
+/** Replace the node at `path` on `scope` with fresh `children`, and rebuild that
+ *  scope's path index to match. Returns the partial state to `set`. */
 function patchTree(
-  trees: Trees,
+  state: State,
   scope: ChangeScope,
   path: string,
   children: TreeNode[],
-): { trees: Trees } {
-  const side = trees[scope];
-  if (!side) return { trees };
-  return { trees: { ...trees, [scope]: replaceChildren(side, path, children) } };
+): Partial<State> {
+  const side = state.trees[scope];
+  if (!side) return {};
+  const nextSide = replaceChildren(side, path, children);
+  return {
+    trees: { ...state.trees, [scope]: nextSide },
+    treeIndex: { ...state.treeIndex, [scope]: indexTree(nextSide) },
+  };
 }
 
 function replaceChildren(node: TreeNode, path: string, children: TreeNode[]): TreeNode {
