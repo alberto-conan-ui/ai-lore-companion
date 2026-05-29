@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Fast tiers — type-check + every unit/integration test that does NOT need a
+  # full Electron build. Runs on every push/PR. `--ignore-scripts` skips the
+  # electron-rebuild postinstall (these tiers run on system node; core's own
+  # test rebuilds better-sqlite3 against node as needed).
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify (core build + node type-check + core/headless/component tests)
+        run: npm run verify
+
+  # End-to-end — heavier: a full Electron build driven by Playwright under a
+  # virtual display. Separate stage so a slow or flaky e2e never blocks the fast
+  # signal. NOTE: authored but not yet validated against a live runner — the
+  # Electron + xvfb setup may need adjustment on its first run.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: e2e (Playwright + Electron under xvfb)
+        run: xvfb-run --auto-servernum npm run e2e

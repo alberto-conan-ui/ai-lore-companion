@@ -93,6 +93,13 @@ export type Harness = {
     engines: Spy<[EngineEntry[]]>;
     shortcuts: Spy<[Shortcut[]]>;
   };
+  /** Spies on the host actions a handler may delegate to (window routing etc.). */
+  actions: {
+    showProject: Spy<[unknown, string]>;
+    promptAndOpenProject: Spy<[unknown]>;
+    reloadWindow: Spy<[unknown]>;
+    reapplyIgnores: Spy<[unknown]>;
+  };
   /** The snapshot `deps.settingsSnapshot` returns (default empty-ish). */
   settingsSnapshot: SettingsSnapshot;
   /** Fire a captured channel handler with a fake event + the given args. */
@@ -108,6 +115,12 @@ export function harnessFor(register: RegisterModule): Harness {
     settings: spy<[]>(),
     engines: spy<[EngineEntry[]]>(),
     shortcuts: spy<[Shortcut[]]>(),
+  };
+  const actions = {
+    showProject: spy<[unknown, string]>(),
+    promptAndOpenProject: spy<[unknown]>(),
+    reloadWindow: spy<[unknown]>(),
+    reapplyIgnores: spy<[unknown]>(),
   };
   const settingsSnapshot: SettingsSnapshot = {
     registry: [],
@@ -127,10 +140,10 @@ export function harnessFor(register: RegisterModule): Harness {
     broadcastSettings: () => broadcasts.settings(),
     broadcastEngines: (list) => broadcasts.engines(list),
     broadcastShortcuts: (list) => broadcasts.shortcuts(list),
-    reapplyIgnores: () => {},
-    showProject: () => {},
-    promptAndOpenProject: async () => {},
-    reloadWindow: async () => {},
+    reapplyIgnores: (win) => actions.reapplyIgnores(win),
+    showProject: (win, root) => actions.showProject(win, root),
+    promptAndOpenProject: async (win) => actions.promptAndOpenProject(win),
+    reloadWindow: async (win) => actions.reloadWindow(win),
   };
 
   // Capture handlers by CONTRACT key. In production `reg` wraps `ipcMain`; the
@@ -158,6 +171,7 @@ export function harnessFor(register: RegisterModule): Harness {
     },
     deps,
     broadcasts,
+    actions,
     settingsSnapshot,
     invoke(key, ...args) {
       const handler = handlers.get(key);

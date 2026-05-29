@@ -12,9 +12,11 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit",
+    "typecheck:node": "tsc -b tsconfig.node.json",
     "clean": "rm -rf out",
-    "test": "npm run test:headless",
-    "test:headless": "rm -rf dist-test && tsc -p tsconfig.test.json && echo '{\"type\":\"module\"}' > dist-test/package.json && node --test --enable-source-maps \"dist-test/test/headless/**/*.test.js\"",
+    "test": "npm run test:headless && npm run test:component",
+    "test:headless": "rm -rf dist-test && tsc -p tsconfig.test.json && echo '{\"type\":\"module\"}' > dist-test/package.json && node --import ./test/headless/register-electron.mjs --test --enable-source-maps \"dist-test/test/headless/**/*.test.js\"",
+    "test:component": "vitest run",
     "test:e2e": "npm run build && playwright test",
     "dist": "npm run build && PYTHON=/usr/bin/python3 npm_config_python=/usr/bin/python3 electron-builder",
     "postinstall": "electron-rebuild -f -o better-sqlite3,node-pty"
@@ -36,14 +38,18 @@
   "devDependencies": {
     "@electron/rebuild": "^3.7.1",
     "@playwright/test": "^1.49.0",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^32.2.7",
     "electron-builder": "^25.1.8",
     "electron-vite": "^2.3.0",
+    "jsdom": "^27.0.1",
     "playwright": "^1.49.0",
-    "vite": "^5.4.11"
+    "vite": "^5.4.11",
+    "vitest": "^2.1.9"
   },
   "author": "AI-Lore",
   "build": {
