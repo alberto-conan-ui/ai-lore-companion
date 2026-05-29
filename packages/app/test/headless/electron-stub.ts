@@ -45,6 +45,15 @@ export const shell = {
   showItemInFolder: makeSpy(),
 };
 
+/** `utilityProcess` is referenced by `main/search/service.ts` (the worker-backed
+ *  search). The headless tier uses the in-process service and never forks, so
+ *  this only needs to exist for the named import to link. */
+export const utilityProcess = {
+  fork: () => {
+    throw new Error('utilityProcess.fork is not available in the headless tier');
+  },
+};
+
 /** Clear all recorded calls and restore the default window — call in `beforeEach`. */
 export function resetElectronStub(): void {
   shell.openPath.calls.length = 0;

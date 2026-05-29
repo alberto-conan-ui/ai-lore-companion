@@ -21,6 +21,7 @@ import type { ChainResult, EngineEntry } from '@ai-lore-companion/core';
 import type { Registrar } from '../../src/main/ipc/registrar.js';
 import type { Deps, ProjectContext, RegisterModule, Wiring } from '../../src/main/ipc/types.js';
 import type { PtyService } from '../../src/main/pty.js';
+import { InProcessSearchService } from '../../src/main/search/service.js';
 import type { SettingsSnapshot, Shortcut } from '../../src/shared/ipc.js';
 
 /** A recording stub — every call's argument tuple is pushed to `.calls`. */
@@ -197,5 +198,6 @@ export function fakeContext(opts: {
     wiring: opts.wiring ?? null,
     ptyService: opts.ptyService ?? fakePtyService(),
     ignoreLists: { drift: [], search: [], hidden: [] } as unknown as ProjectContext['ignoreLists'],
+    search: new InProcessSearchService(),
   };
 }

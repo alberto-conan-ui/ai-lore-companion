@@ -1,5 +1,17 @@
-import { type JSX, forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import type { FileSearchHit } from '../../../shared/ipc.js';
+import {
+  type JSX,
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import type { ContentSearchHit, FileSearchHit } from '../../../shared/ipc.js';
+
+/** One row in the dropdown — a name match or an in-file content match. The two
+ *  groups render under their own headers but share one keyboard highlight. */
+type Row = { kind: 'name'; hit: FileSearchHit } | { kind: 'content'; hit: ContentSearchHit };
 
 type Props = {
   /** Absolute directories the search walks — the union of every pane's roots. */
@@ -35,9 +47,21 @@ export const GlobalSearch = forwardRef<GlobalSearchHandle, Props>(function Globa
   forwardedRef,
 ): JSX.Element {
   const [query, setQuery] = useState('');
-  const [hits, setHits] = useState<FileSearchHit[]>([]);
+  const [nameHits, setNameHits] = useState<FileSearchHit[]>([]);
+  const [contentHits, setContentHits] = useState<ContentSearchHit[]>([]);
+  const [ripgrepMissing, setRipgrepMissing] = useState(false);
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(0);
+
+  // One flat, ordered list (names first, then content) so a single highlight
+  // index walks both groups with ↑/↓.
+  const rows = useMemo<Row[]>(
+    () => [
+      ...nameHits.map((hit): Row => ({ kind: 'name', hit })),
+      ...contentHits.map((hit): Row => ({ kind: 'content', hit })),
+    ],
+    [nameHits, contentHits],
+  );
   // Refs to the result `<li>`s so we can scroll the highlighted one into view.
   const itemRefs = useRef<Array<HTMLLIElement | null>>([]);
   // Refs for the input itself and for the element that held focus when the
@@ -53,16 +77,24 @@ export const GlobalSearch = forwardRef<GlobalSearchHandle, Props>(function Globa
     },
   }));
 
-  // Debounced search — one IPC round trip ~150ms after typing settles.
+  // Debounced search — name (index) and content (ripgrep) run together ~150ms
+  // after typing settles; results show as two groups.
   useEffect(() => {
     const q = query.trim();
     if (q === '') {
-      setHits([]);
+      setNameHits([]);
+      setContentHits([]);
+      setRipgrepMissing(false);
       return;
     }
     const timer = setTimeout(() => {
-      void window.cockpit.searchFiles({ dirs, query: q }).then((result) => {
-        setHits(result);
+      void Promise.all([
+        window.cockpit.searchFiles({ dirs, query: q }),
+        window.cockpit.searchContent({ dirs, query: q }),
+      ]).then(([names, content]) => {
+        setNameHits(names);
+        setContentHits(content.hits);
+        setRipgrepMissing(content.ripgrepMissing);
         setHighlight(0);
         setOpen(true);
       });
@@ -70,10 +102,10 @@ export const GlobalSearch = forwardRef<GlobalSearchHandle, Props>(function Globa
     return () => clearTimeout(timer);
   }, [query, dirs]);
 
-  // Keep `highlight` clamped if `hits` shrinks (e.g. user keeps typing).
+  // Keep `highlight` clamped if the result set shrinks (e.g. user keeps typing).
   useEffect(() => {
-    if (highlight >= hits.length) setHighlight(Math.max(0, hits.length - 1));
-  }, [hits.length, highlight]);
+    if (highlight >= rows.length) setHighlight(Math.max(0, rows.length - 1));
+  }, [rows.length, highlight]);
 
   // Scroll the highlighted row into view when the dropdown overflows `maxHeight`.
   useEffect(() => {
@@ -81,11 +113,56 @@ export const GlobalSearch = forwardRef<GlobalSearchHandle, Props>(function Globa
     itemRefs.current[highlight]?.scrollIntoView({ block: 'nearest' });
   }, [highlight, open]);
 
-  const pick = (hit: FileSearchHit): void => {
-    onPick(hit.path);
+  const pick = (path: string): void => {
+    onPick(path);
     setQuery('');
-    setHits([]);
+    setNameHits([]);
+    setContentHits([]);
     setOpen(false);
+  };
+
+  // Render one result row at its absolute index in `rows` (so the keyboard
+  // highlight and the scroll-into-view refs line up across both groups).
+  const renderRow = (row: Row, index: number): JSX.Element => {
+    const isHighlight = index === highlight;
+    const { hit } = row;
+    return (
+      <li
+        key={`${row.kind}:${hit.path}${row.kind === 'content' ? `:${hit.line}` : ''}`}
+        ref={(el) => {
+          itemRefs.current[index] = el;
+        }}
+        style={{ listStyle: 'none' }}
+      >
+        <button
+          type="button"
+          style={isHighlight ? hitStyleHighlighted : hitStyle}
+          data-testid={row.kind === 'name' ? 'search-result' : 'content-result'}
+          aria-selected={isHighlight}
+          onMouseEnter={() => setHighlight(index)}
+          // onMouseDown fires before the input's blur — so the pick lands.
+          onMouseDown={(e) => {
+            e.preventDefault();
+            pick(hit.path);
+          }}
+        >
+          {row.kind === 'name' ? (
+            <>
+              <span style={hitNameStyle}>{hit.name}</span>
+              <span style={hitDirStyle}>{dirname(displayPath(hit.path))}</span>
+            </>
+          ) : (
+            <>
+              <span style={hitNameStyle}>
+                {hit.name}
+                <span style={hitLineStyle}>:{hit.line}</span>
+              </span>
+              <span style={hitSnippetStyle}>{hit.snippet}</span>
+            </>
+          )}
+        </button>
+      </li>
+    );
   };
 
   return (
@@ -99,7 +176,7 @@ export const GlobalSearch = forwardRef<GlobalSearchHandle, Props>(function Globa
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onFocus={() => {
-          if (hits.length > 0) setOpen(true);
+          if (rows.length > 0) setOpen(true);
         }}
         onBlur={() => {
           // Delay the close so an onMouseDown on a result still registers.
@@ -113,50 +190,40 @@ export const GlobalSearch = forwardRef<GlobalSearchHandle, Props>(function Globa
             const prev = previousFocusRef.current;
             previousFocusRef.current = null;
             if (prev && document.body.contains(prev)) prev.focus();
-          } else if (e.key === 'ArrowDown' && hits.length > 0) {
+          } else if (e.key === 'ArrowDown' && rows.length > 0) {
             e.preventDefault();
-            setHighlight((h) => (h + 1) % hits.length);
-          } else if (e.key === 'ArrowUp' && hits.length > 0) {
+            setHighlight((h) => (h + 1) % rows.length);
+          } else if (e.key === 'ArrowUp' && rows.length > 0) {
             e.preventDefault();
-            setHighlight((h) => (h - 1 + hits.length) % hits.length);
-          } else if (e.key === 'Enter' && hits.length > 0) {
-            pick(hits[highlight] ?? hits[0]);
+            setHighlight((h) => (h - 1 + rows.length) % rows.length);
+          } else if (e.key === 'Enter' && rows.length > 0) {
+            const row = rows[highlight] ?? rows[0];
+            if (row) pick(row.hit.path);
           }
         }}
         placeholder="Find a file by name…"
         style={inputStyle}
         data-testid="global-search"
       />
-      {open && hits.length > 0 ? (
+      {open && (rows.length > 0 || ripgrepMissing) ? (
         <ul style={dropdownStyle}>
-          {hits.map((hit, i) => {
-            const isHighlight = i === highlight;
-            return (
-              <li
-                key={hit.path}
-                ref={(el) => {
-                  itemRefs.current[i] = el;
-                }}
-                style={{ listStyle: 'none' }}
-              >
-                <button
-                  type="button"
-                  style={isHighlight ? hitStyleHighlighted : hitStyle}
-                  data-testid="search-result"
-                  aria-selected={isHighlight}
-                  onMouseEnter={() => setHighlight(i)}
-                  // onMouseDown fires before the input's blur — so the pick lands.
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    pick(hit);
-                  }}
-                >
-                  <span style={hitNameStyle}>{hit.name}</span>
-                  <span style={hitDirStyle}>{dirname(displayPath(hit.path))}</span>
-                </button>
-              </li>
-            );
-          })}
+          {nameHits.length > 0 ? (
+            <li aria-hidden style={groupHeaderStyle}>
+              Names
+            </li>
+          ) : null}
+          {nameHits.map((hit, i) => renderRow({ kind: 'name', hit }, i))}
+          {contentHits.length > 0 ? (
+            <li aria-hidden style={groupHeaderStyle}>
+              In files
+            </li>
+          ) : null}
+          {contentHits.map((hit, j) => renderRow({ kind: 'content', hit }, nameHits.length + j))}
+          {ripgrepMissing ? (
+            <li style={hintStyle} data-testid="content-search-hint">
+              Install ripgrep (`rg`) on your PATH to search inside files.
+            </li>
+          ) : null}
         </ul>
       ) : null}
     </div>
@@ -240,4 +307,39 @@ const hitDirStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+};
+
+/** A group header ("Names" / "In files") separating the two result kinds. */
+const groupHeaderStyle: React.CSSProperties = {
+  listStyle: 'none',
+  padding: '0.35rem 0.7rem 0.15rem',
+  color: '#6c7783',
+  fontSize: '0.62rem',
+  fontWeight: 600,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+};
+
+/** The trailing line/column marker on a content hit's file name. */
+const hitLineStyle: React.CSSProperties = {
+  color: '#6c7783',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+};
+
+/** The matched line's text under a content hit. */
+const hitSnippetStyle: React.CSSProperties = {
+  color: '#9aa7b4',
+  fontSize: '0.7rem',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
+/** The "install ripgrep" hint shown when `rg` is absent on PATH. */
+const hintStyle: React.CSSProperties = {
+  listStyle: 'none',
+  padding: '0.3rem 0.7rem',
+  color: '#6c7783',
+  fontSize: '0.7rem',
 };

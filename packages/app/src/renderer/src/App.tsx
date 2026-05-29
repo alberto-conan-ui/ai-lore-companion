@@ -19,6 +19,7 @@ import { baseDirsOf, entriesInSubRoot } from './components/Pane.js';
 import { type PanelId, TabbedPanel, type WorkspaceTab } from './components/TabbedPanel.js';
 import { TAB_KINDS, type PaneSpec, type TabRenderContext } from './components/tabKinds.js';
 import { TrackerStrip } from './components/TrackerStrip.js';
+import { TERMINAL_FIND_EVENT } from './components/useXtermSession.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { accentColor, accentTint, hueFor, projectName } from './projectAccent.js';
 import { useCockpitStore } from './store.js';
@@ -387,15 +388,35 @@ export function App(): JSX.Element {
     return off;
   }, []);
 
-  // ⌘+F focuses the global file search. Main pushes this on the App menu
-  // accelerator. When focus is inside a BrowserTab's WebContentsView the
-  // keydown stays there (browser find) and this handler never fires.
-  useEffect(() => {
-    const off = window.cockpit.onFocusGlobalSearch(() => {
+  // ⌘+F focuses the global file search — unless a terminal holds focus, in
+  // which case it opens that terminal's in-terminal find bar instead (Focus 4).
+  const routeFind = useCallback(() => {
+    if (document.activeElement?.closest('.xterm')) {
+      window.dispatchEvent(new Event(TERMINAL_FIND_EVENT));
+    } else {
       globalSearchRef.current?.focusMe();
-    });
-    return off;
+    }
   }, []);
+
+  // Two entry points to ⌘F, both routed through `routeFind`:
+  //  1. A renderer keydown — the real path on macOS, where the menu's hidden
+  //     `visible:false` Navigate items DON'T register their accelerators, so the
+  //     ⌘F menu item never fires on a keystroke. Listening here works regardless
+  //     of menu visibility. (Focus inside a BrowserTab's WebContentsView is a
+  //     separate web-contents, so this never fires there — browser find stays.)
+  //  2. The `onFocusGlobalSearch` push from the menu item's click handler — the
+  //     path the e2e drives (it clicks the menu item, it can't press the key).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'f' || e.key === 'F')) {
+        e.preventDefault();
+        routeFind();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [routeFind]);
+  useEffect(() => window.cockpit.onFocusGlobalSearch(routeFind), [routeFind]);
 
   /** Whether a panel is currently visible. leftRail and centre are always on;
    *  the right column and the three bottoms carry explicit open flags. */

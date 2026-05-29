@@ -1,9 +1,19 @@
 import { statSync } from 'node:fs';
 import { isTreeError, readDirectory } from '@ai-lore-companion/core';
 import { shell } from 'electron';
-import type { FileSearchArg, FileSearchHit, TreeExpandArg } from '../../shared/ipc.js';
+import type {
+  ContentSearchArg,
+  ContentSearchResult,
+  FileSearchArg,
+  FileSearchHit,
+  TreeExpandArg,
+} from '../../shared/ipc.js';
 import { loreHide, treeHideFor } from '../path-mapping.js';
+import { searchContent } from '../search/content.js';
 import type { RegisterModule } from './types.js';
+
+/** Max content hits returned to the renderer per keystroke. */
+const CONTENT_CAP = 50;
 
 /** Trees, file search, and path open/reveal. */
 export const registerTree: RegisterModule = (reg, deps) => {
@@ -36,29 +46,29 @@ export const registerTree: RegisterModule = (reg, deps) => {
     return isTreeError(result) ? [] : (result.children ?? []);
   });
 
-  reg.handle('searchFiles', (event, arg: FileSearchArg) => {
+  reg.handle('searchFiles', async (event, arg: FileSearchArg): Promise<FileSearchHit[]> => {
     const ctx = deps.contextFor(event);
     if (!ctx) return [];
-    const query = arg.query.trim().toLowerCase();
-    if (query.length === 0) return [];
-    // Skip the project's `no-search` and `hidden` ignores, plus the Lore
-    // folder — for walk speed and so the results stay sensible.
+
+    // The service owns the index — built once, kept fresh by the watcher, and
+    // (in production) running in a `utilityProcess` off the main thread. Skip
+    // the project's `no-search` / `hidden` ignores plus the Lore folder — the
+    // same exclusion set the old per-keystroke walk used. Rank-then-slice: the
+    // cap is a render limit on already-ranked hits, not a walk-order cut.
     const ignore = [...loreHide(ctx.chain, 'payload'), ...ctx.ignoreLists.search];
-    const LIMIT = 40;
-    const hits: FileSearchHit[] = [];
-    const walk = (dir: string): void => {
-      if (hits.length >= LIMIT) return;
-      const result = readDirectory(dir, { ignore });
-      if (isTreeError(result)) return;
-      for (const child of result.children ?? []) {
-        if (hits.length >= LIMIT) break;
-        if (child.isDir) walk(child.path);
-        else if (child.name.toLowerCase().includes(query)) {
-          hits.push({ name: child.name, path: child.path });
-        }
-      }
-    };
-    for (const dir of arg.dirs) walk(dir);
-    return hits;
+    const RENDER_CAP = 40;
+    return ctx.search.search({ dirs: arg.dirs, ignore, query: arg.query, limit: RENDER_CAP });
   });
+
+  reg.handle(
+    'searchContent',
+    async (event, arg: ContentSearchArg): Promise<ContentSearchResult> => {
+      const ctx = deps.contextFor(event);
+      if (!ctx) return { hits: [], ripgrepMissing: false };
+      // Same exclusion set as the name search: the project's `no-search` /
+      // `hidden` ignores plus the Lore folder. ripgrep also honours .gitignore.
+      const ignore = [...loreHide(ctx.chain, 'payload'), ...ctx.ignoreLists.search];
+      return searchContent({ dirs: arg.dirs, query: arg.query, ignore, limit: CONTENT_CAP });
+    },
+  );
 };

@@ -25,6 +25,8 @@ import type {
   ChainPayload,
   ChangesPayload,
   CommitListPayload,
+  ContentSearchArg,
+  ContentSearchResult,
   DiffTextArg,
   DiffTextResult,
   FileSearchArg,
@@ -108,6 +110,7 @@ export const CONTRACT = {
   onTreeUpdate: push<TreeUpdatePayload>('cockpit:tree-update'),
   treeExpand: invoke<[arg: TreeExpandArg], TreeNode[]>('cockpit:tree-expand'),
   searchFiles: invoke<[arg: FileSearchArg], FileSearchHit[]>('cockpit:file-search'),
+  searchContent: invoke<[arg: ContentSearchArg], ContentSearchResult>('cockpit:content-search'),
 
   // ── Files + paths ─────────────────────────────────────────────────────────
   openPath: invoke<[path: string], string>('cockpit:open-path'),

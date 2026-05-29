@@ -53,6 +53,7 @@ import {
 import { watchPrompts } from './prompts.js';
 import { createPtyService } from './pty.js';
 import { addRecent, clearRecents, loadRecents } from './recents.js';
+import { type SearchService, WorkerSearchService } from './search/service.js';
 import { loadGlobalSettings, loadProjectSettings } from './settings.js';
 import { withIcons } from './shortcuts.js';
 
@@ -130,6 +131,19 @@ function handleDirEvent(
   });
 }
 
+/**
+ * Keep the file-search index in step with the filesystem. File `add`/`unlink`
+ * patch it in place — no re-walk. Directory events need no handling: chokidar
+ * emits a file `add`/`unlink` for every file under a folder it adds or removes.
+ * The service ignores patches before its first build (the lazy build reads the
+ * live tree anyway). The watcher ignores the `drift` set, and `search ⊆ drift`,
+ * so an `add` here is always a search-valid path.
+ */
+function patchSearch(search: SearchService, event: DirEvent): void {
+  if (event.event === 'add') search.add(event.absPath);
+  else if (event.event === 'unlink') search.remove(event.absPath);
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1100,
@@ -198,6 +212,11 @@ function createWindow(): BrowserWindow {
 function createProjectContext(win: BrowserWindow, root: string): ProjectContext {
   const chain = readChain({ root });
 
+  // The file-search service, kept fresh by this window's watcher. The worker
+  // is forked lazily on the first search (see `service.ts`) so window open
+  // pays nothing.
+  const search: SearchService = new WorkerSearchService();
+
   // Ignore rules: the built-in defaults, then the global tier, then this
   // project's tier — each layer overriding the last by pattern. The three
   // derived lists feed the watcher, the file search, and the tree reader.
@@ -253,7 +272,10 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
       lorePath: chain.lorePath,
       ignored: ignoreLists.drift,
       onFileChange: (event) => changes.scheduleRefresh(event.scope),
-      onDirEvent: (event) => handleDirEvent(win, chain, hidden, event),
+      onDirEvent: (event) => {
+        patchSearch(search, event);
+        handleDirEvent(win, chain, hidden, event);
+      },
     });
     wiring = { watcher, changes, pushCommits };
   }
@@ -275,7 +297,7 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
         sendToWin(win, CHANNELS.onPromptsChanged, undefined);
       });
 
-  return { root, chain, wiring, ptyService, ignoreLists, promptsWatcherClose };
+  return { root, chain, wiring, ptyService, ignoreLists, search, promptsWatcherClose };
 }
 
 /** Open a welcome window — no project, just Open / Open Recent. */
@@ -518,6 +540,10 @@ function reapplyIgnores(win: BrowserWindow): void {
   ctx.ignoreLists = deriveIgnoreLists(rules);
   const { hidden, drift } = ctx.ignoreLists;
 
+  // The search-ignore set may have changed — drop the index so the next search
+  // rebuilds it against the new rules.
+  ctx.search.invalidate();
+
   // Re-attach the watcher so its drift filter reflects the new rules.
   void wiring.watcher.close().then(() => {
     if (contexts.get(win.id) !== ctx) return;
@@ -526,7 +552,10 @@ function reapplyIgnores(win: BrowserWindow): void {
       lorePath: chain.lorePath,
       ignored: drift,
       onFileChange: (event) => wiring.changes.scheduleRefresh(event.scope),
-      onDirEvent: (event) => handleDirEvent(win, chain, hidden, event),
+      onDirEvent: (event) => {
+        patchSearch(ctx.search, event);
+        handleDirEvent(win, chain, hidden, event);
+      },
     });
   });
 
@@ -584,6 +613,7 @@ async function teardownContext(winId: number): Promise<void> {
   contexts.delete(winId);
 
   ctx.ptyService.killAll();
+  ctx.search.dispose();
   if (ctx.wiring) {
     try {
       await ctx.wiring.watcher.close();

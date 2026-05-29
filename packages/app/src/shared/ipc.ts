@@ -121,8 +121,35 @@ export type FileSearchArg = { dirs: string[]; query: string };
 /** One file matched by a search — its base name and absolute path. */
 export type FileSearchHit = { name: string; path: string };
 
+/** A content-search request — same dirs + query as the name search. */
+export type ContentSearchArg = { dirs: string[]; query: string };
+/** One in-file match from ripgrep content search: the file, the 1-based line
+ *  and column of the match, and the matching line's text as a snippet. */
+export type ContentSearchHit = {
+  name: string;
+  path: string;
+  line: number;
+  column: number;
+  snippet: string;
+};
+/** Content-search result — the hits, plus whether ripgrep was missing on PATH
+ *  (so the renderer can hint at installing it rather than showing "no matches"). */
+export type ContentSearchResult = { hits: ContentSearchHit[]; ripgrepMissing: boolean };
+
 /** Keystrokes (or pasted text) bound for a terminal's PTY. */
 export type TerminalInputArg = { id: string; data: string };
+
+/**
+ * Software flow-control tokens for PTY backpressure (Focus 4). The PTY is
+ * spawned with node-pty's `handleFlowControl`, which intercepts these on the
+ * input path — `PTY_FLOW_PAUSE` (XOFF) pauses reading from the child,
+ * `PTY_FLOW_RESUME` (XON) resumes — rather than forwarding them. The renderer
+ * sends them through the normal input channel when xterm's parse buffer crosses
+ * the high/low-water mark, so a flood (`yes`, a big `cat`) cannot outrun the UI.
+ * These are the conventional terminal flow-control codes (Ctrl+S / Ctrl+Q).
+ */
+export const PTY_FLOW_PAUSE = '\x13';
+export const PTY_FLOW_RESUME = '\x11';
 /** A terminal resize request, in character cells. */
 export type TerminalResizeArg = { id: string; cols: number; rows: number };
 /** Output bytes streamed from a terminal's PTY. */

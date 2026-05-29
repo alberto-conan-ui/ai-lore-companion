@@ -1,9 +1,42 @@
 import { FitAddon } from '@xterm/addon-fit';
+import { SearchAddon } from '@xterm/addon-search';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import { type RefObject, useCallback, useEffect, useRef } from 'react';
-import type { TerminalForegroundStatus } from '../../../shared/ipc.js';
+import {
+  PTY_FLOW_PAUSE,
+  PTY_FLOW_RESUME,
+  type TerminalForegroundStatus,
+} from '../../../shared/ipc.js';
+
+/** Backpressure thresholds (chars of un-parsed PTY output). Pause the child when
+ *  xterm falls this far behind; resume once it has caught up. */
+const FLOW_HIGH_WATER = 200_000;
+const FLOW_LOW_WATER = 20_000;
+
+/** Match-highlight colours for the find addon, tuned to `TERMINAL_THEME`. */
+const SEARCH_DECORATIONS = {
+  matchBackground: '#3a4658',
+  matchOverviewRuler: '#3a4658',
+  activeMatchBackground: '#5a9bd4',
+  activeMatchColorOverviewRuler: '#5a9bd4',
+} as const;
+
+/** The find-bar API a terminal surface drives (see `FindBar`). */
+export interface XtermSearchHandle {
+  /** Highlight + jump to the next match of `query` (wraps). */
+  findNext: (query: string) => void;
+  /** Highlight + jump to the previous match of `query` (wraps). */
+  findPrevious: (query: string) => void;
+  /** Clear all match decorations. */
+  clear: () => void;
+  /** Subscribe to match-count changes; returns an unsubscribe. `resultIndex` is
+   *  the 0-based active match (-1 when none); `resultCount` the total. */
+  onResults: (cb: (r: { resultIndex: number; resultCount: number }) => void) => () => void;
+}
 
 /**
  * The single source of truth for the integrated terminal's xterm.js setup.
@@ -60,6 +93,8 @@ export interface XtermSessionHandle {
   focus: () => void;
   /** Write `command` + newline into the PTY and refocus (sidebar shortcuts). */
   runCommand: (command: string) => void;
+  /** Drives the in-terminal find bar (⌘F). */
+  search: XtermSearchHandle;
 }
 
 export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle {
@@ -76,11 +111,30 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const searchRef = useRef<SearchAddon | null>(null);
   const idRef = useRef<string | null>(null);
-  // Hold the latest onStatus without re-running the mount effect when the
+  // Hold the latest callbacks without re-running the mount effect when the
   // caller passes a fresh closure.
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
+  // Match-result listeners (the find bar subscribes for its count display).
+  const resultListenersRef = useRef(
+    new Set<(r: { resultIndex: number; resultCount: number }) => void>(),
+  );
+
+  const search = useRef<XtermSearchHandle>({
+    findNext: (query) => {
+      searchRef.current?.findNext(query, { decorations: SEARCH_DECORATIONS });
+    },
+    findPrevious: (query) => {
+      searchRef.current?.findPrevious(query, { decorations: SEARCH_DECORATIONS });
+    },
+    clear: () => searchRef.current?.clearDecorations(),
+    onResults: (cb) => {
+      resultListenersRef.current.add(cb);
+      return () => resultListenersRef.current.delete(cb);
+    },
+  }).current;
 
   const doFit = useCallback(() => {
     const host = hostRef.current;
@@ -115,6 +169,9 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
       fontFamily: TERMINAL_FONT_FAMILY,
       fontSize: 13,
       cursorBlink: true,
+      // Required by the Unicode11 + search-decoration addons, which use xterm's
+      // proposed API surface.
+      allowProposedApi: true,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -143,6 +200,29 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
       }
     }
 
+    // Wide-glyph width: activate Unicode v11 so emoji / CJK / combining marks
+    // occupy the correct cell count (no cursor drift on emoji-heavy output).
+    const unicode11 = new Unicode11Addon();
+    term.loadAddon(unicode11);
+    term.unicode.activeVersion = '11';
+
+    // Clickable links — URLs in output open in the external browser, matching
+    // iTerm's ⌘-click.
+    term.loadAddon(
+      new WebLinksAddon((_event, uri) => {
+        void window.cockpit.openExternal(uri);
+      }),
+    );
+
+    // In-terminal find (⌘F). The bar UI lives in the surface; this addon does
+    // the matching + decorations and reports counts to subscribers.
+    const search = new SearchAddon();
+    term.loadAddon(search);
+    searchRef.current = search;
+    const offResults = search.onDidChangeResults((r) => {
+      for (const listener of resultListenersRef.current) listener(r);
+    });
+
     // Shift+Enter must insert a newline, not submit. xterm sends a bare `\r`
     // for both Enter and Shift+Enter, and Claude Code / Gemini read `\r` as
     // submit. Sending `\n` (LF — the Ctrl+J code) instead is the sequence
@@ -168,8 +248,25 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
     const bind = (id: string): void => {
       idRef.current = id;
       window.cockpit.resizeTerminal({ id, cols: term.cols, rows: term.rows });
+      // Flow control: count un-parsed bytes via xterm's write callback. When the
+      // terminal falls behind a flood, send XOFF to pause the child; resume with
+      // XON once it has drained. Keeps a `yes`/`cat <big>` from locking the UI.
+      let pending = 0;
+      let paused = false;
       offData = window.cockpit.onTerminalData((p) => {
-        if (p.id === id) term.write(p.data);
+        if (p.id !== id) return;
+        pending += p.data.length;
+        term.write(p.data, () => {
+          pending -= p.data.length;
+          if (paused && pending <= FLOW_LOW_WATER) {
+            paused = false;
+            window.cockpit.sendTerminalInput({ id, data: PTY_FLOW_RESUME });
+          }
+        });
+        if (!paused && pending >= FLOW_HIGH_WATER) {
+          paused = true;
+          window.cockpit.sendTerminalInput({ id, data: PTY_FLOW_PAUSE });
+        }
       });
       offExit = window.cockpit.onTerminalExit((p) => {
         if (p.id === id && exitMessage) term.write(`\r\n\x1b[2m${exitMessage}\x1b[0m\r\n`);
@@ -215,10 +312,12 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
       offData();
       offExit();
       offStatus();
+      offResults.dispose();
       if (killOnUnmount && idRef.current) window.cockpit.killTerminal(idRef.current);
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
+      searchRef.current = null;
       idRef.current = null;
     };
     // NOT `active` — toggling tab visibility must not tear down + respawn the
@@ -236,5 +335,30 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
     }
   }, [active, doFit]);
 
-  return { hostRef, focus, runCommand };
+  return { hostRef, focus, runCommand, search };
+}
+
+/** Custom DOM event App fires on ⌘F when a terminal holds focus (the ⌘F menu
+ *  accelerator can't reach xterm directly, so it routes through here). */
+export const TERMINAL_FIND_EVENT = 'cockpit:terminal-find';
+
+/**
+ * Open a terminal surface's find bar when ⌘F is pressed *and this surface's
+ * terminal has focus*. App dispatches {@link TERMINAL_FIND_EVENT} on the ⌘F
+ * accelerator; each terminal listens and only the focused one (whose `hostRef`
+ * contains the active element) responds — giving the "terminal-focused only"
+ * behaviour the global file search keeps elsewhere.
+ */
+export function useTerminalFindShortcut(
+  hostRef: RefObject<HTMLDivElement>,
+  open: () => void,
+): void {
+  useEffect(() => {
+    const onFind = (): void => {
+      const host = hostRef.current;
+      if (host && document.activeElement && host.contains(document.activeElement)) open();
+    };
+    window.addEventListener(TERMINAL_FIND_EVENT, onFind);
+    return () => window.removeEventListener(TERMINAL_FIND_EVENT, onFind);
+  }, [hostRef, open]);
 }

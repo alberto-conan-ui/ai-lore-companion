@@ -1,8 +1,9 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useRef, useState } from 'react';
 import type { PromptEntry, TerminalForegroundStatus } from '../../../shared/ipc.js';
+import { FindBar } from './FindBar.js';
 import { SidebarTab } from './SidebarTab.js';
-import { useXtermSession } from './useXtermSession.js';
+import { useTerminalFindShortcut, useXtermSession } from './useXtermSession.js';
 
 /** Default + clamping for the prompts column width (Phase C). The default is
  *  the initial width on first-open; clamps protect both columns when the user
@@ -411,13 +412,18 @@ function RunningPty({
   onStatus: (tabId: string, status: TerminalForegroundStatus, command: string) => void;
   focusPtyRef: React.MutableRefObject<() => void>;
 }): JSX.Element {
-  const { hostRef, focus } = useXtermSession({
+  const [findOpen, setFindOpen] = useState(false);
+  const { hostRef, focus, search } = useXtermSession({
     active,
     ptyId,
     killOnUnmount: false,
     exitMessage: '[engine exited]',
     onStatus: (status, command) => onStatus(tabId, status, command),
   });
+  useTerminalFindShortcut(
+    hostRef,
+    useCallback(() => setFindOpen(true), []),
+  );
 
   // Publish the focus handle so siblings (PromptsColumn) can refocus the
   // terminal after a click — caller invokes it via the ref's `.current`.
@@ -431,6 +437,15 @@ function RunningPty({
   return (
     <div style={runningWrapStyle}>
       <div ref={hostRef} style={runningHostStyle} />
+      {findOpen ? (
+        <FindBar
+          search={search}
+          onClose={() => {
+            setFindOpen(false);
+            focus();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -580,6 +595,7 @@ const promptsEmptyStyle: React.CSSProperties = {
 };
 
 const runningWrapStyle: React.CSSProperties = {
+  position: 'relative',
   flex: 1,
   minHeight: 0,
   minWidth: 0,

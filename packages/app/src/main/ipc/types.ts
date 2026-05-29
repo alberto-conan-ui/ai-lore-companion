@@ -8,6 +8,7 @@ import type {
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import type { SettingsSnapshot, Shortcut } from '../../shared/ipc.js';
 import type { PtyService } from '../pty.js';
+import type { SearchService } from '../search/service.js';
 
 /** The watcher + changes tracker a valid AI-Lore project window holds. */
 export type Wiring = {
@@ -30,6 +31,10 @@ export type ProjectContext = {
   ptyService: PtyService;
   /** The project's resolved ignore lists — drift / search / hidden patterns. */
   ignoreLists: IgnoreLists;
+  /** File-name search, backed by a watcher-fed index. Production runs it in a
+   *  `utilityProcess`; tests use the in-process impl. Lazily built on the first
+   *  search; patched by the watcher; invalidated when ignore rules change. */
+  search: SearchService;
   /** Re-read this window's chain and push it if it changed. */
   refreshChain?: () => void;
   /** Teardown for the prompts watcher (chokidar on `<lore>/process/verbs/`). */

@@ -24,7 +24,9 @@ import { spawn } from 'node:child_process';
 /** Bin directories often missing from a Finder-launched .app's PATH. */
 const EXTRA_PATH_DIRS = ['/usr/local/bin', '/opt/homebrew/bin'];
 
-function augmentedPath(): string {
+/** Process PATH with the common Homebrew bin dirs prepended — for spawning CLIs
+ *  (`ksdiff`, `rg`, …) a Finder-launched `.app` would otherwise miss on PATH. */
+export function augmentedPath(): string {
   const current = process.env.PATH ?? '';
   const segments = current.split(':').filter((s) => s.length > 0);
   const present = new Set(segments);

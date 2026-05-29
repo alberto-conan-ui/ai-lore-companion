@@ -100,6 +100,27 @@ test.describe('window modes', () => {
     }
   });
 
+  test('content search surfaces in-file matches (or hints to install ripgrep)', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      // "gate" is in demo.focus.md's body ("demo gate"), not in any file name —
+      // so any hit here came from the ripgrep content path, not the name index.
+      await page.getByTestId('global-search').fill('gate');
+      // The content round trip ran end-to-end: with ripgrep on PATH a content
+      // result shows; without it, the install hint does. Either proves the wire.
+      await expect(
+        page.getByTestId('content-result').or(page.getByTestId('content-search-hint')).first(),
+      ).toBeVisible({ timeout: 5_000 });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('the global search routes a Lore-pane hit to the right tab', async () => {
     const fixture = makeProject();
     try {
@@ -730,6 +751,33 @@ test.describe('window modes', () => {
       await page.getByTestId('pane-status').getByTestId('tree-root').click();
       await clickNavigateItem(app, 'Find File…');
       await expect(page.getByTestId('global-search')).toBeFocused({ timeout: 3_000 });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('⌘F opens the in-terminal find bar when a terminal has focus', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('pane-status')).toBeVisible({ timeout: 15_000 });
+
+      // Open a shell tab and focus its terminal.
+      await page.locator('[data-column-id="centre"]').getByTestId('new-shell').first().click();
+      await expect(page.getByTestId('tab-shell').first()).toBeVisible({ timeout: 5_000 });
+      await page.getByTestId('terminal').first().click();
+
+      // The same ⌘F action now opens the terminal find bar (focus is in the
+      // terminal), not the global file search.
+      await clickNavigateItem(app, 'Find File…');
+      await expect(page.getByTestId('terminal-find')).toBeVisible({ timeout: 5_000 });
+      await expect(page.getByTestId('global-search')).not.toBeFocused();
+
+      // Esc closes it.
+      await page.getByTestId('terminal-find-input').press('Escape');
+      await expect(page.getByTestId('terminal-find')).toBeHidden({ timeout: 3_000 });
 
       await app.close();
     } finally {

@@ -51,21 +51,49 @@ test('treeExpand returns [] with no project context', () => {
   assert.deepEqual(h.invoke('treeExpand', { path: root, scope: 'payload' }), []);
 });
 
-test('searchFiles finds a name substring match, recursing into subdirs', () => {
-  const hits = h.invoke('searchFiles', { query: 'eta', dirs: [root] }) as { name: string }[];
-  assert.deepEqual(
-    hits.map((x) => x.name),
-    ['beta.md'],
-  );
+// `searchFiles` is async — it awaits the search service (a `utilityProcess` in
+// production, the in-process index in these tests).
+async function search(query: string): Promise<string[]> {
+  const hits = (await h.invoke('searchFiles', { query, dirs: [root] })) as { name: string }[];
+  return hits.map((x) => x.name);
+}
+
+test('searchFiles finds a name match, recursing into subdirs', async () => {
+  assert.deepEqual(await search('eta'), ['beta.md']);
 });
 
-test('searchFiles is case-insensitive and matches multiple files', () => {
-  const hits = h.invoke('searchFiles', { query: 'A', dirs: [root] }) as { name: string }[];
-  assert.deepEqual(hits.map((x) => x.name).sort(), ['alpha.txt', 'beta.md']);
+test('searchFiles is case-insensitive and matches multiple files', async () => {
+  assert.deepEqual((await search('A')).sort(), ['alpha.txt', 'beta.md']);
 });
 
-test('searchFiles returns [] for an empty query and with no context', () => {
-  assert.deepEqual(h.invoke('searchFiles', { query: '   ', dirs: [root] }), []);
+test('searchFiles returns [] for an empty query and with no context', async () => {
+  assert.deepEqual(await search('   '), []);
   h.setCtx(undefined);
-  assert.deepEqual(h.invoke('searchFiles', { query: 'alpha', dirs: [root] }), []);
+  assert.deepEqual(await search('alpha'), []);
+});
+
+test('searchFiles matches a fuzzy subsequence the old substring search would miss', async () => {
+  // "bta" is not a substring of "beta.md" but is a subsequence (B-e-T-A). The
+  // old substring `includes` matcher returned nothing for this.
+  assert.deepEqual(await search('bta'), ['beta.md']);
+});
+
+test('searchFiles ranks the more relevant file first (rank-then-slice)', async () => {
+  writeFileSync(join(root, 'search.ts'), '');
+  writeFileSync(join(root, 'sub', 'my-search-helper.ts'), '');
+  const names = await search('search');
+  // Both match; the shorter, boundary-anchored "search.ts" outranks the longer
+  // "my-search-helper.ts".
+  assert.equal(names[0], 'search.ts');
+  assert.ok(names.includes('my-search-helper.ts'));
+});
+
+test('searchFiles reflects a watcher add without rebuilding the index', async () => {
+  // First search builds the index over `root`.
+  await search('alpha');
+  // Simulate the watcher patching a newly-created file into the live index.
+  const added = join(root, 'sub', 'gamma.ts');
+  writeFileSync(added, '');
+  h.ctx?.search.add(added);
+  assert.deepEqual(await search('gamma'), ['gamma.ts']);
 });

@@ -1,7 +1,8 @@
-import { type JSX, useCallback } from 'react';
+import { type JSX, useCallback, useState } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
+import { FindBar } from './FindBar.js';
 import { SidebarTab } from './SidebarTab.js';
-import { useXtermSession } from './useXtermSession.js';
+import { useTerminalFindShortcut, useXtermSession } from './useXtermSession.js';
 
 /**
  * A terminal tab — an `xterm.js` terminal bound to a real PTY in main. The
@@ -36,8 +37,9 @@ export function TerminalTab({
   // data/exit/status wiring all live in the shared hook. `runCommand` is wired
   // to the sidebar shortcuts — if the shell is at a prompt the command runs
   // immediately; if a foreground task is running the bytes append to its stdin.
+  const [findOpen, setFindOpen] = useState(false);
   const spawn = useCallback(() => window.cockpit.spawnTerminal(), []);
-  const { hostRef, runCommand } = useXtermSession({
+  const { hostRef, runCommand, search, focus } = useXtermSession({
     active,
     spawn,
     killOnUnmount: true,
@@ -47,6 +49,10 @@ export function TerminalTab({
       if (onStatus && tabId) onStatus(tabId, status, command);
     },
   });
+  useTerminalFindShortcut(
+    hostRef,
+    useCallback(() => setFindOpen(true), []),
+  );
 
   return (
     <SidebarTab
@@ -59,6 +65,15 @@ export function TerminalTab({
       content={
         <div style={wrapStyle} data-testid="terminal">
           <div ref={hostRef} style={hostStyle} />
+          {findOpen ? (
+            <FindBar
+              search={search}
+              onClose={() => {
+                setFindOpen(false);
+                focus();
+              }}
+            />
+          ) : null}
         </div>
       }
     />
@@ -103,6 +118,7 @@ function ShellShortcutsColumn({
 }
 
 const wrapStyle: React.CSSProperties = {
+  position: 'relative',
   flex: 1,
   minHeight: 0,
   minWidth: 0,

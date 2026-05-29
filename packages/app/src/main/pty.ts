@@ -180,6 +180,12 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
         rows: 24,
         cwd: opts.cwd,
         env: { ...process.env, COLORTERM: 'truecolor' } as Record<string, string>,
+        // Backpressure: with flow control on, node-pty pauses reading from the
+        // child when it receives XOFF (`PTY_FLOW_PAUSE`) on the input path and
+        // resumes on XON (`PTY_FLOW_RESUME`). The renderer sends these as xterm's
+        // parse buffer fills/drains, so a flood can't outrun the UI. Defaults are
+        // XOFF/XON, matching the shared constants.
+        handleFlowControl: true,
       });
       ptys.set(id, { pty, tty: null, ttyResolved: false, last: IDLE });
       pty.onData((data) => opts.onData(id, data));
