@@ -396,3 +396,93 @@ test('setBaseline triggers an immediate re-read against the new baseline', () =>
   }
 });
 
+test('advanceToLatest advances a scope that is still following latest', () => {
+  const payload = makeRepo();
+  const lore = makeRepo();
+  try {
+    const shaA = payload.commit('a'); // the latest save-point at attach
+    const loreSha = lore.commit('la');
+    const events: { scope: ChangeScope; baseline: string }[] = [];
+    const tracker = attachChangesTracker({
+      payloadRoot: payload.dir,
+      loreRoot: lore.dir,
+      debounceMs: 5,
+      baselineByScope: { payload: shaA, lore: loreSha },
+      onChange: (scope, _entries, baseline) => events.push({ scope, baseline }),
+    });
+    try {
+      const shaB = payload.commit('b'); // a newer save-point lands
+      tracker.advanceToLatest('payload', shaB);
+      assert.equal(tracker.baselines().payload, shaB, 'following scope advances to the new latest');
+      assert.ok(
+        events.some((e) => e.scope === 'payload' && e.baseline === shaB),
+        'advancing re-reads against the new baseline',
+      );
+    } finally {
+      tracker.close();
+    }
+  } finally {
+    payload.cleanup();
+    lore.cleanup();
+  }
+});
+
+test('advanceToLatest leaves a manually-pinned baseline alone', () => {
+  const payload = makeRepo();
+  const lore = makeRepo();
+  try {
+    const shaPrev = payload.commit('prev');
+    const shaA = payload.commit('a'); // latest tracked at attach
+    const loreSha = lore.commit('la');
+    const tracker = attachChangesTracker({
+      payloadRoot: payload.dir,
+      loreRoot: lore.dir,
+      debounceMs: 5,
+      baselineByScope: { payload: shaA, lore: loreSha },
+      onChange: () => {},
+    });
+    try {
+      tracker.setBaseline('payload', shaPrev); // user pins to an older commit
+      const shaB = payload.commit('b'); // a newer save-point lands
+      tracker.advanceToLatest('payload', shaB);
+      assert.equal(
+        tracker.baselines().payload,
+        shaPrev,
+        'a pinned baseline is not yanked to latest',
+      );
+    } finally {
+      tracker.close();
+    }
+  } finally {
+    payload.cleanup();
+    lore.cleanup();
+  }
+});
+
+test('advanceToLatest is a no-op when the latest has not moved', () => {
+  const payload = makeRepo();
+  const lore = makeRepo();
+  try {
+    const shaA = payload.commit('a');
+    const loreSha = lore.commit('la');
+    const events: ChangeScope[] = [];
+    const tracker = attachChangesTracker({
+      payloadRoot: payload.dir,
+      loreRoot: lore.dir,
+      debounceMs: 5,
+      baselineByScope: { payload: shaA, lore: loreSha },
+      onChange: (scope) => events.push(scope),
+    });
+    try {
+      const seedEvents = events.length;
+      tracker.advanceToLatest('payload', shaA); // same latest → nothing happens
+      assert.equal(events.length, seedEvents, 're-asserting the same latest fires no onChange');
+      assert.equal(tracker.baselines().payload, shaA);
+    } finally {
+      tracker.close();
+    }
+  } finally {
+    payload.cleanup();
+    lore.cleanup();
+  }
+});

@@ -63,6 +63,15 @@ export type ChangesTracker = {
    * re-read so the next snapshot reflects the new baseline.
    */
   setBaseline(scope: ChangeScope, baseline: string): void;
+  /**
+   * Advance `scope` to a new latest save-point commit — **only if the scope is
+   * still following latest** (its active baseline equals the latest we last
+   * tracked). If the user has manually pinned a different baseline, the pin is
+   * respected: we remember the new latest for future tracking but leave the
+   * baseline alone. "Follow latest unless pinned." A no-op when the latest
+   * hasn't moved. Re-reads (forced) when it does advance.
+   */
+  advanceToLatest(scope: ChangeScope, commit: string): void;
   /** Cancel any pending timers. */
   close(): void;
 };
@@ -74,6 +83,14 @@ export function attachChangesTracker(options: ChangesTrackerOptions): ChangesTra
   const baselines: { payload: string; lore: string } = {
     payload: options.baselineByScope?.payload ?? 'HEAD',
     lore: options.baselineByScope?.lore ?? 'HEAD',
+  };
+  // The latest save-point commit each scope is tracking. Seeded equal to the
+  // initial baseline (at attach the baseline IS the latest save-point, so each
+  // scope starts "following latest"). A scope is following latest while its
+  // baseline still equals this; a manual `setBaseline` to anything else pins it.
+  const latest: { payload: string; lore: string } = {
+    payload: baselines.payload,
+    lore: baselines.lore,
   };
   const state: ChangesSnapshot = { payload: [], lore: [] };
   const serialised: { payload: string; lore: string } = { payload: '[]', lore: '[]' };
@@ -127,6 +144,19 @@ export function attachChangesTracker(options: ChangesTrackerOptions): ChangesTra
     reread(scope, true);
   };
 
+  const advanceToLatest = (scope: ChangeScope, commit: string): void => {
+    if (commit === latest[scope]) return; // latest hasn't moved — nothing to do.
+    const following = baselines[scope] === latest[scope];
+    latest[scope] = commit;
+    if (!following || baselines[scope] === commit) return; // pinned, or already there.
+    baselines[scope] = commit;
+    if (timers[scope]) {
+      clearTimeout(timers[scope]);
+      timers[scope] = null;
+    }
+    reread(scope, true);
+  };
+
   // Seed both snapshots once on attach so the host has data without waiting
   // for the first watcher event.
   refreshNow();
@@ -137,6 +167,7 @@ export function attachChangesTracker(options: ChangesTrackerOptions): ChangesTra
     scheduleRefresh,
     refreshNow,
     setBaseline,
+    advanceToLatest,
     close: () => {
       if (timers.payload) clearTimeout(timers.payload);
       if (timers.lore) clearTimeout(timers.lore);

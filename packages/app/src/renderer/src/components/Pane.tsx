@@ -749,9 +749,12 @@ const paneBodyStyle: React.CSSProperties = {
 
 const treeColumnStyle: React.CSSProperties = {
   flexShrink: 0,
-  overflowY: 'auto',
+  // The FileTree owns its own scroll viewport (virtualized) — the column just
+  // bounds it horizontally and lays it out as a full-height flex child.
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
   background: '#0c121a',
-  padding: '0.3rem 0',
 };
 
 /** The drag bar between the tree and the grid — resizes the tree horizontally. */

@@ -93,6 +93,57 @@ function checkProjectCompatibility(root: string): AlteredReason | null {
 /** Project context per window, keyed by `BrowserWindow.id`. */
 const contexts = new Map<number, ProjectContext>();
 
+/**
+ * Per-window debounce timers for the event-driven chain re-read. A burst of
+ * lore writes (a Memory reshape, a save-point) coalesces into one refresh.
+ */
+const chainRefreshTimers = new Map<number, ReturnType<typeof setTimeout>>();
+
+/** Per-window tree-update coalescer — re-created at each watcher attach (its
+ *  `hidden` set changes with ignore rules), disposed at teardown. */
+const treeCoalescers = new Map<number, TreeUpdateCoalescer>();
+/** How long a lore write waits before the chain is re-read — long enough to
+ *  swallow a multi-file write burst, short enough to feel live. */
+const CHAIN_REFRESH_DEBOUNCE_MS = 150;
+
+/**
+ * Watcher-driven chain refresh. Replaces the old 5 s poll (Focus 5 — event-
+ * driven chain): a lore-side file change schedules a single coalesced re-read
+ * via the window's `refreshChain`, which JSON-compares and sends nothing when
+ * the edit didn't actually move the chain. No idle reads, no staleness window.
+ */
+function scheduleChainRefresh(win: BrowserWindow): void {
+  const existing = chainRefreshTimers.get(win.id);
+  if (existing) clearTimeout(existing);
+  chainRefreshTimers.set(
+    win.id,
+    setTimeout(() => {
+      chainRefreshTimers.delete(win.id);
+      contexts.get(win.id)?.refreshChain?.();
+    }, CHAIN_REFRESH_DEBOUNCE_MS),
+  );
+}
+
+/**
+ * Re-evaluate the latest save-point and advance each scope's Changes baseline
+ * to it — but only for a scope still *following latest* (the tracker respects a
+ * manually-pinned baseline). Fixes the "a new save-point isn't reflected until
+ * reload" gap: recording one now re-baselines every following pane live, and
+ * refreshes the commit dropdowns. Cheap and idempotent — a no-op when the
+ * latest hasn't moved. Called on a save-points-folder write and on window
+ * focus (the reconcile safety net).
+ */
+function reconcileSavePoints(win: BrowserWindow): void {
+  const ctx = contexts.get(win.id);
+  if (!ctx?.wiring || isChainError(ctx.chain)) return;
+  const sp = latestSavePoint(resolve(ctx.chain.lorePath, 'memory/save-points'));
+  if (!sp) return;
+  ctx.wiring.changes.advanceToLatest('payload', sp.payloadCommit);
+  ctx.wiring.changes.advanceToLatest('lore', sp.loreCommit);
+  ctx.wiring.pushCommits('payload');
+  ctx.wiring.pushCommits('lore');
+}
+
 /** `app.getPath('userData')` — resolved once the app is ready. */
 let userDataDir = '';
 /** The root this launch was pointed at, or null for a welcome launch. */
@@ -112,23 +163,68 @@ function contextFor(event: IpcMainEvent | IpcMainInvokeEvent): ProjectContext | 
 }
 
 /**
- * On a watcher directory event, re-read the *parent* of the changed directory
- * — its children list is what changed — and push the fresh list to the owning
- * window. The window ignores updates for paths it has not loaded.
+ * Coalesces a burst of watcher directory events into one tree re-read per
+ * affected parent folder (Focus 5 — bounded update churn). Each dir event
+ * means a parent's children list changed; the fix used to re-read and push
+ * that parent immediately, per event. A branch switch or a build fires
+ * hundreds of add/unlink events, so the renderer's store took hundreds of
+ * `patchTree` calls — each a full index rebuild + re-render. The coalescer
+ * collects the unique (scope, parent) pairs over a short window and sends one
+ * update per parent. The window ignores updates for paths it has not loaded.
  */
-function handleDirEvent(
+type TreeUpdateCoalescer = {
+  schedule: (event: DirEvent) => void;
+  dispose: () => void;
+};
+
+/** How long dir events accumulate before the coalesced tree re-read fires.
+ *  Long enough to swallow a flood, short enough that a single rename feels
+ *  instant. Pairs with chokidar's 100 ms `awaitWriteFinish` on file content. */
+const TREE_UPDATE_COALESCE_MS = 100;
+
+function makeTreeUpdateCoalescer(
   win: BrowserWindow,
   chain: ChainResult,
   hidden: readonly string[],
-  event: DirEvent,
-): void {
-  const parent = dirname(event.absPath);
-  const node = readTreeNode(chain, parent, event.scope, hidden);
-  sendToWin(win, CHANNELS.onTreeUpdate, {
-    scope: event.scope,
-    path: parent,
-    children: node.children ?? [],
-  });
+): TreeUpdateCoalescer {
+  const pending = new Map<DirEvent['scope'], Set<string>>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flush = (): void => {
+    timer = undefined;
+    if (win.isDestroyed()) {
+      pending.clear();
+      return;
+    }
+    for (const [scope, parents] of pending) {
+      for (const parent of parents) {
+        const node = readTreeNode(chain, parent, scope, hidden);
+        sendToWin(win, CHANNELS.onTreeUpdate, {
+          scope,
+          path: parent,
+          children: node.children ?? [],
+        });
+      }
+    }
+    pending.clear();
+  };
+  return {
+    schedule: (event) => {
+      const parent = dirname(event.absPath);
+      let set = pending.get(event.scope);
+      if (!set) {
+        set = new Set();
+        pending.set(event.scope, set);
+      }
+      set.add(parent);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(flush, TREE_UPDATE_COALESCE_MS);
+    },
+    dispose: () => {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      pending.clear();
+    },
+  };
 }
 
 /**
@@ -165,6 +261,20 @@ function createWindow(): BrowserWindow {
   // The window title is owned by main — the project name, set per window in
   // `attachProjectContext`. The renderer's <title> must not override it.
   win.on('page-title-updated', (event) => event.preventDefault());
+
+  // Reconcile safety net: the live model is best-effort watcher-driven, with no
+  // full re-sync except this. On regaining focus, force-refresh the cheap,
+  // staleness-prone surfaces — the chain (header), the changes/drift snapshot,
+  // and the latest-save-point baseline — so anything a missed event left stale
+  // self-heals without a window reload. The lazily-expanded file tree is left
+  // to the watcher (re-initing it would collapse expanded subtrees).
+  win.on('focus', () => {
+    const ctx = contexts.get(win.id);
+    if (!ctx?.wiring) return;
+    ctx.refreshChain?.();
+    ctx.wiring.changes.refreshNow();
+    reconcileSavePoints(win);
+  });
 
   // Close guard: a window with a running terminal task confirms before closing.
   let closeConfirmed = false;
@@ -267,14 +377,25 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
         pushCommits(scope);
       },
     });
+    treeCoalescers.get(win.id)?.dispose();
+    const treeCoalescer = makeTreeUpdateCoalescer(win, chain, hidden);
+    treeCoalescers.set(win.id, treeCoalescer);
     const watcher = attachWatcher({
       root,
       lorePath: chain.lorePath,
       ignored: ignoreLists.drift,
-      onFileChange: (event) => changes.scheduleRefresh(event.scope),
+      onFileChange: (event) => {
+        changes.scheduleRefresh(event.scope);
+        if (event.scope === 'lore') {
+          // A lore write may have moved the focus chain — re-read it, debounced.
+          scheduleChainRefresh(win);
+          // A new save-point should re-baseline following panes live.
+          if (event.absPath.startsWith(savePointsDir)) reconcileSavePoints(win);
+        }
+      },
       onDirEvent: (event) => {
         patchSearch(search, event);
-        handleDirEvent(win, chain, hidden, event);
+        treeCoalescer.schedule(event);
       },
     });
     wiring = { watcher, changes, pushCommits };
@@ -383,13 +504,13 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
     sendToWin(win, CHANNELS.onTreeInit, buildTreeInitPayload(chain, ctx.ignoreLists.hidden));
   });
 
-  // Re-read the chain on a slow interval so the header reflects status / focus
-  // / active-child edits without requiring a window reload. The chain is small
-  // (status + focus + active-child paths and titles) and cheap to walk — 5s is
-  // a good balance between liveness and noise. We compare via JSON to skip the
-  // IPC send when nothing changed. The same logic is exposed on the context as
-  // `refreshChain` so mutations (e.g. setRegister) can push the new state to
-  // the renderer immediately without waiting for the next poll tick.
+  // Re-read the chain so the header reflects status / focus / active-child
+  // edits without a window reload. Event-driven (Focus 5): the window's lore
+  // watcher calls this (debounced) on a lore write — no polling. The chain is
+  // small (status + focus + active-child paths and titles) and cheap to walk;
+  // we compare via JSON to skip the IPC send when nothing changed. Exposed on
+  // the context as `refreshChain` so the watcher trigger and mutations (e.g.
+  // setRegister) both push the new state to the renderer immediately.
   if (!isChainError(ctx.chain)) {
     let lastSent = JSON.stringify(ctx.chain);
     const refreshChain = (): void => {
@@ -403,8 +524,6 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       sendToWin(win, CHANNELS.onChain, next);
     };
     ctx.refreshChain = refreshChain;
-    const id = setInterval(refreshChain, 5_000);
-    win.once('closed', () => clearInterval(id));
   }
 }
 
@@ -532,6 +651,7 @@ function reapplyIgnores(win: BrowserWindow): void {
   if (!ctx || isChainError(ctx.chain) || !ctx.wiring) return;
   const chain = ctx.chain;
   const wiring = ctx.wiring;
+  const reattachSavePointsDir = resolve(chain.lorePath, 'memory/save-points');
   const globalRules = mergeIgnoreRules(
     DEFAULT_IGNORE_RULES,
     loadGlobalSettings(userDataDir).ignores,
@@ -547,14 +667,24 @@ function reapplyIgnores(win: BrowserWindow): void {
   // Re-attach the watcher so its drift filter reflects the new rules.
   void wiring.watcher.close().then(() => {
     if (contexts.get(win.id) !== ctx) return;
+    // Rebuild the coalescer with the new hidden set (it bakes `hidden` in).
+    treeCoalescers.get(win.id)?.dispose();
+    const treeCoalescer = makeTreeUpdateCoalescer(win, chain, hidden);
+    treeCoalescers.set(win.id, treeCoalescer);
     wiring.watcher = attachWatcher({
       root: ctx.root,
       lorePath: chain.lorePath,
       ignored: drift,
-      onFileChange: (event) => wiring.changes.scheduleRefresh(event.scope),
+      onFileChange: (event) => {
+        wiring.changes.scheduleRefresh(event.scope);
+        if (event.scope === 'lore') {
+          scheduleChainRefresh(win);
+          if (event.absPath.startsWith(reattachSavePointsDir)) reconcileSavePoints(win);
+        }
+      },
       onDirEvent: (event) => {
         patchSearch(ctx.search, event);
-        handleDirEvent(win, chain, hidden, event);
+        treeCoalescer.schedule(event);
       },
     });
   });
@@ -611,6 +741,14 @@ async function teardownContext(winId: number): Promise<void> {
   const ctx = contexts.get(winId);
   if (!ctx) return;
   contexts.delete(winId);
+
+  const pendingChainRefresh = chainRefreshTimers.get(winId);
+  if (pendingChainRefresh) {
+    clearTimeout(pendingChainRefresh);
+    chainRefreshTimers.delete(winId);
+  }
+  treeCoalescers.get(winId)?.dispose();
+  treeCoalescers.delete(winId);
 
   ctx.ptyService.killAll();
   ctx.search.dispose();

@@ -845,6 +845,37 @@ test.describe('window modes', () => {
     }
   });
 
+  test('an external edit to status.index.md updates the header (event-driven chain, no poll)', async () => {
+    const fixture = makeProject();
+    const statusPath = join(
+      fixture.root,
+      '.ai-lore-e2e-fixture',
+      'memory',
+      'status',
+      'status.index.md',
+    );
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('chip-posture')).toContainText('execute', { ignoreCase: true });
+
+      // Write the file directly — simulating an AI session or an external
+      // editor changing the posture, not a click through the IPC writer. The
+      // chain is no longer polled, so the only way this reaches the header is
+      // the lore watcher driving a debounced refresh.
+      const before = readFileSync(statusPath, 'utf8');
+      writeFileSync(statusPath, before.replace(/^posture: execute$/m, 'posture: reshape'));
+
+      await expect(page.getByTestId('chip-posture')).toContainText('reshape', {
+        ignoreCase: true,
+        timeout: 5_000,
+      });
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   test('clicking a posture option writes status.index.md and the chip updates', async () => {
     const fixture = makeProject();
     const statusPath = join(
