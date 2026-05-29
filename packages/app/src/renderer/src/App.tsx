@@ -1,4 +1,4 @@
-import type { ChangeScope, EngineEntry } from '@ai-lore-companion/core';
+import type { EngineEntry } from '@ai-lore-companion/core';
 import {
   type JSX,
   useCallback,
@@ -12,24 +12,18 @@ import { createPortal } from 'react-dom';
 import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../shared/ipc.js';
 import { isChainErrorPayload } from '../../shared/ipc.js';
 import type { AlteredReason } from '../../shared/ipc.js';
-import { AiTab } from './components/AiTab.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
-import { BrowserTab } from './components/BrowserTab.js';
-import { PublishPane } from './components/PublishPane.js';
 import { DockPanel } from './components/DockPanel.js';
 import { GlobalSearch, type GlobalSearchHandle } from './components/GlobalSearch.js';
-import { Pane, type SubRoot, baseDirsOf, entriesInSubRoot } from './components/Pane.js';
+import { baseDirsOf, entriesInSubRoot } from './components/Pane.js';
 import { type PanelId, TabbedPanel, type WorkspaceTab } from './components/TabbedPanel.js';
-import { TerminalTab } from './components/TerminalTab.js';
+import { TAB_KINDS, type PaneSpec, type TabRenderContext } from './components/tabKinds.js';
 import { TrackerStrip } from './components/TrackerStrip.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { accentColor, accentTint, hueFor, projectName } from './projectAccent.js';
 import { useCockpitStore } from './store.js';
 
 type Panel = { tabs: WorkspaceTab[]; activeId: string };
-
-/** One of the four pinned cockpit panes — its tab, plus how to root and scope it. */
-type PaneSpec = { id: string; title: string; scope: ChangeScope; subRoot: SubRoot };
 
 /** v0.8 Phase B — the pinned cockpit tabs adapt to the project's shape.
  *  Default-shape projects get three (Status / Payload / Memory). Publishing-
@@ -472,13 +466,11 @@ export function App(): JSX.Element {
 
   const addTab = (panelId: PanelId, kind: 'shell' | 'browser'): void => {
     const id = crypto.randomUUID();
+    const make = TAB_KINDS[kind].makeTab;
+    if (!make) return;
     setPanels((p) => {
-      const n = p[panelId].tabs.filter((t) => t.kind === kind).length + 1;
-      const title = `${kind === 'shell' ? 'Shell' : 'Browser'} ${n}`;
-      const tab: WorkspaceTab =
-        kind === 'shell'
-          ? { id, kind, title, baseTitle: title, status: 'idle' }
-          : { id, kind, title, baseTitle: title };
+      const index = p[panelId].tabs.filter((t) => t.kind === kind).length + 1;
+      const tab = make({ id, index, engineName });
       return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
     });
     setDockOpen(panelId, true);
@@ -490,9 +482,10 @@ export function App(): JSX.Element {
    *  the next new AI tab defaults to the same engine. */
   const addAiTab = (panelId: PanelId, engineId: string): void => {
     const id = crypto.randomUUID();
-    const title = `AI (${engineName(engineId)})`;
+    const make = TAB_KINDS.ai.makeTab;
+    if (!make) return;
     setPanels((p) => {
-      const tab: WorkspaceTab = { id, kind: 'ai', title, baseTitle: title, engine: engineId };
+      const tab = make({ id, index: 0, engineId, engineName });
       return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
     });
     setDockOpen(panelId, true);
@@ -695,15 +688,10 @@ export function App(): JSX.Element {
   const closeTab = (panelId: PanelId, tabId: string): void => {
     const panel = panels[panelId];
     const tab = panel.tabs.find((t) => t.id === tabId);
-    // A shell tab running a task confirms before closing — the whole-window
-    // close has the same guard, but closing a single tab bypassed it.
-    if (tab?.kind === 'shell' && tab.status === 'running') {
-      const proceed = window.confirm(
-        'This terminal is running a task. Closing the tab will end it.\n\nClose anyway?',
-      );
-      if (!proceed) return;
-    }
-    if (tab?.kind === 'browser') window.cockpit.browserDestroy(tabId);
+    // Per-kind close hook: shell confirms when a task runs (the whole-window
+    // close has the same guard; closing a single tab bypassed it), browser
+    // tears down its WebContentsView. A `false` return cancels the close.
+    if (tab && TAB_KINDS[tab.kind].onClose?.(tab) === false) return;
     setPanels((p) => {
       const tabs = p[panelId].tabs.filter((t) => t.id !== tabId);
       const activeId =
@@ -897,60 +885,23 @@ export function App(): JSX.Element {
     />
   );
 
+  // Everything a tab body reaches into App for — passed to the registry's
+  // `renderBody` so `tabKinds` stays a pure module with no App-state imports.
+  const renderCtx: TabRenderContext = {
+    projectRoot: chain.root,
+    paneSpecById,
+    displayPath,
+    revealTarget,
+    handleTerminalStatus,
+    terminalInitialCommands,
+    tabShortcuts,
+    engines,
+    setAiTabEngine,
+    setAiTabRunning,
+  };
   const contentPortals = tabPlacements.map(({ tab, visible }) => {
     const host = getOrCreateTabHost(tab.id);
-    let body: JSX.Element | null = null;
-    if (tab.kind === 'pane') {
-      if (tab.id === 'publish') {
-        body = <PublishPane />;
-      } else {
-        const spec = paneSpecById.get(tab.id);
-        if (spec) {
-          body = (
-            <Pane
-              testId={spec.id}
-              scope={spec.scope}
-              label={spec.title}
-              subRoot={spec.subRoot}
-              projectRoot={chain.root}
-              displayPath={displayPath}
-              revealRequest={revealTarget?.paneId === spec.id ? revealTarget : undefined}
-            />
-          );
-        }
-      }
-    } else if (tab.kind === 'shell') {
-      body = (
-        <TerminalTab
-          active={visible}
-          tabId={tab.id}
-          onStatus={handleTerminalStatus}
-          initialCommand={terminalInitialCommands[tab.id]}
-          tabShortcuts={tabShortcuts}
-        />
-      );
-    } else if (tab.kind === 'ai') {
-      body = (
-        <AiTab
-          active={visible}
-          tabId={tab.id}
-          engine={tab.engine ?? ''}
-          engines={engines}
-          onEngineChange={(engineId) => setAiTabEngine(tab.id, engineId)}
-          onStatus={handleTerminalStatus}
-          onRunningChange={setAiTabRunning}
-        />
-      );
-    } else {
-      body = (
-        <BrowserTab
-          tabId={tab.id}
-          visible={visible}
-          tabShortcuts={tabShortcuts}
-          onLaunchUrlExternal={(id) => window.cockpit.shortcutsRun(id)}
-        />
-      );
-    }
+    const body = TAB_KINDS[tab.kind].renderBody(tab, visible, renderCtx);
     return createPortal(body, host, tab.id);
   });
 

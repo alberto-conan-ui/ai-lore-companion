@@ -22,11 +22,10 @@
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import { type EngineEntry, dedupEngines, parseEngineEntries } from '@ai-lore-companion/core';
+import { type CatalogStoreSpec, loadCatalog, saveCatalog } from './catalog-store.js';
 import { projectDataDir } from './db-path.js';
-
-type StoreFile = { engines: EngineEntry[]; removedDefaults: string[] };
 
 /** Default engines back-filled when their binary resolves on PATH. Ids are
  *  stable so removal is idempotent across sessions. */
@@ -34,33 +33,6 @@ const DEFAULT_ENGINES: readonly EngineEntry[] = [
   { id: 'default.claude', name: 'Claude', binary: 'claude' },
   { id: 'default.gemini', name: 'Gemini', binary: 'gemini' },
 ];
-
-function enginesFile(userDataDir: string): string {
-  return join(userDataDir, 'engines.json');
-}
-
-function readStore(userDataDir: string): StoreFile {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(enginesFile(userDataDir), 'utf8'));
-    if (typeof parsed !== 'object' || parsed === null) {
-      return { engines: [], removedDefaults: [] };
-    }
-    const obj = parsed as Record<string, unknown>;
-    const engines = parseEngineEntries(obj.engines);
-    const removedDefaults = Array.isArray(obj.removedDefaults)
-      ? obj.removedDefaults.filter((x): x is string => typeof x === 'string')
-      : [];
-    return { engines, removedDefaults };
-  } catch {
-    return { engines: [], removedDefaults: [] };
-  }
-}
-
-function writeStore(userDataDir: string, store: StoreFile): void {
-  const file = enginesFile(userDataDir);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(store, null, 2));
-}
 
 const DEFAULT_SHELL = process.env.SHELL ?? '/bin/zsh';
 
@@ -92,38 +64,30 @@ function binaryResolves(binary: string): boolean {
   }
 }
 
-/** Back-fill any default whose id is absent, was never removed, and whose
- *  binary resolves on PATH. A user-added engine with the same binary is
- *  treated as a hit so a fresh seed does not duplicate. */
-function withDefaults(store: StoreFile): StoreFile {
-  const have = new Set(store.engines.map((e) => e.id));
-  const removed = new Set(store.removedDefaults);
-  const binaries = new Set(store.engines.map((e) => e.binary));
-  const toAdd: EngineEntry[] = [];
-  for (const d of DEFAULT_ENGINES) {
-    if (have.has(d.id) || removed.has(d.id) || binaries.has(d.binary)) continue;
-    if (!binaryResolves(d.binary)) continue;
-    toAdd.push(d);
-  }
-  if (toAdd.length === 0) return store;
-  return { ...store, engines: [...store.engines, ...toAdd] };
-}
+/** The engines sidecar-store spec. A default is satisfied by any existing
+ *  entry with the same binary (so a user-added `claude` blocks the seed), and
+ *  is only seeded when its binary resolves on PATH. The resolved list is
+ *  de-duplicated by the engine identity tuple. */
+const enginesStore: CatalogStoreSpec<EngineEntry> = {
+  fileName: 'engines.json',
+  field: 'engines',
+  parse: parseEngineEntries,
+  idOf: (e) => e.id,
+  defaults: DEFAULT_ENGINES,
+  isSatisfiedBy: (d, entries) => entries.some((e) => e.binary === d.binary),
+  canSeed: (d) => binaryResolves(d.binary),
+  dedup: dedupEngines,
+};
 
 /** Read the engine list, back-filling resolvable defaults. */
 export function loadEngines(userDataDir: string): EngineEntry[] {
-  return dedupEngines(withDefaults(readStore(userDataDir)).engines);
+  return loadCatalog(enginesStore, userDataDir);
 }
 
 /** Replace the engine list. Any default whose id has disappeared is recorded
- *  in `removedDefaults` so it does not respawn on next load. */
+ *  so it does not respawn on next load. */
 export function saveEngines(userDataDir: string, list: readonly EngineEntry[]): void {
-  const prev = readStore(userDataDir);
-  const newIds = new Set(list.map((e) => e.id));
-  const removedDefaults = new Set(prev.removedDefaults);
-  for (const d of DEFAULT_ENGINES) {
-    if (!newIds.has(d.id)) removedDefaults.add(d.id);
-  }
-  writeStore(userDataDir, { engines: [...list], removedDefaults: [...removedDefaults] });
+  saveCatalog(enginesStore, userDataDir, list);
 }
 
 // --- Per-project AI-tab state ----------------------------------------------

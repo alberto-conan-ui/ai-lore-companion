@@ -9,6 +9,8 @@
  * not on the entry itself.
  */
 
+import { type CatalogModel, dedupEntries, parseEntries } from '../catalog/catalog.js';
+
 /** One engine entry. `binary` may be an absolute path or a bare name to
  *  resolve on PATH at spawn time. */
 export type EngineEntry = {
@@ -49,26 +51,20 @@ export function parseEngineEntry(value: unknown): EngineEntry | null {
   return out;
 }
 
+/** The catalog model for engines — entry coercion + identity tuple
+ *  (id, name, binary, args). The generic `parseEntries` / `dedupEntries`
+ *  operate off this; the named wrappers below preserve existing call sites. */
+export const engineCatalog: CatalogModel<EngineEntry> = {
+  parseEntry: parseEngineEntry,
+  identity: (e) => `${e.id}|${e.name.toLowerCase()}|${e.binary}|${(e.args ?? []).join(' ')}`,
+};
+
 /** Parse an array of entries from a raw value, dropping malformed elements. */
 export function parseEngineEntries(value: unknown): EngineEntry[] {
-  if (!Array.isArray(value)) return [];
-  const out: EngineEntry[] = [];
-  for (const raw of value) {
-    const parsed = parseEngineEntry(raw);
-    if (parsed) out.push(parsed);
-  }
-  return out;
+  return parseEntries(engineCatalog, value);
 }
 
 /** Dedup engine entries by identity tuple — (id, name, binary, args). */
 export function dedupEngines(engines: readonly EngineEntry[]): EngineEntry[] {
-  const seen = new Set<string>();
-  const out: EngineEntry[] = [];
-  for (const e of engines) {
-    const key = `${e.id}|${e.name.toLowerCase()}|${e.binary}|${(e.args ?? []).join(' ')}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(e);
-  }
-  return out;
+  return dedupEntries(engineCatalog, engines);
 }

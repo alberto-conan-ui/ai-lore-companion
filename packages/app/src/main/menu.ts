@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import { BrowserWindow, Menu, type MenuItemConstructorOptions, app } from 'electron';
-import { IPC, type RecentProject } from '../shared/ipc.js';
+import { CHANNELS, type RecentProject } from '../shared/ipc.js';
 
 /** Click handlers the application menu routes back into the main process. */
 export type MenuHandlers = {
@@ -69,14 +69,14 @@ const navigateSubmenu: MenuItemConstructorOptions[] = [
     label: 'Find File…',
     accelerator: 'CmdOrCtrl+F',
     visible: false,
-    click: (_item, win) => pushToFocused(win, IPC.FocusGlobalSearch),
+    click: (_item, win) => pushToFocused(win, CHANNELS.onFocusGlobalSearch),
   },
   ...Array.from({ length: 9 }, (_, i) => i + 1).map(
     (n): MenuItemConstructorOptions => ({
       label: `Go to Tab ${n}`,
       accelerator: `CmdOrCtrl+${n}`,
       visible: false,
-      click: (_item, win) => pushToFocused(win, IPC.SelectCockpitTab, n),
+      click: (_item, win) => pushToFocused(win, CHANNELS.onSelectCockpitTab, n),
     }),
   ),
 ];
@@ -100,7 +100,7 @@ const appSubmenu: MenuItemConstructorOptions[] = [
       // `item.click()` (used by the e2e) does not pass `win`, so fall back to
       // `getFocusedWindow()`. No-op when nothing is focused.
       const target = win ?? BrowserWindow.getFocusedWindow();
-      if (target) target.webContents.send(IPC.SettingsOpen);
+      if (target) target.webContents.send(CHANNELS.onSettingsOpen);
     },
   },
   { type: 'separator' },

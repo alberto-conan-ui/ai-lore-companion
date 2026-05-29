@@ -92,6 +92,8 @@ export type {
   WriteTier,
 } from './settings/types.js';
 
+export { type CatalogModel, dedupEntries, parseEntries } from './catalog/index.js';
+
 export {
   type AppEntry,
   type AppKind,

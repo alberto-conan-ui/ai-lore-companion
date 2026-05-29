@@ -1,43 +1,26 @@
-import { randomUUID } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  type AppEntry,
   type ChainResult,
-  DEFAULT_IGNORE_RULES,
   type ChangeScope,
-  type ChangesTracker,
+  DEFAULT_IGNORE_RULES,
   type DirEvent,
   type EngineEntry,
   type IgnoreLists,
   SETTINGS_REGISTRY,
-  type SavePoint,
-  type TreeNode,
-  type WatcherHandle,
   attachChangesTracker,
   attachWatcher,
   deriveIgnoreLists,
-  findDiffApp,
   isChainError,
-  isIgnoreRule,
-  isTreeError,
-  isValidValue,
   latestSavePoint,
   listSavePoints,
   locateLore,
   mergeIgnoreRules,
-  parseAppEntries,
-  parseEngineEntries,
-  parseMemoryFileSync,
-  parseMemorySections,
   readChain,
   readCommitList,
   readCoreVersion,
-  readDiffText,
-  readDirectory,
   resolveAll,
-  updateFrontmatterFieldInFile,
   versionMeetsMinimum,
 } from '@ai-lore-companion/core';
 import {
@@ -49,83 +32,31 @@ import {
   app,
   dialog,
   ipcMain,
-  shell,
 } from 'electron';
 import {
   type AlteredReason,
-  type AppsInvokeArg,
-  type AppsInvokeResult,
-  type BrowserBounds,
-  type BrowserProfile,
-  type CockpitApi,
-  type CommitListEntry,
-  type DiffTextArg,
-  type DiffTextResult,
-  type FileSearchArg,
-  type FileSearchHit,
-  type FocusReadArg,
-  type FocusReadResult,
-  IPC,
-  type OpenDiffArg,
-  type OpenDiffResult,
-  type SetBaselineArg,
-  type SetRegisterArg,
-  type SettingsSetArg,
-  type SettingsSetIgnoresArg,
+  CHANNELS,
   type SettingsSnapshot,
   type Shortcut,
-  type ShortcutInput,
-  type TerminalInputArg,
-  type TerminalResizeArg,
-  type TerminalSpawnEngineArg,
-  type TreeExpandArg,
 } from '../shared/ipc.js';
 import { appsWithIcons, runAppsMigrations } from './apps.js';
-import {
-  loadEngines,
-  loadLastEngine,
-  loadPromptsColumnWidth,
-  saveEngines,
-  saveLastEngine,
-  savePromptsColumnWidth,
-} from './engines.js';
-import { type PromptEntry, readPrompts, watchPrompts } from './prompts.js';
 import { resolveProjectRoot } from './args.js';
-import { loadBrowserProfile, saveBrowserProfile } from './browser-prefs.js';
 import * as browser from './browser.js';
-import { launchDiff, materialiseBaseline } from './diff.js';
+import { type Deps, type ProjectContext, type Wiring, registerCockpitIpc } from './ipc/index.js';
 import { buildAppMenu } from './menu.js';
 import {
   COMMIT_LIST_LIMIT,
   attachSavePointBadges,
-  loreHide,
   projectRelativise,
-  projectToRepoRelative,
   readTreeNode,
-  treeHideFor,
 } from './path-mapping.js';
-import { type PtyService, createPtyService } from './pty.js';
+import { watchPrompts } from './prompts.js';
+import { createPtyService } from './pty.js';
 import { addRecent, clearRecents, loadRecents } from './recents.js';
-import {
-  loadGlobalSettings,
-  loadProjectSettings,
-  saveGlobalApps,
-  saveGlobalIgnores,
-  saveGlobalSetting,
-  saveProjectIgnores,
-  saveProjectSetting,
-} from './settings.js';
-import { launchApp, launchUrl, loadShortcuts, saveShortcuts, withIcons } from './shortcuts.js';
-import { spawnDetached } from './spawn-detached.js';
+import { loadGlobalSettings, loadProjectSettings } from './settings.js';
+import { withIcons } from './shortcuts.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-type Wiring = {
-  watcher: WatcherHandle;
-  changes: ChangesTracker;
-  /** Re-read commits for `scope` and push CommitList to the renderer. */
-  pushCommits: (scope: ChangeScope) => void;
-};
 
 /**
  * Minimum AI-Lore version the cockpit supports. Older projects open in the
@@ -148,32 +79,6 @@ function checkProjectCompatibility(root: string): AlteredReason | null {
   }
   return null;
 }
-
-/**
- * Everything `main` holds for one project window — created when the window
- * opens, torn down when it closes. `wiring` (DB, queue, watcher) is null when
- * the folder is not a valid AI-Lore project — a chain error — in which case the
- * window still gets a chain payload and a terminal, exactly as before V4.
- */
-type ProjectContext = {
-  root: string;
-  chain: ChainResult;
-  wiring: Wiring | null;
-  ptyService: PtyService;
-  /** The project's resolved ignore lists — drift / search / hidden patterns. */
-  ignoreLists: IgnoreLists;
-  /**
-   * Re-read this window's chain and push it to the renderer when it has
-   * changed. Used by the 5-second poll and by mutations (e.g. setRegister)
-   * that want their write to land in the UI immediately.
-   */
-  refreshChain?: () => void;
-  /**
-   * Teardown for the Phase D prompts watcher — closes the chokidar instance
-   * subscribed to `<lore>/process/verbs/`. Null for non-AI-Lore windows.
-   */
-  promptsWatcherClose?: () => Promise<void>;
-};
 
 /** Project context per window, keyed by `BrowserWindow.id`. */
 const contexts = new Map<number, ProjectContext>();
@@ -209,7 +114,7 @@ function handleDirEvent(
 ): void {
   const parent = dirname(event.absPath);
   const node = readTreeNode(chain, parent, event.scope, hidden);
-  sendToWin(win, IPC.TreeUpdate, {
+  sendToWin(win, CHANNELS.onTreeUpdate, {
     scope: event.scope,
     path: parent,
     children: node.children ?? [],
@@ -304,7 +209,7 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
       const result = readCommitList(repoRoot, COMMIT_LIST_LIMIT);
       const commits = result.kind === 'ok' ? result.commits : [];
       const savePoints = listSavePoints(savePointsDir);
-      sendToWin(win, IPC.CommitList, {
+      sendToWin(win, CHANNELS.onCommitList, {
         scope,
         commits: attachSavePointBadges(commits, savePoints, scope),
       });
@@ -323,7 +228,7 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
       loreRoot: loreWorkingTree,
       baselineByScope: initialBaselineByScope,
       onChange: (scope, entries, baseline) => {
-        sendToWin(win, IPC.Changes, {
+        sendToWin(win, CHANNELS.onChanges, {
           scope,
           entries: projectRelativise(scope, entries, root, loreWorkingTree),
           baseline,
@@ -345,9 +250,10 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
 
   const ptyService = createPtyService({
     cwd: root,
-    onData: (id, data) => sendToWin(win, IPC.TerminalData, { id, data }),
-    onExit: (id) => sendToWin(win, IPC.TerminalExit, { id }),
-    onStatus: (id, status, command) => sendToWin(win, IPC.TerminalStatus, { id, status, command }),
+    onData: (id, data) => sendToWin(win, CHANNELS.onTerminalData, { id, data }),
+    onExit: (id) => sendToWin(win, CHANNELS.onTerminalExit, { id }),
+    onStatus: (id, status, command) =>
+      sendToWin(win, CHANNELS.onTerminalStatus, { id, status, command }),
   });
 
   // Phase D — watch the vendored verbs folder so methodology upgrades surface
@@ -356,20 +262,18 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
   const promptsWatcherClose = isChainError(chain)
     ? undefined
     : watchPrompts(chain.lorePath, () => {
-        sendToWin(win, IPC.PromptsChanged, undefined);
+        sendToWin(win, CHANNELS.onPromptsChanged, undefined);
       });
 
   return { root, chain, wiring, ptyService, ignoreLists, promptsWatcherClose };
 }
-
-
 
 /** Open a welcome window — no project, just Open / Open Recent. */
 function openWelcomeWindow(): BrowserWindow {
   const win = createWindow();
   win.webContents.once('did-finish-load', () => {
     if (win.isDestroyed()) return;
-    sendToWin(win, IPC.WindowInit, { mode: 'welcome', recents: loadRecents(userDataDir) });
+    sendToWin(win, CHANNELS.onWindowInit, { mode: 'welcome', recents: loadRecents(userDataDir) });
   });
   return win;
 }
@@ -400,7 +304,7 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       // Either not an AI-Lore project, or on a version older than the
       // cockpit supports — both render the altered mode (banner + terminal
       // + Reload) so the user can bootstrap / upgrade in place.
-      sendToWin(win, IPC.WindowInit, {
+      sendToWin(win, CHANNELS.onWindowInit, {
         mode: 'altered',
         folder: ctx.root,
         reason: incompatible,
@@ -411,7 +315,7 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       // Compatible version but the chain couldn't be walked (malformed
       // status / focus files). Surface as "not an AI-Lore project" — the
       // chain error message is too internal for the user to act on.
-      sendToWin(win, IPC.WindowInit, {
+      sendToWin(win, CHANNELS.onWindowInit, {
         mode: 'altered',
         folder: ctx.root,
         reason: { kind: 'not-ai-lore' },
@@ -419,8 +323,8 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       return;
     }
     const chain = ctx.chain;
-    sendToWin(win, IPC.WindowInit, { mode: 'cockpit' });
-    sendToWin(win, IPC.Chain, chain);
+    sendToWin(win, CHANNELS.onWindowInit, { mode: 'cockpit' });
+    sendToWin(win, CHANNELS.onChain, chain);
     if (ctx.wiring) {
       // Seed the renderer with both repos' drift snapshots. Subsequent
       // updates push from the tracker's `onChange` callback (wired in
@@ -430,12 +334,12 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       const seed = ctx.wiring.changes.snapshot();
       const seedBaselines = ctx.wiring.changes.baselines();
       const loreWorkingTree = join(chain.lorePath, 'memory');
-      sendToWin(win, IPC.Changes, {
+      sendToWin(win, CHANNELS.onChanges, {
         scope: 'payload',
         entries: projectRelativise('payload', seed.payload, ctx.root, loreWorkingTree),
         baseline: seedBaselines.payload,
       });
-      sendToWin(win, IPC.Changes, {
+      sendToWin(win, CHANNELS.onChanges, {
         scope: 'lore',
         entries: projectRelativise('lore', seed.lore, ctx.root, loreWorkingTree),
         baseline: seedBaselines.lore,
@@ -444,7 +348,7 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       ctx.wiring.pushCommits('payload');
       ctx.wiring.pushCommits('lore');
     }
-    sendToWin(win, IPC.TreeInit, buildTreeInitPayload(chain, ctx.ignoreLists.hidden));
+    sendToWin(win, CHANNELS.onTreeInit, buildTreeInitPayload(chain, ctx.ignoreLists.hidden));
   });
 
   // Re-read the chain on a slow interval so the header reflects status / focus
@@ -464,7 +368,7 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       if (serialised === lastSent) return;
       lastSent = serialised;
       ctx.chain = next;
-      sendToWin(win, IPC.Chain, next);
+      sendToWin(win, CHANNELS.onChain, next);
     };
     ctx.refreshChain = refreshChain;
     const id = setInterval(refreshChain, 5_000);
@@ -546,7 +450,7 @@ function rebuildMenu(): void {
 function broadcastShortcuts(list: Shortcut[]): void {
   const decorated = withIcons(list);
   for (const win of BrowserWindow.getAllWindows()) {
-    sendToWin(win, IPC.ShortcutsChanged, decorated);
+    sendToWin(win, CHANNELS.onShortcutsChanged, decorated);
   }
 }
 
@@ -574,14 +478,14 @@ function settingsSnapshot(ctx: ProjectContext | undefined): SettingsSnapshot {
 /** Push a fresh settings snapshot to every window — each gets its own tiers. */
 function broadcastSettings(): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    sendToWin(win, IPC.SettingsChanged, settingsSnapshot(contexts.get(win.id)));
+    sendToWin(win, CHANNELS.onSettingsChanged, settingsSnapshot(contexts.get(win.id)));
   }
 }
 
 /** Push the engines list to every window — engines are user-wide. */
 function broadcastEngines(list: EngineEntry[]): void {
   for (const win of BrowserWindow.getAllWindows()) {
-    sendToWin(win, IPC.EnginesChanged, list);
+    sendToWin(win, CHANNELS.onEnginesChanged, list);
   }
 }
 
@@ -617,7 +521,7 @@ function reapplyIgnores(win: BrowserWindow): void {
   });
 
   // Re-send the trees with the new hidden set — a clear, visible refresh.
-  sendToWin(win, IPC.TreeInit, buildTreeInitPayload(chain, hidden));
+  sendToWin(win, CHANNELS.onTreeInit, buildTreeInitPayload(chain, hidden));
 }
 
 /**
@@ -631,8 +535,7 @@ function buildTreeInitPayload(
 ): import('../shared/ipc.js').TreeInitPayload {
   // v0.8 Phase C — in publishing shape the Payload tree roots at
   // `<project>/payload/` (the workshop) rather than the project root.
-  const payloadRoot =
-    chain.shape === 'publishing' ? join(chain.root, 'payload') : chain.root;
+  const payloadRoot = chain.shape === 'publishing' ? join(chain.root, 'payload') : chain.root;
   // The Lore tree carries two first-class children of `<lore>/`: `memory/`
   // (always) and `references/` (when present). A synthetic root at
   // `chain.lorePath` lets pane sub-roots walk to either side — `memory/...`
@@ -658,404 +561,6 @@ function buildTreeInitPayload(
     out.publish = readTreeNode(chain, publishRoot, 'lore', hidden);
   }
   return out;
-}
-
-function registerIpcHandlers(): void {
-  // The v0.5 dismiss channels were removed in v0.6 Phase A — see ipc.ts.
-  ipcMain.handle(IPC.OpenPath, (_event, path: string): ReturnType<CockpitApi['openPath']> => {
-    return shell.openPath(path);
-  });
-  ipcMain.on(IPC.RevealInFinder, (_event, path: string) => {
-    // `showItemInFolder` reveals files (highlights them in their parent). For
-    // folders it would show the *parent* directory, which is the wrong target
-    // — for folders we want Finder to open *into* them. statSync picks the
-    // right form.
-    let isDir = false;
-    try {
-      isDir = statSync(path).isDirectory();
-    } catch {
-      // Path may not exist; fall through to showItemInFolder.
-    }
-    if (isDir) {
-      void shell.openPath(path);
-    } else {
-      shell.showItemInFolder(path);
-    }
-  });
-  ipcMain.handle(
-    IPC.TreeExpand,
-    (event, arg: TreeExpandArg): ReturnType<CockpitApi['treeExpand']> => {
-      const ctx = contextFor(event);
-      if (!ctx) return Promise.resolve([]);
-      const result = readDirectory(arg.path, {
-        ignore: treeHideFor(ctx.chain, arg.scope, ctx.ignoreLists.hidden),
-      });
-      return Promise.resolve(isTreeError(result) ? [] : (result.children ?? []));
-    },
-  );
-  ipcMain.handle(IPC.FileSearch, (event, arg: FileSearchArg): FileSearchHit[] => {
-    const ctx = contextFor(event);
-    if (!ctx) return [];
-    const query = arg.query.trim().toLowerCase();
-    if (query.length === 0) return [];
-    // Skip the project's `no-search` and `hidden` ignores, plus the Lore
-    // folder — for walk speed and so the results stay sensible.
-    const ignore = [...loreHide(ctx.chain, 'payload'), ...ctx.ignoreLists.search];
-    const LIMIT = 40;
-    const hits: FileSearchHit[] = [];
-    const walk = (dir: string): void => {
-      if (hits.length >= LIMIT) return;
-      const result = readDirectory(dir, { ignore });
-      if (isTreeError(result)) return;
-      for (const child of result.children ?? []) {
-        if (hits.length >= LIMIT) break;
-        if (child.isDir) walk(child.path);
-        else if (child.name.toLowerCase().includes(query)) {
-          hits.push({ name: child.name, path: child.path });
-        }
-      }
-    };
-    for (const dir of arg.dirs) walk(dir);
-    return hits;
-  });
-
-  ipcMain.handle(IPC.OpenProject, async (event, path?: string): Promise<void> => {
-    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    if (typeof path === 'string' && path.length > 0) {
-      showProject(win, path);
-    } else {
-      await promptAndOpenProject(win);
-    }
-  });
-
-  ipcMain.handle(IPC.Reload, async (event): Promise<void> => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) await reloadWindow(win);
-  });
-  ipcMain.handle(IPC.OpenExternal, (_event, url: string): Promise<void> => {
-    return shell.openExternal(url);
-  });
-
-  ipcMain.handle(IPC.TerminalSpawn, (event): ReturnType<CockpitApi['spawnTerminal']> => {
-    const ctx = contextFor(event);
-    return Promise.resolve(ctx ? ctx.ptyService.spawn() : '');
-  });
-  ipcMain.handle(
-    IPC.TerminalSpawnEngine,
-    (
-      event,
-      arg: TerminalSpawnEngineArg,
-    ): ReturnType<CockpitApi['spawnTerminalEngine']> => {
-      const ctx = contextFor(event);
-      if (!ctx) return Promise.resolve('');
-      const id = ctx.ptyService.spawn({ binary: arg.binary, args: arg.args });
-      return Promise.resolve(id);
-    },
-  );
-  ipcMain.on(IPC.TerminalInput, (event, arg: TerminalInputArg) => {
-    contextFor(event)?.ptyService.write(arg.id, arg.data);
-  });
-  ipcMain.on(IPC.TerminalResize, (event, arg: TerminalResizeArg) => {
-    contextFor(event)?.ptyService.resize(arg.id, arg.cols, arg.rows);
-  });
-  ipcMain.on(IPC.TerminalKill, (event, id: string) => {
-    contextFor(event)?.ptyService.kill(id);
-  });
-
-  ipcMain.on(IPC.BrowserCreate, (event, arg: { tabId: string; initialUrl?: string }) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) browser.create(win, arg.tabId, loadBrowserProfile(userDataDir), arg.initialUrl);
-  });
-  ipcMain.on(IPC.BrowserDestroy, (_event, tabId: string) => {
-    browser.destroy(tabId);
-  });
-  ipcMain.handle(IPC.BrowserGetUrl, (_event, tabId: string): string | null => {
-    return browser.getUrl(tabId);
-  });
-  ipcMain.on(IPC.BrowserSetVisible, (_event, arg: { tabId: string; visible: boolean }) => {
-    browser.setVisible(arg.tabId, arg.visible);
-  });
-  ipcMain.on(IPC.BrowserSetBounds, (_event, arg: { tabId: string; bounds: BrowserBounds }) => {
-    browser.setBounds(arg.tabId, arg.bounds);
-  });
-  ipcMain.on(IPC.BrowserNavigate, (_event, arg: { tabId: string; url: string }) => {
-    browser.navigate(arg.tabId, arg.url);
-  });
-  ipcMain.on(IPC.BrowserGoBack, (_event, tabId: string) => {
-    browser.goBack(tabId);
-  });
-  ipcMain.on(IPC.BrowserGoForward, (_event, tabId: string) => {
-    browser.goForward(tabId);
-  });
-  ipcMain.on(IPC.BrowserReload, (_event, tabId: string) => {
-    browser.reload(tabId);
-  });
-  ipcMain.on(IPC.BrowserSetProfile, (_event, arg: { tabId: string; profile: BrowserProfile }) => {
-    saveBrowserProfile(userDataDir, arg.profile);
-    browser.setProfile(arg.tabId, arg.profile);
-  });
-  ipcMain.on(IPC.BrowserSuppressAll, (event, suppress: boolean) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) browser.suppressAll(win.id, suppress);
-  });
-
-  ipcMain.handle(IPC.ShortcutsList, (): Shortcut[] => withIcons(loadShortcuts(userDataDir)));
-  ipcMain.on(IPC.ShortcutsRun, (event, id: string) => {
-    const shortcut = loadShortcuts(userDataDir).find((s) => s.id === id);
-    if (!shortcut) return;
-    if (shortcut.target === 'url') {
-      if (shortcut.url) launchUrl(shortcut.url);
-      return;
-    }
-    if (shortcut.target === 'terminal') {
-      if (!shortcut.command) return;
-      event.sender.send(IPC.ShortcutOpenTerminal, {
-        label: shortcut.label,
-        command: shortcut.command,
-      });
-      return;
-    }
-    const ctx = contextFor(event);
-    if (!ctx) return;
-    // "project" → the window's root; "lore" → its Lore folder, if it has one.
-    const folder =
-      shortcut.target === 'lore' ? (isChainError(ctx.chain) ? null : ctx.chain.lorePath) : ctx.root;
-    if (folder && shortcut.app) launchApp(shortcut.app, folder);
-  });
-  ipcMain.handle(IPC.ShortcutsPickApp, async (event): Promise<string | null> => {
-    const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
-    const opts: OpenDialogOptions = {
-      title: 'Choose an application',
-      defaultPath: '/Applications',
-      properties: ['openFile'],
-      filters: [{ name: 'Applications', extensions: ['app'] }],
-    };
-    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
-    return result.canceled ? null : (result.filePaths[0] ?? null);
-  });
-  ipcMain.handle(IPC.ShortcutsAdd, (_event, input: ShortcutInput): Shortcut[] => {
-    const list = [...loadShortcuts(userDataDir), { id: randomUUID(), ...input }];
-    saveShortcuts(userDataDir, list);
-    broadcastShortcuts(list);
-    return withIcons(list);
-  });
-  ipcMain.handle(IPC.ShortcutsRemove, (_event, id: string): Shortcut[] => {
-    const list = loadShortcuts(userDataDir).filter((s) => s.id !== id);
-    saveShortcuts(userDataDir, list);
-    broadcastShortcuts(list);
-    return withIcons(list);
-  });
-
-  ipcMain.handle(IPC.SettingsGet, (event): SettingsSnapshot => {
-    return settingsSnapshot(contextFor(event));
-  });
-  ipcMain.handle(IPC.SettingsSet, (event, arg: SettingsSetArg): SettingsSnapshot => {
-    const ctx = contextFor(event);
-    const def = SETTINGS_REGISTRY.find((d) => d.key === arg.key);
-    // Reject an unknown key, a value that fails its declared type, or a
-    // project-tier write from a window with no AI-Lore project.
-    if (def && isValidValue(def, arg.value)) {
-      if (arg.tier === 'global') {
-        saveGlobalSetting(userDataDir, arg.key, arg.value);
-        broadcastSettings();
-      } else if (ctx && !isChainError(ctx.chain)) {
-        saveProjectSetting(userDataDir, ctx.root, arg.key, arg.value);
-        broadcastSettings();
-      }
-    }
-    return settingsSnapshot(ctx);
-  });
-  ipcMain.handle(IPC.SettingsSetIgnores, (event, arg: SettingsSetIgnoresArg): SettingsSnapshot => {
-    const ctx = contextFor(event);
-    const rules = arg.rules.filter(isIgnoreRule);
-    if (arg.tier === 'global') {
-      saveGlobalIgnores(userDataDir, rules);
-      for (const win of BrowserWindow.getAllWindows()) reapplyIgnores(win);
-    } else if (ctx && !isChainError(ctx.chain)) {
-      saveProjectIgnores(userDataDir, ctx.root, rules);
-      const root = ctx.root;
-      for (const win of BrowserWindow.getAllWindows()) {
-        if (contexts.get(win.id)?.root === root) reapplyIgnores(win);
-      }
-    }
-    broadcastSettings();
-    return settingsSnapshot(ctx);
-  });
-  ipcMain.handle(IPC.SetRegister, (event, arg: SetRegisterArg): void => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) return;
-    const statusPath = join(ctx.chain.lorePath, 'memory/status/status.index.md');
-    const dotPath = arg.field === 'posture' ? 'posture' : `dials.${arg.field}`;
-    const written = updateFrontmatterFieldInFile(statusPath, dotPath, arg.value);
-    if (!written) return;
-    // Push the new chain immediately — the 5s poll's `lastSent` would
-    // catch up eventually, but the chip should reflect the click now.
-    ctx.refreshChain?.();
-  });
-  ipcMain.handle(IPC.FocusRead, (event, arg: FocusReadArg): FocusReadResult => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) {
-      return { error: 'no project context' };
-    }
-    const abs = isAbsolute(arg.path) ? arg.path : resolve(ctx.root, arg.path);
-    // Refuse paths that escape this window's project — the renderer should
-    // never read a file outside the project's tree.
-    const rel = relative(ctx.root, abs);
-    if (rel.startsWith('..') || isAbsolute(rel)) {
-      return { error: 'path is outside the project' };
-    }
-    try {
-      const parsed = parseMemoryFileSync(abs);
-      return {
-        path: abs,
-        frontmatter: parsed.frontmatter,
-        sections: parseMemorySections(parsed.body),
-      };
-    } catch (err) {
-      return { error: `cannot read focus file: ${(err as Error).message}` };
-    }
-  });
-  ipcMain.handle(IPC.SetBaseline, (event, arg: SetBaselineArg): void => {
-    const ctx = contextFor(event);
-    if (!ctx?.wiring || isChainError(ctx.chain)) return;
-    ctx.wiring.changes.setBaseline(arg.scope, arg.baseline);
-    // setBaseline triggers an immediate tracker re-read, which fires onChange,
-    // which pushes Changes + CommitList. No separate push needed here.
-  });
-  ipcMain.handle(IPC.DiffText, (event, arg: DiffTextArg): DiffTextResult => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) {
-      return { kind: 'failed', message: 'no project context' };
-    }
-    const loreWorkingTree = join(ctx.chain.lorePath, 'memory');
-    const workingTreeRoot = arg.scope === 'payload' ? ctx.root : loreWorkingTree;
-    // Renderer sends project-relative paths; un-rebase the lore prefix so git
-    // diff sees a path relative to the repo's working tree root.
-    const repoRelPath = projectToRepoRelative(arg.scope, arg.relPath, ctx.root, loreWorkingTree);
-    if (repoRelPath.startsWith('..') || isAbsolute(repoRelPath)) {
-      return { kind: 'failed', message: 'path is outside the repo working tree' };
-    }
-    const result = readDiffText(workingTreeRoot, arg.baseline, repoRelPath);
-    return result.kind === 'ok'
-      ? { kind: 'ok', text: result.text }
-      : { kind: 'failed', message: result.message };
-  });
-  ipcMain.handle(IPC.OpenDiff, (event, arg: OpenDiffArg): OpenDiffResult => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) {
-      return { kind: 'failed', message: 'no project context' };
-    }
-    const apps = loadGlobalSettings(userDataDir).apps ?? [];
-    const diff = findDiffApp(apps);
-    if (!diff || !diff.cliPath || !diff.argvTemplate) {
-      return { kind: 'no-cli' };
-    }
-    const cli = diff.cliPath;
-    const template = diff.argvTemplate;
-    // Per-repo working tree. The lore repo's .git/ lives at
-    // <lorePath>/memory/.git/, so its working tree root is <lorePath>/memory/.
-    const workingTreeRoot =
-      arg.scope === 'payload' ? ctx.root : resolve(ctx.chain.lorePath, 'memory');
-    // Resolve the baseline commit. `'HEAD'` falls back to the latest save-point
-    // — diffing working-tree-vs-HEAD opens an empty diff in the external app
-    // when the file is unmodified, which is rarely what the user wants when
-    // they ask for a Diff on a row.
-    let commit: string;
-    if (arg.baseline === 'HEAD') {
-      const savePoint = latestSavePoint(resolve(ctx.chain.lorePath, 'memory/save-points'));
-      if (!savePoint) return { kind: 'no-save-point' };
-      commit = arg.scope === 'payload' ? savePoint.payloadCommit : savePoint.loreCommit;
-    } else {
-      commit = arg.baseline;
-    }
-    // Paths arrive project-relative; refuse anything that escapes the project.
-    const absFile = isAbsolute(arg.relPath) ? arg.relPath : resolve(ctx.root, arg.relPath);
-    const rootRel = relative(ctx.root, absFile);
-    if (rootRel.startsWith('..') || isAbsolute(rootRel)) {
-      return { kind: 'failed', message: 'path is outside the project' };
-    }
-    const gitRelPath = relative(workingTreeRoot, absFile);
-    if (gitRelPath.startsWith('..') || isAbsolute(gitRelPath)) {
-      return { kind: 'failed', message: 'path is outside the repo working tree' };
-    }
-    const materialised = materialiseBaseline({ workingTreeRoot, commit, gitRelPath });
-    if (materialised.kind === 'failed') {
-      return materialised;
-    }
-    const launched = launchDiff({
-      cli,
-      template,
-      baseline: materialised.tempPath,
-      current: absFile,
-    });
-    if (launched.kind === 'failed') {
-      return launched;
-    }
-    return { kind: 'ok', cli };
-  });
-  ipcMain.handle(IPC.AppsSave, (_event, apps: AppEntry[]): SettingsSnapshot => {
-    saveGlobalApps(userDataDir, parseAppEntries(apps));
-    broadcastSettings();
-    return settingsSnapshot(contextFor(_event));
-  });
-  ipcMain.handle(IPC.AppsInvoke, (_event, arg: AppsInvokeArg): AppsInvokeResult => {
-    const apps = loadGlobalSettings(userDataDir).apps ?? [];
-    const app = apps.find((a) => a.id === arg.appId);
-    if (!app) return { kind: 'not-found' };
-    if (app.kind === 'app') {
-      if (!app.appPath) return { kind: 'failed', message: 'app entry missing appPath' };
-      // `open -a` is the canonical macOS way to target a specific app; the
-      // path argument is passed as argv, never shell-interpolated.
-      return spawnDetached('open', ['-a', app.appPath, arg.path]);
-    }
-    // kind === 'cli'
-    if (!app.cliPath || !app.argvTemplate) {
-      return { kind: 'failed', message: 'cli entry missing cliPath or argvTemplate' };
-    }
-    // Single-path template — `{path}` is the one placeholder for non-diff
-    // CLIs. Diff entries do not come through this path.
-    const argv = app.argvTemplate
-      .split(/\s+/)
-      .filter((t) => t.length > 0)
-      .map((t) => (t === '{path}' ? arg.path : t));
-    return spawnDetached(app.cliPath, argv);
-  });
-
-  ipcMain.handle(IPC.EnginesList, (): EngineEntry[] => loadEngines(userDataDir));
-  ipcMain.handle(IPC.EnginesSave, (_event, engines: EngineEntry[]): EngineEntry[] => {
-    const parsed = parseEngineEntries(engines);
-    saveEngines(userDataDir, parsed);
-    const list = loadEngines(userDataDir);
-    broadcastEngines(list);
-    return list;
-  });
-  ipcMain.handle(IPC.EngineLastGet, (event): string | null => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) return null;
-    return loadLastEngine(userDataDir, ctx.root);
-  });
-  ipcMain.handle(IPC.EngineLastSet, (event, engineId: string): void => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) return;
-    if (typeof engineId !== 'string' || engineId.length === 0) return;
-    saveLastEngine(userDataDir, ctx.root, engineId);
-  });
-  ipcMain.handle(IPC.AiPromptsWidthGet, (event): number | null => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) return null;
-    return loadPromptsColumnWidth(userDataDir, ctx.root);
-  });
-  ipcMain.handle(IPC.AiPromptsWidthSet, (event, width: number): void => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) return;
-    if (typeof width !== 'number' || !Number.isFinite(width)) return;
-    savePromptsColumnWidth(userDataDir, ctx.root, width);
-  });
-  ipcMain.handle(IPC.PromptsList, (event): PromptEntry[] => {
-    const ctx = contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) return [];
-    return readPrompts(ctx.chain.lorePath);
-  });
 }
 
 /** Tear down one window's context — kill its PTYs, close its watcher + trackers. */
@@ -1100,13 +605,32 @@ function openLaunchWindow(): void {
   }
 }
 
+/**
+ * The shared services the `main/ipc/*` register modules need from this host —
+ * window/context state and the cross-window broadcasts that live in this
+ * file's closure. Everything else a handler touches it imports directly.
+ */
+const ipcDeps: Deps = {
+  contextFor,
+  getUserDataDir: () => userDataDir,
+  contexts,
+  settingsSnapshot,
+  broadcastSettings,
+  broadcastEngines,
+  broadcastShortcuts,
+  reapplyIgnores,
+  showProject,
+  promptAndOpenProject,
+  reloadWindow,
+};
+
 app.whenReady().then(() => {
   userDataDir = app.getPath('userData');
   // v0.6 Phase A — bring the Apps catalog to the current schema version
   // before any window reads settings. v1 folds in legacy folder shortcuts;
   // v2 cleans labels + dedups. Idempotent + version-gated.
   runAppsMigrations(userDataDir);
-  registerIpcHandlers();
+  registerCockpitIpc(ipcMain, ipcDeps);
   rebuildMenu();
 
   launchRoot = resolveProjectRoot(process.argv);

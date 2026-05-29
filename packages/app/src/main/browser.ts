@@ -3,7 +3,7 @@ import {
   type BrowserBounds,
   type BrowserProfile,
   type BrowserStatePayload,
-  IPC,
+  CHANNELS,
 } from '../shared/ipc.js';
 
 /**
@@ -72,7 +72,7 @@ function pushState(tabId: string, c: Companion): void {
     loading: wc.isLoading(),
     profile: c.profile,
   };
-  c.win.webContents.send(IPC.BrowserState, state);
+  c.win.webContents.send(CHANNELS.onBrowserState, state);
 }
 
 function buildView(

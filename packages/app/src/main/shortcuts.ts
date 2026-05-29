@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { readdirSync } from 'node:fs';
+import { basename, join } from 'node:path';
 import { nativeImage } from 'electron';
 import type { Shortcut } from '../shared/ipc.js';
+import { type CatalogStoreSpec, loadCatalog, saveCatalog } from './catalog-store.js';
 
 /**
  * App-launch shortcuts — a user-configured list, persisted as a JSON file
@@ -14,8 +15,6 @@ import type { Shortcut } from '../shared/ipc.js';
  * fresh installs and existing stores both end up with them. A user who removes
  * a default is recorded in `removedDefaults` so the seed does not respawn.
  */
-
-type StoreFile = { shortcuts: Shortcut[]; removedDefaults: string[] };
 
 /** Shortcuts every project starts with. Their ids are stable so removal is
  *  idempotent across sessions. The app path is the full bundle path so the
@@ -35,10 +34,6 @@ const SYSTEM_APP_PATHS: Record<string, string> = {
   Finder: '/System/Library/CoreServices/Finder.app',
 };
 
-function shortcutsFile(userDataDir: string): string {
-  return join(userDataDir, 'shortcuts.json');
-}
-
 function isShortcut(x: unknown): x is Shortcut {
   if (typeof x !== 'object' || x === null) return false;
   const s = x as Record<string, unknown>;
@@ -55,67 +50,32 @@ function isShortcut(x: unknown): x is Shortcut {
   );
 }
 
-/** Parse the store file. Back-compat: a top-level array is the old shape. */
-function readStore(userDataDir: string): StoreFile {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(shortcutsFile(userDataDir), 'utf8'));
-    if (Array.isArray(parsed)) {
-      return { shortcuts: parsed.filter(isShortcut), removedDefaults: [] };
-    }
-    if (typeof parsed === 'object' && parsed !== null) {
-      const obj = parsed as Record<string, unknown>;
-      const shortcuts = Array.isArray(obj.shortcuts) ? obj.shortcuts.filter(isShortcut) : [];
-      const removedDefaults = Array.isArray(obj.removedDefaults)
-        ? obj.removedDefaults.filter((x): x is string => typeof x === 'string')
-        : [];
-      return { shortcuts, removedDefaults };
-    }
-    return { shortcuts: [], removedDefaults: [] };
-  } catch {
-    return { shortcuts: [], removedDefaults: [] };
-  }
-}
-
-function writeStore(userDataDir: string, store: StoreFile): void {
-  const file = shortcutsFile(userDataDir);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(store, null, 2));
-}
-
-/** Add any default whose id is absent and was never removed by the user. A
- *  user-added shortcut with the same target+app counts as a hit too — a
- *  collision-light check that avoids two Finders if the user wired one. */
-function withDefaults(store: StoreFile): StoreFile {
-  const have = new Set(store.shortcuts.map((s) => s.id));
-  const removed = new Set(store.removedDefaults);
-  const toAdd = DEFAULT_SHORTCUTS.filter((d) => {
-    if (have.has(d.id) || removed.has(d.id)) return false;
-    if (d.target !== 'url' && d.app) {
-      const dupe = store.shortcuts.some((s) => s.target === d.target && s.app === d.app);
-      if (dupe) return false;
-    }
-    return true;
-  });
-  if (toAdd.length === 0) return store;
-  return { ...store, shortcuts: [...store.shortcuts, ...toAdd] };
-}
+/** The shortcuts sidecar-store spec. A non-URL default is satisfied by any
+ *  existing shortcut with the same target+app (so a user-wired Finder blocks
+ *  the seed). Tolerant of the legacy top-level-array file shape. */
+const shortcutsStore: CatalogStoreSpec<Shortcut> = {
+  fileName: 'shortcuts.json',
+  field: 'shortcuts',
+  parse: (raw) => (Array.isArray(raw) ? raw.filter(isShortcut) : []),
+  idOf: (s) => s.id,
+  defaults: DEFAULT_SHORTCUTS,
+  isSatisfiedBy: (d, entries) =>
+    d.target !== 'url' && d.app !== undefined
+      ? entries.some((s) => s.target === d.target && s.app === d.app)
+      : false,
+  legacyArray: true,
+};
 
 /** Read the shortcut list — back-filling defaults so they appear without a
  *  one-shot bootstrap step. */
 export function loadShortcuts(userDataDir: string): Shortcut[] {
-  return withDefaults(readStore(userDataDir)).shortcuts;
+  return loadCatalog(shortcutsStore, userDataDir);
 }
 
 /** Persist the shortcut list. A default whose id has disappeared from `list`
- *  is recorded in `removedDefaults` so it does not respawn on the next load. */
+ *  is recorded so it does not respawn on the next load. */
 export function saveShortcuts(userDataDir: string, list: Shortcut[]): void {
-  const prev = readStore(userDataDir);
-  const newIds = new Set(list.map((s) => s.id));
-  const removedDefaults = new Set(prev.removedDefaults);
-  for (const d of DEFAULT_SHORTCUTS) {
-    if (!newIds.has(d.id)) removedDefaults.add(d.id);
-  }
-  writeStore(userDataDir, { shortcuts: list, removedDefaults: [...removedDefaults] });
+  saveCatalog(shortcutsStore, userDataDir, list);
 }
 
 /**

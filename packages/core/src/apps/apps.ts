@@ -16,6 +16,8 @@
  * the same across all projects.
  */
 
+import { type CatalogModel, dedupEntries, parseEntries } from '../catalog/catalog.js';
+
 export type AppKind = 'app' | 'cli';
 
 /** Which kinds of nodes an entry shows up on in context menus. */
@@ -93,15 +95,23 @@ export function parseAppEntry(value: unknown): AppEntry | null {
   return out;
 }
 
+/**
+ * The catalog model for apps — entry coercion + identity tuple
+ * (label, kind, target, path, role). The generic `parseEntries` /
+ * `dedupEntries` operate off this; the named wrappers preserve call sites
+ * and `dedupApps`'s documented semantics.
+ */
+export const appCatalog: CatalogModel<AppEntry> = {
+  parseEntry: parseAppEntry,
+  identity: (a) => {
+    const path = a.appPath ?? a.cliPath ?? '';
+    return `${a.label.toLowerCase()}|${a.kind}|${a.target}|${path}|${a.role ?? ''}`;
+  },
+};
+
 /** Parse an array of entries from a raw value, dropping malformed elements. */
 export function parseAppEntries(value: unknown): AppEntry[] {
-  if (!Array.isArray(value)) return [];
-  const out: AppEntry[] = [];
-  for (const raw of value) {
-    const parsed = parseAppEntry(raw);
-    if (parsed) out.push(parsed);
-  }
-  return out;
+  return parseEntries(appCatalog, value);
 }
 
 /** Find the catalog's diff entry (the `role: 'diff'` `cli` entry), if any. */
@@ -149,14 +159,5 @@ export function cleanAppLabel(label: string): string {
  * collapse to a single catalog entry after label cleaning.
  */
 export function dedupApps(apps: readonly AppEntry[]): AppEntry[] {
-  const seen = new Set<string>();
-  const out: AppEntry[] = [];
-  for (const a of apps) {
-    const path = a.appPath ?? a.cliPath ?? '';
-    const key = `${a.label.toLowerCase()}|${a.kind}|${a.target}|${path}|${a.role ?? ''}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(a);
-  }
-  return out;
+  return dedupEntries(appCatalog, apps);
 }

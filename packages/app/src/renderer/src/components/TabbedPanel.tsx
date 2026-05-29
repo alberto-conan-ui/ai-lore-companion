@@ -2,6 +2,7 @@ import type { EngineEntry } from '@ai-lore-companion/core';
 import { type JSX, useState } from 'react';
 import type { TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { type DriftLevel, driftLevel } from '../store.js';
+import { NEW_TAB_BUTTONS, type NewTabContext, TAB_KINDS } from './tabKinds.js';
 
 /** A tab's kind selects which surface it renders. `pane` tabs are the
  *  cockpit's pinned sub-rooted file views (Status / Payload / Memory) — they
@@ -25,17 +26,6 @@ export type WorkspaceTab = {
   /** For `kind === 'ai'`: the engine chosen when the tab was opened. */
   engine?: string;
 };
-
-/** Pick the engine id the strip's `+ AI` button creates a tab with. The
- *  project's last pick if it still exists; otherwise the first available; an
- *  empty string when no engines exist (the button is disabled in that case). */
-function defaultEngineId(
-  engines: readonly EngineEntry[],
-  lastEngineId: string | null,
-): string {
-  if (lastEngineId && engines.some((e) => e.id === lastEngineId)) return lastEngineId;
-  return engines[0]?.id ?? '';
-}
 
 /**
  * The six panels of the v0.9 workspace. Three columns side-by-side, each
@@ -115,32 +105,6 @@ function DriftBadge({ count }: { count: number }): JSX.Element {
   );
 }
 
-/** Idle/running dot on a shell tab — lit while a foreground task runs. */
-function StatusDot({ status }: { status: TerminalForegroundStatus }): JSX.Element {
-  const running = status === 'running';
-  return (
-    <span
-      style={{
-        ...statusDotStyle,
-        background: running ? '#4cd07d' : '#3a4654',
-        boxShadow: running ? '0 0 4px #4cd07d' : 'none',
-      }}
-      aria-label={running ? 'running' : 'idle'}
-    />
-  );
-}
-
-/** Filled-glyph badge on an AI tab — the kind marker (Phase B will overlay an
- *  idle/running indicator on top of it). */
-function AiBadge(): JSX.Element {
-  return (
-    <span style={aiBadgeStyle} aria-label="AI tab">
-      ✦
-    </span>
-  );
-}
-
-
 /**
  * A panel: a strip of typed, draggable tabs over a content slot. The strip is
  * a drop target — dropping a tab moves it here. The content slot stays empty;
@@ -168,10 +132,16 @@ export function TabbedPanel({
   // The tab currently being renamed inline, plus its draft text.
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
-  // The engine `+ AI` opens a new tab with — last-picked if still available,
-  // first otherwise. The user can change it in the new tab's empty-state
-  // dropdown before clicking Start.
-  const newAiEngineId = defaultEngineId(engines, lastEngineId);
+  // What the strip's `+ <kind>` creator buttons act through. Each button's
+  // tooltip / disabled / onClick reads from this (e.g. `+ AI` resolves the
+  // default engine and is disabled when none are configured).
+  const newTabCtx: NewTabContext = {
+    engines,
+    lastEngineId,
+    onNewShell,
+    onNewAi,
+    onNewBrowser,
+  };
 
   const startEdit = (tab: WorkspaceTab): void => {
     setEditingId(tab.id);
@@ -222,9 +192,9 @@ export function TabbedPanel({
               style={{ ...tabStyle, ...(active ? activeTabStyle : null) }}
               data-testid={tab.kind === 'pane' ? `tab-${tab.id}` : `tab-${tab.kind}`}
               data-tab-kind={tab.kind}
-              draggable={tab.kind !== 'pane'}
+              draggable={TAB_KINDS[tab.kind].draggable}
               onDragStart={(e) => {
-                if (tab.kind === 'pane') {
+                if (!TAB_KINDS[tab.kind].draggable) {
                   e.preventDefault();
                   return;
                 }
@@ -259,21 +229,20 @@ export function TabbedPanel({
                     ...tabLabelBtn,
                     color: active ? '#e6edf3' : '#8a96a2',
                     // Pinned panes don't carry the drag-cursor hint other tabs do.
-                    cursor: tab.kind === 'pane' ? 'pointer' : 'grab',
+                    cursor: TAB_KINDS[tab.kind].draggable ? 'grab' : 'pointer',
                   }}
                   title={tab.kind === 'ai' && tab.engine ? `${tab.title} · ${tab.engine}` : tab.title}
                   onClick={() => onSelectTab(tab.id)}
                   onDoubleClick={() => {
-                    if (tab.kind !== 'pane') startEdit(tab);
+                    if (TAB_KINDS[tab.kind].draggable) startEdit(tab);
                   }}
                 >
-                  {tab.kind === 'shell' ? <StatusDot status={tab.status ?? 'idle'} /> : null}
-                  {tab.kind === 'ai' ? <AiBadge /> : null}
+                  {TAB_KINDS[tab.kind].stripAdornment?.(tab) ?? null}
                   <span style={tabTitleStyle}>{tab.title}</span>
                   {tabDrift && tab.id in tabDrift ? <DriftBadge count={tabDrift[tab.id]} /> : null}
                 </button>
               )}
-              {tab.kind === 'pane' ? null : (
+              {TAB_KINDS[tab.kind].closable ? (
                 <button
                   type="button"
                   style={closeBtn}
@@ -282,50 +251,34 @@ export function TabbedPanel({
                 >
                   ×
                 </button>
-              )}
+              ) : null}
             </div>
           );
         })}
         {locked ? null : (
           <>
             <span style={stripDividerStyle} aria-hidden="true" />
-            <button
-              type="button"
-              style={newBtn}
-              title={
-                engines.length === 0
-                  ? 'Add an engine in Settings → Engines to enable AI tabs'
-                  : 'New AI session'
-              }
-              data-testid="new-ai"
-              disabled={engines.length === 0}
-              onClick={() => onNewAi(newAiEngineId)}
-            >
-              + AI
-            </button>
-            <button
-              type="button"
-              style={newBtn}
-              title="New shell"
-              data-testid="new-shell"
-              onClick={onNewShell}
-            >
-              + shell
-            </button>
-            <button
-              type="button"
-              style={newBtn}
-              title="New browser"
-              data-testid="new-browser"
-              onClick={onNewBrowser}
-            >
-              + web
-            </button>
-            {/* v0.9 Phase E: the per-shortcut `+ <name>` URL + terminal
+            {/* One creator button per registered tab kind that declares a
+             *  `newButton`, in the registry's display order (+ AI / + shell /
+             *  + web). Adding a creatable kind needs only its descriptor.
+             *
+             *  v0.9 Phase E: the per-shortcut `+ <name>` URL + terminal
              *  buttons that used to live here are gone. URL shortcuts now
              *  surface inside every Web tab's sidebar; terminal shortcuts
-             *  inside every Shell tab's sidebar. The strip carries only the
-             *  three kind-creators (+ AI / + shell / + web). */}
+             *  inside every Shell tab's sidebar. */}
+            {NEW_TAB_BUTTONS.map((btn) => (
+              <button
+                key={btn.testId}
+                type="button"
+                style={newBtn}
+                title={btn.title(newTabCtx)}
+                data-testid={btn.testId}
+                disabled={btn.disabled?.(newTabCtx) ?? false}
+                onClick={() => btn.onClick(newTabCtx)}
+              >
+                {btn.label}
+              </button>
+            ))}
           </>
         )}
       </div>
@@ -395,27 +348,6 @@ const tabTitleStyle: React.CSSProperties = {
   textOverflow: 'ellipsis',
   verticalAlign: 'middle',
 };
-
-const statusDotStyle: React.CSSProperties = {
-  flexShrink: 0,
-  width: '7px',
-  height: '7px',
-  borderRadius: '50%',
-};
-
-const aiBadgeStyle: React.CSSProperties = {
-  flexShrink: 0,
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: '14px',
-  fontSize: '0.95rem',
-  fontWeight: 700,
-  lineHeight: 1,
-  color: '#c7b3ff',
-  textShadow: '0 0 6px rgba(199, 179, 255, 0.35)',
-};
-
 
 const tabEditInput: React.CSSProperties = {
   margin: '0.2rem 0.45rem',
