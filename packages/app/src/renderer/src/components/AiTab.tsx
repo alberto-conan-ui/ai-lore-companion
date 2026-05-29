@@ -1,18 +1,8 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
-import { FitAddon } from '@xterm/addon-fit';
-import { WebglAddon } from '@xterm/addon-webgl';
-import { Terminal } from '@xterm/xterm';
-import '@xterm/xterm/css/xterm.css';
 import { type JSX, useCallback, useEffect, useRef, useState } from 'react';
 import type { PromptEntry, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { SidebarTab } from './SidebarTab.js';
-
-const TERMINAL_THEME = {
-  background: '#15191f',
-  foreground: '#dde3ea',
-  cursor: '#5a9bd4',
-  selectionBackground: '#1d2c3d',
-};
+import { useXtermSession } from './useXtermSession.js';
 
 /** Default + clamping for the prompts column width (Phase C). The default is
  *  the initial width on first-open; clamps protect both columns when the user
@@ -162,9 +152,7 @@ function EmptyState({
     >
       <div style={cardStyle}>
         <div style={glyphStyle}>✦</div>
-        <div style={titleStyle}>
-          {justExited ? 'Engine exited' : 'Start an AI session'}
-        </div>
+        <div style={titleStyle}>{justExited ? 'Engine exited' : 'Start an AI session'}</div>
         <div style={launchRowStyle}>
           <button
             type="button"
@@ -318,9 +306,7 @@ function PromptsColumn({
       {PROMPT_GROUPS.map((group) => {
         const rows = grouped[group.label] ?? [];
         if (rows.length === 0) return null;
-        return (
-          <PromptGroup key={group.label} label={group.label} rows={rows} onClick={inject} />
-        );
+        return <PromptGroup key={group.label} label={group.label} rows={rows} onClick={inject} />;
       })}
       {grouped.Advanced && grouped.Advanced.length > 0 ? (
         <div>
@@ -338,7 +324,9 @@ function PromptsColumn({
         </div>
       ) : null}
       {prompts.length === 0 ? (
-        <div style={promptsEmptyStyle}>No verbs found under <code>process/verbs/</code>.</div>
+        <div style={promptsEmptyStyle}>
+          No verbs found under <code>process/verbs/</code>.
+        </div>
       ) : null}
     </div>
   );
@@ -404,10 +392,12 @@ function groupPrompts(prompts: readonly PromptEntry[]): Record<string, PromptEnt
   return out;
 }
 
-/** The xterm host. Identical to TerminalTab's surface in shape; mounted only
- *  inside `RunningSplit` so it never has to negotiate its parent layout.
- *  Publishes a focus handle through `focusPtyRef` so siblings (the prompts
- *  column) can hand focus back to the terminal after a click. */
+/** The xterm host for a running engine. Drives the same shared `useXtermSession`
+ *  hook as the Shell tab — the engine PTY is spawned by `AiTab` (so the id is
+ *  passed in, not spawned here) and its lifetime is managed there (Restart
+ *  re-uses the tab), so this view does not kill the PTY on unmount. Publishes a
+ *  focus handle through `focusPtyRef` so siblings (the prompts column) can hand
+ *  focus back to the terminal after a click. */
 function RunningPty({
   active,
   tabId,
@@ -421,112 +411,22 @@ function RunningPty({
   onStatus: (tabId: string, status: TerminalForegroundStatus, command: string) => void;
   focusPtyRef: React.MutableRefObject<() => void>;
 }): JSX.Element {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
+  const { hostRef, focus } = useXtermSession({
+    active,
+    ptyId,
+    killOnUnmount: false,
+    exitMessage: '[engine exited]',
+    onStatus: (status, command) => onStatus(tabId, status, command),
+  });
 
-  const doFit = useCallback(() => {
-    const host = hostRef.current;
-    const term = termRef.current;
-    const fit = fitRef.current;
-    if (!host || !term || !fit || host.offsetParent === null) return;
-    fit.fit();
-    window.cockpit.resizeTerminal({ id: ptyId, cols: term.cols, rows: term.rows });
-  }, [ptyId]);
-
+  // Publish the focus handle so siblings (PromptsColumn) can refocus the
+  // terminal after a click — caller invokes it via the ref's `.current`.
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-
-    const term = new Terminal({
-      theme: TERMINAL_THEME,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, "Symbols Nerd Font Mono", monospace',
-      fontSize: 13,
-      cursorBlink: true,
-    });
-    const fit = new FitAddon();
-    term.loadAddon(fit);
-    term.open(host);
-    fit.fit();
-    termRef.current = term;
-    fitRef.current = fit;
-
-    // WebGL renderer eliminates the visible flicker the default DOM renderer
-    // shows under high-update-rate TUIs (gemini's thinking spinner is the
-    // motivating case). Mount-time try/catch covers GPU-context-creation
-    // failure (older / virtualised macs); onContextLoss disposes the addon
-    // so xterm.js falls back to its DOM renderer if the GPU context is lost
-    // mid-session (laptop sleep/wake, dGPU switching).
-    //
-    // Skip in Playwright-driven runs: WebGL renders into a <canvas>, so the
-    // .xterm-rows DOM nodes our e2e tests assert against disappear. Production
-    // users see WebGL; tests see the DOM renderer they're written against.
-    if (!navigator.webdriver) {
-      try {
-        const webgl = new WebglAddon();
-        webgl.onContextLoss(() => webgl.dispose());
-        term.loadAddon(webgl);
-      } catch {
-        // WebGL unavailable — DOM renderer stays in place.
-      }
-    }
-
-    // Mirror TerminalTab: Shift+Enter sends LF (newline-insert in Claude /
-    // Gemini), bare Enter sends submit.
-    term.attachCustomKeyEventHandler((e) => {
-      if (e.key === 'Enter' && e.shiftKey) {
-        if (e.type === 'keydown') {
-          window.cockpit.sendTerminalInput({ id: ptyId, data: '\n' });
-        }
-        return false;
-      }
-      return true;
-    });
-
-    window.cockpit.resizeTerminal({ id: ptyId, cols: term.cols, rows: term.rows });
-
-    const offData = window.cockpit.onTerminalData((p) => {
-      if (p.id === ptyId) term.write(p.data);
-    });
-    const offExit = window.cockpit.onTerminalExit((p) => {
-      if (p.id === ptyId) term.write('\r\n\x1b[2m[engine exited]\x1b[0m\r\n');
-    });
-    const offStatus = window.cockpit.onTerminalStatus((p) => {
-      if (p.id === ptyId) onStatus(tabId, p.status, p.command);
-    });
-    term.onData((data) => window.cockpit.sendTerminalInput({ id: ptyId, data }));
-    term.focus();
-
-    // Publish the focus handle so siblings (PromptsColumn) can refocus the
-    // terminal after a click — caller invokes it via the ref's `.current`.
-    focusPtyRef.current = () => term.focus();
-
-    const onResize = (): void => doFit();
-    window.addEventListener('resize', onResize);
-    // Refit on container resize — covers both window resize and the prompts
-    // column's drag handle changing the PTY's width.
-    const resizeObserver = new ResizeObserver(() => doFit());
-    resizeObserver.observe(host);
-
+    focusPtyRef.current = focus;
     return () => {
-      window.removeEventListener('resize', onResize);
-      resizeObserver.disconnect();
-      offData();
-      offExit();
-      offStatus();
-      term.dispose();
-      termRef.current = null;
-      fitRef.current = null;
       focusPtyRef.current = () => {};
     };
-  }, [ptyId, doFit, onStatus, tabId, focusPtyRef]);
-
-  useEffect(() => {
-    if (active) {
-      doFit();
-      termRef.current?.focus();
-    }
-  }, [active, doFit]);
+  }, [focus, focusPtyRef]);
 
   return (
     <div style={runningWrapStyle}>
