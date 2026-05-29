@@ -95,14 +95,17 @@ function buildView(
 
   const wc = view.webContents;
   const update = (): void => pushState(tabId, c);
+  // `WebContents.on` is overloaded per event name, so a union literal doesn't
+  // match a single overload; bind through a string-keyed signature for the loop.
+  const onWc = wc.on.bind(wc) as (event: string, listener: () => void) => void;
   for (const e of [
     'did-navigate',
     'did-navigate-in-page',
     'did-start-loading',
     'did-stop-loading',
     'page-title-updated',
-  ] as const) {
-    wc.on(e, update);
+  ]) {
+    onWc(e, update);
   }
 
   void wc.loadURL(initialUrl);

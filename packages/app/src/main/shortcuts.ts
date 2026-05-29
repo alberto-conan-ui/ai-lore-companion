@@ -113,7 +113,8 @@ function findBundleIcns(bundlePath: string): string | null {
   if (exact) return join(resources, exact);
   const named = icnsFiles.find((f) => f.toLowerCase().startsWith(appName));
   if (named) return join(resources, named);
-  return join(resources, icnsFiles[0]);
+  const first = icnsFiles[0];
+  return first ? join(resources, first) : null;
 }
 
 /**

@@ -53,7 +53,7 @@ export type CatalogStoreSpec<T> = {
   legacyArray?: boolean;
 };
 
-function filePath(spec: CatalogStoreSpec<unknown>, userDataDir: string): string {
+function filePath<T>(spec: CatalogStoreSpec<T>, userDataDir: string): string {
   return join(userDataDir, spec.fileName);
 }
 

@@ -1,6 +1,17 @@
 import { basename } from 'node:path';
-import { BrowserWindow, Menu, type MenuItemConstructorOptions, app } from 'electron';
+import { type BaseWindow, BrowserWindow, Menu, type MenuItemConstructorOptions, app } from 'electron';
 import { CHANNELS, type RecentProject } from '../shared/ipc.js';
+
+/**
+ * Electron types a menu item's `click` window param as `BaseWindow` (the
+ * superclass), but every cockpit window is a `BrowserWindow`. Narrow it so the
+ * window-keyed handlers keep their `BrowserWindow` contract; a non-BrowserWindow
+ * (or absent) focus resolves to `undefined`, which the handlers already treat
+ * as "no target".
+ */
+function asBrowserWindow(win: BaseWindow | undefined): BrowserWindow | undefined {
+  return win instanceof BrowserWindow ? win : undefined;
+}
 
 /** Click handlers the application menu routes back into the main process. */
 export type MenuHandlers = {
@@ -24,7 +35,7 @@ function recentSubmenu(
       (r): MenuItemConstructorOptions => ({
         label: basename(r.path),
         sublabel: r.path,
-        click: (_item, win) => handlers.onOpenRecent(win, r.path),
+        click: (_item, win) => handlers.onOpenRecent(asBrowserWindow(win), r.path),
       }),
     ),
     { type: 'separator' },
@@ -69,14 +80,14 @@ const navigateSubmenu: MenuItemConstructorOptions[] = [
     label: 'Find File…',
     accelerator: 'CmdOrCtrl+F',
     visible: false,
-    click: (_item, win) => pushToFocused(win, CHANNELS.onFocusGlobalSearch),
+    click: (_item, win) => pushToFocused(asBrowserWindow(win), CHANNELS.onFocusGlobalSearch),
   },
   ...Array.from({ length: 9 }, (_, i) => i + 1).map(
     (n): MenuItemConstructorOptions => ({
       label: `Go to Tab ${n}`,
       accelerator: `CmdOrCtrl+${n}`,
       visible: false,
-      click: (_item, win) => pushToFocused(win, CHANNELS.onSelectCockpitTab, n),
+      click: (_item, win) => pushToFocused(asBrowserWindow(win), CHANNELS.onSelectCockpitTab, n),
     }),
   ),
 ];
@@ -99,7 +110,7 @@ const appSubmenu: MenuItemConstructorOptions[] = [
       // `win` is the focused window when the user fires `⌘,`. Programmatic
       // `item.click()` (used by the e2e) does not pass `win`, so fall back to
       // `getFocusedWindow()`. No-op when nothing is focused.
-      const target = win ?? BrowserWindow.getFocusedWindow();
+      const target = asBrowserWindow(win) ?? BrowserWindow.getFocusedWindow();
       if (target) target.webContents.send(CHANNELS.onSettingsOpen);
     },
   },
@@ -127,7 +138,7 @@ export function buildAppMenu(recents: RecentProject[], handlers: MenuHandlers): 
         {
           label: 'Open Project…',
           accelerator: 'CmdOrCtrl+O',
-          click: (_item, win) => handlers.onOpen(win),
+          click: (_item, win) => handlers.onOpen(asBrowserWindow(win)),
         },
         { label: 'Open Recent', submenu: recentSubmenu(recents, handlers) },
         { type: 'separator' },

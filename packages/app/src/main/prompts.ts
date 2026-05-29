@@ -106,10 +106,11 @@ function parseVerbsIndex(verbsDir: string): Map<string, IndexRow> {
       .split('|')
       .map((c) => c.trim());
     if (cells.length < 3) continue;
-    const nameMatch = cells[0].match(/\[`([^`]+)`\]/);
+    const nameMatch = cells[0]?.match(/\[`([^`]+)`\]/);
     if (!nameMatch) continue;
     const name = nameMatch[1];
-    const kindRaw = cells[1].toLowerCase();
+    if (!name) continue;
+    const kindRaw = cells[1]?.toLowerCase() ?? '';
     const kind: IndexRow['kind'] =
       kindRaw === 'verb' || kindRaw === 'bookend' ? kindRaw : 'unknown';
     const description = cells.slice(2).join(' | ').trim();

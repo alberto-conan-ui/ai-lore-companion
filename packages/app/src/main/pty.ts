@@ -100,12 +100,14 @@ async function probeForeground(shellPid: number, tty: string): Promise<Probe> {
       const m = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/);
       if (!m) continue;
       const [, pid, ppid, stat, command] = m;
+      if (!pid || !ppid || !stat || !command) continue;
       if (!stat.includes('+')) continue;
       if (Number(pid) === shellPid) continue;
       fg.push({ ppid: Number(ppid), command });
     }
     if (fg.length === 0) return IDLE;
     const top = fg.find((r) => r.ppid === shellPid) ?? fg[0];
+    if (!top) return IDLE;
     return { status: 'running', command: top.command };
   } catch {
     return IDLE;

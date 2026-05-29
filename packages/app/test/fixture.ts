@@ -295,7 +295,14 @@ export async function launchApp(opts: {
 }): Promise<{ app: ElectronApplication; page: Page }> {
   // A welcome-window test must not inherit a COCKPIT_ROOT from the dev's shell;
   // an undefined value is dropped when the child process is spawned.
-  const env: NodeJS.ProcessEnv = { ...process.env, COCKPIT_ROOT: opts.root };
+  // COCKPIT_E2E bypasses the running-task close/quit confirmation dialogs — a
+  // native modal would otherwise block teardown when a spec leaves a terminal
+  // task running.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    COCKPIT_ROOT: opts.root,
+    COCKPIT_E2E: '1',
+  };
   const app = await electron.launch({
     args: [APP_MAIN, `--user-data-dir=${opts.userData}`],
     cwd: APP_DIR,

@@ -66,6 +66,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIN_CORE_VERSION = '0.5.1';
 
 /**
+ * E2E test mode. When `COCKPIT_E2E=1`, the running-task close/quit confirmation
+ * dialogs are bypassed so the Playwright suite can tear windows down unattended
+ * — a native modal would otherwise block on a human dismissing it. Read once at
+ * startup; production / `dist` builds never set it, so the guard stays for real
+ * users. The e2e fixture's `launchApp` sets it.
+ */
+const E2E_BYPASS_GUARDS = process.env.COCKPIT_E2E === '1';
+
+/**
  * Decide whether a folder should open as a cockpit. Returns `null` when the
  * project is compatible (`createProjectContext` proceeds), or an
  * `AlteredReason` when the window should render the altered view instead.
@@ -147,6 +156,7 @@ function createWindow(): BrowserWindow {
   let closeConfirmed = false;
   win.on('close', (event) => {
     if (closeConfirmed) return;
+    if (E2E_BYPASS_GUARDS) return;
     if (!contexts.get(win.id)?.ptyService.hasRunningTask()) return;
     event.preventDefault();
     void dialog
@@ -650,7 +660,7 @@ app.on('before-quit', (event) => {
   event.preventDefault();
 
   // Quit guard: one confirmation if any window is running a terminal task.
-  if (!quitConfirmed) {
+  if (!quitConfirmed && !E2E_BYPASS_GUARDS) {
     const anyRunning = [...contexts.values()].some((c) => c.ptyService.hasRunningTask());
     if (anyRunning) {
       void dialog

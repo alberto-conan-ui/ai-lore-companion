@@ -234,6 +234,48 @@ test.describe('window modes', () => {
     }
   });
 
+  // Focus 2 (Trust Net) — unattended e2e. A window with a running terminal task
+  // pops a native confirmation in main on close/quit (`win.on('close')` /
+  // `app.on('before-quit')`, both gated on `ptyService.hasRunningTask()`). That
+  // modal must be dismissed by a human — so any suite leaving a task running
+  // would block teardown forever. The `COCKPIT_E2E` flag the fixture sets
+  // bypasses both. This spec *deliberately leaves a task running* at close: the
+  // shell tab's StatusDot turning `running` is the same foreground-status feed
+  // `hasRunningTask()` reads, so once it lights, the guard branch is live.
+  // Without the bypass, `app.close()` would block on the modal until timeout.
+  test('a window with a running terminal task tears down unattended', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      const centre = page.locator('[data-column-id="centre"]');
+      await centre.getByTestId('new-shell').first().click();
+      await expect(page.getByTestId('tab-shell').first()).toBeVisible({ timeout: 5_000 });
+      const terminal = page.getByTestId('terminal').first();
+      await expect(terminal).toBeVisible();
+
+      // Type a long-running foreground command into the shell. The keystrokes
+      // route through xterm's `onData` → `sendTerminalInput` to the real PTY.
+      await terminal.click();
+      await page.keyboard.type('sleep 30');
+      await page.keyboard.press('Enter');
+
+      // The ~1s foreground poll detects `sleep` as the foreground task and the
+      // shell tab's StatusDot flips to `running` — deterministic proof that
+      // `hasRunningTask()` is now true on the main side.
+      await expect(page.getByTestId('tab-shell').first().getByLabel('running')).toBeVisible({
+        timeout: 5_000,
+      });
+
+      // With the guard bypassed this resolves promptly; un-bypassed it would
+      // hang on the native modal.
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   // v0.7 Phase C — the two-column running view. Once Start fires, the AI
   // tab body splits into a prompts column on the left and the xterm PTY on
   // the right, with a draggable resize handle between them. Phase C just
