@@ -1,7 +1,7 @@
 {
   "name": "@ai-lore-companion/app",
   "productName": "AI-Lore",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "private": true,
   "description": "Electron desktop shell for the AI-Lore cockpit.",
   "main": "./out/main/index.js",
@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@ai-lore-companion/core": "*",
+    "@vscode/ripgrep": "^1.15.9",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-search": "^0.16.0",
     "@xterm/addon-unicode11": "^0.9.0",

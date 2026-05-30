@@ -176,5 +176,6 @@ export type {
 } from './watcher/watcher.js';
 
 export { fuzzyScore } from './search/fuzzy.js';
-export { PathIndex } from './search/path-index.js';
+export { isGlob, globToRegExp } from './search/glob.js';
+export { PathIndex, rankPaths } from './search/path-index.js';
 export type { SearchHit } from './search/path-index.js';

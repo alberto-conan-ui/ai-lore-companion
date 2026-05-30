@@ -42,6 +42,24 @@ test('search ranks fuzzy matches and respects the limit', () => {
   assert.equal(capped.length, 1);
 });
 
+test('search matches a glob when the query has * or ?', () => {
+  const idx = new PathIndex();
+  idx.build([root], []);
+  // `*.ts` is anchored — it matches alpha.ts but NOT Component.tsx.
+  assert.deepEqual(
+    idx.search('*.ts', 10).map((h) => h.name),
+    ['alpha.ts'],
+  );
+  assert.deepEqual(
+    idx.search('*.tsx', 10).map((h) => h.name),
+    ['Component.tsx'],
+  );
+  // `?` matches exactly one character each.
+  assert.equal(idx.search('Component.???', 10)[0]?.name, 'Component.tsx');
+  // A glob with no match returns nothing (not a fuzzy fallback).
+  assert.equal(idx.search('*.zzz', 10).length, 0);
+});
+
 test('search returns nothing for an empty query', () => {
   const idx = new PathIndex();
   idx.build([root], []);

@@ -1,5 +1,11 @@
 import { basename } from 'node:path';
-import { type BaseWindow, BrowserWindow, Menu, type MenuItemConstructorOptions, app } from 'electron';
+import {
+  type BaseWindow,
+  BrowserWindow,
+  Menu,
+  type MenuItemConstructorOptions,
+  app,
+} from 'electron';
 import { CHANNELS, type RecentProject } from '../shared/ipc.js';
 
 /**
@@ -77,7 +83,7 @@ function pushToFocused(win: BrowserWindow | undefined, channel: string, ...args:
  */
 const navigateSubmenu: MenuItemConstructorOptions[] = [
   {
-    label: 'Find File…',
+    label: 'Find in Project…',
     accelerator: 'CmdOrCtrl+F',
     visible: false,
     click: (_item, win) => pushToFocused(asBrowserWindow(win), CHANNELS.onFocusGlobalSearch),

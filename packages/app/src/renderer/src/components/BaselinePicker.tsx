@@ -1,0 +1,381 @@
+import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type BaselineModel,
+  type Milestone,
+  activeMilestoneId,
+  buildMilestones,
+  findMilestone,
+} from '../../../shared/baseline.js';
+import { useCockpitStore } from '../store.js';
+
+/**
+ * The global baseline picker — one control beside the pinned tabs that drives
+ * the Changes baseline for **every** pane at once (Payload + the lore-backed
+ * Status/Memory). It replaces the per-pane dropdowns.
+ *
+ * Save-points are the default list (the mask); a tickbox reveals the acks
+ * underneath. Selecting any milestone resolves a baseline for *both* repos
+ * (the mask math lives in [shared/baseline.ts](../../../shared/baseline.ts))
+ * and applies it to both scopes via `setBaseline`.
+ */
+export function BaselinePicker(): JSX.Element {
+  const savePoints = useCockpitStore((s) => s.savePoints);
+  const payloadCommits = useCockpitStore((s) => s.commitListByScope.payload);
+  const loreCommits = useCockpitStore((s) => s.commitListByScope.lore);
+  const baselineByScope = useCockpitStore((s) => s.baselineByScope);
+  const storeSetBaseline = useCockpitStore((s) => s.setBaseline);
+
+  const [open, setOpen] = useState(false);
+  // Roll up ACKs (default on): each save-point folds in the ack it's bound to
+  // and selects that ack. Off → acks un-roll into the timeline and a save-point
+  // selects its own commit. Renaming/inverting the old "include acks" toggle.
+  const [rollup, setRollup] = useState(true);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  const model = useMemo<BaselineModel>(
+    () => buildMilestones({ savePoints, payloadCommits, loreCommits }, rollup),
+    [savePoints, payloadCommits, loreCommits, rollup],
+  );
+
+  // What the live baseline resolves to. With rollup on, a save-point and its
+  // bound ack share a commit, so a baseline alone is ambiguous —
+  // `activeMilestoneId` scans save-points first.
+  const derivedActiveId = useMemo(
+    () => activeMilestoneId(model, baselineByScope),
+    [model, baselineByScope],
+  );
+  // An explicit click wins over the derived match (so clicking that newest ack
+  // highlights the ack, not its save-point) — until the live baseline moves to
+  // something the pick no longer matches (e.g. follow-latest), then we defer to
+  // the derived id again.
+  const [pickedId, setPickedId] = useState<string | null>(null);
+  const activeId = useMemo(() => {
+    if (pickedId) {
+      const picked = findMilestone(model, pickedId);
+      if (
+        picked &&
+        picked.payloadBaseline === baselineByScope.payload &&
+        picked.loreBaseline === baselineByScope.lore
+      ) {
+        return pickedId;
+      }
+    }
+    return derivedActiveId;
+  }, [pickedId, model, baselineByScope, derivedActiveId]);
+  const active = activeId ? findMilestone(model, activeId) : null;
+
+  // One chronological timeline (newest first). Rolled up → save-points only;
+  // un-rolled → acks slot between the save-points by date.
+  const rows = useMemo(() => {
+    const list = rollup ? model.savePoints : [...model.savePoints, ...model.acks];
+    return list.slice().sort((a, b) => b.timestamp - a.timestamp);
+  }, [model, rollup]);
+
+  // Apply one logical milestone to both repos — store mirror + main tracker.
+  const select = useCallback(
+    (m: Milestone) => {
+      setPickedId(m.id);
+      storeSetBaseline('payload', m.payloadBaseline);
+      storeSetBaseline('lore', m.loreBaseline);
+      void window.cockpit.setBaseline({ scope: 'payload', baseline: m.payloadBaseline });
+      void window.cockpit.setBaseline({ scope: 'lore', baseline: m.loreBaseline });
+      setOpen(false);
+    },
+    [storeSetBaseline],
+  );
+
+  // Dismiss on outside click / Escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent): void => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const buttonLabel = active ? active.label : 'Working tree';
+  const buttonDate = active ? formatStamp(active.timestamp) : '';
+
+  return (
+    <div ref={rootRef} style={rootStyle}>
+      <button
+        type="button"
+        style={triggerStyle}
+        data-testid="baseline-picker"
+        title="Compare every pane against this milestone"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span style={triggerIconStyle} aria-hidden="true">
+          {active?.kind === 'ack' ? '•' : '★'}
+        </span>
+        <span style={triggerLabelStyle}>{buttonLabel}</span>
+        {active ? <span style={triggerShaStyle}>{shortSha(active.commitSha)}</span> : null}
+        {buttonDate ? <span style={triggerDateStyle}>{buttonDate}</span> : null}
+        <span style={caretStyle} aria-hidden="true">
+          ▾
+        </span>
+      </button>
+
+      {open ? (
+        <div style={popoverStyle} data-testid="baseline-picker-popover">
+          <label style={ackToggleStyle}>
+            <input
+              type="checkbox"
+              checked={rollup}
+              onChange={(e) => setRollup(e.target.checked)}
+              data-testid="baseline-rollup-acks"
+            />
+            Roll up ACKs
+            <span style={ackToggleHintStyle}>
+              {rollup ? 'save-points show their bound ack' : 'acks shown individually'}
+            </span>
+          </label>
+          <div style={listStyle}>
+            {rows.length === 0 ? <div style={emptyStyle}>No save-points or acks yet.</div> : null}
+            {rows.map((m) => (
+              <Row
+                key={m.id}
+                m={m}
+                active={m.id === activeId}
+                showBound={rollup}
+                onSelect={select}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Row({
+  m,
+  active,
+  showBound,
+  onSelect,
+}: {
+  m: Milestone;
+  active: boolean;
+  /** Show the bound ack beneath a save-point (rollup mode). */
+  showBound: boolean;
+  onSelect: (m: Milestone) => void;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      style={{ ...rowStyle, ...(active ? rowActiveStyle : null) }}
+      data-testid={`baseline-option-${m.id}`}
+      aria-current={active}
+      onClick={() => onSelect(m)}
+    >
+      <span style={badgeStyle(m.kind)}>{m.kind === 'save-point' ? '★' : '•'}</span>
+      <span style={rowMainStyle}>
+        <span style={rowTopStyle}>
+          <span style={rowLabelStyle}>{m.label}</span>
+          <span style={rowShaStyle}>{shortSha(m.commitSha)}</span>
+          <span style={rowDateStyle}>{formatStamp(m.timestamp)}</span>
+        </span>
+        {showBound && m.boundAck ? (
+          <span style={boundAckStyle}>
+            <span style={boundArrowStyle}>↳</span>
+            <span style={boundDotStyle}>•</span>
+            <span style={rowLabelStyle}>{m.boundAck.label}</span>
+            <span style={rowShaStyle}>{shortSha(m.boundAck.sha)}</span>
+            <span style={rowDateStyle}>{formatStamp(m.boundAck.timestamp)}</span>
+          </span>
+        ) : null}
+      </span>
+    </button>
+  );
+}
+
+/** First 7 chars — the git short-SHA convention. */
+function shortSha(sha: string): string {
+  return sha.slice(0, 7);
+}
+
+/** Epoch seconds → a compact local date + time. `0` (unknown) renders blank. */
+function formatStamp(epochSeconds: number): string {
+  if (!epochSeconds) return '';
+  const d = new Date(epochSeconds * 1000);
+  return d.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+const rootStyle: React.CSSProperties = {
+  position: 'relative',
+  display: 'flex',
+  alignItems: 'center',
+  marginLeft: 'auto',
+  paddingRight: '0.3rem',
+};
+
+const triggerStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.4rem',
+  maxWidth: '22rem',
+  height: '1.7rem',
+  padding: '0 0.55rem',
+  background: '#0c121a',
+  border: '1px solid #2f3a45',
+  borderRadius: '5px',
+  color: '#dde3ea',
+  fontSize: '0.72rem',
+  cursor: 'pointer',
+};
+
+const triggerIconStyle: React.CSSProperties = { color: '#e0b048', flex: 'none' };
+
+const triggerLabelStyle: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  fontWeight: 600,
+};
+
+const triggerShaStyle: React.CSSProperties = {
+  flex: 'none',
+  color: '#7c8893',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.66rem',
+};
+
+const triggerDateStyle: React.CSSProperties = { color: '#6c7783', flex: 'none' };
+
+const caretStyle: React.CSSProperties = { color: '#6c7783', flex: 'none', fontSize: '0.65rem' };
+
+const popoverStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: 'calc(100% + 4px)',
+  right: 0,
+  zIndex: 60,
+  width: '44rem',
+  maxWidth: '92vw',
+  maxHeight: '60vh',
+  display: 'flex',
+  flexDirection: 'column',
+  background: '#121a24',
+  border: '1px solid #2f3a45',
+  borderRadius: '6px',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
+  overflow: 'hidden',
+};
+
+const ackToggleStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.4rem',
+  padding: '0.5rem 0.7rem',
+  borderBottom: '1px solid #1f2933',
+  color: '#9fb1bd',
+  fontSize: '0.72rem',
+  cursor: 'pointer',
+};
+
+const ackToggleHintStyle: React.CSSProperties = {
+  color: '#6c7783',
+  fontStyle: 'italic',
+};
+
+const listStyle: React.CSSProperties = {
+  overflowY: 'auto',
+  minHeight: 0,
+  padding: '0.25rem',
+};
+
+const emptyStyle: React.CSSProperties = {
+  padding: '0.7rem',
+  color: '#6c7783',
+  fontSize: '0.74rem',
+  fontStyle: 'italic',
+};
+
+const rowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-start',
+  gap: '0.5rem',
+  width: '100%',
+  padding: '0.35rem 0.5rem',
+  background: 'transparent',
+  border: 'none',
+  borderRadius: '4px',
+  color: '#dde3ea',
+  fontSize: '0.74rem',
+  textAlign: 'left',
+  cursor: 'pointer',
+};
+
+const rowActiveStyle: React.CSSProperties = { background: '#1d4e6b' };
+
+function badgeStyle(kind: Milestone['kind']): React.CSSProperties {
+  return {
+    flex: 'none',
+    lineHeight: '1.3rem',
+    color: kind === 'save-point' ? '#e0b048' : '#7fa8c9',
+  };
+}
+
+/** The row's text column — the save-point line, and the bound-ack line below. */
+const rowMainStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.1rem',
+};
+
+const rowTopStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: '0.5rem',
+};
+
+const rowLabelStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const rowShaStyle: React.CSSProperties = {
+  flex: 'none',
+  color: '#7c8893',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.66rem',
+};
+
+const rowDateStyle: React.CSSProperties = {
+  flex: 'none',
+  color: '#6c7783',
+  fontSize: '0.68rem',
+};
+
+/** The bound-ack line under a save-point (rollup mode). */
+const boundAckStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'baseline',
+  gap: '0.35rem',
+  paddingLeft: '0.2rem',
+  color: '#9fb1bd',
+  fontSize: '0.7rem',
+};
+
+const boundArrowStyle: React.CSSProperties = { flex: 'none', color: '#4a5762' };
+
+const boundDotStyle: React.CSSProperties = { flex: 'none', color: '#7fa8c9' };

@@ -10,6 +10,8 @@ import type {
   ChangesPayload,
   CommitListEntry,
   CommitListPayload,
+  SavePointInfo,
+  SavePointsPayload,
   TreeInitPayload,
   TreeUpdatePayload,
 } from '../../shared/ipc.js';
@@ -121,6 +123,12 @@ type State = {
    * on launch and on every changes-tracker tick.
    */
   commitListByScope: { payload: CommitListEntry[]; lore: CommitListEntry[] };
+  /**
+   * The save-point ledger — both repos paired per entry. The global baseline
+   * picker (beside the pinned tabs) builds its milestone list from this plus
+   * `commitListByScope`. Pushed by main via `onSavePoints`. Newest first.
+   */
+  savePoints: SavePointInfo[];
   trees: Trees;
   /** O(1) path → node lookup per scope, kept in sync with `trees` (Focus 5). */
   treeIndex: TreeIndex;
@@ -141,6 +149,7 @@ type State = {
   applyChanges: (payload: ChangesPayload) => void;
   setBaseline: (scope: ChangeScope, baseline: string) => void;
   applyCommitList: (payload: CommitListPayload) => void;
+  applySavePoints: (payload: SavePointsPayload) => void;
   setTrees: (init: TreeInitPayload) => void;
   applyTreeUpdate: (update: TreeUpdatePayload) => void;
   expandTree: (scope: ChangeScope, path: string, children: TreeNode[]) => void;
@@ -153,6 +162,7 @@ export const useCockpitStore = create<State>((set) => ({
   changes: { payload: [], lore: [] },
   baselineByScope: { payload: 'HEAD', lore: 'HEAD' },
   commitListByScope: { payload: [], lore: [] },
+  savePoints: [],
   trees: { payload: null, lore: null, publish: null },
   treeIndex: { payload: new Map(), lore: new Map(), publish: new Map() },
   apps: [],
@@ -176,6 +186,7 @@ export const useCockpitStore = create<State>((set) => ({
     set((state) => ({
       commitListByScope: { ...state.commitListByScope, [payload.scope]: payload.commits },
     })),
+  applySavePoints: (payload) => set({ savePoints: payload.savePoints }),
   setTrees: (init) => {
     // Publishing-shape projects carry a third tree; default-shape inits omit
     // the field and the publish slot stays null.

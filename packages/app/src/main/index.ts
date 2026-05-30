@@ -1,9 +1,10 @@
-import { existsSync } from 'node:fs';
+import { existsSync, watch as watchFile } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   type ChainResult,
   type ChangeScope,
+  type CommitListEntry,
   DEFAULT_IGNORE_RULES,
   type DirEvent,
   type EngineEntry,
@@ -13,7 +14,6 @@ import {
   attachWatcher,
   deriveIgnoreLists,
   isChainError,
-  latestSavePoint,
   listSavePoints,
   locateLore,
   mergeIgnoreRules,
@@ -33,6 +33,7 @@ import {
   dialog,
   ipcMain,
 } from 'electron';
+import { type BaselineModel, buildMilestones, defaultMilestone } from '../shared/baseline.js';
 import {
   type AlteredReason,
   CHANNELS,
@@ -102,6 +103,39 @@ const chainRefreshTimers = new Map<number, ReturnType<typeof setTimeout>>();
 /** Per-window tree-update coalescer — re-created at each watcher attach (its
  *  `hidden` set changes with ignore rules), disposed at teardown. */
 const treeCoalescers = new Map<number, TreeUpdateCoalescer>();
+/** Per-window disposer for the `.git/logs/HEAD` watchers — see {@link watchGitRefs}. */
+const gitRefWatchers = new Map<number, () => void>();
+
+/**
+ * Watch each repo's `.git/logs/HEAD` — the file git appends to on every commit.
+ * The working-tree watcher ignores `.git/`, so a plain `ack` (a commit with no
+ * working-tree file write) would otherwise go unseen until the next window
+ * focus. This makes recording an ack or save-point refresh the baseline picker
+ * and re-read every pane immediately. Debounced; returns a disposer.
+ */
+function watchGitRefs(repoRoots: readonly string[], onCommit: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const fire = (): void => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      onCommit();
+    }, 150);
+  };
+  const watchers = repoRoots.map((r) => {
+    const log = join(r, '.git', 'logs', 'HEAD');
+    if (!existsSync(log)) return null;
+    try {
+      return watchFile(log, fire);
+    } catch {
+      return null;
+    }
+  });
+  return () => {
+    if (timer) clearTimeout(timer);
+    for (const w of watchers) w?.close();
+  };
+}
 /** How long a lore write waits before the chain is re-read — long enough to
  *  swallow a multi-file write burst, short enough to feel live. */
 const CHAIN_REFRESH_DEBOUNCE_MS = 150;
@@ -124,24 +158,65 @@ function scheduleChainRefresh(win: BrowserWindow): void {
   );
 }
 
+/** Commits from a `readCommitList` result, or `[]` on failure. */
+function okCommits(result: ReturnType<typeof readCommitList>): CommitListEntry[] {
+  return result.kind === 'ok' ? result.commits : [];
+}
+
+/** Project a core `SavePoint` to the picker's wire shape. */
+function toSavePointInfo(sp: {
+  name: string;
+  title: string;
+  date: string;
+  payloadCommit: string;
+  loreCommit: string;
+}): { name: string; title: string; date: string; payloadCommit: string; loreCommit: string } {
+  return {
+    name: sp.name,
+    title: sp.title,
+    date: sp.date,
+    payloadCommit: sp.payloadCommit,
+    loreCommit: sp.loreCommit,
+  };
+}
+
+/** Build the baseline picker model for a project's two repos. The mask
+ *  resolution (save-point → latest ack of its run) lives in the shared module
+ *  so main and the renderer compute identical baselines. */
+function buildBaselineModel(
+  payloadRoot: string,
+  loreWorkingTree: string,
+  savePointsDir: string,
+): BaselineModel {
+  return buildMilestones({
+    savePoints: listSavePoints(savePointsDir).map(toSavePointInfo),
+    payloadCommits: okCommits(readCommitList(payloadRoot, COMMIT_LIST_LIMIT)),
+    loreCommits: okCommits(readCommitList(loreWorkingTree, COMMIT_LIST_LIMIT)),
+  });
+}
+
 /**
- * Re-evaluate the latest save-point and advance each scope's Changes baseline
- * to it — but only for a scope still *following latest* (the tracker respects a
- * manually-pinned baseline). Fixes the "a new save-point isn't reflected until
- * reload" gap: recording one now re-baselines every following pane live, and
- * refreshes the commit dropdowns. Cheap and idempotent — a no-op when the
- * latest hasn't moved. Called on a save-points-folder write and on window
- * focus (the reconcile safety net).
+ * Re-evaluate the default milestone (latest save-point, resolved to the latest
+ * ack in its run) and advance each scope's Changes baseline to it — but only
+ * for a scope still *following latest* (the tracker respects a manually-pinned
+ * baseline). Fixes the "a new save-point isn't reflected until reload" gap:
+ * recording one re-baselines every following pane live, refreshes the commit
+ * dropdowns, and re-pushes the save-point ledger. Cheap and idempotent — a
+ * no-op when the latest hasn't moved. Called on a save-points-folder write and
+ * on window focus (the reconcile safety net).
  */
 function reconcileSavePoints(win: BrowserWindow): void {
   const ctx = contexts.get(win.id);
   if (!ctx?.wiring || isChainError(ctx.chain)) return;
-  const sp = latestSavePoint(resolve(ctx.chain.lorePath, 'memory/save-points'));
-  if (!sp) return;
-  ctx.wiring.changes.advanceToLatest('payload', sp.payloadCommit);
-  ctx.wiring.changes.advanceToLatest('lore', sp.loreCommit);
+  const loreWorkingTree = join(ctx.chain.lorePath, 'memory');
+  const savePointsDir = resolve(ctx.chain.lorePath, 'memory/save-points');
+  const def = defaultMilestone(buildBaselineModel(ctx.root, loreWorkingTree, savePointsDir));
+  if (!def) return;
+  ctx.wiring.changes.advanceToLatest('payload', def.payloadBaseline);
+  ctx.wiring.changes.advanceToLatest('lore', def.loreBaseline);
   ctx.wiring.pushCommits('payload');
   ctx.wiring.pushCommits('lore');
+  ctx.wiring.pushSavePoints();
 }
 
 /** `app.getPath('userData')` — resolved once the app is ready. */
@@ -353,14 +428,22 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
         commits: attachSavePointBadges(commits, savePoints, scope),
       });
     };
-    // Per the v0.6 Phase B gate: when a save-point is recorded, the default
-    // baseline is the latest one — what differs between the working tree and
-    // the last marked milestone. HEAD is the fallback when no save-points
-    // exist. Both scopes derive from the same save-point (each picking its
-    // own commit field) so the two panes start aligned to the same milestone.
-    const latestSp = latestSavePoint(savePointsDir);
-    const initialBaselineByScope = latestSp
-      ? { payload: latestSp.payloadCommit, lore: latestSp.loreCommit }
+    // The global baseline picker's source of truth — the save-point ledger,
+    // both repos paired. The renderer builds its milestone list from this plus
+    // the two commit lists.
+    const pushSavePoints = (): void => {
+      sendToWin(win, CHANNELS.onSavePoints, {
+        savePoints: listSavePoints(savePointsDir).map(toSavePointInfo),
+      });
+    };
+    // The default baseline is the latest save-point, *resolved to the latest
+    // ack in its run* — the mask mechanic. So both panes start at "what changed
+    // since the last acknowledged state." HEAD-equivalent (`undefined`) is the
+    // fallback when no save-points/acks exist. Both scopes derive from one
+    // logical milestone so the panes start aligned.
+    const def = defaultMilestone(buildBaselineModel(root, loreWorkingTree, savePointsDir));
+    const initialBaselineByScope = def
+      ? { payload: def.payloadBaseline, lore: def.loreBaseline }
       : undefined;
     const changes = attachChangesTracker({
       payloadRoot: root,
@@ -398,7 +481,17 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
         treeCoalescer.schedule(event);
       },
     });
-    wiring = { watcher, changes, pushCommits };
+    // Refresh on commit (ack or save-point) even when no working-tree file
+    // changes — the `.git` watcher the working-tree watcher can't provide.
+    gitRefWatchers.get(win.id)?.();
+    gitRefWatchers.set(
+      win.id,
+      watchGitRefs([root, loreWorkingTree], () => {
+        changes.refreshNow();
+        reconcileSavePoints(win);
+      }),
+    );
+    wiring = { watcher, changes, pushCommits, pushSavePoints };
   }
 
   const ptyService = createPtyService({
@@ -497,9 +590,11 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
         entries: projectRelativise('lore', seed.lore, ctx.root, loreWorkingTree),
         baseline: seedBaselines.lore,
       });
-      // Seed the baseline dropdown for both repos.
+      // Seed the baseline dropdown for both repos, plus the save-point ledger
+      // the global picker masks over.
       ctx.wiring.pushCommits('payload');
       ctx.wiring.pushCommits('lore');
+      ctx.wiring.pushSavePoints();
     }
     sendToWin(win, CHANNELS.onTreeInit, buildTreeInitPayload(chain, ctx.ignoreLists.hidden));
   });
@@ -749,6 +844,8 @@ async function teardownContext(winId: number): Promise<void> {
   }
   treeCoalescers.get(winId)?.dispose();
   treeCoalescers.delete(winId);
+  gitRefWatchers.get(winId)?.();
+  gitRefWatchers.delete(winId);
 
   ctx.ptyService.killAll();
   ctx.search.dispose();

@@ -16,6 +16,7 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import type { ContentSearchHit, ContentSearchResult } from '../../shared/ipc.js';
 import { augmentedPath } from '../spawn-detached.js';
+import { ripgrepPath } from './ripgrep.js';
 
 /** Max matches reported per file — keeps one hot file from flooding results. */
 const PER_FILE_CAP = 5;
@@ -89,6 +90,9 @@ export type ContentSearchOptions = {
   ignore: readonly string[];
   /** Max total hits to return. */
   limit: number;
+  /** Include ignored + hidden files: drop the ignore globs, add `--no-ignore
+   *  --hidden` so `.git`, `node_modules`, build output, etc. are all searched. */
+  includeIgnored?: boolean;
 };
 
 /**
@@ -108,7 +112,12 @@ export function searchContent(opts: ContentSearchOptions): Promise<ContentSearch
     '--smart-case',
     '--max-count',
     String(PER_FILE_CAP),
-    ...opts.ignore.flatMap((glob) => ['--glob', `!${glob}`]),
+    // Include-ignored drops the project's ignore globs and tells rg to ignore
+    // .gitignore + search hidden files; otherwise pass the ignore set and let
+    // rg's .gitignore handling stand.
+    ...(opts.includeIgnored
+      ? ['--no-ignore', '--hidden']
+      : opts.ignore.flatMap((glob) => ['--glob', `!${glob}`])),
     '--',
     query,
     ...opts.dirs,
@@ -124,7 +133,7 @@ export function searchContent(opts: ContentSearchOptions): Promise<ContentSearch
 
     let child: ChildProcess;
     try {
-      child = spawn('rg', args, { env: { ...process.env, PATH: augmentedPath() } });
+      child = spawn(ripgrepPath(), args, { env: { ...process.env, PATH: augmentedPath() } });
     } catch {
       done({ hits: [], ripgrepMissing: true });
       return;
@@ -140,6 +149,41 @@ export function searchContent(opts: ContentSearchOptions): Promise<ContentSearch
     });
     child.on('close', () => {
       done({ hits: parseRipgrepJson(out, opts.limit), ripgrepMissing: false });
+    });
+  });
+}
+
+/**
+ * List file paths under `dirs` via `rg --files`. This is the name-search source
+ * when the "include ignored" toggle is on — the watcher-fed index only holds
+ * un-ignored files, so an unfiltered listing must come from rg. With
+ * `includeIgnored`, adds `--no-ignore --hidden` so ignored/hidden files appear;
+ * otherwise rg's defaults (.gitignore + skip hidden) apply. Resolves `[]` on a
+ * missing `rg` or any error — the search box must not crash.
+ */
+export function listFiles(dirs: readonly string[], includeIgnored: boolean): Promise<string[]> {
+  if (dirs.length === 0) return Promise.resolve([]);
+  const args = ['--files', ...(includeIgnored ? ['--no-ignore', '--hidden'] : []), '--', ...dirs];
+  return new Promise((resolve) => {
+    let child: ChildProcess;
+    try {
+      child = spawn(ripgrepPath(), args, { env: { ...process.env, PATH: augmentedPath() } });
+    } catch {
+      resolve([]);
+      return;
+    }
+    let out = '';
+    child.stdout?.on('data', (chunk: Buffer) => {
+      out += chunk.toString();
+    });
+    child.on('error', () => resolve([]));
+    child.on('close', () => {
+      resolve(
+        out
+          .split('\n')
+          .map((s) => s.trim())
+          .filter((s) => s !== ''),
+      );
     });
   });
 }

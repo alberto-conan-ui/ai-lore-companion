@@ -6,7 +6,13 @@ import type {
   TreeNode,
 } from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type DriftLevel, driftLevel, findTreeNode, useCockpitStore } from '../store.js';
+import {
+  type DriftLevel,
+  categoriseDriftCode,
+  driftLevel,
+  findTreeNode,
+  useCockpitStore,
+} from '../store.js';
 import { AppPickerModal } from './AppPickerModal.js';
 import { DriftPill } from './DriftPill.js';
 import { FileGrid, type FileGridHandle } from './FileGrid.js';
@@ -102,9 +108,9 @@ export function Pane({
 }: Props): JSX.Element {
   const index = useCockpitStore((s) => s.treeIndex[scope]);
   const rawChangesForScope = useCockpitStore((s) => s.changes[scope]);
+  // The baseline is global now (the picker beside the pinned tabs writes both
+  // scopes); the pane only reads its own scope's value for diff/open actions.
   const baseline = useCockpitStore((s) => s.baselineByScope[scope]);
-  const commitList = useCockpitStore((s) => s.commitListByScope[scope]);
-  const storeSetBaseline = useCockpitStore((s) => s.setBaseline);
   const expandTree = useCockpitStore((s) => s.expandTree);
   const showIndexFiles = useCockpitStore((s) => s.showIndexFiles);
   const setShowIndexFiles = useCockpitStore((s) => s.setShowIndexFiles);
@@ -120,20 +126,6 @@ export function Pane({
     s.chain && !('error' in s.chain) ? s.chain.hasSavePoint : false,
   );
   const apps = useCockpitStore((s) => s.apps);
-
-  /**
-   * The Changes panel's baseline dropdown is the single source of truth for
-   * the diff baseline across this pane. Two stores stay in sync: the renderer
-   * store (drives the dropdown UI) and the main-process tracker (drives the
-   * `git diff` re-read). Wrap the IPC + store update behind one call.
-   */
-  const handleBaselineChange = useCallback(
-    (next: string) => {
-      storeSetBaseline(scope, next);
-      void window.cockpit.setBaseline({ scope, baseline: next });
-    },
-    [scope, storeSetBaseline],
-  );
 
   // Context-menu actions shared across tree, grid, and (eventually) queue.
   const handleRevealInFinder = useCallback((node: TreeNode) => {
@@ -413,12 +405,17 @@ export function Pane({
     if (revealRequest) void revealFile(revealRequest.path);
   }, [revealRequest, revealFile]);
 
-  // Queue double-click prefers the configured external diff over the OS-default
-  // open. When no diff app is configured, when no save-point exists, or when
-  // anything goes wrong, falls back to today's OS-default open so the user
-  // still sees the file.
+  // Queue double-click. A new file (untracked, or added since the baseline) has
+  // no baseline version to diff against — open it straight in the OS-default
+  // app rather than attempting a diff or prompting for a diff app. Everything
+  // else prefers the configured external diff, falling back to OS-default open
+  // when no diff app is configured or anything goes wrong.
   const handleQueueDouble = useCallback(
     async (entry: DriftRow) => {
+      if (categoriseDriftCode(entry.code) === 'add') {
+        void window.cockpit.openPath(entry.absPath);
+        return;
+      }
       const result = await window.cockpit.openDiff({
         scope,
         relPath: entry.projectRelPath,
@@ -577,11 +574,7 @@ export function Pane({
         <ChangesPanel
           ref={queueHandle}
           label={label}
-          scope={scope}
           entries={paneEntries}
-          baseline={baseline}
-          commitList={commitList}
-          onBaselineChange={handleBaselineChange}
           displayPath={queueDisplayPath}
           onRowClick={handleQueueClick}
           onRowDoubleClick={handleQueueDouble}

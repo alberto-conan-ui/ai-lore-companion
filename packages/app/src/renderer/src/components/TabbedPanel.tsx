@@ -83,6 +83,10 @@ type Props = {
    *  drops are refused. Used by the leftRail in v0.9 so the nav rail stays
    *  pinned-only. */
   locked?: boolean;
+  /** Optional control pinned to the right end of the strip — the global
+   *  baseline picker rides here on the leftRail so it sits beside the pinned
+   *  Status / Payload / Memory tabs. */
+  trailing?: JSX.Element;
 };
 
 /** Drift badge on a pinned tab — count plus the four-level colour scale. */
@@ -128,6 +132,7 @@ export function TabbedPanel({
   slotRef,
   tabDrift,
   locked = false,
+  trailing,
 }: Props): JSX.Element {
   // The tab currently being renamed inline, plus its draft text.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -281,6 +286,7 @@ export function TabbedPanel({
             ))}
           </>
         )}
+        {trailing ?? null}
       </div>
       <div ref={slotRef} style={contentSlot} />
     </div>

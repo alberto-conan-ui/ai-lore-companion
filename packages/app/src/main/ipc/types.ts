@@ -16,6 +16,8 @@ export type Wiring = {
   changes: ChangesTracker;
   /** Re-read commits for `scope` and push CommitList to the renderer. */
   pushCommits: (scope: ChangeScope) => void;
+  /** Re-read the save-point ledger and push it (the global picker's mask). */
+  pushSavePoints: () => void;
 };
 
 /**

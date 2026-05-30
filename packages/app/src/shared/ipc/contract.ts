@@ -36,6 +36,7 @@ import type {
   OpenDiffArg,
   OpenDiffResult,
   PromptEntry,
+  SavePointsPayload,
   SetBaselineArg,
   SetRegisterArg,
   SettingsSetArg,
@@ -101,6 +102,7 @@ export const CONTRACT = {
   // `Changes` keeps its v0.5-era channel string for stored-layout compatibility.
   onChanges: push<ChangesPayload>('cockpit:git-status'),
   onCommitList: push<CommitListPayload>('cockpit:commit-list'),
+  onSavePoints: push<SavePointsPayload>('cockpit:save-points'),
   setBaseline: invoke<[arg: SetBaselineArg], void>('cockpit:set-baseline'),
   diffText: invoke<[arg: DiffTextArg], DiffTextResult>('cockpit:diff-text'),
   openDiff: invoke<[arg: OpenDiffArg], OpenDiffResult>('cockpit:open-diff'),

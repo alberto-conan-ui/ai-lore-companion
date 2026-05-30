@@ -19,8 +19,38 @@
 import { basename, sep } from 'node:path';
 import { isTreeError, readDirectory } from '../tree/tree.js';
 import { fuzzyScore } from './fuzzy.js';
+import { globToRegExp, isGlob } from './glob.js';
 
 export type SearchHit = { name: string; path: string; score: number };
+
+/**
+ * Rank `entries` (each `[path, name]`) against `query` and return the top
+ * `limit` hits. A glob query (`*` / `?`) matches the basename as a glob;
+ * otherwise it ranks fuzzily. Shared by {@link PathIndex} (the watcher-fed
+ * index, default search) and the `rg --files` path the host uses when the
+ * "include ignored" toggle is on — so both rank identically.
+ */
+export function rankPaths(
+  entries: Iterable<readonly [path: string, name: string]>,
+  query: string,
+  limit: number,
+): SearchHit[] {
+  const q = query.trim();
+  if (q === '') return [];
+  const glob = isGlob(q) ? globToRegExp(q) : null;
+  const hits: SearchHit[] = [];
+  for (const [path, name] of entries) {
+    let score: number | null;
+    if (glob) score = glob.test(name) ? 1 : null;
+    else score = fuzzyScore(q, name);
+    if (score === null) continue;
+    hits.push({ name, path, score });
+  }
+  hits.sort(
+    (a, b) => b.score - a.score || a.name.length - b.name.length || a.path.localeCompare(b.path),
+  );
+  return hits.slice(0, limit);
+}
 
 export class PathIndex {
   /** path → basename. */
@@ -94,20 +124,10 @@ export class PathIndex {
   }
 
   /** Rank every indexed name against `query` and return the top `limit` hits.
-   *  An empty (or whitespace-only) query returns no hits. */
+   *  An empty (or whitespace-only) query returns no hits. A query containing a
+   *  glob metacharacter (`*` / `?`) matches as a glob on the basename; otherwise
+   *  it ranks fuzzily. Both share the shorter-name-wins-ties ordering. */
   search(query: string, limit: number): SearchHit[] {
-    const q = query.trim();
-    if (q === '') return [];
-
-    const hits: SearchHit[] = [];
-    for (const [path, name] of this.names) {
-      const score = fuzzyScore(q, name);
-      if (score === null) continue;
-      hits.push({ name, path, score });
-    }
-    hits.sort(
-      (a, b) => b.score - a.score || a.name.length - b.name.length || a.path.localeCompare(b.path),
-    );
-    return hits.slice(0, limit);
+    return rankPaths(this.names, query, limit);
   }
 }

@@ -66,12 +66,36 @@ export type CommitListEntry = {
   sha: string;
   /** Commit subject (first line of the message). */
   subject: string;
+  /** Committer date, Unix epoch **seconds** — ordering + ack-pairing across repos. */
+  timestamp: number;
   /** Save-point match when present. */
   savePoint?: { title: string };
 };
 
 /** Per-scope commit-list snapshot pushed from main. */
 export type CommitListPayload = { scope: ChangeScope; commits: CommitListEntry[] };
+
+/**
+ * One save-point, projected from the ledger for the global baseline picker.
+ * Carries **both** repo commits so the picker pairs the two panes from one
+ * logical selection (the renderer never sees the two-commit detail). Pushed
+ * via `onSavePoints`, newest first.
+ */
+export type SavePointInfo = {
+  /** Ledger filename — the stable id behind a save-point milestone. */
+  name: string;
+  /** Save-point title. */
+  title: string;
+  /** `YYYY-MM-DD` from the ledger frontmatter. */
+  date: string;
+  /** Payload-repo commit SHA. */
+  payloadCommit: string;
+  /** Lore-repo commit SHA. */
+  loreCommit: string;
+};
+
+/** Save-point ledger snapshot pushed from main, newest first. */
+export type SavePointsPayload = { savePoints: SavePointInfo[] };
 
 /** Renderer → main: flip a scope's baseline. */
 export type SetBaselineArg = { scope: ChangeScope; baseline: string };
@@ -116,13 +140,19 @@ export type TreeUpdatePayload = { scope: ChangeScope; path: string; children: Tr
 /** Argument to a `tree-expand` request. */
 export type TreeExpandArg = { scope: ChangeScope; path: string };
 
-/** A global file-search request — absolute directories to walk, and the query. */
-export type FileSearchArg = { dirs: string[]; query: string };
-/** One file matched by a search — its base name and absolute path. */
-export type FileSearchHit = { name: string; path: string };
+/** A global file-search request — absolute directories to walk (the checked
+ *  scopes), the query, and whether to include ignored/hidden files. The scope
+ *  checkboxes choose `dirs`; `includeIgnored` switches the name search from the
+ *  watcher-fed index to an unfiltered `rg --files` scan. */
+export type FileSearchArg = { dirs: string[]; query: string; includeIgnored?: boolean };
+/** One file matched by a search — its base name and absolute path. `ignored` is
+ *  set when the file is only present because the include-ignored toggle is on
+ *  (it would normally be excluded) — the dialog badges it. */
+export type FileSearchHit = { name: string; path: string; ignored?: boolean };
 
-/** A content-search request — same dirs + query as the name search. */
-export type ContentSearchArg = { dirs: string[]; query: string };
+/** A content-search request — same dirs + query as the name search, plus the
+ *  include-ignored flag (drops the ignore globs and adds `--no-ignore --hidden`). */
+export type ContentSearchArg = { dirs: string[]; query: string; includeIgnored?: boolean };
 /** One in-file match from ripgrep content search: the file, the 1-based line
  *  and column of the match, and the matching line's text as a snippet. */
 export type ContentSearchHit = {
@@ -131,6 +161,8 @@ export type ContentSearchHit = {
   line: number;
   column: number;
   snippet: string;
+  /** Set when this match is in a normally-ignored file (include-ignored on). */
+  ignored?: boolean;
 };
 /** Content-search result — the hits, plus whether ripgrep was missing on PATH
  *  (so the renderer can hint at installing it rather than showing "no matches"). */

@@ -88,7 +88,8 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      await page.getByTestId('global-search').fill('demo');
+      await clickNavigateItem(app, 'Find in Project…');
+      await page.getByTestId('search-dialog-input').fill('demo');
       // The fixture has memory/status/focus/demo.focus.md — it shows as a result.
       await expect(
         page.getByTestId('search-result').filter({ hasText: 'demo.focus.md' }),
@@ -108,7 +109,8 @@ test.describe('window modes', () => {
 
       // "gate" is in demo.focus.md's body ("demo gate"), not in any file name —
       // so any hit here came from the ripgrep content path, not the name index.
-      await page.getByTestId('global-search').fill('gate');
+      await clickNavigateItem(app, 'Find in Project…');
+      await page.getByTestId('search-dialog-input').fill('gate');
       // The content round trip ran end-to-end: with ripgrep on PATH a content
       // result shows; without it, the install hint does. Either proves the wire.
       await expect(
@@ -130,10 +132,11 @@ test.describe('window modes', () => {
       // `demo.focus.md` lives under `memory/status/focus/` — the Status pane
       // (which groups status + journal + action-tree). Picking it must switch
       // the active pane to Status, not Payload (the routing bug Phase B fixed).
-      await page.getByTestId('global-search').fill('demo');
+      await clickNavigateItem(app, 'Find in Project…');
+      await page.getByTestId('search-dialog-input').fill('demo');
       const hit = page.getByTestId('search-result').filter({ hasText: 'demo.focus.md' });
       await expect(hit).toBeVisible({ timeout: 5_000 });
-      await hit.click();
+      await hit.dblclick();
 
       await expect(page.getByTestId('pane-status')).toBeVisible({ timeout: 3_000 });
 
@@ -216,9 +219,7 @@ test.describe('window modes', () => {
   test('Start launches the chosen engine in the AI tab PTY', async () => {
     const fixture = makeProject();
     const fake = makeFakeEngineBinary('PHASE_B_ENGINE_RAN');
-    seedEngines(fixture.userData, [
-      { id: 'fake', name: 'Fake', binary: fake.binary },
-    ]);
+    seedEngines(fixture.userData, [{ id: 'fake', name: 'Fake', binary: fake.binary }]);
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
@@ -305,9 +306,7 @@ test.describe('window modes', () => {
   test('the running AI tab renders the two-column split with a resize handle', async () => {
     const fixture = makeProject();
     const fake = makeFakeEngineBinary('PHASE_C_SPLIT_VISIBLE');
-    seedEngines(fixture.userData, [
-      { id: 'fake', name: 'Fake', binary: fake.binary },
-    ]);
+    seedEngines(fixture.userData, [{ id: 'fake', name: 'Fake', binary: fake.binary }]);
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
@@ -347,9 +346,7 @@ test.describe('window modes', () => {
   test('the prompts column width persists across launches', async () => {
     const fixture = makeProject();
     const fake = makeFakeEngineBinary('PHASE_C_WIDTH_PERSISTS');
-    seedEngines(fixture.userData, [
-      { id: 'fake', name: 'Fake', binary: fake.binary },
-    ]);
+    seedEngines(fixture.userData, [{ id: 'fake', name: 'Fake', binary: fake.binary }]);
     try {
       // First launch: open an AI tab, start, write a custom width via the
       // same IPC the drag handler invokes on mouseup.
@@ -378,9 +375,7 @@ test.describe('window modes', () => {
         .poll(
           async () =>
             Number(
-              await second.page
-                .getByTestId('ai-prompts-column')
-                .getAttribute('data-sidebar-width'),
+              await second.page.getByTestId('ai-prompts-column').getAttribute('data-sidebar-width'),
             ),
           { timeout: 5_000 },
         )
@@ -402,9 +397,7 @@ test.describe('window modes', () => {
     const fixture = makeProject();
     seedVerbs(fixture.root);
     const fake = makeFakeEngineBinary('PHASE_D_PROMPTS_READY');
-    seedEngines(fixture.userData, [
-      { id: 'fake', name: 'Fake', binary: fake.binary },
-    ]);
+    seedEngines(fixture.userData, [{ id: 'fake', name: 'Fake', binary: fake.binary }]);
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
@@ -538,7 +531,9 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('publish-file-list')).toContainText('index.html');
       await expect(page.getByTestId('publish-file-list')).toContainText('README.md');
       // The Publish pane carries no ChangesPanel — drift surfaces are absent.
-      await expect(page.getByTestId('pane-publish').locator('[data-testid^="changes-"]')).toHaveCount(0);
+      await expect(
+        page.getByTestId('pane-publish').locator('[data-testid^="changes-"]'),
+      ).toHaveCount(0);
       await app.close();
     } finally {
       fixture.cleanup();
@@ -667,18 +662,17 @@ test.describe('window modes', () => {
     }
   });
 
-  test('the header renders three rows and the chain titles are clickable', async () => {
+  test('the header renders the identity row and the chain titles are clickable', async () => {
     const fixture = makeProject();
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      // v0.6 Phase A reshaped the header down to identity + search. The
-      // shortcut sub-rows and the drift cluster (Pill + Dismiss all) are
-      // gone; per-pane DriftPills + per-file glyphs surface drift where
-      // the user is acting.
+      // The header is identity only now — search moved to a ⌘F dialog (the bar
+      // is gone). The shortcut sub-rows and drift cluster were dropped earlier;
+      // per-pane DriftPills + per-file glyphs surface drift where the user acts.
       await expect(page.getByTestId('header-identity')).toBeVisible();
-      await expect(page.getByTestId('header-search')).toBeVisible();
+      await expect(page.getByTestId('header-search')).toHaveCount(0);
       await expect(page.getByTestId('header-actions')).toHaveCount(0);
       await expect(page.getByTestId('header-drift')).toHaveCount(0);
       await expect(page.getByTestId('drift-cluster')).toHaveCount(0);
@@ -741,16 +735,17 @@ test.describe('window modes', () => {
     }
   });
 
-  test('Cmd+F focuses the global file search', async () => {
+  test('Cmd+F (Find in Project) opens the search dialog', async () => {
     const fixture = makeProject();
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('pane-status')).toBeVisible({ timeout: 15_000 });
 
-      // Click somewhere else first so the search input is not already focused.
+      // Click somewhere else first so focus isn't already in a search field.
       await page.getByTestId('pane-status').getByTestId('tree-root').click();
-      await clickNavigateItem(app, 'Find File…');
-      await expect(page.getByTestId('global-search')).toBeFocused({ timeout: 3_000 });
+      await clickNavigateItem(app, 'Find in Project…');
+      await expect(page.getByTestId('search-dialog')).toBeVisible({ timeout: 3_000 });
+      await expect(page.getByTestId('search-dialog-input')).toBeFocused({ timeout: 3_000 });
 
       await app.close();
     } finally {
@@ -771,9 +766,9 @@ test.describe('window modes', () => {
 
       // The same ⌘F action now opens the terminal find bar (focus is in the
       // terminal), not the global file search.
-      await clickNavigateItem(app, 'Find File…');
+      await clickNavigateItem(app, 'Find in Project…');
       await expect(page.getByTestId('terminal-find')).toBeVisible({ timeout: 5_000 });
-      await expect(page.getByTestId('global-search')).not.toBeFocused();
+      await expect(page.getByTestId('search-dialog')).toHaveCount(0);
 
       // Esc closes it.
       await page.getByTestId('terminal-find-input').press('Escape');
@@ -792,11 +787,12 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
       // The fixture's demo focus appears in search by default.
-      await page.getByTestId('global-search').fill('demo');
+      await clickNavigateItem(app, 'Find in Project…');
+      await page.getByTestId('search-dialog-input').fill('demo');
       await expect(
         page.getByTestId('search-result').filter({ hasText: 'demo.focus.md' }),
       ).toBeVisible({ timeout: 5_000 });
-      await page.getByTestId('global-search').fill('');
+      await page.getByTestId('search-dialog-input').press('Escape');
 
       // Add a project-tier `no-search` rule for the `demo` pattern.
       await openSettingsViaMenu(app);
@@ -814,7 +810,8 @@ test.describe('window modes', () => {
       await expect(sheet).toBeHidden();
 
       // Re-running the search must now find nothing.
-      await page.getByTestId('global-search').fill('demo');
+      await clickNavigateItem(app, 'Find in Project…');
+      await page.getByTestId('search-dialog-input').fill('demo');
       await expect(page.getByTestId('search-result')).toHaveCount(0, { timeout: 3_000 });
 
       await app.close();
@@ -1307,21 +1304,48 @@ test.describe('window modes', () => {
     }
   });
 
-  test('the Changes panel renders an inline diff preview region', async () => {
+  test('the global baseline picker sits beside the pinned tabs and reveals acks', async () => {
     const fixture = makeProject();
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      // Preview testIDs are keyed by pane label so Status (scope=lore) and
-      // Memory (scope=lore) don't collide. The Status tab is the default on
-      // launch — its preview is rendered + visible.
-      const statusPreview = page.getByTestId('changes-preview-status');
-      await expect(statusPreview).toBeVisible({ timeout: 5_000 });
-      // No selection yet → the empty hint is visible.
-      await expect(statusPreview.getByText(/Select a row to preview its diff/i)).toBeVisible();
-      // The splitter between the file list and the preview is present.
-      await expect(page.getByTestId('changes-splitter-status')).toBeVisible();
+      // One global picker drives every pane's baseline — it lives in the locked
+      // leftRail strip beside the pinned tabs, not per-pane.
+      const picker = page.getByTestId('baseline-picker');
+      await expect(picker).toBeVisible({ timeout: 5_000 });
+      // The old per-pane baseline dropdown and inline diff preview are gone.
+      await expect(page.getByTestId('changes-baseline-status')).toHaveCount(0);
+      await expect(page.getByTestId('changes-preview-status')).toHaveCount(0);
+
+      // Opening it shows the save-points-first popover with the rollup tickbox.
+      await picker.click();
+      await expect(page.getByTestId('baseline-picker-popover')).toBeVisible();
+      await expect(page.getByTestId('baseline-rollup-acks')).toBeVisible();
+
+      await app.close();
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  test('the search dialog shows per-tab scope checkboxes and an include-ignored toggle', async () => {
+    const fixture = makeProject();
+    try {
+      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
+      await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
+
+      await clickNavigateItem(app, 'Find in Project…');
+      await expect(page.getByTestId('search-dialog')).toBeVisible({ timeout: 3_000 });
+      // One scope checkbox per pinned tab (default-shape: Status/Payload/Memory),
+      // each checked by default, plus the include-ignored toggle (off).
+      for (const id of ['status', 'payload', 'memory']) {
+        const box = page.getByTestId(`search-scope-${id}`);
+        await expect(box).toBeVisible();
+        await expect(box).toBeChecked();
+      }
+      await expect(page.getByTestId('search-scope-publish')).toHaveCount(0); // default shape
+      await expect(page.getByTestId('search-include-ignored')).not.toBeChecked();
 
       await app.close();
     } finally {
@@ -1506,9 +1530,9 @@ test.describe('window modes', () => {
       // tree starts collapsed, so the leaf file is not visible until expanded;
       // the root `blueprint` folder is shown with its count instead.
       await panel.getByTestId('changes-view-mode-memory').selectOption('tree');
-      await expect(
-        panel.getByRole('columnheader', { name: 'Path', exact: true }),
-      ).toBeVisible({ timeout: 5_000 });
+      await expect(panel.getByRole('columnheader', { name: 'Path', exact: true })).toBeVisible({
+        timeout: 5_000,
+      });
       await expect(panel.getByText('blueprint', { exact: false })).toBeVisible();
       // Leaf rows are hidden by the collapsed default — opening them is the
       // user's choice, not a guarantee the test should make.
@@ -1523,5 +1547,4 @@ test.describe('window modes', () => {
       fixture.cleanup();
     }
   });
-
 });

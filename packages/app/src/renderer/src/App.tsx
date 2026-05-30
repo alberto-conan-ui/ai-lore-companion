@@ -13,8 +13,9 @@ import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../sh
 import { isChainErrorPayload } from '../../shared/ipc.js';
 import type { AlteredReason } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
+import { BaselinePicker } from './components/BaselinePicker.js';
 import { DockPanel } from './components/DockPanel.js';
-import { GlobalSearch, type GlobalSearchHandle } from './components/GlobalSearch.js';
+import { SearchDialog, type SearchScope } from './components/SearchDialog.js';
 import { baseDirsOf, entriesInSubRoot } from './components/Pane.js';
 import { type PanelId, TabbedPanel, type WorkspaceTab } from './components/TabbedPanel.js';
 import { TAB_KINDS, type PaneSpec, type TabRenderContext } from './components/tabKinds.js';
@@ -72,6 +73,7 @@ export function App(): JSX.Element {
   const setChain = useCockpitStore((s) => s.setChain);
   const applyChanges = useCockpitStore((s) => s.applyChanges);
   const applyCommitList = useCockpitStore((s) => s.applyCommitList);
+  const applySavePoints = useCockpitStore((s) => s.applySavePoints);
   const setTrees = useCockpitStore((s) => s.setTrees);
   const applyTreeUpdate = useCockpitStore((s) => s.applyTreeUpdate);
   const setApps = useCockpitStore((s) => s.setApps);
@@ -276,8 +278,19 @@ export function App(): JSX.Element {
 
   const paneSpecById = useMemo(() => new Map(paneSpecs.map((p) => [p.id, p])), [paneSpecs]);
 
-  // Every directory the global search walks — the union of all panes' roots.
-  const searchDirs = useMemo(() => paneSpecs.flatMap((p) => baseDirsOf(p.subRoot)), [paneSpecs]);
+  // The scopes the global search can cover — one checkbox per pinned tab, plus
+  // Publish when the project is in publishing shape. All checked by default.
+  const searchScopes = useMemo<SearchScope[]>(() => {
+    const base: SearchScope[] = paneSpecs.map((p) => ({
+      id: p.id,
+      label: p.title,
+      dirs: baseDirsOf(p.subRoot),
+    }));
+    if (chain && !isChainErrorPayload(chain) && chain.shape === 'publishing' && chain.publish) {
+      base.push({ id: 'publish', label: 'Publish', dirs: [`${chain.root}/${chain.publish.path}`] });
+    }
+    return base;
+  }, [paneSpecs, chain]);
 
   // Drift counts per pinned tab — shown as a badge on the tab strip. Sourced
   // from the per-scope changes snapshot (v0.6 Phase B); filtered to each
@@ -311,6 +324,7 @@ export function App(): JSX.Element {
     const offChain = window.cockpit.onChain(setChain);
     const offChanges = window.cockpit.onChanges(applyChanges);
     const offCommitList = window.cockpit.onCommitList(applyCommitList);
+    const offSavePoints = window.cockpit.onSavePoints(applySavePoints);
     const offTreeInit = window.cockpit.onTreeInit(setTrees);
     const offTreeUpdate = window.cockpit.onTreeUpdate(applyTreeUpdate);
     // Hydrate the Apps catalog from the global settings tier — context menus
@@ -323,13 +337,15 @@ export function App(): JSX.Element {
       offChain();
       offChanges();
       offCommitList();
+      offSavePoints();
       offTreeInit();
       offTreeUpdate();
       offSettings();
     };
-  }, [setChain, applyChanges, applyCommitList, setTrees, applyTreeUpdate, setApps]);
+  }, [setChain, applyChanges, applyCommitList, applySavePoints, setTrees, applyTreeUpdate, setApps]);
 
-  const globalSearchRef = useRef<GlobalSearchHandle>(null);
+  // The project search is a modal dialog (⌘F / Edit ▸ Find), not a header bar.
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // ⌘+[ / ⌘+] moves the keyboard between visible Panes. Adapted from the
   // V2 "Project ↔ Lore" model to the dockable workspace: each panel can
@@ -394,7 +410,7 @@ export function App(): JSX.Element {
     if (document.activeElement?.closest('.xterm')) {
       window.dispatchEvent(new Event(TERMINAL_FIND_EVENT));
     } else {
-      globalSearchRef.current?.focusMe();
+      setSearchOpen(true);
     }
   }, []);
 
@@ -903,6 +919,7 @@ export function App(): JSX.Element {
       slotRef={slotRefs[panelId]}
       tabDrift={panelId === 'leftRail' ? tabDrift : undefined}
       locked={panelId === 'leftRail'}
+      trailing={panelId === 'leftRail' ? <BaselinePicker /> : undefined}
     />
   );
 
@@ -930,16 +947,15 @@ export function App(): JSX.Element {
   const tint = accentTint(projectHue);
   return (
     <div style={cockpitShell}>
-      <TrackerStrip
-        search={
-          <GlobalSearch
-            ref={globalSearchRef}
-            dirs={searchDirs}
-            onPick={handleSearchPick}
-            displayPath={displayPath}
-          />
-        }
-      />
+      <TrackerStrip />
+      {searchOpen ? (
+        <SearchDialog
+          scopes={searchScopes}
+          onPick={handleSearchPick}
+          displayPath={displayPath}
+          onClose={() => setSearchOpen(false)}
+        />
+      ) : null}
       <div style={panelsRow}>
         <Column
           name="leftRail"

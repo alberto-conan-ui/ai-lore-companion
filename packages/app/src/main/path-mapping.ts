@@ -20,7 +20,7 @@ export const COMMIT_LIST_LIMIT = 50;
  * the dropdown renders the badge alongside the subject line.
  */
 export function attachSavePointBadges(
-  commits: readonly { sha: string; subject: string }[],
+  commits: readonly { sha: string; subject: string; timestamp: number }[],
   savePoints: readonly SavePoint[],
   scope: ChangeScope,
 ): CommitListEntry[] {

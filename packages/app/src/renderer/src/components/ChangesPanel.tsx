@@ -1,4 +1,4 @@
-import type { AppEntry, ChangeEntry, ChangeScope, TreeNode } from '@ai-lore-companion/core';
+import type { AppEntry, ChangeEntry, TreeNode } from '@ai-lore-companion/core';
 import type {
   CellKeyDownEvent,
   ColDef,
@@ -12,20 +12,17 @@ import {
   type JSX,
   forwardRef,
   useCallback,
-  useEffect,
   useImperativeHandle,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import type { CommitListEntry } from '../../../shared/ipc.js';
 import { type DriftKind, categoriseDriftCode } from '../store.js';
 // Importing the theme also evaluates FileGrid.tsx, which registers the AG Grid
 // modules and license — so this grid has them without repeating the setup.
 import { cockpitGridTheme } from './FileGrid.js';
-import { InlineDiffPreview } from './InlineDiffPreview.js';
-import { buildNodeContextMenu } from './nodeContextMenu.js';
 import { RowKebab } from './RowKebab.js';
+import { buildNodeContextMenu } from './nodeContextMenu.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the panel. */
 export type ChangesPanelHandle = {
@@ -45,15 +42,7 @@ export type DriftRow = ChangeEntry & {
 
 type Props = {
   label: string;
-  /** Which repo this panel reflects — drives the inline preview's diff source. */
-  scope: ChangeScope;
   entries: DriftRow[];
-  /** Current baseline (commit SHA or `'HEAD'`). Drives the dropdown selection. */
-  baseline: string;
-  /** Recent commits + save-point badges for the dropdown. Newest first. */
-  commitList: CommitListEntry[];
-  /** Called when the user picks a new baseline from the dropdown. */
-  onBaselineChange: (baseline: string) => void;
   onRowClick: (entry: DriftRow) => void;
   onRowDoubleClick: (entry: DriftRow) => void;
   /** Maps a project-relative path to its tab-relative display path. */
@@ -71,11 +60,6 @@ type Props = {
   /** Setter for the List / Tree dropdown in the header. */
   onViewModeChange: (mode: 'list' | 'tree') => void;
 };
-
-/** Default share of the panel's height given to the inline diff preview. */
-const DEFAULT_PREVIEW_FRACTION = 0.4;
-const MIN_PREVIEW_FRACTION = 0.1;
-const MAX_PREVIEW_FRACTION = 0.8;
 
 const KIND_GLYPH: Record<DriftKind, { glyph: string; color: string; label: string }> = {
   add: { glyph: '+', color: '#7fc97f', label: 'added' },
@@ -106,19 +90,6 @@ function folderRest(displayP: string): string {
   return i === -1 ? '/' : dir.slice(i + 1);
 }
 
-/** Short SHA for the dropdown — first 7 chars, the git convention. */
-function shortSha(sha: string): string {
-  return sha.slice(0, 7);
-}
-
-/** The dropdown label for one commit. Save-points lead with their title; plain
- *  commits show short SHA + subject. */
-function commitOptionLabel(c: CommitListEntry): string {
-  return c.savePoint
-    ? `★ ${c.savePoint.title} — ${shortSha(c.sha)}`
-    : `${shortSha(c.sha)} ${c.subject}`;
-}
-
 /** Cell renderer for the per-row kind glyph. */
 function KindCell(params: { value?: string }): JSX.Element | null {
   if (!params.value) return null;
@@ -136,20 +107,16 @@ function nodeForRow(row: DriftRow): TreeNode {
 }
 
 /**
- * The pane's *Changes* surface — a baseline-aware view of what differs
- * between the working tree and a commit the user picks. Replaces the v0.6
- * Phase B v1 `PaneQueue` (which was hard-coded to HEAD). The baseline
- * dropdown carries recent commits plus save-point badges; the inline diff
- * preview (Phase B task 5) sits below this surface.
+ * The pane's *Changes* surface — the list of what differs between the working
+ * tree and the milestone the global baseline picker selected (beside the
+ * pinned tabs). The baseline lives globally now, so this panel is the file
+ * list only; double-click routes a row to the external diff app (or, for a new
+ * file, opens it directly — handled by the Pane).
  */
 export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function ChangesPanel(
   {
     label,
-    scope,
     entries,
-    baseline,
-    commitList,
-    onBaselineChange,
     onRowClick,
     onRowDoubleClick,
     displayPath,
@@ -165,49 +132,7 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
   forwardedRef,
 ): JSX.Element {
   const [quickFilter, setQuickFilter] = useState('');
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [previewFraction, setPreviewFraction] = useState(DEFAULT_PREVIEW_FRACTION);
-  const containerRef = useRef<HTMLElement>(null);
   const gridRef = useRef<AgGridReact<DriftRow>>(null);
-
-  // Clear the selected path when its row disappears (file committed, baseline
-  // flipped, etc.) so the preview doesn't stay pointed at a stale row.
-  useEffect(() => {
-    if (!selectedPath) return;
-    if (!entries.some((e) => e.projectRelPath === selectedPath)) {
-      setSelectedPath(null);
-    }
-  }, [entries, selectedPath]);
-
-  // Open-externally fallback for the truncated-diff case: synthesise a
-  // file-shaped node from the selected row and route through onDiff so the
-  // user lands in the configured external diff app.
-  const openSelectedExternally = useCallback(() => {
-    if (!selectedPath) return;
-    const row = entries.find((e) => e.projectRelPath === selectedPath);
-    if (!row) return;
-    onDiff(nodeForRow(row));
-  }, [selectedPath, entries, onDiff]);
-
-  // Splitter drag — track relative fraction inside the panel's own height.
-  const startResize = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
-    event.preventDefault();
-    const container = containerRef.current;
-    if (!container) return;
-    const rect = container.getBoundingClientRect();
-    const onMove = (ev: PointerEvent): void => {
-      const offset = ev.clientY - rect.top;
-      const fraction = 1 - offset / rect.height;
-      const clamped = Math.max(MIN_PREVIEW_FRACTION, Math.min(MAX_PREVIEW_FRACTION, fraction));
-      setPreviewFraction(clamped);
-    };
-    const onUp = (): void => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  }, []);
 
   useImperativeHandle(forwardedRef, () => ({
     focusMe: () => {
@@ -298,7 +223,14 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
         cellRenderer: (params: {
           data?: DriftRow;
           node: { group?: boolean };
-          api: { showContextMenu: (p: { rowNode: unknown; value: unknown; x: number; y: number }) => void };
+          api: {
+            showContextMenu: (p: {
+              rowNode: unknown;
+              value: unknown;
+              x: number;
+              y: number;
+            }) => void;
+          };
         }): JSX.Element | null => {
           if (!params.data || params.node.group) return null;
           const row = params.data;
@@ -323,34 +255,15 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
     [displayPath, viewMode],
   );
 
-  // `HEAD` is always the first option; recent commits follow with save-point
-  // badges where they apply. The selected value is the SHA (or `'HEAD'`).
-  const dropdownOptions = useMemo(
-    () => [
-      { value: 'HEAD', label: 'HEAD (working tree drift)' },
-      ...commitList.map((c) => ({ value: c.sha, label: commitOptionLabel(c) })),
-    ],
-    [commitList],
-  );
-
   const onAnyRowClicked = useCallback(
     (e: RowClickedEvent<DriftRow>) => {
-      if (!e.data) return;
-      setSelectedPath(e.data.projectRelPath);
-      onRowClick(e.data);
+      if (e.data) onRowClick(e.data);
     },
     [onRowClick],
   );
 
-  const previewPct = `${Math.round(previewFraction * 100)}%`;
-  const listPct = `${Math.round((1 - previewFraction) * 100)}%`;
-
   return (
-    <section
-      ref={containerRef}
-      style={containerStyle}
-      data-testid={`changes-${label.toLowerCase()}`}
-    >
+    <section style={containerStyle} data-testid={`changes-${label.toLowerCase()}`}>
       <header style={headerStyle}>
         <span style={labelStyle}>{label} changes</span>
         <span style={countStyle}>{entries.length}</span>
@@ -364,19 +277,6 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
           <option value="list">List</option>
           <option value="tree">Tree</option>
         </select>
-        <select
-          value={baseline}
-          onChange={(e) => onBaselineChange(e.target.value)}
-          style={baselineSelectStyle}
-          data-testid={`changes-baseline-${label.toLowerCase()}`}
-          aria-label="Compare against"
-        >
-          {dropdownOptions.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
         <input
           type="search"
           value={quickFilter}
@@ -386,7 +286,7 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
           data-testid={`changes-search-${label.toLowerCase()}`}
         />
       </header>
-      <div style={{ ...gridWrapStyle, height: listPct }}>
+      <div style={gridWrapStyle}>
         <AgGridReact<DriftRow>
           ref={gridRef}
           theme={cockpitGridTheme}
@@ -450,23 +350,6 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
           onCellKeyDown={onCellKeyDown}
         />
       </div>
-      <div
-        style={splitterStyle}
-        onPointerDown={startResize}
-        data-testid={`changes-splitter-${label.toLowerCase()}`}
-        role="separator"
-        aria-orientation="horizontal"
-        aria-label="Resize diff preview"
-      />
-      <div style={{ ...previewWrapStyle, height: previewPct }}>
-        <InlineDiffPreview
-          scope={scope}
-          label={label}
-          baseline={baseline}
-          selectedPath={selectedPath}
-          onOpenExternally={openSelectedExternally}
-        />
-      </div>
     </section>
   );
 });
@@ -514,17 +397,6 @@ const viewModeSelectStyle: React.CSSProperties = {
   fontSize: '0.72rem',
 };
 
-const baselineSelectStyle: React.CSSProperties = {
-  flex: 'none',
-  maxWidth: '20rem',
-  padding: '0.2rem 0.4rem',
-  background: '#0c121a',
-  border: '1px solid #2f3a45',
-  borderRadius: '4px',
-  color: '#dde3ea',
-  fontSize: '0.72rem',
-};
-
 const searchStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
@@ -538,20 +410,6 @@ const searchStyle: React.CSSProperties = {
 };
 
 const gridWrapStyle: React.CSSProperties = {
+  flex: 1,
   minHeight: 0,
-};
-
-const splitterStyle: React.CSSProperties = {
-  height: 5,
-  cursor: 'row-resize',
-  background: '#0f1620',
-  borderTop: '1px solid #1f2933',
-  borderBottom: '1px solid #1f2933',
-  flex: 'none',
-};
-
-const previewWrapStyle: React.CSSProperties = {
-  minHeight: 0,
-  display: 'flex',
-  flexDirection: 'column',
 };

@@ -46,6 +46,11 @@ export type CommitListEntry = {
   sha: string;
   /** Commit subject (the first line of the message). */
   subject: string;
+  /** Committer date, Unix epoch **seconds**. Drives chronological ordering and
+   *  the ack-pairing across the two repos (an ack commits both within seconds,
+   *  so the timestamp pairs a payload ack to its lore ack — see
+   *  [shared/baseline.ts](../../../app/src/shared/baseline.ts)). */
+  timestamp: number;
 };
 
 /**
@@ -152,13 +157,14 @@ function formatAsDeletion(content: string, relPath: string): string {
 
 /**
  * Read the most-recent commits on the repo's current branch, newest first.
- * Subjects come from `git log --format=%H%x09%s` (SHA tab subject), one
- * per line; the parser splits on TAB to handle subjects containing spaces.
+ * Fields come from `git log --format=%H%x09%ct%x09%s` (SHA tab committer-epoch
+ * tab subject), one per line; the parser splits on the first two TABs so a
+ * subject containing tabs or spaces survives intact.
  */
 export function readCommitList(workingTreeRoot: string, limit: number): CommitListResult {
   const result = spawnSync(
     'git',
-    ['-C', workingTreeRoot, 'log', `-n`, String(limit), '--format=%H%x09%s'],
+    ['-C', workingTreeRoot, 'log', '-n', String(limit), '--format=%H%x09%ct%x09%s'],
     { encoding: 'utf8' },
   );
   if (result.error) {
@@ -173,9 +179,14 @@ export function readCommitList(workingTreeRoot: string, limit: number): CommitLi
   const commits: CommitListEntry[] = [];
   for (const line of result.stdout.split('\n')) {
     if (!line) continue;
-    const tab = line.indexOf('\t');
-    if (tab === -1) continue;
-    commits.push({ sha: line.slice(0, tab), subject: line.slice(tab + 1) });
+    const firstTab = line.indexOf('\t');
+    if (firstTab === -1) continue;
+    const secondTab = line.indexOf('\t', firstTab + 1);
+    if (secondTab === -1) continue;
+    const sha = line.slice(0, firstTab);
+    const timestamp = Number.parseInt(line.slice(firstTab + 1, secondTab), 10);
+    const subject = line.slice(secondTab + 1);
+    commits.push({ sha, subject, timestamp: Number.isFinite(timestamp) ? timestamp : 0 });
   }
   return { kind: 'ok', commits };
 }

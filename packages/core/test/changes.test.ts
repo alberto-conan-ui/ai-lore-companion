@@ -235,6 +235,9 @@ test('readCommitList returns recent commits newest first', () => {
     assert.equal(result.commits[0]?.subject, 'second');
     assert.equal(result.commits[1]?.sha, sha1);
     assert.equal(result.commits[1]?.subject, 'first');
+    // Each entry carries a committer timestamp (epoch seconds), newest >= older.
+    assert.ok((result.commits[0]?.timestamp ?? 0) > 0);
+    assert.ok((result.commits[0]?.timestamp ?? 0) >= (result.commits[1]?.timestamp ?? 0));
   } finally {
     cleanup();
   }
