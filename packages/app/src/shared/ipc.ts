@@ -312,6 +312,13 @@ export type OpenDiffArg = {
   /** Path relative to the Payload project root — the same shape change entries carry. */
   relPath: string;
   /**
+   * Source path (project-relative) for a renamed/copied entry — set when the
+   * change code is `R`/`C`. The baseline ("before") side is materialised from
+   * this path at the commit; without it a moved file has no baseline version and
+   * the external diff opens it as a brand-new file. Absent for non-rename entries.
+   */
+  oldPath?: string;
+  /**
    * The commit to diff against. `'HEAD'` falls back to the latest save-point
    * when the panel has not picked a non-HEAD baseline yet — `HEAD` materialised
    * vs working tree is a no-op diff that wastes the user's external app.

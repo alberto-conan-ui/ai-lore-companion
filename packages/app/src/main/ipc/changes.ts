@@ -79,7 +79,25 @@ export const registerChanges: RegisterModule = (reg, deps) => {
     if (gitRelPath.startsWith('..') || isAbsolute(gitRelPath)) {
       return { kind: 'failed', message: 'path is outside the repo working tree' };
     }
-    const materialised = materialiseBaseline({ workingTreeRoot, commit, gitRelPath });
+    // For a renamed/copied entry the baseline content lives at the OLD path —
+    // the new path does not exist at the commit, so materialising from it yields
+    // an empty "before" and the external diff shows the file as new. Fall back to
+    // the new path when there is no rename source.
+    const baselineRel = arg.oldPath ?? arg.relPath;
+    const absBaseline = isAbsolute(baselineRel) ? baselineRel : resolve(ctx.root, baselineRel);
+    const baselineRootRel = relative(ctx.root, absBaseline);
+    if (baselineRootRel.startsWith('..') || isAbsolute(baselineRootRel)) {
+      return { kind: 'failed', message: 'rename source is outside the project' };
+    }
+    const baselineGitRelPath = relative(workingTreeRoot, absBaseline);
+    if (baselineGitRelPath.startsWith('..') || isAbsolute(baselineGitRelPath)) {
+      return { kind: 'failed', message: 'rename source is outside the repo working tree' };
+    }
+    const materialised = materialiseBaseline({
+      workingTreeRoot,
+      commit,
+      gitRelPath: baselineGitRelPath,
+    });
     if (materialised.kind === 'failed') {
       return materialised;
     }

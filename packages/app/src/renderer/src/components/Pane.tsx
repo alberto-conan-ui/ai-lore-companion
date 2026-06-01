@@ -419,6 +419,9 @@ export function Pane({
       const result = await window.cockpit.openDiff({
         scope,
         relPath: entry.projectRelPath,
+        // Renamed/copied rows carry their source path; pass it so the baseline
+        // is read from the old path (otherwise the move shows as a new file).
+        oldPath: entry.oldPath,
         baseline,
       });
       if (result.kind === 'ok') return;
