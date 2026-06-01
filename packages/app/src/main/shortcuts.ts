@@ -4,6 +4,7 @@ import { basename, join } from 'node:path';
 import { nativeImage } from 'electron';
 import type { Shortcut } from '../shared/ipc.js';
 import { type CatalogStoreSpec, loadCatalog, saveCatalog } from './catalog-store.js';
+import { projectDataDir } from './db-path.js';
 
 /**
  * App-launch shortcuts — a user-configured list, persisted as a JSON file
@@ -76,6 +77,33 @@ export function loadShortcuts(userDataDir: string): Shortcut[] {
  *  is recorded so it does not respawn on the next load. */
 export function saveShortcuts(userDataDir: string, list: Shortcut[]): void {
   saveCatalog(shortcutsStore, userDataDir, list);
+}
+
+/** Per-project shortcuts live in the project's own data dir (not global
+ *  userData), so they appear only for that project. No defaults — a fresh
+ *  project starts empty. Same `Shortcut` shape; the sidebars use the `url`
+ *  (Web) and `terminal` (Shell) targets. */
+const projectShortcutsStore: CatalogStoreSpec<Shortcut> = {
+  fileName: 'shortcuts.json',
+  field: 'shortcuts',
+  parse: (raw) => (Array.isArray(raw) ? raw.filter(isShortcut) : []),
+  idOf: (s) => s.id,
+  defaults: [],
+  legacyArray: true,
+};
+
+/** Read a project's own shortcut list. */
+export function loadProjectShortcuts(userDataDir: string, projectRoot: string): Shortcut[] {
+  return loadCatalog(projectShortcutsStore, projectDataDir(userDataDir, projectRoot));
+}
+
+/** Persist a project's own shortcut list. */
+export function saveProjectShortcuts(
+  userDataDir: string,
+  projectRoot: string,
+  list: Shortcut[],
+): void {
+  saveCatalog(projectShortcutsStore, projectDataDir(userDataDir, projectRoot), list);
 }
 
 /**

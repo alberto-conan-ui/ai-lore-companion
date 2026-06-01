@@ -156,6 +156,13 @@ export const CONTRACT = {
   shortcutsAdd: invoke<[input: ShortcutInput], Shortcut[]>('shortcuts:add'),
   shortcutsRemove: invoke<[id: string], Shortcut[]>('shortcuts:remove'),
   onShortcutsChanged: push<Shortcut[]>('shortcuts:changed'),
+  projectShortcutsList: invoke<[], Shortcut[]>('shortcuts:project-list'),
+  projectShortcutsAdd: invoke<[input: ShortcutInput], Shortcut[]>('shortcuts:project-add'),
+  projectShortcutsUpdate: invoke<[id: string, input: ShortcutInput], Shortcut[]>(
+    'shortcuts:project-update',
+  ),
+  projectShortcutsRemove: invoke<[id: string], Shortcut[]>('shortcuts:project-remove'),
+  onProjectShortcutsChanged: push<Shortcut[]>('shortcuts:project-changed'),
   onOpenTerminalShortcut: push<ShortcutTerminalPayload>('shortcut:open-terminal'),
 
   // ── Settings + register ───────────────────────────────────────────────────

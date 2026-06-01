@@ -5,6 +5,7 @@ import {
   type BrowserStatePayload,
   type Shortcut,
 } from '../../../shared/ipc.js';
+import { ProjectShortcuts } from './ProjectShortcuts.js';
 import { SidebarTab } from './SidebarTab.js';
 
 type Props = {
@@ -200,13 +201,6 @@ function WebShortcutsColumn({
   onLaunchExternal: (shortcutId: string) => void;
 }): JSX.Element {
   const rows = shortcuts.filter((s) => s.target === 'url' && s.url);
-  if (rows.length === 0) {
-    return (
-      <div style={emptyStyle}>
-        No URL shortcuts. Add some in <strong>Settings → Shortcuts</strong>.
-      </div>
-    );
-  }
   return (
     <div style={listStyle} data-testid="web-shortcuts-list">
       {rows.map((s) => (
@@ -232,6 +226,12 @@ function WebShortcutsColumn({
           </button>
         </div>
       ))}
+      <ProjectShortcuts
+        target="url"
+        valuePlaceholder="https://localhost:3000"
+        testIdPrefix="web"
+        onUse={(s) => onPick(s.url ?? '')}
+      />
     </div>
   );
 }
@@ -353,11 +353,4 @@ const externalBtnStyle: React.CSSProperties = {
   fontSize: '0.85rem',
   cursor: 'pointer',
   padding: '0 0.3rem',
-};
-
-const emptyStyle: React.CSSProperties = {
-  padding: '0.85rem',
-  fontSize: '0.78rem',
-  color: '#6c7783',
-  lineHeight: 1.5,
 };

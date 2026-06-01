@@ -1,6 +1,7 @@
 import { type JSX, useCallback, useState } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { FindBar } from './FindBar.js';
+import { ProjectShortcuts } from './ProjectShortcuts.js';
 import { SidebarTab } from './SidebarTab.js';
 import { useTerminalFindShortcut, useXtermSession } from './useXtermSession.js';
 
@@ -91,13 +92,6 @@ function ShellShortcutsColumn({
   onRun: (command: string) => void;
 }): JSX.Element {
   const rows = shortcuts.filter((s) => s.target === 'terminal' && s.command);
-  if (rows.length === 0) {
-    return (
-      <div style={emptyStyle}>
-        No terminal shortcuts. Add some in <strong>Settings → Shortcuts</strong>.
-      </div>
-    );
-  }
   return (
     <div style={listStyle} data-testid="shell-shortcuts-list">
       {rows.map((s) => (
@@ -113,6 +107,12 @@ function ShellShortcutsColumn({
           <span style={commandStyle}>{s.command}</span>
         </button>
       ))}
+      <ProjectShortcuts
+        target="terminal"
+        valuePlaceholder="npm run dev"
+        testIdPrefix="shell"
+        onUse={(s) => onRun(s.command ?? '')}
+      />
     </div>
   );
 }
@@ -166,11 +166,4 @@ const commandStyle: React.CSSProperties = {
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
   width: '100%',
-};
-
-const emptyStyle: React.CSSProperties = {
-  padding: '0.85rem',
-  fontSize: '0.78rem',
-  color: '#6c7783',
-  lineHeight: 1.5,
 };

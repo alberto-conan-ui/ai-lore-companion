@@ -2,7 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { isChainError } from '@ai-lore-companion/core';
 import { BrowserWindow, type OpenDialogOptions, dialog } from 'electron';
 import { CHANNELS } from '../../shared/ipc.js';
-import { launchApp, launchUrl, loadShortcuts, saveShortcuts, withIcons } from '../shortcuts.js';
+import {
+  launchApp,
+  launchUrl,
+  loadProjectShortcuts,
+  loadShortcuts,
+  saveProjectShortcuts,
+  saveShortcuts,
+  withIcons,
+} from '../shortcuts.js';
 import type { RegisterModule } from './types.js';
 
 /** App-launch shortcuts — list, run, pick-app dialog, add, remove. */
@@ -56,5 +64,45 @@ export const registerShortcuts: RegisterModule = (reg, deps) => {
     saveShortcuts(deps.getUserDataDir(), list);
     deps.broadcastShortcuts(list);
     return withIcons(list);
+  });
+
+  // Per-project shortcuts — scoped to the window's project, stored in its data
+  // dir. Add & remove only; surfaced + entered from each tab's sidebar.
+  reg.handle('projectShortcutsList', (event) => {
+    const ctx = deps.contextFor(event);
+    if (!ctx) return [];
+    return loadProjectShortcuts(deps.getUserDataDir(), ctx.root);
+  });
+
+  reg.handle('projectShortcutsAdd', (event, input) => {
+    const ctx = deps.contextFor(event);
+    if (!ctx) return [];
+    const list = [
+      ...loadProjectShortcuts(deps.getUserDataDir(), ctx.root),
+      { id: randomUUID(), ...input },
+    ];
+    saveProjectShortcuts(deps.getUserDataDir(), ctx.root, list);
+    event.sender.send(CHANNELS.onProjectShortcutsChanged, list);
+    return list;
+  });
+
+  reg.handle('projectShortcutsUpdate', (event, id, input) => {
+    const ctx = deps.contextFor(event);
+    if (!ctx) return [];
+    const list = loadProjectShortcuts(deps.getUserDataDir(), ctx.root).map((s) =>
+      s.id === id ? { id, ...input } : s,
+    );
+    saveProjectShortcuts(deps.getUserDataDir(), ctx.root, list);
+    event.sender.send(CHANNELS.onProjectShortcutsChanged, list);
+    return list;
+  });
+
+  reg.handle('projectShortcutsRemove', (event, id) => {
+    const ctx = deps.contextFor(event);
+    if (!ctx) return [];
+    const list = loadProjectShortcuts(deps.getUserDataDir(), ctx.root).filter((s) => s.id !== id);
+    saveProjectShortcuts(deps.getUserDataDir(), ctx.root, list);
+    event.sender.send(CHANNELS.onProjectShortcutsChanged, list);
+    return list;
   });
 };
