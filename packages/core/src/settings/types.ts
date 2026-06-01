@@ -53,4 +53,81 @@ export type SettingsFile = {
    * [apps.ts](../apps/apps.ts).
    */
   apps?: AppEntry[];
+  /**
+   * A project window's workspace-layout snapshot, persisted in the per-project
+   * tier only; absent for the global tier. Independent of `schemaVersion` —
+   * the snapshot carries its own version (`WorkspaceLayout.schemaVersion`).
+   */
+  layout?: WorkspaceLayout;
+};
+
+/**
+ * What a restored tab was running in the previous session — drives the warn
+ * banner shown on the restored (empty) tab. Purely descriptive: no live state
+ * (PTY, page, engine) is ever revived, so this only carries enough to phrase
+ * "Last session, this tab was …". Captured live, persisted, read back at
+ * restore.
+ */
+export type TabLastSession = {
+  /** The tab kind it was — picks the banner's phrasing. */
+  kind: string;
+  /**
+   * The human detail: a shell's running command, a browser's URL, an AI tab's
+   * engine name. Empty string when the tab was open but idle (e.g. a shell at
+   * a bare prompt) — the banner falls back to a kind-only message.
+   */
+  detail: string;
+};
+
+/** The persisted shape of a tab in the layout snapshot — structure only, no
+ *  live state. `lastSession` records what it was running, for the banner. */
+export type LayoutTab = {
+  id: string;
+  /**
+   * `'pane' | 'shell' | 'ai' | 'browser'` — matched against the runtime tab
+   * kinds. An unknown kind is dropped on restore.
+   */
+  kind: string;
+  title: string;
+  baseTitle?: string;
+  manualTitle?: boolean;
+  /** For `kind === 'ai'`: the engine the tab was bound to. */
+  engine?: string;
+  lastSession?: TabLastSession;
+};
+
+/** One panel in the layout snapshot — its ordered tabs and the active one. */
+export type LayoutPanel = {
+  tabs: LayoutTab[];
+  activeId: string;
+};
+
+/**
+ * A project window's workspace layout — what every panel held, the column /
+ * dock open + size state. Restored on next open when `workspace.restoreLayout`
+ * is on. The six panels mirror the renderer's `PanelId` set; restore lifts each
+ * tab into an **empty** runtime tab (no PTY, no page load, no engine launch).
+ */
+export type WorkspaceLayout = {
+  /** Bumped when the shape changes; an unknown version is treated as no snapshot. */
+  schemaVersion: number;
+  panels: {
+    leftRail: LayoutPanel;
+    centre: LayoutPanel;
+    right: LayoutPanel;
+    leftRailBottom: LayoutPanel;
+    centreBottom: LayoutPanel;
+    rightBottom: LayoutPanel;
+  };
+  /** Right column open; the three bottom docks open. */
+  rightOpen: boolean;
+  leftRailBottomOpen: boolean;
+  centreBottomOpen: boolean;
+  rightBottomOpen: boolean;
+  /** leftRail fixed width; right width when open; each dock's height. */
+  leftRailWidth: number;
+  rightWidth: number;
+  leftRailBottomHeight: number;
+  centreBottomHeight: number;
+  rightBottomHeight: number;
 };

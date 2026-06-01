@@ -70,6 +70,7 @@ function renderCtx(over: Partial<TabRenderContext> = {}): TabRenderContext {
     engines,
     setAiTabEngine: vi.fn(),
     setAiTabRunning: vi.fn(),
+    clearLastSession: vi.fn(),
     ...over,
   };
 }
@@ -262,5 +263,80 @@ describe('renderBody dispatches to the right body', () => {
     cleanup();
     render(TAB_KINDS.browser.renderBody(tab({ id: 'b1', kind: 'browser' }), true, renderCtx()));
     expect(screen.getByTestId('body-browser')).toBeTruthy();
+  });
+});
+
+describe('restored (dormant) tabs', () => {
+  test('a restored shell stays dormant — banner, no live terminal', () => {
+    render(
+      TAB_KINDS.shell.renderBody(
+        tab({ id: 's1', kind: 'shell', lastSession: { kind: 'shell', detail: 'npm run dev' } }),
+        true,
+        renderCtx(),
+      ),
+    );
+    expect(screen.getByTestId('dormant-tab')).toBeTruthy();
+    expect(screen.queryByTestId('body-shell')).toBeNull();
+    expect(screen.getByTestId('restore-banner').textContent).toContain('npm run dev');
+  });
+
+  test('a restored browser stays dormant — banner, no WebContentsView', () => {
+    render(
+      TAB_KINDS.browser.renderBody(
+        tab({
+          id: 'b1',
+          kind: 'browser',
+          lastSession: { kind: 'browser', detail: 'https://example.com/' },
+        }),
+        true,
+        renderCtx(),
+      ),
+    );
+    expect(screen.getByTestId('dormant-tab')).toBeTruthy();
+    expect(screen.queryByTestId('body-browser')).toBeNull();
+    expect(screen.getByTestId('restore-banner').textContent).toContain('https://example.com/');
+  });
+
+  test('resuming a dormant shell clears its lastSession (via banner action)', () => {
+    const clearLastSession = vi.fn();
+    render(
+      TAB_KINDS.shell.renderBody(
+        tab({ id: 's1', kind: 'shell', lastSession: { kind: 'shell', detail: 'npm test' } }),
+        true,
+        renderCtx({ clearLastSession }),
+      ),
+    );
+    screen.getByTestId('restore-banner-action').click();
+    expect(clearLastSession).toHaveBeenCalledWith('s1');
+  });
+
+  test('the banner ✕ also clears the dormant tab', () => {
+    const clearLastSession = vi.fn();
+    render(
+      TAB_KINDS.browser.renderBody(
+        tab({ id: 'b1', kind: 'browser', lastSession: { kind: 'browser', detail: '' } }),
+        true,
+        renderCtx({ clearLastSession }),
+      ),
+    );
+    screen.getByTestId('restore-banner-dismiss').click();
+    expect(clearLastSession).toHaveBeenCalledWith('b1');
+  });
+
+  test('a restored AI tab shows the banner but its body stays mounted (already inert)', () => {
+    render(
+      TAB_KINDS.ai.renderBody(
+        tab({
+          id: 'a1',
+          kind: 'ai',
+          engine: 'claude',
+          lastSession: { kind: 'ai', detail: 'Claude' },
+        }),
+        true,
+        renderCtx(),
+      ),
+    );
+    expect(screen.getByTestId('restore-banner').textContent).toContain('Claude');
+    expect(screen.getByTestId('body-ai')).toBeTruthy();
   });
 });

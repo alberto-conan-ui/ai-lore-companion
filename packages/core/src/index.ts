@@ -56,8 +56,6 @@ export type {
   StatusFrontmatter,
 } from './frontmatter/index.js';
 
-
-
 export {
   DEFAULT_IGNORE_RULES,
   createIgnoreMatcher,
@@ -72,6 +70,7 @@ export type { IgnoreLevel, IgnoreLists, IgnoreRule } from './ignore.js';
 export {
   SETTINGS_REGISTRY,
   SETTINGS_SCHEMA_VERSION,
+  WORKSPACE_LAYOUT_SCHEMA_VERSION,
   emptySettingsFile,
   isValidValue,
   parseSettingsFile,
@@ -81,14 +80,19 @@ export {
   validateRegistry,
   withApps,
   withIgnores,
+  withLayout,
   withSetting,
 } from './settings/settings.js';
 export type {
+  LayoutPanel,
+  LayoutTab,
   SettingDef,
   SettingTier,
   SettingType,
   SettingValue,
   SettingsFile,
+  TabLastSession,
+  WorkspaceLayout,
   WriteTier,
 } from './settings/types.js';
 

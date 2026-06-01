@@ -1,7 +1,7 @@
 {
   "name": "@ai-lore-companion/app",
   "productName": "AI-Lore",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "private": true,
   "description": "Electron desktop shell for the AI-Lore cockpit.",
   "main": "./out/main/index.js",

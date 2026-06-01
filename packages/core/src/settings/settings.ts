@@ -7,13 +7,28 @@
 
 import { type AppEntry, parseAppEntries } from '../apps/apps.js';
 import { type IgnoreRule, isIgnoreRule } from '../ignore.js';
-import type { SettingDef, SettingValue, SettingsFile } from './types.js';
+import type {
+  LayoutPanel,
+  LayoutTab,
+  SettingDef,
+  SettingValue,
+  SettingsFile,
+  TabLastSession,
+  WorkspaceLayout,
+} from './types.js';
 
 /**
  * The on-disk schema version of a settings file. Bump when the persisted shape
  * changes, so a future load can migrate older files.
  */
 export const SETTINGS_SCHEMA_VERSION = 1;
+
+/**
+ * The version of the embedded workspace-layout snapshot. Independent of the
+ * settings file's `schemaVersion` — a snapshot with an unknown version is
+ * dropped on load, and the window opens with the default layout.
+ */
+export const WORKSPACE_LAYOUT_SCHEMA_VERSION = 1;
 
 /**
  * Every setting the cockpit knows. The Settings UI renders from this list and
@@ -29,6 +44,14 @@ export const SETTINGS_REGISTRY: readonly SettingDef[] = [
     tier: 'both',
     default: true,
   },
+  {
+    key: 'workspace.restoreLayout',
+    label: 'Restore workspace layout on open',
+    section: 'Workspace',
+    type: 'boolean',
+    tier: 'global',
+    default: true,
+  },
   // (The v0.5 `diff.externalCliPath` / `diff.externalArgvTemplate` settings
   // were replaced in v0.6 Phase A by an entry in the Apps catalog with
   // `role: 'diff'`. The catalog is the single source of "what app opens
@@ -42,11 +65,115 @@ export function emptySettingsFile(): SettingsFile {
 
 /** A new settings file carrying `apps` as its catalog — the input is not mutated. */
 export function withApps(file: SettingsFile, apps: readonly AppEntry[]): SettingsFile {
-  return {
+  const next: SettingsFile = {
     schemaVersion: file.schemaVersion,
     values: file.values,
     ignores: file.ignores,
     apps: [...apps],
+  };
+  if (file.layout) next.layout = file.layout;
+  return next;
+}
+
+/** Whether a raw value is shaped like a `TabLastSession`. */
+function parseLastSession(value: unknown): TabLastSession | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const o = value as Record<string, unknown>;
+  if (typeof o.kind !== 'string' || typeof o.detail !== 'string') return undefined;
+  return { kind: o.kind, detail: o.detail };
+}
+
+/** Whether a raw value is shaped like a `LayoutTab`. Unknown fields are tolerated. */
+function isLayoutTab(value: unknown): value is LayoutTab {
+  if (typeof value !== 'object' || value === null) return false;
+  const o = value as Record<string, unknown>;
+  if (typeof o.id !== 'string' || typeof o.kind !== 'string' || typeof o.title !== 'string') {
+    return false;
+  }
+  if (o.baseTitle !== undefined && typeof o.baseTitle !== 'string') return false;
+  if (o.manualTitle !== undefined && typeof o.manualTitle !== 'boolean') return false;
+  if (o.engine !== undefined && typeof o.engine !== 'string') return false;
+  return true;
+}
+
+/** Coerce a parsed value into a `LayoutPanel`, dropping malformed tabs. */
+function parseLayoutPanel(value: unknown): LayoutPanel | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const o = value as Record<string, unknown>;
+  if (!Array.isArray(o.tabs) || typeof o.activeId !== 'string') return null;
+  const tabs: LayoutTab[] = [];
+  for (const raw of o.tabs) {
+    if (!isLayoutTab(raw)) continue;
+    const t: LayoutTab = { id: raw.id, kind: raw.kind, title: raw.title };
+    if (raw.baseTitle !== undefined) t.baseTitle = raw.baseTitle;
+    if (raw.manualTitle !== undefined) t.manualTitle = raw.manualTitle;
+    if (raw.engine !== undefined) t.engine = raw.engine;
+    const last = parseLastSession((raw as Record<string, unknown>).lastSession);
+    if (last) t.lastSession = last;
+    tabs.push(t);
+  }
+  return { tabs, activeId: o.activeId };
+}
+
+const LAYOUT_PANEL_KEYS = [
+  'leftRail',
+  'centre',
+  'right',
+  'leftRailBottom',
+  'centreBottom',
+  'rightBottom',
+] as const;
+
+const LAYOUT_OPEN_KEYS = [
+  'rightOpen',
+  'leftRailBottomOpen',
+  'centreBottomOpen',
+  'rightBottomOpen',
+] as const;
+
+const LAYOUT_SIZE_KEYS = [
+  'leftRailWidth',
+  'rightWidth',
+  'leftRailBottomHeight',
+  'centreBottomHeight',
+  'rightBottomHeight',
+] as const;
+
+/**
+ * Read a workspace-layout snapshot out of a parsed `layout` field. Returns
+ * `null` for absent, malformed, or unknown-version snapshots — the caller
+ * treats that as "no snapshot" and the window opens with defaults.
+ */
+function parseWorkspaceLayout(value: unknown): WorkspaceLayout | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const o = value as Record<string, unknown>;
+  if (o.schemaVersion !== WORKSPACE_LAYOUT_SCHEMA_VERSION) return null;
+  if (typeof o.panels !== 'object' || o.panels === null) return null;
+  const p = o.panels as Record<string, unknown>;
+  const panels = {} as WorkspaceLayout['panels'];
+  for (const key of LAYOUT_PANEL_KEYS) {
+    const panel = parseLayoutPanel(p[key]);
+    if (!panel) return null;
+    panels[key] = panel;
+  }
+  for (const key of LAYOUT_OPEN_KEYS) {
+    if (typeof o[key] !== 'boolean') return null;
+  }
+  for (const key of LAYOUT_SIZE_KEYS) {
+    if (typeof o[key] !== 'number' || !Number.isFinite(o[key] as number)) return null;
+  }
+  return {
+    schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
+    panels,
+    rightOpen: o.rightOpen as boolean,
+    leftRailBottomOpen: o.leftRailBottomOpen as boolean,
+    centreBottomOpen: o.centreBottomOpen as boolean,
+    rightBottomOpen: o.rightBottomOpen as boolean,
+    leftRailWidth: o.leftRailWidth as number,
+    rightWidth: o.rightWidth as number,
+    leftRailBottomHeight: o.leftRailBottomHeight as number,
+    centreBottomHeight: o.centreBottomHeight as number,
+    rightBottomHeight: o.rightBottomHeight as number,
   };
 }
 
@@ -80,8 +207,10 @@ export function parseSettingsFile(text: string | null): SettingsFile {
   }
   const ignores: IgnoreRule[] = Array.isArray(obj.ignores) ? obj.ignores.filter(isIgnoreRule) : [];
   const apps: AppEntry[] = parseAppEntries(obj.apps);
+  const layout = parseWorkspaceLayout(obj.layout);
   const file: SettingsFile = { schemaVersion: version, values, ignores };
   if (apps.length > 0) file.apps = apps;
+  if (layout) file.layout = layout;
   return file;
 }
 
@@ -98,6 +227,7 @@ export function withSetting(file: SettingsFile, key: string, value: SettingValue
     ignores: file.ignores,
   };
   if (file.apps) next.apps = file.apps;
+  if (file.layout) next.layout = file.layout;
   return next;
 }
 
@@ -109,6 +239,22 @@ export function withIgnores(file: SettingsFile, rules: readonly IgnoreRule[]): S
     ignores: [...rules],
   };
   if (file.apps) next.apps = file.apps;
+  if (file.layout) next.layout = file.layout;
+  return next;
+}
+
+/**
+ * A new settings file carrying `layout` (or clearing it, when `null`) — the
+ * input is not mutated. The layout snapshot belongs to the per-project tier.
+ */
+export function withLayout(file: SettingsFile, layout: WorkspaceLayout | null): SettingsFile {
+  const next: SettingsFile = {
+    schemaVersion: file.schemaVersion,
+    values: file.values,
+    ignores: file.ignores,
+  };
+  if (file.apps) next.apps = file.apps;
+  if (layout) next.layout = layout;
   return next;
 }
 

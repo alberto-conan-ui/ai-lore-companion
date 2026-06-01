@@ -15,11 +15,13 @@ import type {
   SetRegisterArg,
   SettingsSetArg,
   SettingsSetIgnoresArg,
+  SettingsSetLayoutArg,
 } from '../../shared/ipc.js';
 import {
   saveGlobalIgnores,
   saveGlobalSetting,
   saveProjectIgnores,
+  saveProjectLayout,
   saveProjectSetting,
 } from '../settings.js';
 import type { RegisterModule } from './types.js';
@@ -60,6 +62,16 @@ export const registerSettings: RegisterModule = (reg, deps) => {
     }
     deps.broadcastSettings();
     return deps.settingsSnapshot(ctx);
+  });
+
+  reg.handle('settingsSetLayout', (event, arg: SettingsSetLayoutArg) => {
+    const ctx = deps.contextFor(event);
+    // Layouts are per-project only — a window with no AI-Lore project has
+    // nowhere to store one, so the write is a silent no-op. No broadcast:
+    // the snapshot is the writing window's own state, with no other consumer.
+    if (ctx && !isChainError(ctx.chain)) {
+      saveProjectLayout(deps.getUserDataDir(), ctx.root, arg.layout);
+    }
   });
 
   reg.handle('setRegister', (event, arg: SetRegisterArg) => {

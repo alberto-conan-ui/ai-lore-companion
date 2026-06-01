@@ -43,6 +43,7 @@ import type {
   SetRegisterArg,
   SettingsSetArg,
   SettingsSetIgnoresArg,
+  SettingsSetLayoutArg,
   SettingsSnapshot,
   Shortcut,
   ShortcutInput,
@@ -179,6 +180,9 @@ export const CONTRACT = {
   settingsSetIgnores: invoke<[arg: SettingsSetIgnoresArg], SettingsSnapshot>(
     'settings:set-ignores',
   ),
+  /** Replace the per-project workspace-layout snapshot — silently no-ops on a
+   *  window with no AI-Lore project context. */
+  settingsSetLayout: invoke<[arg: SettingsSetLayoutArg], void>('settings:set-layout'),
   onSettingsChanged: push<SettingsSnapshot>('settings:changed'),
   onSettingsOpen: push<void>('settings:open'),
   onSelectCockpitTab: push<number>('cockpit:select-tab'),

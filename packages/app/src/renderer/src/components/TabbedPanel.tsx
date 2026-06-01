@@ -1,4 +1,4 @@
-import type { EngineEntry } from '@ai-lore-companion/core';
+import type { EngineEntry, TabLastSession } from '@ai-lore-companion/core';
 import { type JSX, useEffect, useState } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { type DriftLevel, driftLevel } from '../store.js';
@@ -25,6 +25,15 @@ export type WorkspaceTab = {
   status?: TerminalForegroundStatus;
   /** For `kind === 'ai'`: the engine chosen when the tab was opened. */
   engine?: string;
+  /**
+   * Set only on a tab **restored from a previous session's layout snapshot**.
+   * It records what the tab was running last session and marks the tab
+   * **dormant** — shell/browser surfaces stay unmounted (no PTY, no page) and
+   * a warn banner offers to resume. Cleared on first action (or banner ✕),
+   * which brings the tab to life as a fresh one of its kind. Never persisted
+   * onto a live tab during a session — only restore writes it.
+   */
+  lastSession?: TabLastSession;
 };
 
 /**

@@ -15,6 +15,7 @@ import type {
   SettingValue,
   SettingsFile,
   TreeNode,
+  WorkspaceLayout,
   WriteTier,
 } from '@ai-lore-companion/core';
 
@@ -182,6 +183,15 @@ export type TerminalInputArg = { id: string; data: string };
  */
 export const PTY_FLOW_PAUSE = '\x13';
 export const PTY_FLOW_RESUME = '\x11';
+
+/**
+ * Renderer-safe mirror of core's `WORKSPACE_LAYOUT_SCHEMA_VERSION`. The renderer
+ * stamps captured layout snapshots with it; importing the value straight from
+ * the core barrel would drag the main-process watcher (chokidar) into the
+ * renderer bundle, so it is mirrored here instead. **Keep in lockstep with
+ * `@ai-lore-companion/core`'s constant.**
+ */
+export const WORKSPACE_LAYOUT_SCHEMA_VERSION = 1;
 /** A terminal resize request, in character cells. */
 export type TerminalResizeArg = { id: string; cols: number; rows: number };
 /** Output bytes streamed from a terminal's PTY. */
@@ -273,6 +283,9 @@ export type SettingsSetArg = { tier: WriteTier; key: string; value: SettingValue
 
 /** A write to a tier's ignore rules — the complete replacement list. */
 export type SettingsSetIgnoresArg = { tier: WriteTier; rules: IgnoreRule[] };
+
+/** Replace the per-project workspace-layout snapshot — or clear it with `null`. */
+export type SettingsSetLayoutArg = { layout: WorkspaceLayout | null };
 
 /**
  * One field of the AI-Lore conversational register. `posture` lives on

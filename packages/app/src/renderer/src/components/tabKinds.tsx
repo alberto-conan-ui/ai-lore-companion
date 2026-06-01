@@ -1,7 +1,8 @@
-import type { ChangeScope, EngineEntry } from '@ai-lore-companion/core';
-import type { CSSProperties, JSX } from 'react';
+import type { ChangeScope, EngineEntry, TabLastSession } from '@ai-lore-companion/core';
+import type { CSSProperties, JSX, ReactNode } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { AiTab } from './AiTab.js';
+import { Banner } from './Banner.js';
 import { BrowserTab } from './BrowserTab.js';
 import { Pane, type SubRoot } from './Pane.js';
 import { PublishPane } from './PublishPane.js';
@@ -40,6 +41,9 @@ export type TabRenderContext = {
   setAiTabEngine: (tabId: string, engineId: string) => void;
   /** Flip an AI tab's running state. */
   setAiTabRunning: (tabId: string, running: boolean) => void;
+  /** Clear a restored tab's dormant `lastSession` — resumes it (mounts the
+   *  live surface) or dismisses the banner. Wired to the banner's action / ✕. */
+  clearLastSession: (tabId: string) => void;
 };
 
 /** Context the strip's `+ <kind>` creator buttons act through. */
@@ -129,6 +133,70 @@ export type TabKindDescriptor = {
   onClose?: (tab: WorkspaceTab) => boolean;
 };
 
+/** The banner line for a restored tab — what it was running last session.
+ *  A monospace span carries the command / URL when one was captured. */
+function restoreMessage(ls: TabLastSession): ReactNode {
+  const detail = ls.detail ? <span style={restoreDetailStyle}>{ls.detail}</span> : null;
+  switch (ls.kind) {
+    case 'shell':
+      return detail ? (
+        <>Last session, this terminal was running {detail}</>
+      ) : (
+        'Last session, this was an open terminal.'
+      );
+    case 'browser':
+      return detail ? (
+        <>Last session, this tab was on {detail}</>
+      ) : (
+        'Last session, this was a browser tab.'
+      );
+    case 'ai':
+      return detail ? (
+        <>Last session, this tab was running {detail}</>
+      ) : (
+        'Last session, this was an AI session.'
+      );
+    default:
+      return 'Last session, this tab was open.';
+  }
+}
+
+/** The resume-action label for a restored tab — kind-appropriate verb. */
+function resumeLabel(kind: string): string {
+  if (kind === 'browser') return 'New browser';
+  if (kind === 'ai') return 'New session';
+  return 'New terminal';
+}
+
+/**
+ * A restored shell / browser tab in its **dormant** state: the warn banner
+ * over an empty body. The live surface (PTY, WebContentsView) is deliberately
+ * not mounted, so nothing is spawned or loaded on open. The banner's action
+ * and its `✕` both call `onResume`, which clears `lastSession` — the parent
+ * then re-renders the live surface as a fresh tab.
+ */
+function DormantTabSurface({
+  lastSession,
+  onResume,
+}: {
+  lastSession: TabLastSession;
+  onResume: () => void;
+}): JSX.Element {
+  return (
+    <div style={dormantWrapStyle} data-testid="dormant-tab" data-tab-kind={lastSession.kind}>
+      <Banner
+        tone="warn"
+        testId="restore-banner"
+        action={{ label: resumeLabel(lastSession.kind), onClick: onResume }}
+        onDismiss={onResume}
+      >
+        {restoreMessage(lastSession)}
+      </Banner>
+      <div style={dormantBodyStyle} />
+    </div>
+  );
+}
+
 /** Idle/running dot on a shell tab — lit while a foreground task runs. */
 function StatusDot({ status }: { status: TerminalForegroundStatus }): JSX.Element {
   const running = status === 'running';
@@ -211,15 +279,21 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
             onPick: () => ctx.onNewShellWithCommand(s.command ?? '', s.label),
           })),
     },
-    renderBody: (tab, visible, ctx) => (
-      <TerminalTab
-        active={visible}
-        tabId={tab.id}
-        onStatus={ctx.handleTerminalStatus}
-        initialCommand={ctx.terminalInitialCommands[tab.id]}
-        tabShortcuts={ctx.tabShortcuts}
-      />
-    ),
+    renderBody: (tab, visible, ctx) =>
+      tab.lastSession ? (
+        <DormantTabSurface
+          lastSession={tab.lastSession}
+          onResume={() => ctx.clearLastSession(tab.id)}
+        />
+      ) : (
+        <TerminalTab
+          active={visible}
+          tabId={tab.id}
+          onStatus={ctx.handleTerminalStatus}
+          initialCommand={ctx.terminalInitialCommands[tab.id]}
+          tabShortcuts={ctx.tabShortcuts}
+        />
+      ),
     onClose: (tab) => {
       // A shell running a task confirms before closing — the whole-window
       // close has the same guard, but closing a single tab bypassed it.
@@ -251,16 +325,34 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
       disabled: (ctx) => ctx.engines.length === 0,
       onClick: (ctx) => ctx.onNewAi(defaultEngineId(ctx.engines, ctx.lastEngineId)),
     },
+    // An AI tab is already inert until the user clicks Start (it never
+    // auto-spawns), so a restored one needs no dormant placeholder — its own
+    // empty state IS the dormant state. The restore banner sits above it;
+    // starting the engine (or the ✕) clears it.
     renderBody: (tab, visible, ctx) => (
-      <AiTab
-        active={visible}
-        tabId={tab.id}
-        engine={tab.engine ?? ''}
-        engines={ctx.engines}
-        onEngineChange={(engineId) => ctx.setAiTabEngine(tab.id, engineId)}
-        onStatus={ctx.handleTerminalStatus}
-        onRunningChange={ctx.setAiTabRunning}
-      />
+      <div style={bannerStackStyle}>
+        {tab.lastSession ? (
+          <Banner
+            tone="warn"
+            testId="restore-banner"
+            onDismiss={() => ctx.clearLastSession(tab.id)}
+          >
+            {restoreMessage(tab.lastSession)}
+          </Banner>
+        ) : null}
+        <AiTab
+          active={visible}
+          tabId={tab.id}
+          engine={tab.engine ?? ''}
+          engines={ctx.engines}
+          onEngineChange={(engineId) => ctx.setAiTabEngine(tab.id, engineId)}
+          onStatus={ctx.handleTerminalStatus}
+          onRunningChange={(id, running) => {
+            if (running) ctx.clearLastSession(id);
+            ctx.setAiTabRunning(id, running);
+          }}
+        />
+      </div>
     ),
   },
   browser: {
@@ -287,17 +379,25 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
             onLaunchExternal: () => ctx.onLaunchUrlExternal(s.url ?? ''),
           })),
     },
-    renderBody: (tab, visible, ctx) => (
-      <BrowserTab
-        tabId={tab.id}
-        visible={visible}
-        initialUrl={ctx.browserInitialUrls[tab.id]}
-        tabShortcuts={ctx.tabShortcuts}
-        onLaunchUrlExternal={(id) => window.cockpit.shortcutsRun(id)}
-      />
-    ),
+    renderBody: (tab, visible, ctx) =>
+      tab.lastSession ? (
+        <DormantTabSurface
+          lastSession={tab.lastSession}
+          onResume={() => ctx.clearLastSession(tab.id)}
+        />
+      ) : (
+        <BrowserTab
+          tabId={tab.id}
+          visible={visible}
+          initialUrl={ctx.browserInitialUrls[tab.id]}
+          tabShortcuts={ctx.tabShortcuts}
+          onLaunchUrlExternal={(id) => window.cockpit.shortcutsRun(id)}
+        />
+      ),
     onClose: (tab) => {
-      window.cockpit.browserDestroy(tab.id);
+      // A dormant (restored, never-resumed) browser tab has no WebContentsView
+      // in main — destroy is a harmless no-op there, but skip it for clarity.
+      if (!tab.lastSession) window.cockpit.browserDestroy(tab.id);
       return true;
     },
   },
@@ -309,6 +409,35 @@ export const NEW_TAB_BUTTONS: NewTabButton[] = Object.values(TAB_KINDS)
   .map((d) => d.newButton)
   .filter((b): b is NewTabButton => b !== undefined)
   .sort((a, b) => a.order - b.order);
+
+/** Column that stacks a restore banner above a tab body (AI tab). */
+const bannerStackStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  flex: 1,
+  minHeight: 0,
+  minWidth: 0,
+};
+
+/** Dormant shell/browser tab: banner over an empty body. */
+const dormantWrapStyle: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  flex: 1,
+  minHeight: 0,
+  minWidth: 0,
+  background: '#0a0f17',
+};
+
+const dormantBodyStyle: CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+};
+
+const restoreDetailStyle: CSSProperties = {
+  fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+  fontWeight: 600,
+};
 
 const statusDotStyle: CSSProperties = {
   flexShrink: 0,

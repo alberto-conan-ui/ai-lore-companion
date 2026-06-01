@@ -6,6 +6,8 @@ import {
   SETTINGS_SCHEMA_VERSION,
   type SettingDef,
   type SettingsFile,
+  WORKSPACE_LAYOUT_SCHEMA_VERSION,
+  type WorkspaceLayout,
   emptySettingsFile,
   isValidValue,
   parseSettingsFile,
@@ -15,6 +17,7 @@ import {
   validateRegistry,
   withApps,
   withIgnores,
+  withLayout,
   withSetting,
 } from '../src/index.js';
 
@@ -200,6 +203,105 @@ test('withSetting preserves the file ignore rules', () => {
   assert.deepEqual(after.ignores, [{ pattern: 'dist', level: 'hidden' }]);
 });
 
+const sampleLayout = (): WorkspaceLayout => ({
+  schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
+  panels: {
+    leftRail: { tabs: [{ id: 'status', kind: 'pane', title: 'Status' }], activeId: 'status' },
+    centre: {
+      tabs: [
+        {
+          id: 'tab-1',
+          kind: 'browser',
+          title: 'Browser 1',
+          baseTitle: 'Browser 1',
+          lastSession: { kind: 'browser', detail: 'https://example.com/' },
+        },
+      ],
+      activeId: 'tab-1',
+    },
+    right: { tabs: [], activeId: '' },
+    leftRailBottom: { tabs: [], activeId: '' },
+    centreBottom: {
+      tabs: [
+        {
+          id: 'tab-2',
+          kind: 'shell',
+          title: 'Shell 1',
+          lastSession: { kind: 'shell', detail: 'npm run dev' },
+        },
+      ],
+      activeId: 'tab-2',
+    },
+    rightBottom: { tabs: [], activeId: '' },
+  },
+  rightOpen: false,
+  leftRailBottomOpen: false,
+  centreBottomOpen: true,
+  rightBottomOpen: false,
+  leftRailWidth: 400,
+  rightWidth: 480,
+  leftRailBottomHeight: 240,
+  centreBottomHeight: 300,
+  rightBottomHeight: 240,
+});
+
+test('SETTINGS_REGISTRY carries the workspace.restoreLayout toggle, defaulting on', () => {
+  const def = SETTINGS_REGISTRY.find((d) => d.key === 'workspace.restoreLayout');
+  assert.ok(def, 'expected the workspace.restoreLayout setting');
+  assert.equal(def?.type, 'boolean');
+  assert.equal(def?.tier, 'global');
+  assert.equal(def?.default, true);
+});
+
+test('withLayout attaches a snapshot without mutating the input', () => {
+  const before = emptySettingsFile();
+  const after = withLayout(before, sampleLayout());
+  assert.equal(before.layout, undefined);
+  assert.equal(after.layout?.centreBottomHeight, 300);
+});
+
+test('withLayout(null) clears an existing snapshot', () => {
+  const before = withLayout(emptySettingsFile(), sampleLayout());
+  const after = withLayout(before, null);
+  assert.equal(after.layout, undefined);
+});
+
+test('withSetting and withIgnores preserve an attached layout', () => {
+  const base = withLayout(emptySettingsFile(), sampleLayout());
+  assert.equal(withSetting(base, 'a.toggle', true).layout?.rightWidth, 480);
+  assert.equal(withIgnores(base, [{ pattern: 'dist', level: 'hidden' }]).layout?.rightWidth, 480);
+});
+
+test('parseSettingsFile round-trips a layout (incl. lastSession) through serialize', () => {
+  const original = withLayout(emptySettingsFile(), sampleLayout());
+  const parsed = parseSettingsFile(serializeSettingsFile(original));
+  assert.deepEqual(parsed.layout, original.layout);
+});
+
+test('parseSettingsFile drops a layout with an unknown snapshot version', () => {
+  const stale = { ...sampleLayout(), schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION + 1 };
+  const file = withLayout(emptySettingsFile(), stale as WorkspaceLayout);
+  const parsed = parseSettingsFile(serializeSettingsFile(file));
+  assert.equal(parsed.layout, undefined);
+});
+
+test('parseSettingsFile drops a layout missing a panel, and malformed tabs within one', () => {
+  // Missing the `right` panel → the whole snapshot is rejected.
+  const full = sampleLayout();
+  const { right: _omit, ...panelsWithoutRight } = full.panels;
+  const missingPanel = { ...full, panels: panelsWithoutRight };
+  const f1 = parseSettingsFile(JSON.stringify({ ...emptySettingsFile(), layout: missingPanel }));
+  assert.equal(f1.layout, undefined);
+
+  // A malformed tab (no id) inside an otherwise-valid panel is dropped, the
+  // rest of the snapshot survives.
+  const withBadTab = sampleLayout();
+  (withBadTab.panels.centre.tabs as unknown[]).push({ kind: 'shell', title: 'no id' });
+  const f2 = parseSettingsFile(JSON.stringify(withLayout(emptySettingsFile(), withBadTab)));
+  assert.equal(f2.layout?.panels.centre.tabs.length, 1);
+  assert.equal(f2.layout?.panels.centre.tabs[0]?.id, 'tab-1');
+});
+
 const sampleApp: AppEntry = {
   id: 'vscode',
   label: 'VS Code',
@@ -216,10 +318,13 @@ test('withApps attaches the catalog without mutating the input', () => {
   assert.equal(after.apps?.[0]?.id, 'vscode');
 });
 
-test('withApps replacing the catalog preserves ignores', () => {
-  const base = withIgnores(emptySettingsFile(), [{ pattern: 'dist', level: 'hidden' }]);
+test('withApps replacing the catalog preserves layout + ignores', () => {
+  const base = withIgnores(withLayout(emptySettingsFile(), sampleLayout()), [
+    { pattern: 'dist', level: 'hidden' },
+  ]);
   const after = withApps(base, [sampleApp]);
   assert.equal(after.apps?.length, 1);
+  assert.equal(after.layout?.rightWidth, 480);
   assert.equal(after.ignores.length, 1);
 });
 
@@ -229,4 +334,3 @@ test('parseSettingsFile round-trips Apps through serialize', () => {
   assert.equal(parsed.apps?.length, 1);
   assert.equal(parsed.apps?.[0]?.label, 'VS Code');
 });
-

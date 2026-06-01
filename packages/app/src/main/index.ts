@@ -21,6 +21,7 @@ import {
   readCommitList,
   readCoreVersion,
   resolveAll,
+  resolveSetting,
   versionMeetsMinimum,
 } from '@ai-lore-companion/core';
 import {
@@ -29,9 +30,11 @@ import {
   type IpcMainInvokeEvent,
   Menu,
   type OpenDialogOptions,
+  type Rectangle,
   app,
   dialog,
   ipcMain,
+  screen,
 } from 'electron';
 import { type BaselineModel, buildMilestones, defaultMilestone } from '../shared/baseline.js';
 import {
@@ -57,6 +60,7 @@ import { addRecent, clearRecents, loadRecents, removeRecent } from './recents.js
 import { type SearchService, WorkerSearchService } from './search/service.js';
 import { loadGlobalSettings, loadProjectSettings } from './settings.js';
 import { withIcons } from './shortcuts.js';
+import { loadWindowBounds, saveWindowBounds } from './window-state.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -315,6 +319,30 @@ function patchSearch(search: SearchService, event: DirEvent): void {
   else if (event.event === 'unlink') search.remove(event.absPath);
 }
 
+/** Whether a stored window rect still lands on a connected display — guards
+ *  against restoring onto a monitor that has since been unplugged (the window
+ *  would open off-screen). True when the rect's centre sits in some display's
+ *  work area. */
+function boundsOnScreen(b: Rectangle): boolean {
+  const cx = b.x + b.width / 2;
+  const cy = b.y + b.height / 2;
+  return screen.getAllDisplays().some((d) => {
+    const w = d.workArea;
+    return cx >= w.x && cx <= w.x + w.width && cy >= w.y && cy <= w.y + w.height;
+  });
+}
+
+/** Whether layout restore (panels + window bounds) is enabled for a project —
+ *  the `workspace.restoreLayout` toggle, resolved across global + project. */
+function layoutRestoreOn(root: string): boolean {
+  const def = SETTINGS_REGISTRY.find((d) => d.key === 'workspace.restoreLayout');
+  if (!def) return false;
+  return (
+    resolveSetting(def, loadGlobalSettings(userDataDir), loadProjectSettings(userDataDir, root)) ===
+    true
+  );
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1100,
@@ -328,6 +356,22 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   });
+
+  // Persist the window's bounds (per project), debounced, so reopening restores
+  // the size/position the user left. Reads the live context at save time, so a
+  // single listener follows whatever project the window currently holds; a
+  // welcome window (no context) saves nothing.
+  let boundsSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  const saveBounds = (): void => {
+    if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
+    boundsSaveTimer = setTimeout(() => {
+      if (win.isDestroyed() || win.isMinimized()) return;
+      const root = contexts.get(win.id)?.root;
+      if (root && layoutRestoreOn(root)) saveWindowBounds(userDataDir, root, win.getBounds());
+    }, 400);
+  };
+  win.on('resize', saveBounds);
+  win.on('move', saveBounds);
 
   win.once('ready-to-show', () => win.show());
   win.once('closed', () => {
@@ -533,6 +577,16 @@ function openWelcomeWindow(): BrowserWindow {
 function attachProjectContext(win: BrowserWindow, root: string): void {
   const ctx = createProjectContext(win, root);
   contexts.set(win.id, ctx);
+
+  // Restore the project's last window bounds before the window is first shown
+  // (so there's no resize flash). Only for a not-yet-visible window — reusing a
+  // visible window for another project should not make it jump. Gated by the
+  // same toggle as the in-window layout restore.
+  if (!win.isVisible() && !isChainError(ctx.chain) && layoutRestoreOn(root)) {
+    const bounds = loadWindowBounds(userDataDir, root);
+    if (bounds && boundsOnScreen(bounds)) win.setBounds(bounds);
+    else if (bounds) win.setSize(bounds.width, bounds.height); // off-screen pos → size only
+  }
 
   // The title bar shows the project (the folder name) — for a cockpit window
   // and for an altered non-AI-Lore window alike. Welcome windows keep "AI-Lore".

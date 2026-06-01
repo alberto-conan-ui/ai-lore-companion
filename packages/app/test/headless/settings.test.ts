@@ -3,9 +3,47 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
+import type { WorkspaceLayout } from '@ai-lore-companion/core';
+import { WORKSPACE_LAYOUT_SCHEMA_VERSION } from '@ai-lore-companion/core';
 import { registerSettings } from '../../src/main/ipc/settings.js';
+import { loadProjectSettings } from '../../src/main/settings.js';
 import { resetElectronStub } from './electron-stub.js';
 import { type Harness, fakeContext, harnessFor } from './harness.js';
+
+/** A minimal valid layout snapshot — one dormant shell in the centre panel. */
+function sampleLayout(): WorkspaceLayout {
+  const empty = { tabs: [], activeId: '' };
+  return {
+    schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
+    panels: {
+      leftRail: { tabs: [], activeId: 'status' },
+      centre: {
+        tabs: [
+          {
+            id: 't1',
+            kind: 'shell',
+            title: 'Shell 1',
+            lastSession: { kind: 'shell', detail: 'vi' },
+          },
+        ],
+        activeId: 't1',
+      },
+      right: empty,
+      leftRailBottom: empty,
+      centreBottom: empty,
+      rightBottom: empty,
+    },
+    rightOpen: true,
+    leftRailBottomOpen: false,
+    centreBottomOpen: false,
+    rightBottomOpen: false,
+    leftRailWidth: 400,
+    rightWidth: 480,
+    leftRailBottomHeight: 240,
+    centreBottomHeight: 240,
+    rightBottomHeight: 240,
+  };
+}
 
 let h: Harness;
 let root: string;
@@ -39,6 +77,28 @@ test('settingsSetIgnores broadcasts and returns the snapshot', () => {
   const result = h.invoke('settingsSetIgnores', { tier: 'global', rules: [] });
   assert.equal(result, h.settingsSnapshot);
   assert.equal(h.broadcasts.settings.calls.length, 1);
+});
+
+test('settingsSetLayout persists the snapshot to the project tier, no broadcast', () => {
+  const layout = sampleLayout();
+  h.invoke('settingsSetLayout', { layout });
+  const stored = loadProjectSettings(h.userDataDir, root).layout;
+  assert.equal(stored?.panels.centre.tabs[0]?.lastSession?.detail, 'vi');
+  assert.equal(stored?.rightOpen, true);
+  // The snapshot is the writing window's own state — no SettingsChanged push.
+  assert.equal(h.broadcasts.settings.calls.length, 0);
+});
+
+test('settingsSetLayout(null) clears a stored snapshot', () => {
+  h.invoke('settingsSetLayout', { layout: sampleLayout() });
+  h.invoke('settingsSetLayout', { layout: null });
+  assert.equal(loadProjectSettings(h.userDataDir, root).layout, undefined);
+});
+
+test('settingsSetLayout is a no-op with no project context', () => {
+  h.setCtx(undefined);
+  h.invoke('settingsSetLayout', { layout: sampleLayout() });
+  // Nothing to assert against a project dir; the call simply must not throw.
 });
 
 test('setRegister writes the posture to the status frontmatter', () => {

@@ -5,11 +5,13 @@ import {
   type IgnoreRule,
   type SettingValue,
   type SettingsFile,
+  type WorkspaceLayout,
   emptySettingsFile,
   parseSettingsFile,
   serializeSettingsFile,
   withApps,
   withIgnores,
+  withLayout,
   withSetting,
 } from '@ai-lore-companion/core';
 import { projectDataDir } from './db-path.js';
@@ -74,6 +76,20 @@ export function saveProjectSetting(
   value: SettingValue,
 ): SettingsFile {
   const next = withSetting(loadProjectSettings(userDataDir, projectRoot), key, value);
+  writeSettingsFile(projectSettingsPath(userDataDir, projectRoot), next);
+  return next;
+}
+
+/**
+ * Replace (or clear, with `null`) the project's workspace-layout snapshot;
+ * returns the updated file. Layouts live only in the per-project tier.
+ */
+export function saveProjectLayout(
+  userDataDir: string,
+  projectRoot: string,
+  layout: WorkspaceLayout | null,
+): SettingsFile {
+  const next = withLayout(loadProjectSettings(userDataDir, projectRoot), layout);
   writeSettingsFile(projectSettingsPath(userDataDir, projectRoot), next);
   return next;
 }

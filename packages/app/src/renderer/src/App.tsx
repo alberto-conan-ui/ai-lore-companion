@@ -1,4 +1,10 @@
-import type { EngineEntry } from '@ai-lore-companion/core';
+import type {
+  EngineEntry,
+  LayoutPanel,
+  LayoutTab,
+  TabLastSession,
+  WorkspaceLayout,
+} from '@ai-lore-companion/core';
 import {
   type JSX,
   useCallback,
@@ -10,14 +16,19 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../shared/ipc.js';
-import { isChainErrorPayload } from '../../shared/ipc.js';
+import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
 import type { AlteredReason } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BaselinePicker } from './components/BaselinePicker.js';
 import { DockPanel } from './components/DockPanel.js';
 import { baseDirsOf, entriesInSubRoot } from './components/Pane.js';
 import { SearchDialog, type SearchScope } from './components/SearchDialog.js';
-import { type PanelId, TabbedPanel, type WorkspaceTab } from './components/TabbedPanel.js';
+import {
+  type PanelId,
+  type TabKind,
+  TabbedPanel,
+  type WorkspaceTab,
+} from './components/TabbedPanel.js';
 import { TrackerStrip } from './components/TrackerStrip.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { type PaneSpec, TAB_KINDS, type TabRenderContext } from './components/tabKinds.js';
@@ -64,6 +75,39 @@ const PANEL_IDS = [
 const DEFAULT_LEFT_RAIL_WIDTH = 400;
 const DEFAULT_RIGHT_WIDTH = 480;
 const DEFAULT_BOTTOM_HEIGHT = 240;
+
+/** Kinds the layout snapshot can restore. `pane` tabs are seeded by
+ *  `panesForShape`, never restored — and an unknown kind from an older
+ *  snapshot is dropped. */
+const RESTORABLE_KINDS = new Set<TabKind>(['shell', 'ai', 'browser']);
+
+/** Persist a runtime tab as a layout tab — structure plus the captured
+ *  `lastSession`, dropping all live state (PTY ids, status, etc.). */
+function tabToLayout(tab: WorkspaceTab, lastSession: TabLastSession | undefined): LayoutTab {
+  const out: LayoutTab = { id: tab.id, kind: tab.kind, title: tab.title };
+  if (tab.baseTitle !== undefined) out.baseTitle = tab.baseTitle;
+  if (tab.manualTitle !== undefined) out.manualTitle = tab.manualTitle;
+  if (tab.engine !== undefined) out.engine = tab.engine;
+  if (lastSession) out.lastSession = lastSession;
+  return out;
+}
+
+/** Lift a persisted layout tab into a **dormant** runtime tab — empty, with
+ *  `lastSession` set so the banner shows and the live surface stays unmounted.
+ *  Returns null for a kind the workspace can't restore. */
+function tabFromLayout(t: LayoutTab): WorkspaceTab | null {
+  const kind = t.kind as TabKind;
+  if (!RESTORABLE_KINDS.has(kind)) return null;
+  const out: WorkspaceTab = { id: t.id, kind, title: t.title };
+  if (t.baseTitle !== undefined) out.baseTitle = t.baseTitle;
+  if (t.manualTitle !== undefined) out.manualTitle = t.manualTitle;
+  if (t.engine !== undefined) out.engine = t.engine;
+  if (kind === 'shell') out.status = 'idle';
+  // Always dormant on restore — even with no captured detail, an empty
+  // `lastSession` keeps the surface unmounted until the user resumes it.
+  out.lastSession = t.lastSession ?? { kind, detail: '' };
+  return out;
+}
 
 /** What this window is — set once by main via `onWindowInit`. */
 type WindowMode = 'loading' | 'welcome' | 'cockpit' | 'altered';
@@ -131,6 +175,16 @@ export function App(): JSX.Element {
   // Per-tab seed URLs a web shortcut queued. Consumed by `BrowserTab` on mount;
   // the view opens here instead of the home page.
   const [browserInitialUrls, setBrowserInitialUrls] = useState<Record<string, string>>({});
+  // The foreground command each shell tab is currently running (keyed by tab
+  // id), tracked from the status push. Read at capture time to describe a
+  // restored shell ("was running …"); a ref, so updating it never re-renders.
+  const runningCommands = useRef<Record<string, string>>({});
+  // Layout-restore guards. `restoreStarted` runs the restore effect once;
+  // `captureReady` gates capture until restore has settled (whether or not a
+  // snapshot was found), so the default empty layout never clobbers a stored
+  // one before it is read back.
+  const restoreStarted = useRef(false);
+  const captureReady = useRef(false);
   // URL + terminal shortcuts surfaced inside Shell / Web tab sidebars and the
   // `+ shell ▾` / `+ web ▾` start-with-shortcut dropdowns. Project/lore
   // shortcuts live in the header rows instead.
@@ -688,6 +742,10 @@ export function App(): JSX.Element {
    *  the running/idle suffix is what the user actually cares about. */
   const handleTerminalStatus = useCallback(
     (tabId: string, status: TerminalForegroundStatus, command: string): void => {
+      // Remember the live foreground command for the layout snapshot; clear it
+      // when the shell falls idle, so a captured "was running …" is never stale.
+      if (status === 'running' && command) runningCommands.current[tabId] = command;
+      else delete runningCommands.current[tabId];
       setPanels((prev) => {
         for (const panelId of PANEL_IDS) {
           const tabs = prev[panelId].tabs;
@@ -715,6 +773,186 @@ export function App(): JSX.Element {
     },
     [engineName],
   );
+
+  /** Resume / dismiss a restored (dormant) tab: drop its `lastSession` so the
+   *  banner clears and the live surface mounts as a fresh tab of its kind. */
+  const clearLastSession = useCallback((tabId: string): void => {
+    setPanels((prev) => {
+      for (const panelId of PANEL_IDS) {
+        const tabs = prev[panelId].tabs;
+        const idx = tabs.findIndex((t) => t.id === tabId);
+        if (idx === -1 || !tabs[idx].lastSession) continue;
+        const next = [...tabs];
+        const { lastSession: _drop, ...rest } = tabs[idx];
+        next[idx] = rest;
+        return { ...prev, [panelId]: { ...prev[panelId], tabs: next } };
+      }
+      return prev;
+    });
+  }, []);
+
+  // ── Layout persistence (E) ────────────────────────────────────────────────
+  // Capture the layout structure (panels, tabs, sizes) and, per tab, what it
+  // was running — then restore it **empty** on next open: every tab comes back
+  // dormant (no PTY, no page, no engine), with a warn banner saying what it
+  // held. Only the focused window writes, so two windows on one project don't
+  // race their snapshots.
+  const [hasFocus, setHasFocus] = useState<boolean>(() =>
+    typeof document === 'undefined' ? true : document.hasFocus(),
+  );
+  useEffect(() => {
+    const onFocus = (): void => setHasFocus(true);
+    const onBlur = (): void => setHasFocus(false);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('blur', onBlur);
+    };
+  }, []);
+
+  /** What a tab was running, for the snapshot — live state where available,
+   *  else a dormant tab's carried note, else an empty (kind-only) marker. */
+  const lastSessionFor = useCallback(
+    async (tab: WorkspaceTab): Promise<TabLastSession | undefined> => {
+      if (tab.kind === 'browser') {
+        const url = await window.cockpit.browserGetUrl(tab.id);
+        if (url) return { kind: 'browser', detail: url };
+        return tab.lastSession ?? { kind: 'browser', detail: '' };
+      }
+      if (tab.kind === 'ai') {
+        if (tab.engine) return { kind: 'ai', detail: engineName(tab.engine) };
+        return tab.lastSession ?? { kind: 'ai', detail: '' };
+      }
+      if (tab.kind === 'shell') {
+        const cmd = runningCommands.current[tab.id];
+        if (cmd) return { kind: 'shell', detail: cmd };
+        return tab.lastSession ?? { kind: 'shell', detail: '' };
+      }
+      return undefined; // pane tabs carry no session
+    },
+    [engineName],
+  );
+
+  /** Snapshot the current layout — asks main for each browser tab's URL. */
+  const captureLayout = useCallback(async (): Promise<WorkspaceLayout> => {
+    const lastBy: Record<string, TabLastSession | undefined> = {};
+    for (const panelId of PANEL_IDS) {
+      for (const tab of panels[panelId].tabs) {
+        lastBy[tab.id] = await lastSessionFor(tab);
+      }
+    }
+    const toLayout = (p: Panel): LayoutPanel => ({
+      tabs: p.tabs.map((t) => tabToLayout(t, lastBy[t.id])),
+      activeId: p.activeId,
+    });
+    return {
+      schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
+      panels: {
+        leftRail: toLayout(panels.leftRail),
+        centre: toLayout(panels.centre),
+        right: toLayout(panels.right),
+        leftRailBottom: toLayout(panels.leftRailBottom),
+        centreBottom: toLayout(panels.centreBottom),
+        rightBottom: toLayout(panels.rightBottom),
+      },
+      rightOpen,
+      leftRailBottomOpen,
+      centreBottomOpen,
+      rightBottomOpen,
+      leftRailWidth,
+      rightWidth,
+      leftRailBottomHeight,
+      centreBottomHeight,
+      rightBottomHeight,
+    };
+  }, [
+    panels,
+    lastSessionFor,
+    rightOpen,
+    leftRailBottomOpen,
+    centreBottomOpen,
+    rightBottomOpen,
+    leftRailWidth,
+    rightWidth,
+    leftRailBottomHeight,
+    centreBottomHeight,
+    rightBottomHeight,
+  ]);
+
+  /** Rebuild the workspace from a stored snapshot — the five free panels as
+   *  dormant tabs, the column/dock sizes, and leftRail's active pane (its
+   *  pinned tabs stay owned by `panesForShape`). */
+  const applyLayout = useCallback((layout: WorkspaceLayout): void => {
+    const liftPanel = (p: LayoutPanel): Panel => {
+      const tabs = p.tabs.map(tabFromLayout).filter((t): t is WorkspaceTab => t !== null);
+      const activeId = tabs.some((t) => t.id === p.activeId) ? p.activeId : (tabs[0]?.id ?? '');
+      return { tabs, activeId };
+    };
+    setPanels((prev) => ({
+      ...prev,
+      centre: liftPanel(layout.panels.centre),
+      right: liftPanel(layout.panels.right),
+      leftRailBottom: liftPanel(layout.panels.leftRailBottom),
+      centreBottom: liftPanel(layout.panels.centreBottom),
+      rightBottom: liftPanel(layout.panels.rightBottom),
+      // leftRail's pinned panes are deterministic from the project shape — only
+      // restore which one was active, and only if it still exists.
+      leftRail: prev.leftRail.tabs.some((t) => t.id === layout.panels.leftRail.activeId)
+        ? { ...prev.leftRail, activeId: layout.panels.leftRail.activeId }
+        : prev.leftRail,
+    }));
+    setRightOpen(layout.rightOpen);
+    setLeftRailBottomOpen(layout.leftRailBottomOpen);
+    setCentreBottomOpen(layout.centreBottomOpen);
+    setRightBottomOpen(layout.rightBottomOpen);
+    setLeftRailWidth(layout.leftRailWidth);
+    setRightWidth(layout.rightWidth);
+    setLeftRailBottomHeight(layout.leftRailBottomHeight);
+    setCentreBottomHeight(layout.centreBottomHeight);
+    setRightBottomHeight(layout.rightBottomHeight);
+  }, []);
+
+  // Restore once, when the window first enters cockpit mode. Reads the project
+  // settings snapshot; applies the stored layout when `restoreLayout` is on.
+  // Either way, opens the capture gate when it settles.
+  useEffect(() => {
+    if (mode !== 'cockpit' || restoreStarted.current) return;
+    restoreStarted.current = true;
+    let cancelled = false;
+    void window.cockpit.settingsGet().then((snap) => {
+      if (cancelled) return;
+      const layout = snap.project?.layout;
+      if (snap.resolved['workspace.restoreLayout'] === true && layout) applyLayout(layout);
+      captureReady.current = true;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, applyLayout]);
+
+  // Capture on layout changes, debounced, from the focused window only — but
+  // not until restore has settled (so the default layout never overwrites a
+  // stored one first).
+  useEffect(() => {
+    if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
+    if (!hasFocus || !captureReady.current) return;
+    const handle = window.setTimeout(() => {
+      void captureLayout().then((layout) => window.cockpit.settingsSetLayout({ layout }));
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [mode, chain, hasFocus, captureLayout]);
+
+  // Final flush on window close — fire-and-forget; main records what reaches it.
+  useEffect(() => {
+    if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
+    const onUnload = (): void => {
+      if (!captureReady.current) return;
+      void captureLayout().then((layout) => window.cockpit.settingsSetLayout({ layout }));
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, [mode, chain, captureLayout]);
 
   const selectTab = (panelId: PanelId, tabId: string): void => {
     setPanels((p) => ({ ...p, [panelId]: { ...p[panelId], activeId: tabId } }));
@@ -974,6 +1212,7 @@ export function App(): JSX.Element {
     engines,
     setAiTabEngine,
     setAiTabRunning,
+    clearLastSession,
   };
   const contentPortals = tabPlacements.map(({ tab, visible }) => {
     const host = getOrCreateTabHost(tab.id);
