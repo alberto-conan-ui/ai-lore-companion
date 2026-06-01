@@ -15,13 +15,13 @@ import type { AlteredReason } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { BaselinePicker } from './components/BaselinePicker.js';
 import { DockPanel } from './components/DockPanel.js';
-import { SearchDialog, type SearchScope } from './components/SearchDialog.js';
 import { baseDirsOf, entriesInSubRoot } from './components/Pane.js';
+import { SearchDialog, type SearchScope } from './components/SearchDialog.js';
 import { type PanelId, TabbedPanel, type WorkspaceTab } from './components/TabbedPanel.js';
-import { TAB_KINDS, type PaneSpec, type TabRenderContext } from './components/tabKinds.js';
 import { TrackerStrip } from './components/TrackerStrip.js';
-import { TERMINAL_FIND_EVENT } from './components/useXtermSession.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
+import { type PaneSpec, TAB_KINDS, type TabRenderContext } from './components/tabKinds.js';
+import { TERMINAL_FIND_EVENT } from './components/useXtermSession.js';
 import { accentColor, accentTint, hueFor, projectName } from './projectAccent.js';
 import { useCockpitStore } from './store.js';
 
@@ -64,7 +64,6 @@ const PANEL_IDS = [
 const DEFAULT_LEFT_RAIL_WIDTH = 400;
 const DEFAULT_RIGHT_WIDTH = 480;
 const DEFAULT_BOTTOM_HEIGHT = 240;
-
 
 /** What this window is — set once by main via `onWindowInit`. */
 type WindowMode = 'loading' | 'welcome' | 'cockpit' | 'altered';
@@ -129,8 +128,12 @@ export function App(): JSX.Element {
   const [terminalInitialCommands, setTerminalInitialCommands] = useState<Record<string, string>>(
     {},
   );
-  // URL + terminal shortcuts surfaced in every panel's tab strip as `+ <name>`
-  // creators. Project/lore shortcuts live in the header rows instead.
+  // Per-tab seed URLs a web shortcut queued. Consumed by `BrowserTab` on mount;
+  // the view opens here instead of the home page.
+  const [browserInitialUrls, setBrowserInitialUrls] = useState<Record<string, string>>({});
+  // URL + terminal shortcuts surfaced inside Shell / Web tab sidebars and the
+  // `+ shell ▾` / `+ web ▾` start-with-shortcut dropdowns. Project/lore
+  // shortcuts live in the header rows instead.
   const [tabShortcuts, setTabShortcuts] = useState<Shortcut[]>([]);
   useEffect(() => {
     const apply = (list: Shortcut[]): void => {
@@ -138,6 +141,14 @@ export function App(): JSX.Element {
     };
     void window.cockpit.shortcutsList().then(apply);
     return window.cockpit.onShortcutsChanged(apply);
+  }, []);
+  // This project's own shortcuts — joined with the global list to populate the
+  // `+ shell ▾` / `+ web ▾` dropdowns. The per-tab sidebars manage these; here
+  // they only feed the creator dropdowns.
+  const [projectShortcuts, setProjectShortcuts] = useState<Shortcut[]>([]);
+  useEffect(() => {
+    void window.cockpit.projectShortcutsList().then(setProjectShortcuts);
+    return window.cockpit.onProjectShortcutsChanged(setProjectShortcuts);
   }, []);
   // Configured AI engines — populates the `+ AI ▾` popover and the AI tab's
   // empty-state engine dropdown. Sourced from the global store; back-filled
@@ -160,8 +171,7 @@ export function App(): JSX.Element {
   // Lookup helper: engine display name for the tab title. Falls back to the
   // id when the engine was removed by the user after this AI tab was created.
   const engineName = useCallback(
-    (engineId: string): string =>
-      engines.find((e) => e.id === engineId)?.name ?? engineId,
+    (engineId: string): string => engines.find((e) => e.id === engineId)?.name ?? engineId,
     [engines],
   );
   const [slots, setSlots] = useState<Record<PanelId, HTMLDivElement | null>>({
@@ -254,9 +264,7 @@ export function App(): JSX.Element {
       const expectedIds = expected.map((t) => t.id);
       const railTabs = prev.leftRail.tabs;
       // Existing pane tabs that survive the shape transition.
-      const surviving = railTabs.filter(
-        (t) => t.kind !== 'pane' || expectedIds.includes(t.id),
-      );
+      const surviving = railTabs.filter((t) => t.kind !== 'pane' || expectedIds.includes(t.id));
       // Pane tabs in the new shape that aren't on the strip yet.
       const missing = expected.filter((t) => !railTabs.some((x) => x.id === t.id));
       if (missing.length === 0 && surviving.length === railTabs.length) return prev;
@@ -271,7 +279,7 @@ export function App(): JSX.Element {
       const nextTabs = [...orderedPane, ...nonPane];
       const activeId = nextTabs.some((t) => t.id === prev.leftRail.activeId)
         ? prev.leftRail.activeId
-        : nextTabs[0]?.id ?? '';
+        : (nextTabs[0]?.id ?? '');
       return { ...prev, leftRail: { tabs: nextTabs, activeId } };
     });
   }, [shape]);
@@ -330,9 +338,7 @@ export function App(): JSX.Element {
     // Hydrate the Apps catalog from the global settings tier — context menus
     // need it. Re-pull on every SettingsChanged push so adds/removes are live.
     void window.cockpit.settingsGet().then((snap) => setApps(snap.global.apps ?? []));
-    const offSettings = window.cockpit.onSettingsChanged((snap) =>
-      setApps(snap.global.apps ?? []),
-    );
+    const offSettings = window.cockpit.onSettingsChanged((snap) => setApps(snap.global.apps ?? []));
     return () => {
       offChain();
       offChanges();
@@ -342,7 +348,15 @@ export function App(): JSX.Element {
       offTreeUpdate();
       offSettings();
     };
-  }, [setChain, applyChanges, applyCommitList, applySavePoints, setTrees, applyTreeUpdate, setApps]);
+  }, [
+    setChain,
+    applyChanges,
+    applyCommitList,
+    applySavePoints,
+    setTrees,
+    applyTreeUpdate,
+    setApps,
+  ]);
 
   // The project search is a modal dialog (⌘F / Edit ▸ Find), not a header bar.
   const [searchOpen, setSearchOpen] = useState(false);
@@ -592,7 +606,6 @@ export function App(): JSX.Element {
     [engineName],
   );
 
-
   /** Create a shell tab on `panelId` from a tab shortcut — titled after the
    *  shortcut, with the command queued for the PTY once it spawns. */
   const createTerminalShortcutTab = useCallback(
@@ -612,6 +625,27 @@ export function App(): JSX.Element {
       // Inline the open-on-create mirror of `setDockOpen` — useState setters
       // are stable, so the surrounding `useCallback([])` is still honest.
       // leftRail and centre are always open — no toggle needed.
+      if (panelId === 'right') setRightOpen(true);
+      else if (panelId === 'leftRailBottom') setLeftRailBottomOpen(true);
+      else if (panelId === 'centreBottom') setCentreBottomOpen(true);
+      else if (panelId === 'rightBottom') setRightBottomOpen(true);
+    },
+    [],
+  );
+
+  /** Create a browser tab on `panelId` from a web shortcut — titled after the
+   *  shortcut, opening at its URL once the view spawns. Mirrors
+   *  `createTerminalShortcutTab` for the `+ web ▾` start-with-shortcut path. */
+  const createBrowserShortcutTab = useCallback(
+    (panelId: PanelId, url: string, label: string): void => {
+      const id = crypto.randomUUID();
+      setBrowserInitialUrls((prev) => ({ ...prev, [id]: url }));
+      setPanels((p) => {
+        const tab: WorkspaceTab = { id, kind: 'browser', title: label, baseTitle: label };
+        return { ...p, [panelId]: { tabs: [...p[panelId].tabs, tab], activeId: id } };
+      });
+      // Mirror `createTerminalShortcutTab`'s open-on-create — leftRail / centre
+      // are always open, the rest toggle.
       if (panelId === 'right') setRightOpen(true);
       else if (panelId === 'leftRailBottom') setLeftRailBottomOpen(true);
       else if (panelId === 'centreBottom') setCentreBottomOpen(true);
@@ -804,13 +838,7 @@ export function App(): JSX.Element {
       }
     }
     return out;
-  }, [
-    panels,
-    rightOpen,
-    leftRailBottomOpen,
-    centreBottomOpen,
-    rightBottomOpen,
-  ]);
+  }, [panels, rightOpen, leftRailBottomOpen, centreBottomOpen, rightBottomOpen]);
 
   const tabHostsRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const getOrCreateTabHost = (tabId: string): HTMLDivElement => {
@@ -862,7 +890,12 @@ export function App(): JSX.Element {
   }
 
   if (mode === 'welcome') {
-    return <WelcomeScreen recents={recents} />;
+    return (
+      <WelcomeScreen
+        recents={recents}
+        onRemoveRecent={(path) => void window.cockpit.recentsRemove(path).then(setRecents)}
+      />
+    );
   }
 
   if (mode === 'altered') {
@@ -914,6 +947,10 @@ export function App(): JSX.Element {
       onNewBrowser={() => addTab(panelId, 'browser')}
       engines={engines}
       lastEngineId={lastEngineId}
+      shortcuts={[...projectShortcuts, ...tabShortcuts]}
+      onNewShellWithCommand={(command, label) => createTerminalShortcutTab(panelId, command, label)}
+      onNewBrowserWithUrl={(url, label) => createBrowserShortcutTab(panelId, url, label)}
+      onLaunchUrlExternal={(url) => window.cockpit.urlOpenExternal(url)}
       onRenameTab={(id, name) => renameTab(panelId, id, name)}
       onMoveTab={moveTab}
       slotRef={slotRefs[panelId]}
@@ -932,6 +969,7 @@ export function App(): JSX.Element {
     revealTarget,
     handleTerminalStatus,
     terminalInitialCommands,
+    browserInitialUrls,
     tabShortcuts,
     engines,
     setAiTabEngine,
@@ -973,11 +1011,7 @@ export function App(): JSX.Element {
         {/* Resizable accent-coloured divider between leftRail and centre.
          *  Drag horizontally to adjust leftRail's width; the value persists
          *  via the captureLayout effect. */}
-        <RailSash
-          size={leftRailWidth}
-          onResize={setLeftRailWidth}
-          accent={accent}
-        />
+        <RailSash size={leftRailWidth} onResize={setLeftRailWidth} accent={accent} />
         <Column
           name="centre"
           flex
@@ -1180,7 +1214,6 @@ const columnTopWrap: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
 };
-
 
 const fullCenter: React.CSSProperties = {
   ...appLayout,

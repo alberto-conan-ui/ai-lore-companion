@@ -14,7 +14,7 @@ beforeEach(() => {
   (window as unknown as { cockpit: { setBaseline: ReturnType<typeof vi.fn> } }).cockpit = {
     setBaseline: vi.fn().mockResolvedValue(undefined),
   };
-  // One save-point (newest) with the ack that led up to it just below. Rollup
+  // One save-point with a later ack — the newest commit in its open run. Rollup
   // resolves the save-point to that bound ack (pAck/lAck), so the default
   // baseline is that pair — a baseline-only match highlights the save-point.
   useCockpitStore.setState({
@@ -29,11 +29,11 @@ beforeEach(() => {
     ],
     commitListByScope: {
       payload: [
-        c('pSP', 300, 'the save point'),
-        c('pAck', 200, 'work before sp'),
+        c('pAck', 300, 'latest ack'),
+        c('pSP', 200, 'the save point'),
         c('p0', 100, 'seed'),
       ],
-      lore: [c('lSP', 300, 'lore sp'), c('lAck', 200, 'lore work'), c('l0', 100, 'lore seed')],
+      lore: [c('lAck', 300, 'lore ack'), c('lSP', 200, 'lore sp'), c('l0', 100, 'lore seed')],
     },
     baselineByScope: { payload: 'pAck', lore: 'lAck' },
   });
@@ -51,10 +51,10 @@ test('rollup defaults on; turning it off un-rolls to the bound ack and lets the 
   expect(screen.queryByTestId('baseline-option-ack:pAck')).toBeNull();
 
   // Turn rollup OFF → acks appear, and the highlight moves to the bound ack
-  // that was behind the save-point (the baseline itself didn't change).
+  // the save-point rolled up to (the baseline itself didn't change).
   fireEvent.click(screen.getByTestId('baseline-rollup-acks'));
   expect(screen.getByTestId('baseline-option-ack:pAck')).toBeTruthy();
-  expect(screen.getByTestId('baseline-picker').textContent).toContain('work before sp');
+  expect(screen.getByTestId('baseline-picker').textContent).toContain('latest ack');
 
   // With rollup off, selecting the save-point selects its OWN commit (pSP/lSP),
   // not the rolled-up ack.

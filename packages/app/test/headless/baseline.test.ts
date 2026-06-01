@@ -5,7 +5,7 @@ import {
   buildMilestones,
   dateToEpochSeconds,
   defaultMilestone,
-  nearestAckInEra,
+  latestAckInRun,
   nearestAtOrBefore,
   resolveFullSha,
 } from '../../src/shared/baseline.js';
@@ -17,35 +17,29 @@ const c = (sha: string, timestamp: number, subject = sha): CommitListEntry => ({
   timestamp,
 });
 
-// Two save-points. In the PAYLOAD log their commits are adjacent (pSPb sits
-// right on pSPa) — a save-point boxed by save-points. But the LORE log carries
-// an ack (lX) one beat after the newer save-point's lore commit, exactly the
+// Two save-points. SP A's run is boxed by SP B (no ack between them). SP B is
+// the latest save-point, so its run is open-ended to HEAD and carries loose
+// acks: pB (payload) is the newest ack overall, lX (lore) an earlier one — the
 // real-world shape (an AI-Lore save-point = a payload commit + lore commit(s) a
-// minute apart, plus a "Save-point:" lore ack). Newest-first per repo:
+// minute apart, then more acks accrue before the next save-point is cut).
+// Newest-first per repo:
 const payloadCommits: CommitListEntry[] = [c('pB', 600), c('pSPb', 400), c('pSPa', 200)];
-const loreCommits: CommitListEntry[] = [
-  c('lX', 410, 'lore bound ack'),
-  c('lSPb', 405),
-  c('lSPa', 205),
-];
+const loreCommits: CommitListEntry[] = [c('lX', 410, 'lore ack'), c('lSPb', 405), c('lSPa', 205)];
 const savePoints: SavePointInfo[] = [
   { name: 'B', title: 'SP B', date: '2026-05-30', payloadCommit: 'pSPb', loreCommit: 'lSPb' },
   { name: 'A', title: 'SP A', date: '2026-05-29', payloadCommit: 'pSPa', loreCommit: 'lSPa' },
 ];
 
-test('nearestAckInEra picks the nearest ack within the era, either side', () => {
+test('latestAckInRun picks the newest ack in the run, bounded by the next save-point', () => {
   const acks = [c('n3', 500), c('n2', 410), c('n1', 300), c('n0', 100)];
-  // Anchor 400, open era → n2@410 is closest (gap 10).
-  assert.equal(nearestAckInEra(acks, 400, 200, Number.POSITIVE_INFINITY, new Set())?.sha, 'n2');
-  // Newer bound 405 excludes n2/n3 → n1@300 wins.
-  assert.equal(nearestAckInEra(acks, 400, 200, 405, new Set())?.sha, 'n1');
-  // Excluding the nearest falls through to the next (tie resolves newest).
-  assert.equal(
-    nearestAckInEra(acks, 400, 200, Number.POSITIVE_INFINITY, new Set(['n2']))?.sha,
-    'n3',
-  );
-  // Boxed in — no ack inside the era → null.
-  assert.equal(nearestAckInEra(acks, 400, 390, 410, new Set()), null);
+  // This anchor 200, open run → newest in (200, ∞) is n3@500.
+  assert.equal(latestAckInRun(acks, 200, Number.POSITIVE_INFINITY, new Set())?.sha, 'n3');
+  // Next save-point caps the run at 405 → newest in (200, 405) is n1@300.
+  assert.equal(latestAckInRun(acks, 200, 405, new Set())?.sha, 'n1');
+  // Excluding the newest falls through to the next-newest.
+  assert.equal(latestAckInRun(acks, 200, Number.POSITIVE_INFINITY, new Set(['n3']))?.sha, 'n2');
+  // Empty run — no ack strictly inside the bounds → null.
+  assert.equal(latestAckInRun(acks, 410, 500, new Set()), null);
 });
 
 test('nearestAtOrBefore finds the newest commit at or before a timestamp', () => {
@@ -61,16 +55,17 @@ test('resolveFullSha expands an abbreviated ledger SHA to the full commit SHA', 
   assert.equal(resolveFullSha(commits, 'missing'), 'missing'); // unchanged when absent
 });
 
-test('a save-point rolls up to the nearest ack even when it is in the OTHER repo', () => {
+test('the latest save-point rolls up to the newest ack in its open run', () => {
   const model = buildMilestones({ savePoints, payloadCommits, loreCommits });
   const b = model.savePoints[0];
   assert.equal(b?.id, 'sp:B');
-  // pSPb is boxed by save-points in the payload log, but lX (lore) is adjacent
-  // in the merged timeline → that's the bound ack.
-  assert.equal(b?.boundAck?.sha, 'lX');
+  // SP B's run is open-ended; pB@600 is the newest loose ack after it → bound ack
+  // (NOT the adjacent lX@410). Selecting SP B thus shows "since my last ack".
+  assert.equal(b?.boundAck?.sha, 'pB');
+  assert.equal(b?.payloadBaseline, 'pB');
+  // Each repo rolls to its own commit at-or-before the bound ack's time — lore
+  // has nothing at-or-after pB's time, so it lands on lX.
   assert.equal(b?.loreBaseline, 'lX');
-  // Payload rolls to its commit at-or-before the bound ack (the save-point itself here).
-  assert.equal(b?.payloadBaseline, 'pSPb');
 });
 
 test('a save-point boxed in by save-points (no ack in its era) does not roll up', () => {
@@ -87,7 +82,7 @@ test('rollup off uses the save-point commit but still surfaces the bound ack', (
   const b = model.savePoints[0];
   assert.equal(b?.payloadBaseline, 'pSPb');
   assert.equal(b?.loreBaseline, 'lSPb');
-  assert.equal(b?.boundAck?.sha, 'lX'); // still exposed for display
+  assert.equal(b?.boundAck?.sha, 'pB'); // still exposed for display
 });
 
 test('defaultMilestone is the latest save-point', () => {
@@ -117,7 +112,7 @@ test('save-point timestamp falls back to the ledger date when the commit is out 
 
 test('activeMilestoneId matches the per-scope baseline pair', () => {
   const model = buildMilestones({ savePoints, payloadCommits, loreCommits });
-  assert.equal(activeMilestoneId(model, { payload: 'pSPb', lore: 'lX' }), 'sp:B');
+  assert.equal(activeMilestoneId(model, { payload: 'pB', lore: 'lX' }), 'sp:B');
   assert.equal(activeMilestoneId(model, { payload: 'pSPa', lore: 'lSPa' }), 'sp:A');
   assert.equal(activeMilestoneId(model, { payload: 'nope', lore: 'nope' }), null);
 });

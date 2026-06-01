@@ -1,4 +1,4 @@
-import { existsSync, watch as watchFile } from 'node:fs';
+import { existsSync, realpathSync, watch as watchFile } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -53,7 +53,7 @@ import {
 } from './path-mapping.js';
 import { watchPrompts } from './prompts.js';
 import { createPtyService } from './pty.js';
-import { addRecent, clearRecents, loadRecents } from './recents.js';
+import { addRecent, clearRecents, loadRecents, removeRecent } from './recents.js';
 import { type SearchService, WorkerSearchService } from './search/service.js';
 import { loadGlobalSettings, loadProjectSettings } from './settings.js';
 import { withIcons } from './shortcuts.js';
@@ -650,11 +650,42 @@ async function reloadWindow(win: BrowserWindow): Promise<void> {
   attachProjectContext(win, root);
 }
 
+/** Canonicalise a project root for identity comparison — resolve symlinks and
+ *  on-disk case via `realpath`, falling back to a plain resolve when the path
+ *  can't be stat'd (e.g. it has since moved). */
+function canonicalRoot(root: string): string {
+  try {
+    return realpathSync.native(root);
+  } catch {
+    return resolve(root);
+  }
+}
+
+/** An already-open window showing this project root, if any — matched by
+ *  canonical path so symlinked / differently-cased spellings still collapse. */
+function windowForRoot(root: string): BrowserWindow | null {
+  const target = canonicalRoot(root);
+  for (const [winId, ctx] of contexts) {
+    if (canonicalRoot(ctx.root) !== target) continue;
+    const win = BrowserWindow.fromId(winId);
+    if (win && !win.isDestroyed()) return win;
+  }
+  return null;
+}
+
 /**
- * Route an open request. A welcome window — no context — is replaced in place;
- * a project window, or a menu action with no focused window, opens a new one.
+ * Route an open request. If the project is already open in a window, that
+ * window is brought to the foreground (no duplicate). Otherwise a welcome
+ * window — no context — is replaced in place; a project window, or a menu
+ * action with no focused window, opens a new one.
  */
 function showProject(win: BrowserWindow | undefined, root: string): void {
+  const existing = windowForRoot(root);
+  if (existing) {
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    return;
+  }
   if (win && !win.isDestroyed() && !contexts.has(win.id)) {
     loadProjectIntoWindow(win, root);
   } else {
@@ -682,6 +713,10 @@ function rebuildMenu(): void {
         void promptAndOpenProject(win);
       },
       onOpenRecent: (win, path) => showProject(win, path),
+      onRemoveRecent: (path) => {
+        removeRecent(userDataDir, path);
+        rebuildMenu();
+      },
       onClearRecents: () => {
         clearRecents(userDataDir);
         rebuildMenu();
@@ -897,6 +932,11 @@ const ipcDeps: Deps = {
   showProject,
   promptAndOpenProject,
   reloadWindow,
+  removeRecent: (path: string) => {
+    const next = removeRecent(userDataDir, path);
+    rebuildMenu();
+    return next;
+  },
 };
 
 app.whenReady().then(() => {

@@ -233,6 +233,8 @@ function RunningSplit({
     <div style={aiRunningWrapperStyle} data-testid="ai-tab" data-ai-state="running">
       <SidebarTab
         testIdPrefix="ai-prompts"
+        icon="✦"
+        label="Prompts"
         defaultWidth={PROMPTS_DEFAULT_WIDTH}
         loadWidth={() => window.cockpit.aiPromptsWidthGet()}
         saveWidth={(w) => window.cockpit.aiPromptsWidthSet(w)}
@@ -282,12 +284,20 @@ function PromptsColumn({
 }): JSX.Element {
   const [prompts, setPrompts] = useState<PromptEntry[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  // null = still checking (render the catalog optimistically); false → this
+  // project is on the plain-text path, so the `/ai-lore-<verb>` slash forms
+  // wouldn't resolve — show the bootstrap hint instead of the catalog.
+  const [installed, setInstalled] = useState<boolean | null>(null);
 
   useEffect(() => {
     void window.cockpit.promptsList().then(setPrompts);
     return window.cockpit.onPromptsChanged(() => {
       void window.cockpit.promptsList().then(setPrompts);
     });
+  }, []);
+
+  useEffect(() => {
+    void window.cockpit.engineBindingInstalled().then(setInstalled);
   }, []);
 
   const inject = (slash: string): void => {
@@ -299,6 +309,32 @@ function PromptsColumn({
     // extra click on the terminal area.
     focusPty();
   };
+
+  // Plain-text project — the verbs aren't wired as slash commands, so offering
+  // the catalog would mislead. Point the user at the one-line bootstrap instead.
+  if (installed === false) {
+    return (
+      <div style={promptsListStyle} data-testid="prompts-column">
+        <div data-testid="prompts-bootstrap-hint">
+          <div style={promptGroupHeader}>Plain-text project</div>
+          <div style={promptsEmptyStyle}>
+            AI-Lore isn’t installed as slash commands here. Start the session by loading the
+            methodology, then the verbs become available:
+          </div>
+          <button
+            type="button"
+            style={promptRowStyle}
+            onClick={() => inject('read ai_readme.md')}
+            title="Insert “read ai_readme.md” into the engine"
+            data-testid="prompt-bootstrap-readme"
+          >
+            <span style={promptSlashStyle}>read ai_readme.md</span>
+            <span style={promptDescStyle}>Loads AI-Lore from the project’s ai_readme.md shim</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const grouped = groupPrompts(prompts);
 

@@ -49,6 +49,10 @@ function newCtx(over: Partial<NewTabContext> = {}): NewTabContext {
     onNewShell: vi.fn(),
     onNewAi: vi.fn(),
     onNewBrowser: vi.fn(),
+    shortcuts: [],
+    onNewShellWithCommand: vi.fn(),
+    onNewBrowserWithUrl: vi.fn(),
+    onLaunchUrlExternal: vi.fn(),
     ...over,
   };
 }
@@ -61,6 +65,7 @@ function renderCtx(over: Partial<TabRenderContext> = {}): TabRenderContext {
     revealTarget: null,
     handleTerminalStatus: vi.fn(),
     terminalInitialCommands: {},
+    browserInitialUrls: {},
     tabShortcuts: [],
     engines,
     setAiTabEngine: vi.fn(),
@@ -142,6 +147,42 @@ describe('NEW_TAB_BUTTONS', () => {
     expect(ai?.disabled?.(ctx)).toBe(false);
     ai?.onClick(ctx);
     expect(onNewAi).toHaveBeenCalledWith('gemini');
+  });
+});
+
+describe('start-with-shortcut dropdowns', () => {
+  const shortcuts = [
+    { id: 'u1', label: 'Local dev', target: 'url' as const, url: 'localhost:3000' },
+    { id: 't1', label: 'Dev server', target: 'terminal' as const, command: 'npm run dev' },
+    { id: 'p1', label: 'App folder', target: 'project' as const, app: '/Applications/X.app' },
+  ];
+
+  test('+ shell lists only terminal shortcuts and seeds the command on pick', () => {
+    const shell = NEW_TAB_BUTTONS.find((b) => b.testId === 'new-shell');
+    const onNewShellWithCommand = vi.fn();
+    const rows = shell?.dropdown?.(newCtx({ shortcuts, onNewShellWithCommand })) ?? [];
+    expect(rows.map((r) => r.id)).toEqual(['t1']);
+    expect(rows[0].detail).toBe('npm run dev');
+    expect(rows[0].onLaunchExternal).toBeUndefined();
+    rows[0].onPick();
+    expect(onNewShellWithCommand).toHaveBeenCalledWith('npm run dev', 'Dev server');
+  });
+
+  test('+ web lists only url shortcuts and carries the two-icon open pair', () => {
+    const web = NEW_TAB_BUTTONS.find((b) => b.testId === 'new-browser');
+    const onNewBrowserWithUrl = vi.fn();
+    const onLaunchUrlExternal = vi.fn();
+    const rows =
+      web?.dropdown?.(newCtx({ shortcuts, onNewBrowserWithUrl, onLaunchUrlExternal })) ?? [];
+    expect(rows.map((r) => r.id)).toEqual(['u1']);
+    rows[0].onPick();
+    expect(onNewBrowserWithUrl).toHaveBeenCalledWith('localhost:3000', 'Local dev');
+    rows[0].onLaunchExternal?.();
+    expect(onLaunchUrlExternal).toHaveBeenCalledWith('localhost:3000');
+  });
+
+  test('+ AI has no start-with-shortcut dropdown', () => {
+    expect(NEW_TAB_BUTTONS.find((b) => b.testId === 'new-ai')?.dropdown).toBeUndefined();
   });
 });
 

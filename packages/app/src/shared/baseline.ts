@@ -58,35 +58,30 @@ export type BaselineModel = {
 const ACK_PAIR_WINDOW_SECONDS = 90;
 
 /**
- * The ack a save-point rolls up — the nearest ack to it (in either repo) within
- * its **era**: the span between the adjacent save-points. An AI-Lore save-point
- * operation spans a payload work-commit and one or two lore commits a minute
- * apart, so in the merged timeline the matching ack can sit just before *or*
- * just after the save-point; "nearest within the era" finds it without crossing
- * into a neighbouring save-point's commits. The save-point's own commits are
- * excluded. Returns `null` when the era holds no ack — i.e. the save-point is
- * boxed in by other save-points (the one case where a save-point doesn't roll
- * up). `acksNewestFirst` so ties resolve to the newer ack.
+ * The ack a selected save-point rolls up to: the **latest** ack in the
+ * save-point's run — the newest non-save-point commit *after* this save-point
+ * and *before* the next one. The intent is "the ack closest to the last stage
+ * of reality, without crossing the next save-point": for the latest save-point
+ * (open-ended run → `nextAnchor = +Inf`) that's the most recent ack overall, so
+ * selecting it shows "what changed since my last ack"; for an older save-point
+ * it's the last ack before the next save-point. The save-point's own commits
+ * are excluded. Returns `null` when the run holds no ack — the save-point is
+ * boxed in by other save-points and stands alone (baseline falls back to its
+ * own commit). Acks arrive newest-first, so the first in-run match *is* the
+ * latest.
  */
-export function nearestAckInEra(
+export function latestAckInRun(
   acksNewestFirst: readonly CommitListEntry[],
-  anchor: number,
-  olderBound: number,
-  newerBound: number,
+  thisAnchor: number,
+  nextAnchor: number,
   exclude: ReadonlySet<string>,
 ): CommitListEntry | null {
-  let best: CommitListEntry | null = null;
-  let bestGap = Number.POSITIVE_INFINITY;
   for (const c of acksNewestFirst) {
-    if (c.timestamp <= olderBound || c.timestamp >= newerBound) continue;
+    if (c.timestamp <= thisAnchor || c.timestamp >= nextAnchor) continue;
     if (exclude.has(c.sha)) continue;
-    const gap = Math.abs(c.timestamp - anchor);
-    if (gap < bestGap) {
-      bestGap = gap;
-      best = c;
-    }
+    return c;
   }
-  return best;
+  return null;
 }
 
 /** The newest commit at-or-before `ts` (epoch seconds), or `null` if none. */
@@ -121,8 +116,8 @@ export function dateToEpochSeconds(date: string): number {
 
 /**
  * Build the picker model from the save-point ledger and both repos' commit
- * lists (each newest-first). Save-points roll up to the nearest ack in their
- * era via {@link nearestAckInEra} (off → the save-point's own commit). Ack
+ * lists (each newest-first). Save-points roll up to the latest ack in their run
+ * via {@link latestAckInRun} (off → the save-point's own commit). Ack
  * milestones are the merged non-save-point commits across both repos, collapsed
  * by {@link ACK_PAIR_WINDOW_SECONDS} and paired across repos via
  * {@link nearestAtOrBefore}.
@@ -170,15 +165,15 @@ export function buildMilestones(
 
   const spMilestones: Milestone[] = sps.map((s) => {
     const anchor = anchorOf(s);
-    // Era bounds: the nearest save-point anchors on each side.
-    let olderBound = Number.NEGATIVE_INFINITY;
+    // The run is `(this save-point, next save-point)`; the next-save-point
+    // anchor caps it. Open-ended (→ +Inf) for the latest save-point, so its run
+    // reaches HEAD and rolls up to the most recent ack.
     let newerBound = Number.POSITIVE_INFINITY;
     for (const a of anchors) {
-      if (a < anchor && a > olderBound) olderBound = a;
       if (a > anchor && a < newerBound) newerBound = a;
     }
     const own = new Set([s.payloadFull, s.loreFull]);
-    const ack = nearestAckInEra(mergedAcks, anchor, olderBound, newerBound, own);
+    const ack = latestAckInRun(mergedAcks, anchor, newerBound, own);
     // Roll each repo to its commit at-or-before the bound ack's time; with no
     // bound ack (boxed in by save-points), the baseline is the save-point itself.
     const rollPayload = ack

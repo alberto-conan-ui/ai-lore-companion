@@ -30,6 +30,8 @@ export type TabRenderContext = {
   handleTerminalStatus: (tabId: string, status: TerminalForegroundStatus, command: string) => void;
   /** One-shot commands seeded for a terminal-shortcut tab, by tab id. */
   terminalInitialCommands: Record<string, string>;
+  /** Initial URLs seeded for a browser-shortcut tab, by tab id. */
+  browserInitialUrls: Record<string, string>;
   /** URL + terminal shortcuts surfaced inside Shell / Web tab sidebars. */
   tabShortcuts: Shortcut[];
   /** Configured AI engines — the AI tab's engine dropdown. */
@@ -47,6 +49,28 @@ export type NewTabContext = {
   onNewShell: () => void;
   onNewAi: (engineId: string) => void;
   onNewBrowser: () => void;
+  /** Shortcuts offered in the `+ shell ▾` / `+ web ▾` start-with-shortcut
+   *  dropdowns — this project's own shortcuts plus the global url/terminal
+   *  list. The dropdown builders filter by target. */
+  shortcuts: readonly Shortcut[];
+  /** Seed a new shell tab with a shortcut command, titled after the shortcut. */
+  onNewShellWithCommand: (command: string, label: string) => void;
+  /** Seed a new browser tab with a shortcut URL, titled after the shortcut. */
+  onNewBrowserWithUrl: (url: string, label: string) => void;
+  /** Open a URL in the external browser — the `↗` on web dropdown rows. */
+  onLaunchUrlExternal: (url: string) => void;
+};
+
+/** One row in a creator's start-with-shortcut dropdown. */
+export type NewTabDropdownItem = {
+  id: string;
+  label: string;
+  /** The command or URL — shown as monospace subtext. */
+  detail: string;
+  /** Primary action — open a new tab seeded with this shortcut (the `▣`). */
+  onPick: () => void;
+  /** Optional `↗` — open the URL externally (web rows only). */
+  onLaunchExternal?: () => void;
 };
 
 /** A strip creator button — `+ AI` / `+ shell` / `+ web`. */
@@ -63,6 +87,10 @@ export type NewTabButton = {
   disabled?: (ctx: NewTabContext) => boolean;
   /** Create the tab. */
   onClick: (ctx: NewTabContext) => void;
+  /** Optional start-with-shortcut dropdown. When present, the strip renders a
+   *  `▾` caret beside the label; opening it lists these rows so a new tab can
+   *  start seeded with a shortcut. */
+  dropdown?: (ctx: NewTabContext) => NewTabDropdownItem[];
 };
 
 /** Helpers a `makeTab` factory uses to build a fresh tab. */
@@ -173,6 +201,15 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
       order: 1,
       title: () => 'New shell',
       onClick: (ctx) => ctx.onNewShell(),
+      dropdown: (ctx) =>
+        ctx.shortcuts
+          .filter((s) => s.target === 'terminal' && s.command)
+          .map((s) => ({
+            id: s.id,
+            label: s.label,
+            detail: s.command ?? '',
+            onPick: () => ctx.onNewShellWithCommand(s.command ?? '', s.label),
+          })),
     },
     renderBody: (tab, visible, ctx) => (
       <TerminalTab
@@ -239,11 +276,22 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
       order: 2,
       title: () => 'New browser',
       onClick: (ctx) => ctx.onNewBrowser(),
+      dropdown: (ctx) =>
+        ctx.shortcuts
+          .filter((s) => s.target === 'url' && s.url)
+          .map((s) => ({
+            id: s.id,
+            label: s.label,
+            detail: s.url ?? '',
+            onPick: () => ctx.onNewBrowserWithUrl(s.url ?? '', s.label),
+            onLaunchExternal: () => ctx.onLaunchUrlExternal(s.url ?? ''),
+          })),
     },
     renderBody: (tab, visible, ctx) => (
       <BrowserTab
         tabId={tab.id}
         visible={visible}
+        initialUrl={ctx.browserInitialUrls[tab.id]}
         tabShortcuts={ctx.tabShortcuts}
         onLaunchUrlExternal={(id) => window.cockpit.shortcutsRun(id)}
       />

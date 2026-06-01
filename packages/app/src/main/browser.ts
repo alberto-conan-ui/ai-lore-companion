@@ -130,7 +130,10 @@ export function create(
   initialUrl?: string,
 ): void {
   if (companions.has(tabId)) return;
-  const c = buildView(tabId, win, profile, initialUrl ?? HOME_URL);
+  // A seed URL may be a bare host (`localhost:3000`) from a shortcut — run it
+  // through the same normaliser the address bar uses so it loads as a page.
+  const startUrl = initialUrl ? normalizeUrl(initialUrl) || HOME_URL : HOME_URL;
+  const c = buildView(tabId, win, profile, startUrl);
   win.contentView.addChildView(c.view);
   c.view.setVisible(false);
   companions.set(tabId, c);

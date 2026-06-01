@@ -12,7 +12,14 @@ function folderName(path: string): string {
  * `window.cockpit.openProject` — with no argument it prompts a folder dialog,
  * with a path it opens that folder directly.
  */
-export function WelcomeScreen({ recents }: { recents: RecentProject[] }): JSX.Element {
+export function WelcomeScreen({
+  recents,
+  onRemoveRecent,
+}: {
+  recents: RecentProject[];
+  /** Drop a single project from the recents list (the × on each row). */
+  onRemoveRecent: (path: string) => void;
+}): JSX.Element {
   return (
     <main style={screenStyle} data-testid="welcome">
       <div style={cardStyle}>
@@ -33,7 +40,7 @@ export function WelcomeScreen({ recents }: { recents: RecentProject[] }): JSX.El
             <h2 style={recentsHeadingStyle}>Open Recent</h2>
             <ul style={recentsListStyle}>
               {recents.map((r) => (
-                <li key={r.path}>
+                <li key={r.path} className="welcome-recent" style={recentRowStyle}>
                   <button
                     type="button"
                     style={recentItemStyle}
@@ -43,6 +50,17 @@ export function WelcomeScreen({ recents }: { recents: RecentProject[] }): JSX.El
                   >
                     <span style={recentNameStyle}>{folderName(r.path)}</span>
                     <span style={recentPathStyle}>{r.path}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="welcome-recent-remove"
+                    style={recentRemoveStyle}
+                    data-testid="welcome-recent-remove"
+                    title="Remove from Recents"
+                    aria-label={`Remove ${folderName(r.path)} from Recents`}
+                    onClick={() => onRemoveRecent(r.path)}
+                  >
+                    ×
                   </button>
                 </li>
               ))}
@@ -120,17 +138,37 @@ const recentsListStyle: React.CSSProperties = {
   gap: '2px',
 };
 
+const recentRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'stretch',
+};
+
 const recentItemStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: '1px',
-  width: '100%',
+  flex: 1,
+  minWidth: 0,
   padding: '0.4rem 0.6rem',
   background: 'transparent',
   border: '1px solid transparent',
   borderRadius: '4px',
   cursor: 'pointer',
   textAlign: 'left',
+};
+
+const recentRemoveStyle: React.CSSProperties = {
+  flexShrink: 0,
+  width: 28,
+  alignSelf: 'center',
+  background: 'transparent',
+  border: 'none',
+  color: '#6c7783',
+  fontSize: '1rem',
+  lineHeight: 1,
+  cursor: 'pointer',
+  borderRadius: '4px',
+  padding: 0,
 };
 
 const recentNameStyle: React.CSSProperties = {

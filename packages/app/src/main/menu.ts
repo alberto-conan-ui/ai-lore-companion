@@ -1,4 +1,3 @@
-import { basename } from 'node:path';
 import {
   type BaseWindow,
   BrowserWindow,
@@ -7,6 +6,7 @@ import {
   app,
 } from 'electron';
 import { CHANNELS, type RecentProject } from '../shared/ipc.js';
+import { recentMenuLabel } from './recents.js';
 
 /**
  * Electron types a menu item's `click` window param as `BaseWindow` (the
@@ -25,6 +25,8 @@ export type MenuHandlers = {
   onOpen: (win: BrowserWindow | undefined) => void;
   /** File ▸ Open Recent ▸ <project> — open a known folder. */
   onOpenRecent: (win: BrowserWindow | undefined, path: string) => void;
+  /** File ▸ Open Recent ▸ Remove from List ▸ <project> — drop one entry. */
+  onRemoveRecent: (path: string) => void;
   /** File ▸ Open Recent ▸ Clear Recently Opened. */
   onClearRecents: () => void;
 };
@@ -39,12 +41,24 @@ function recentSubmenu(
   return [
     ...recents.map(
       (r): MenuItemConstructorOptions => ({
-        label: basename(r.path),
+        label: recentMenuLabel(r.path),
         sublabel: r.path,
         click: (_item, win) => handlers.onOpenRecent(asBrowserWindow(win), r.path),
       }),
     ),
     { type: 'separator' },
+    // Per-item removal nests in its own submenu so single-click on a recent
+    // still opens it; picking a name here drops just that entry.
+    {
+      label: 'Remove from List',
+      submenu: recents.map(
+        (r): MenuItemConstructorOptions => ({
+          label: recentMenuLabel(r.path),
+          sublabel: r.path,
+          click: () => handlers.onRemoveRecent(r.path),
+        }),
+      ),
+    },
     { label: 'Clear Recently Opened', click: () => handlers.onClearRecents() },
   ];
 }

@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, dirname, join, sep } from 'node:path';
 import type { RecentProject } from '../shared/ipc.js';
 
 /**
@@ -8,6 +9,24 @@ import type { RecentProject } from '../shared/ipc.js';
  * it survives restarts and feeds both the File ▸ Open Recent menu and the
  * welcome window.
  */
+
+/**
+ * The File ▸ Open Recent menu label. Electron doesn't render a menu item's
+ * `sublabel`, so the disambiguating path has to live in the label itself —
+ * otherwise two projects with the same folder name (e.g. two `Iberia_2026`s)
+ * are indistinguishable. Format: `<folder> — <tilde-abbreviated parent dir>`.
+ */
+export function recentMenuLabel(path: string): string {
+  const parent = dirname(path);
+  const home = homedir();
+  const tildeParent =
+    parent === home
+      ? '~'
+      : parent.startsWith(home + sep)
+        ? `~${parent.slice(home.length)}`
+        : parent;
+  return `${basename(path)} — ${tildeParent}`;
+}
 
 const MAX_RECENTS = 10;
 
@@ -43,6 +62,13 @@ function writeRecents(userDataDir: string, recents: RecentProject[]): void {
 export function addRecent(userDataDir: string, path: string): RecentProject[] {
   const others = loadRecents(userDataDir).filter((r) => r.path !== path);
   const next = [{ path, openedAt: Date.now() }, ...others].slice(0, MAX_RECENTS);
+  writeRecents(userDataDir, next);
+  return next;
+}
+
+/** Drop a single project from the recents list; returns the updated list. */
+export function removeRecent(userDataDir: string, path: string): RecentProject[] {
+  const next = loadRecents(userDataDir).filter((r) => r.path !== path);
   writeRecents(userDataDir, next);
   return next;
 }

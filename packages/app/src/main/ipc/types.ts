@@ -6,7 +6,7 @@ import type {
   WatcherHandle,
 } from '@ai-lore-companion/core';
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron';
-import type { SettingsSnapshot, Shortcut } from '../../shared/ipc.js';
+import type { RecentProject, SettingsSnapshot, Shortcut } from '../../shared/ipc.js';
 import type { PtyService } from '../pty.js';
 import type { SearchService } from '../search/service.js';
 
@@ -72,6 +72,9 @@ export type Deps = {
   promptAndOpenProject(win: BrowserWindow | undefined): Promise<void>;
   /** Reload a window's folder — re-run detection and re-attach. */
   reloadWindow(win: BrowserWindow): Promise<void>;
+  /** Drop one project from the recents list (rebuilds the menu); returns the
+   *  updated list for the caller to push back to the renderer. */
+  removeRecent(path: string): RecentProject[];
 };
 
 /** The signature every `main/ipc/*` register module exports. */

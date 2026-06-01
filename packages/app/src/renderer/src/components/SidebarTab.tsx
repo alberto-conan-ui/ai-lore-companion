@@ -5,24 +5,30 @@ const SIDEBAR_DEFAULT_WIDTH = 220;
 const SIDEBAR_MIN_WIDTH = 160;
 /** The content column needs at least this much room. */
 const CONTENT_MIN_WIDTH = 240;
+/** The always-visible activity rail on the far left, in px. */
+const RAIL_WIDTH = 34;
 
 /**
- * Two-column tab body: a sidebar on the left, a content surface on the right,
- * with a resizable divider between them.
+ * Two-column tab body with a WebStorm-style **tool window**: an always-visible
+ * vertical icon rail on the far left, a sidebar panel it toggles, and a content
+ * surface.
  *
- *   - Drag the divider to resize the sidebar.
- *   - Click the divider (no drag) to collapse the sidebar to a thin chevron;
- *     click the chevron to restore.
- *   - A small × button at the sidebar's top-right also collapses it.
+ *   - The rail icon toggles the sidebar open/closed (substitutes the old
+ *     expand bar). Active (filled) while the panel is open.
+ *   - The open panel is docked — in the flex flow, pushing the content over.
+ *   - Drag the divider to resize the panel.
+ *   - A × in the panel header closes it (same as clicking the active rail icon).
  *
- * The component is purely structural — callers pass the sidebar and content
- * as JSX. Width persistence is plumbed through optional `loadWidth` /
- * `saveWidth` callbacks; without them the column starts at `defaultWidth`
- * and the user's drag is in-session only.
+ * The component is purely structural — callers pass the sidebar and content as
+ * JSX, plus the rail `icon` and panel `label`. Width persistence is plumbed
+ * through optional `loadWidth` / `saveWidth`; open state is in-session.
  */
 export function SidebarTab({
   sidebar,
   content,
+  icon,
+  label,
+  defaultOpen = true,
   defaultWidth = SIDEBAR_DEFAULT_WIDTH,
   loadWidth,
   saveWidth,
@@ -33,6 +39,14 @@ export function SidebarTab({
 }: {
   sidebar: JSX.Element;
   content: JSX.Element;
+  /** Glyph shown on the rail icon for this tool window. */
+  icon: string;
+  /** Short name shown in the panel header (e.g. "Shortcuts", "Prompts"). */
+  label: string;
+  /** Whether the panel starts open. Tabs whose sidebar has another front-door
+   *  (e.g. the `+ shell ▾` / `+ web ▾` shortcut dropdowns) pass `false` so the
+   *  pane doesn't take space until the rail icon opens it. */
+  defaultOpen?: boolean;
   /** First-open width when no persisted value is available. */
   defaultWidth?: number;
   /** Async loader for the persisted width; returns `null` for none. */
@@ -48,8 +62,9 @@ export function SidebarTab({
 }): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const [columnWidth, setColumnWidth] = useState<number>(defaultWidth);
-  const [collapsed, setCollapsed] = useState<boolean>(false);
-  const movedRef = useRef(false);
+  // The tool window's open state, toggled from the rail. Defaults open unless
+  // the caller starts it closed (its sidebar has another way in).
+  const [open, setOpen] = useState<boolean>(defaultOpen);
 
   useEffect(() => {
     if (!loadWidth) return;
@@ -60,20 +75,20 @@ export function SidebarTab({
     });
   }, [loadWidth]);
 
-  /** Clamp a candidate width against the floor and the parent-derived ceiling. */
+  /** Clamp a candidate width against the floor and the parent-derived ceiling.
+   *  The rail's fixed strip is reserved out of the available room. */
   const clamp = useCallback((candidate: number): number => {
     const container = containerRef.current;
-    const max = container ? container.clientWidth - CONTENT_MIN_WIDTH : candidate;
+    const max = container ? container.clientWidth - CONTENT_MIN_WIDTH - RAIL_WIDTH : candidate;
     return Math.max(SIDEBAR_MIN_WIDTH, Math.min(candidate, max));
   }, []);
 
   const handleResizerMouseDown = (e: React.MouseEvent): void => {
     e.preventDefault();
-    movedRef.current = false;
-    if (collapsed) return;
     const container = containerRef.current;
     if (!container) return;
-    const containerLeft = container.getBoundingClientRect().left;
+    // The panel's left edge sits just past the rail.
+    const panelLeft = container.getBoundingClientRect().left + RAIL_WIDTH;
     const startX = e.clientX;
     // Coalesce mousemove → at most one width update per animation frame. A fast
     // drag fires mousemove far quicker than the screen paints; updating the width
@@ -83,11 +98,10 @@ export function SidebarTab({
     let latestX = startX;
     const apply = (): void => {
       frame = 0;
-      setColumnWidth(clamp(latestX - containerLeft));
+      setColumnWidth(clamp(latestX - panelLeft));
     };
     const onMove = (ev: MouseEvent): void => {
       latestX = ev.clientX;
-      if (Math.abs(ev.clientX - startX) > 3) movedRef.current = true;
       if (frame === 0) frame = requestAnimationFrame(apply);
     };
     const onUp = (): void => {
@@ -95,7 +109,7 @@ export function SidebarTab({
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       // Settle on the final pointer position and persist it.
-      const settled = clamp(latestX - containerLeft);
+      const settled = clamp(latestX - panelLeft);
       setColumnWidth(settled);
       if (saveWidth) saveWidth(settled);
     };
@@ -103,59 +117,58 @@ export function SidebarTab({
     document.addEventListener('mouseup', onUp);
   };
 
-  const handleResizerClick = (): void => {
-    if (movedRef.current) {
-      movedRef.current = false;
-      return;
-    }
-    setCollapsed((c) => !c);
-  };
-
   return (
     <div
       ref={containerRef}
       style={splitContainerStyle}
       data-testid={`${testIdPrefix}-tab`}
-      data-sidebar-state={collapsed ? 'collapsed' : 'expanded'}
+      data-sidebar-state={open ? 'open' : 'closed'}
     >
-      <div
-        style={{
-          ...sidebarColumnStyle,
-          width: collapsed ? 0 : columnWidth,
-          display: collapsed ? 'none' : 'flex',
-        }}
-        data-testid={`${testIdPrefix}-column`}
-        data-sidebar-width={collapsed ? 0 : columnWidth}
-        data-sidebar-collapsed={collapsed ? 'true' : 'false'}
-      >
+      <div style={railStyle} data-testid={`${testIdPrefix}-rail`}>
         <button
           type="button"
-          style={closeBtnStyle}
-          title={hideTitle}
-          aria-label={hideTitle}
-          data-testid={`${testIdPrefix}-close`}
-          onClick={() => setCollapsed(true)}
+          style={open ? railIconActiveStyle : railIconStyle}
+          title={open ? collapseTitle : expandTitle}
+          aria-label={open ? collapseTitle : expandTitle}
+          aria-pressed={open}
+          data-testid={`${testIdPrefix}-rail-icon`}
+          onClick={() => setOpen((o) => !o)}
         >
-          ×
+          {icon}
         </button>
-        {sidebar}
       </div>
-      <button
-        type="button"
-        style={collapsed ? resizerCollapsedStyle : resizerStyle}
-        data-testid={`${testIdPrefix}-resizer`}
-        aria-label={collapsed ? expandTitle : collapseTitle}
-        aria-expanded={!collapsed}
-        title={
-          collapsed
-            ? expandTitle
-            : `Drag to resize · click to ${collapseTitle.toLowerCase()}`
-        }
-        onMouseDown={handleResizerMouseDown}
-        onClick={handleResizerClick}
-      >
-        {collapsed ? '›' : ''}
-      </button>
+      {open ? (
+        <>
+          <div
+            style={{ ...sidebarColumnStyle, width: columnWidth }}
+            data-testid={`${testIdPrefix}-column`}
+            data-sidebar-width={columnWidth}
+          >
+            <div style={panelHeaderStyle}>
+              <span style={panelLabelStyle}>{label}</span>
+              <button
+                type="button"
+                style={headerBtnStyle}
+                title={hideTitle}
+                aria-label={hideTitle}
+                data-testid={`${testIdPrefix}-close`}
+                onClick={() => setOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+            <div style={sidebarBodyStyle}>{sidebar}</div>
+          </div>
+          <button
+            type="button"
+            style={resizerStyle}
+            data-testid={`${testIdPrefix}-resizer`}
+            aria-label={collapseTitle}
+            title={`Drag to resize · ${collapseTitle.toLowerCase()} from the rail`}
+            onMouseDown={handleResizerMouseDown}
+          />
+        </>
+      ) : null}
       <div style={contentColumnStyle}>{content}</div>
     </div>
   );
@@ -169,18 +182,75 @@ const splitContainerStyle: React.CSSProperties = {
   background: '#0a0f17',
 };
 
+const railStyle: React.CSSProperties = {
+  flexShrink: 0,
+  width: RAIL_WIDTH,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  paddingTop: 6,
+  gap: 4,
+  background: '#0a0f17',
+  borderRight: '1px solid #1a2230',
+};
+
+const railIconStyle: React.CSSProperties = {
+  width: 26,
+  height: 26,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'transparent',
+  border: '1px solid transparent',
+  borderRadius: 5,
+  color: '#7a8590',
+  fontSize: '0.95rem',
+  cursor: 'pointer',
+  padding: 0,
+};
+
+const railIconActiveStyle: React.CSSProperties = {
+  ...railIconStyle,
+  background: '#16202c',
+  border: '1px solid #28384a',
+  color: '#cfd8e0',
+};
+
 const sidebarColumnStyle: React.CSSProperties = {
   flexShrink: 0,
-  overflowY: 'auto',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
   background: '#0c121a',
   borderRight: '1px solid #1a2230',
   position: 'relative',
 };
 
-const closeBtnStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: 4,
-  right: 4,
+const panelHeaderStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+  height: 26,
+  flexShrink: 0,
+  padding: '0 4px 0 8px',
+  borderBottom: '1px solid #161e29',
+};
+
+const panelLabelStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  fontSize: '0.64rem',
+  fontWeight: 700,
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  color: '#6c7783',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+const headerBtnStyle: React.CSSProperties = {
+  flexShrink: 0,
   width: 18,
   height: 18,
   display: 'flex',
@@ -189,12 +259,17 @@ const closeBtnStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
   color: '#6c7783',
-  fontSize: '0.95rem',
+  fontSize: '0.85rem',
   lineHeight: 1,
   cursor: 'pointer',
   padding: 0,
   borderRadius: 3,
-  zIndex: 1,
+};
+
+const sidebarBodyStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: 'auto',
 };
 
 const resizerStyle: React.CSSProperties = {
@@ -205,21 +280,6 @@ const resizerStyle: React.CSSProperties = {
   border: 'none',
   padding: 0,
   color: 'transparent',
-};
-
-const resizerCollapsedStyle: React.CSSProperties = {
-  flexShrink: 0,
-  width: '14px',
-  background: '#1a2230',
-  cursor: 'pointer',
-  border: 'none',
-  padding: 0,
-  color: '#7a8590',
-  fontSize: '0.85rem',
-  fontWeight: 700,
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
 };
 
 const contentColumnStyle: React.CSSProperties = {

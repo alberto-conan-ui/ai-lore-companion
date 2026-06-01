@@ -58,6 +58,44 @@
         outline: 2px solid #5aa2ff;
         outline-offset: -2px;
       }
+      /* Strip tab creators (+ shell / + web / + AI). The label and the dropdown
+         caret are two separate click targets; a divider plus independent hover
+         backgrounds make the split obvious. Backgrounds live here (not inline)
+         so :hover can win over the resting state. */
+      .strip-creator { display: inline-flex; align-items: center; position: relative; }
+      .strip-creator-main, .strip-creator-caret {
+        background: transparent;
+        border: none;
+        color: #7f8c98;
+        cursor: pointer;
+        font-weight: 600;
+        white-space: nowrap;
+      }
+      .strip-creator-main { padding: 0.25rem 0.5rem; font-size: 0.72rem; border-radius: 3px 0 0 3px; }
+      .strip-creator-caret { padding: 0.25rem 0.34rem; font-size: 0.6rem; border-radius: 0 3px 3px 0; }
+      .strip-creator-main:hover, .strip-creator-caret:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: #cfd8e0;
+      }
+      .strip-creator-main:disabled { color: #4a5762; cursor: default; }
+      .strip-creator-main:disabled:hover { background: transparent; color: #4a5762; }
+      .strip-creator-divider { width: 1px; height: 13px; background: #2a3645; flex-shrink: 0; }
+      /* Start-with-shortcut dropdown rows. A web row has two click zones — the
+         body (▣ open in a new tab) and the ↗ (open in your browser) — split by
+         a divider, each with its own hover so the two actions read as distinct.
+         Backgrounds live here so :hover can win over the resting state. */
+      .creator-menu-row { background: transparent; }
+      .creator-menu-row:hover { background: rgba(255, 255, 255, 0.06); }
+      .creator-menu-ext { background: transparent; color: #7a8590; }
+      .creator-menu-ext:hover { background: rgba(255, 255, 255, 0.11); color: #dde7f0; }
+      .creator-menu-rowdiv { width: 1px; align-self: center; height: 62%; background: #243044; flex-shrink: 0; }
+      /* Welcome-screen recents — the per-row remove (×) stays hidden until the
+         row is hovered or the × itself is focused, so the list stays clean. */
+      .welcome-recent:hover { background: rgba(255, 255, 255, 0.04); border-radius: 4px; }
+      .welcome-recent-remove { opacity: 0; transition: opacity 0.1s; }
+      .welcome-recent:hover .welcome-recent-remove,
+      .welcome-recent-remove:focus-visible { opacity: 1; }
+      .welcome-recent-remove:hover { background: rgba(255, 255, 255, 0.08); color: #dde3ea; }
     </style>
   </head>
   <body>

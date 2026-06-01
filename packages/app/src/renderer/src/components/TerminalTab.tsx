@@ -58,6 +58,9 @@ export function TerminalTab({
   return (
     <SidebarTab
       testIdPrefix="shell-shortcuts"
+      icon="⌘"
+      label="Shortcuts"
+      defaultOpen={false}
       defaultWidth={220}
       expandTitle="Show shortcuts"
       collapseTitle="Hide shortcuts"

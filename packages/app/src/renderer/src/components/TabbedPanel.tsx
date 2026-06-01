@@ -1,8 +1,8 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
-import { type JSX, useState } from 'react';
-import type { TerminalForegroundStatus } from '../../../shared/ipc.js';
+import { type JSX, useEffect, useState } from 'react';
+import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { type DriftLevel, driftLevel } from '../store.js';
-import { NEW_TAB_BUTTONS, type NewTabContext, TAB_KINDS } from './tabKinds.js';
+import { NEW_TAB_BUTTONS, type NewTabButton, type NewTabContext, TAB_KINDS } from './tabKinds.js';
 
 /** A tab's kind selects which surface it renders. `pane` tabs are the
  *  cockpit's pinned sub-rooted file views (Status / Payload / Memory) — they
@@ -71,6 +71,15 @@ type Props = {
    *  they want one, before clicking Start. */
   lastEngineId: string | null;
   onNewBrowser: () => void;
+  /** Shortcuts offered in the `+ shell ▾` / `+ web ▾` dropdowns — per-project
+   *  plus global url/terminal. The dropdown builders filter by target. */
+  shortcuts: readonly Shortcut[];
+  /** Seed a new shell tab in this panel with a shortcut command. */
+  onNewShellWithCommand: (command: string, label: string) => void;
+  /** Seed a new browser tab in this panel with a shortcut URL. */
+  onNewBrowserWithUrl: (url: string, label: string) => void;
+  /** Open a URL in the external browser — the `↗` on web dropdown rows. */
+  onLaunchUrlExternal: (url: string) => void;
   /** Rename a tab — an empty name reverts to the auto-managed default. */
   onRenameTab: (id: string, name: string) => void;
   /** Move a tab — from a panel into this strip at `index` (drag and drop). */
@@ -127,6 +136,10 @@ export function TabbedPanel({
   engines,
   lastEngineId,
   onNewBrowser,
+  shortcuts,
+  onNewShellWithCommand,
+  onNewBrowserWithUrl,
+  onLaunchUrlExternal,
   onRenameTab,
   onMoveTab,
   slotRef,
@@ -146,6 +159,10 @@ export function TabbedPanel({
     onNewShell,
     onNewAi,
     onNewBrowser,
+    shortcuts,
+    onNewShellWithCommand,
+    onNewBrowserWithUrl,
+    onLaunchUrlExternal,
   };
 
   const startEdit = (tab: WorkspaceTab): void => {
@@ -236,7 +253,9 @@ export function TabbedPanel({
                     // Pinned panes don't carry the drag-cursor hint other tabs do.
                     cursor: TAB_KINDS[tab.kind].draggable ? 'grab' : 'pointer',
                   }}
-                  title={tab.kind === 'ai' && tab.engine ? `${tab.title} · ${tab.engine}` : tab.title}
+                  title={
+                    tab.kind === 'ai' && tab.engine ? `${tab.title} · ${tab.engine}` : tab.title
+                  }
                   onClick={() => onSelectTab(tab.id)}
                   onDoubleClick={() => {
                     if (TAB_KINDS[tab.kind].draggable) startEdit(tab);
@@ -272,17 +291,7 @@ export function TabbedPanel({
              *  surface inside every Web tab's sidebar; terminal shortcuts
              *  inside every Shell tab's sidebar. */}
             {NEW_TAB_BUTTONS.map((btn) => (
-              <button
-                key={btn.testId}
-                type="button"
-                style={newBtn}
-                title={btn.title(newTabCtx)}
-                data-testid={btn.testId}
-                disabled={btn.disabled?.(newTabCtx) ?? false}
-                onClick={() => btn.onClick(newTabCtx)}
-              >
-                {btn.label}
-              </button>
+              <StripCreator key={btn.testId} btn={btn} ctx={newTabCtx} />
             ))}
           </>
         )}
@@ -290,6 +299,124 @@ export function TabbedPanel({
       </div>
       <div ref={slotRef} style={contentSlot} />
     </div>
+  );
+}
+
+/**
+ * A strip creator (`+ shell` / `+ web` / `+ AI`). The label button does the
+ * plain create; a kind that declares a `dropdown` also gets a `▾` caret that
+ * opens a start-with-shortcut popover. Web rows carry the two-icon `▣` open-in-
+ * tab / `↗` open-external pair; shell rows just open in a tab on click.
+ */
+function StripCreator({ btn, ctx }: { btn: NewTabButton; ctx: NewTabContext }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const disabled = btn.disabled?.(ctx) ?? false;
+  const items = open && btn.dropdown ? btn.dropdown(ctx) : [];
+  const kindWord = btn.label.replace(/^\+\s*/, '');
+
+  // Native browser views (`WebContentsView`) paint above the DOM, so an open
+  // popover would render behind a browser tab. Hide the views while the menu is
+  // open — same mechanism the settings sheet uses for its modal.
+  useEffect(() => {
+    if (!open) return;
+    window.cockpit.browserSuppressAll(true);
+    return () => window.cockpit.browserSuppressAll(false);
+  }, [open]);
+
+  return (
+    <span className="strip-creator">
+      <button
+        type="button"
+        className="strip-creator-main"
+        title={btn.title(ctx)}
+        data-testid={btn.testId}
+        disabled={disabled}
+        onClick={() => btn.onClick(ctx)}
+      >
+        {btn.label}
+      </button>
+      {btn.dropdown ? (
+        <>
+          {/* Divider + caret read as the button's second click target. */}
+          <span className="strip-creator-divider" aria-hidden="true" />
+          <button
+            type="button"
+            className="strip-creator-caret"
+            title={`Start a ${kindWord} with a shortcut`}
+            aria-label={`Start a ${kindWord} with a shortcut`}
+            aria-expanded={open}
+            data-testid={`${btn.testId}-dropdown`}
+            onClick={() => setOpen((v) => !v)}
+          >
+            ▾
+          </button>
+        </>
+      ) : null}
+      {open ? (
+        <>
+          {/* Click-away backdrop — closes the popover on any outside click.
+           *  Escape also closes it via the keydown below; the overlay itself is
+           *  a presentational catch, so the keyboard handler lives on it too. */}
+          <div
+            style={backdropStyle}
+            role="button"
+            tabIndex={-1}
+            aria-label="Close menu"
+            onClick={() => setOpen(false)}
+            onContextMenu={() => setOpen(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') setOpen(false);
+            }}
+          />
+          <div style={popoverStyle} role="menu" data-testid={`${btn.testId}-menu`}>
+            {items.length === 0 ? (
+              <div style={menuEmptyStyle}>No shortcuts yet</div>
+            ) : (
+              items.map((it) => (
+                <div key={it.id} style={menuRowWrapStyle}>
+                  <button
+                    type="button"
+                    className="creator-menu-row"
+                    style={menuRowStyle}
+                    title={`${it.onLaunchExternal ? 'Open in a new tab' : 'Run in a new shell'} · ${it.detail}`}
+                    data-testid={`${btn.testId}-item-${it.id}`}
+                    onClick={() => {
+                      it.onPick();
+                      setOpen(false);
+                    }}
+                  >
+                    <span style={menuLabelStyle}>
+                      {it.onLaunchExternal ? <span style={menuGlyphStyle}>▣</span> : null}
+                      {it.label}
+                    </span>
+                    <span style={menuDetailStyle}>{it.detail}</span>
+                  </button>
+                  {it.onLaunchExternal ? (
+                    <>
+                      <span className="creator-menu-rowdiv" aria-hidden="true" />
+                      <button
+                        type="button"
+                        className="creator-menu-ext"
+                        style={menuExternalStyle}
+                        title={`Open ${it.detail} in your browser`}
+                        aria-label={`Open ${it.label} in your browser`}
+                        data-testid={`${btn.testId}-item-external-${it.id}`}
+                        onClick={() => {
+                          it.onLaunchExternal?.();
+                          setOpen(false);
+                        }}
+                      >
+                        ↗
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        </>
+      ) : null}
+    </span>
   );
 }
 
@@ -382,7 +509,6 @@ const tabBadgeStyle: React.CSSProperties = {
   fontVariantNumeric: 'tabular-nums',
 };
 
-
 const closeBtn: React.CSSProperties = {
   padding: '0 0.4rem 0 0',
   background: 'transparent',
@@ -402,15 +528,86 @@ const stripDividerStyle: React.CSSProperties = {
   margin: '0 0.5rem',
 };
 
-const newBtn: React.CSSProperties = {
-  padding: '0.25rem 0.55rem',
-  background: 'transparent',
-  border: 'none',
-  color: '#7f8c98',
-  fontSize: '0.72rem',
-  fontWeight: 600,
-  whiteSpace: 'nowrap',
-  cursor: 'pointer',
-  borderRadius: '3px',
+const backdropStyle: React.CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 40,
 };
 
+const popoverStyle: React.CSSProperties = {
+  position: 'absolute',
+  top: '100%',
+  left: 0,
+  marginTop: '2px',
+  minWidth: '12rem',
+  maxWidth: '20rem',
+  maxHeight: '60vh',
+  overflowY: 'auto',
+  background: '#0f1620',
+  border: '1px solid #243044',
+  borderRadius: '6px',
+  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+  padding: '0.25rem',
+  zIndex: 41,
+};
+
+const menuEmptyStyle: React.CSSProperties = {
+  padding: '0.4rem 0.6rem',
+  color: '#6c7783',
+  fontSize: '0.74rem',
+};
+
+const menuRowWrapStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'stretch',
+};
+
+const menuRowStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'flex-start',
+  gap: '0.05rem',
+  flex: 1,
+  minWidth: 0,
+  padding: '0.35rem 0.5rem',
+  // Background lives in the `.creator-menu-row` CSS class so :hover can win.
+  border: 'none',
+  borderRadius: '4px',
+  cursor: 'pointer',
+  textAlign: 'left',
+  font: 'inherit',
+};
+
+const menuLabelStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.35rem',
+  fontSize: '0.8rem',
+  fontWeight: 600,
+  color: '#dde3ea',
+};
+
+const menuGlyphStyle: React.CSSProperties = {
+  color: '#7f8c98',
+  fontSize: '0.78rem',
+};
+
+const menuDetailStyle: React.CSSProperties = {
+  maxWidth: '100%',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+  fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+  fontSize: '0.7rem',
+  color: '#7a8590',
+};
+
+const menuExternalStyle: React.CSSProperties = {
+  flexShrink: 0,
+  width: 34,
+  // Background + color live in `.creator-menu-ext` so :hover can win.
+  border: 'none',
+  fontSize: '0.85rem',
+  cursor: 'pointer',
+  borderRadius: '4px',
+};

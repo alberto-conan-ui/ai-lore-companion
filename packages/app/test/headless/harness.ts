@@ -122,6 +122,7 @@ export function harnessFor(register: RegisterModule): Harness {
     promptAndOpenProject: spy<[unknown]>(),
     reloadWindow: spy<[unknown]>(),
     reapplyIgnores: spy<[unknown]>(),
+    removeRecent: spy<[string]>(),
   };
   const settingsSnapshot: SettingsSnapshot = {
     registry: [],
@@ -145,6 +146,10 @@ export function harnessFor(register: RegisterModule): Harness {
     showProject: (win, root) => actions.showProject(win, root),
     promptAndOpenProject: async (win) => actions.promptAndOpenProject(win),
     reloadWindow: async (win) => actions.reloadWindow(win),
+    removeRecent: (path) => {
+      actions.removeRecent(path);
+      return [];
+    },
   };
 
   // Capture handlers by CONTRACT key. In production `reg` wraps `ipcMain`; the

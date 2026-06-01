@@ -37,6 +37,7 @@ import type {
   OpenDiffArg,
   OpenDiffResult,
   PromptEntry,
+  RecentProject,
   SavePointsPayload,
   SetBaselineArg,
   SetRegisterArg,
@@ -119,10 +120,17 @@ export const CONTRACT = {
   openPath: invoke<[path: string], string>('cockpit:open-path'),
   revealInFinder: send<[path: string]>('cockpit:reveal-in-finder'),
   openExternal: invoke<[url: string], void>('cockpit:open-external'),
+  /** Open a shortcut URL externally — normalised in main (a bare `localhost:3000`
+   *  is fixed up like the address bar), unlike `openExternal` which expects a
+   *  ready URL. Backs the `↗` on web-shortcut dropdown rows. */
+  urlOpenExternal: send<[url: string]>('cockpit:url-open-external'),
 
   // ── Project window control ────────────────────────────────────────────────
   openProject: invoke<[path?: string], void>('cockpit:open-project'),
   reload: invoke<[], void>('cockpit:reload'),
+  /** Drop one project from the recents list; resolves to the updated list so
+   *  the welcome screen can refresh in place. */
+  recentsRemove: invoke<[path: string], RecentProject[]>('cockpit:recents-remove'),
 
   // ── Terminals ─────────────────────────────────────────────────────────────
   spawnTerminal: invoke<[], string>('terminal:spawn'),
@@ -192,6 +200,10 @@ export const CONTRACT = {
   aiPromptsWidthSet: invoke<[width: number], void>('engines:prompts-width-set'),
   promptsList: invoke<[], PromptEntry[]>('prompts:list'),
   onPromptsChanged: push<void>('prompts:changed'),
+  /** Whether this project has the engine binding installed (verbs wired as
+   *  native slash commands). `false` → plain-text path; the AI tab shows a
+   *  "read ai_readme.md" bootstrap hint instead of the verbs catalog. */
+  engineBindingInstalled: invoke<[], boolean>('engine:binding-installed'),
 } as const;
 
 type Contract = typeof CONTRACT;

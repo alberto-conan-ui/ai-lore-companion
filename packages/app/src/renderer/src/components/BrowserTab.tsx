@@ -13,6 +13,9 @@ type Props = {
   tabId: string;
   /** Whether this tab's panel is open and the tab is the active one. */
   visible: boolean;
+  /** A start-with-shortcut seed URL — the view opens here instead of the home
+   *  page. Set when the tab was created from a `+ web ▾` shortcut. */
+  initialUrl?: string;
   /** Configured shortcuts surfaced in the Web-tab sidebar. URL-target entries
    *  become clickable rows that navigate the tab's view. */
   tabShortcuts?: Shortcut[];
@@ -30,6 +33,7 @@ type Props = {
 export function BrowserTab({
   tabId,
   visible,
+  initialUrl,
   tabShortcuts = [],
   onLaunchUrlExternal,
 }: Props): JSX.Element {
@@ -39,11 +43,12 @@ export function BrowserTab({
   const pageRef = useRef<HTMLDivElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
 
-  // Create the view on mount. The view is destroyed when the tab closes or
-  // when the window closes.
+  // Create the view on mount, seeded with `initialUrl` when the tab was opened
+  // from a shortcut. The view is destroyed when the tab closes or the window
+  // closes. (`browserCreate` is idempotent in main, so a re-run is a no-op.)
   useEffect(() => {
-    window.cockpit.browserCreate(tabId);
-  }, [tabId]);
+    window.cockpit.browserCreate(tabId, initialUrl);
+  }, [tabId, initialUrl]);
 
   // Browser state for *this* tab only.
   useEffect(
@@ -106,6 +111,9 @@ export function BrowserTab({
   return (
     <SidebarTab
       testIdPrefix="web-shortcuts"
+      icon="★"
+      label="Shortcuts"
+      defaultOpen={false}
       defaultWidth={220}
       expandTitle="Show shortcuts"
       collapseTitle="Hide shortcuts"

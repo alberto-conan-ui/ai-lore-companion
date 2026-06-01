@@ -7,7 +7,7 @@ import {
   saveLastEngine,
   savePromptsColumnWidth,
 } from '../engines.js';
-import { readPrompts } from '../prompts.js';
+import { isEngineBindingInstalled, readPrompts } from '../prompts.js';
 import type { RegisterModule } from './types.js';
 
 /** AI engines catalog, per-project last-engine + prompts-width, prompts list. */
@@ -52,5 +52,11 @@ export const registerEngines: RegisterModule = (reg, deps) => {
     const ctx = deps.contextFor(event);
     if (!ctx || isChainError(ctx.chain)) return [];
     return readPrompts(ctx.chain.lorePath);
+  });
+
+  reg.handle('engineBindingInstalled', (event) => {
+    const ctx = deps.contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return false;
+    return isEngineBindingInstalled(ctx.root);
   });
 };

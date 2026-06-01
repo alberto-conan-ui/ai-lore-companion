@@ -15,7 +15,7 @@
  * restart").
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import chokidar from 'chokidar';
 
@@ -54,6 +54,31 @@ export function readPrompts(lorePath: string): PromptEntry[] {
 
 function verbsDirOf(lorePath: string): string {
   return join(lorePath, 'process', 'verbs');
+}
+
+/**
+ * Whether the AI-Lore engine binding is **installed** for this project — i.e.
+ * the verbs are wired as the engine's native slash commands, so offering the
+ * catalog's `/ai-lore-<verb>` rows is meaningful. A project on the plain-text
+ * path has the vendored methodology (so {@link readPrompts} still finds verbs)
+ * but no native wiring, so the slash forms would not resolve; the renderer
+ * shows a bootstrap hint instead.
+ *
+ * Detection is per-engine. Today only the Claude binding exists: `install`
+ * writes one skill per verb under `<project>/.claude/skills/ai-lore-<verb>/`.
+ * The presence of any `ai-lore-*` skill directory is the install marker — a
+ * single missing file (a partial install) still counts as installed enough to
+ * show the catalog; a wholly absent set is the plain-text path. Returns `false`
+ * on any read error (treat unknown as not-installed → show the safe hint).
+ */
+export function isEngineBindingInstalled(projectRoot: string): boolean {
+  const skillsDir = join(projectRoot, '.claude', 'skills');
+  if (!existsSync(skillsDir)) return false;
+  try {
+    return readdirSync(skillsDir).some((entry) => entry.startsWith('ai-lore-'));
+  } catch {
+    return false;
+  }
 }
 
 /** Names (filename stems) of every verb `.md` file under the verbs directory,
@@ -126,10 +151,7 @@ function parseVerbsIndex(verbsDir: string): Map<string, IndexRow> {
  *
  * Returns a teardown function — call on context teardown.
  */
-export function watchPrompts(
-  lorePath: string,
-  onChange: () => void,
-): () => Promise<void> {
+export function watchPrompts(lorePath: string, onChange: () => void): () => Promise<void> {
   const verbsDir = verbsDirOf(lorePath);
   // `ignoreInitial: true` — we want change events, not the first crawl. The
   // renderer reads the initial state via the `PromptsList` IPC anyway.

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -82,4 +82,23 @@ test('aiPromptsWidthSet ignores a non-finite width', () => {
 test('promptsList returns [] with no project context', () => {
   h.setCtx(undefined);
   assert.deepEqual(h.invoke('promptsList'), []);
+});
+
+test('engineBindingInstalled is false on the plain-text path (no .claude/skills)', () => {
+  assert.equal(h.invoke('engineBindingInstalled'), false);
+});
+
+test('engineBindingInstalled is true once an ai-lore-* skill is present', () => {
+  mkdirSync(join(projectRoot, '.claude', 'skills', 'ai-lore-orient'), { recursive: true });
+  assert.equal(h.invoke('engineBindingInstalled'), true);
+});
+
+test('engineBindingInstalled is false when .claude/skills holds only non-ai-lore skills', () => {
+  mkdirSync(join(projectRoot, '.claude', 'skills', 'some-other-skill'), { recursive: true });
+  assert.equal(h.invoke('engineBindingInstalled'), false);
+});
+
+test('engineBindingInstalled is false with no project context', () => {
+  h.setCtx(undefined);
+  assert.equal(h.invoke('engineBindingInstalled'), false);
 });
