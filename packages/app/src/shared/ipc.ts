@@ -208,6 +208,9 @@ export type BrowserBounds = { x: number; y: number; width: number; height: numbe
 export const BROWSER_PROFILES = ['Default', 'Work', 'Personal'] as const;
 export type BrowserProfile = (typeof BROWSER_PROFILES)[number];
 
+/** Main → renderer: focus a browser tab's address bar (the ⌘L handler). */
+export type BrowserFocusUrlPayload = { tabId: string };
+
 /** Main → renderer: a browser tab's current state, for its toolbar. */
 export type BrowserStatePayload = {
   tabId: string;

@@ -1,3 +1,4 @@
+import { normalizeUrl } from '@ai-lore-companion/core';
 import { type BrowserWindow, WebContentsView } from 'electron';
 import {
   type BrowserBounds,
@@ -49,18 +50,6 @@ function partitionFor(profile: BrowserProfile): string {
   return `persist:browser-${profile}`;
 }
 
-/**
- * Turn raw URL-bar input into a URL: an explicit `http(s)://` is kept, a bare
- * host gets `https://`, anything else becomes a Google search.
- */
-function normalizeUrl(input: string): string {
-  const s = input.trim();
-  if (s === '') return HOME_URL;
-  if (/^https?:\/\//i.test(s)) return s;
-  if (/^[^\s.]+(\.[^\s.]+)+(\/.*)?$/.test(s)) return `https://${s}`;
-  return `https://www.google.com/search?q=${encodeURIComponent(s)}`;
-}
-
 function pushState(tabId: string, c: Companion): void {
   if (c.win.isDestroyed()) return;
   const wc = c.view.webContents;
@@ -107,6 +96,24 @@ function buildView(
   ]) {
     onWc(e, update);
   }
+
+  // Browser-parity keyboard, scoped to this view — before-input-event fires only
+  // while the view is focused, so it never collides with the app's global menu
+  // accelerators: ⌘R reload, ⌘⇧R hard reload, ⌘L focus the address bar (handled
+  // in the renderer). ⌘F (find-in-page) is deferred — it is the app's global
+  // Find-in-Project accelerator and needs separate handling.
+  wc.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown' || !input.meta) return;
+    const key = input.key.toLowerCase();
+    if (key === 'r') {
+      event.preventDefault();
+      if (input.shift) wc.reloadIgnoringCache();
+      else wc.reload();
+    } else if (key === 'l') {
+      event.preventDefault();
+      if (!c.win.isDestroyed()) c.win.webContents.send(CHANNELS.onBrowserFocusUrl, { tabId });
+    }
+  });
 
   void wc.loadURL(initialUrl);
   return c;
@@ -179,7 +186,7 @@ export function suppressAll(winId: number, suppress: boolean): void {
 
 export function navigate(tabId: string, url: string): void {
   const c = companions.get(tabId);
-  if (c) void c.view.webContents.loadURL(normalizeUrl(url));
+  if (c) void c.view.webContents.loadURL(normalizeUrl(url) || HOME_URL);
 }
 
 export function goBack(tabId: string): void {

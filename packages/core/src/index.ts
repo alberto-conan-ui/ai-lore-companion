@@ -179,3 +179,4 @@ export { fuzzyScore } from './search/fuzzy.js';
 export { isGlob, globToRegExp } from './search/glob.js';
 export { PathIndex, rankPaths } from './search/path-index.js';
 export type { SearchHit } from './search/path-index.js';
+export { normalizeUrl } from './browser/url.js';

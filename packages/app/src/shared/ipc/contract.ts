@@ -20,6 +20,7 @@ import type {
   AppsInvokeArg,
   AppsInvokeResult,
   BrowserBounds,
+  BrowserFocusUrlPayload,
   BrowserProfile,
   BrowserStatePayload,
   ChainPayload,
@@ -146,6 +147,7 @@ export const CONTRACT = {
   browserSetProfile: send<[tabId: string, profile: BrowserProfile]>('browser:set-profile'),
   browserSuppressAll: send<[suppress: boolean]>('browser:suppress-all'),
   onBrowserState: push<BrowserStatePayload>('browser:state'),
+  onBrowserFocusUrl: push<BrowserFocusUrlPayload>('browser:focus-url'),
 
   // ── App-launch shortcuts ──────────────────────────────────────────────────
   shortcutsList: invoke<[], Shortcut[]>('shortcuts:list'),

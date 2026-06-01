@@ -36,6 +36,7 @@ export function BrowserTab({
   const [urlText, setUrlText] = useState('');
   const urlFocused = useRef(false);
   const pageRef = useRef<HTMLDivElement>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
 
   // Create the view on mount. The view is destroyed when the tab closes or
   // when the window closes.
@@ -48,6 +49,17 @@ export function BrowserTab({
     () =>
       window.cockpit.onBrowserState((s) => {
         if (s.tabId === tabId) setState(s);
+      }),
+    [tabId],
+  );
+
+  // ⌘L from the focused web view (routed through main) focuses + selects the bar.
+  useEffect(
+    () =>
+      window.cockpit.onBrowserFocusUrl((p) => {
+        if (p.tabId !== tabId) return;
+        urlInputRef.current?.focus();
+        urlInputRef.current?.select();
       }),
     [tabId],
   );
@@ -134,6 +146,7 @@ export function BrowserTab({
               ⟳
             </button>
             <input
+              ref={urlInputRef}
               style={urlStyle}
               value={urlText}
               spellCheck={false}
