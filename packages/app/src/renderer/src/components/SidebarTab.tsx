@@ -75,17 +75,29 @@ export function SidebarTab({
     if (!container) return;
     const containerLeft = container.getBoundingClientRect().left;
     const startX = e.clientX;
+    // Coalesce mousemove → at most one width update per animation frame. A fast
+    // drag fires mousemove far quicker than the screen paints; updating the width
+    // state every event thrashes the content's ResizeObservers (xterm fit, grid
+    // relayout, the file tree's windowing) and is what made resizing feel laggy.
+    let frame = 0;
+    let latestX = startX;
+    const apply = (): void => {
+      frame = 0;
+      setColumnWidth(clamp(latestX - containerLeft));
+    };
     const onMove = (ev: MouseEvent): void => {
+      latestX = ev.clientX;
       if (Math.abs(ev.clientX - startX) > 3) movedRef.current = true;
-      setColumnWidth(clamp(ev.clientX - containerLeft));
+      if (frame === 0) frame = requestAnimationFrame(apply);
     };
     const onUp = (): void => {
+      if (frame !== 0) cancelAnimationFrame(frame);
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      setColumnWidth((current) => {
-        if (saveWidth) saveWidth(current);
-        return current;
-      });
+      // Settle on the final pointer position and persist it.
+      const settled = clamp(latestX - containerLeft);
+      setColumnWidth(settled);
+      if (saveWidth) saveWidth(settled);
     };
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
