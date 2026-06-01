@@ -362,11 +362,11 @@ function Row({
   // no real path on disk — skip the path tooltip, Reveal-in-Finder, and ignore.
   const synthetic = node.path.startsWith('synthetic:');
 
+  // Background + colour live in CSS (`.file-tree-row`, `.is-selected`, hover,
+  // focus-visible) — see index.html. Only the depth indent stays inline.
   const rowStyle: React.CSSProperties = {
     ...nodeRow,
     paddingLeft: `${0.4 + depth * 0.9}rem`,
-    background: isSelected ? '#1d2c3d' : 'transparent',
-    color: '#e6edf3',
   };
 
   return (
@@ -375,7 +375,7 @@ function Row({
         type="button"
         ref={(el) => setRowRef(node.path, el)}
         tabIndex={isFocused ? 0 : -1}
-        className="row-kebab-host"
+        className={`row-kebab-host file-tree-row${isSelected ? ' is-selected' : ''}`}
         style={rowStyle}
         onClick={() => {
           onSelectFolder(node.path);
@@ -389,7 +389,7 @@ function Row({
         title={synthetic ? node.name : node.path}
         data-testid={isRoot ? 'tree-root' : undefined}
       >
-        <span style={{ ...twistyStyle, color: '#9aa6b2' }}>{open ? '▾' : '▸'}</span>
+        <span style={{ ...twistyStyle, color: '#aeb9c4' }}>{open ? '▾' : '▸'}</span>
         <span style={glyphStyle}>{open ? '📂' : '📁'}</span>
         <span style={{ ...nameStyle, fontWeight: open ? 600 : 400 }}>{node.name}</span>
         <span style={{ ...driftDotStyle, background: DOT_COLOR[driftLevelFor(node.path)] }} />
@@ -451,7 +451,6 @@ const nodeRow: React.CSSProperties = {
   width: '100%',
   height: '100%',
   padding: '0 0.5rem 0 0',
-  background: 'transparent',
   border: 'none',
   textAlign: 'left',
   font: 'inherit',

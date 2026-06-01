@@ -42,6 +42,22 @@
       .row-kebab:focus-visible {
         color: #dde3ea;
       }
+      /* File-tree rows — Finder/ForkLift-style cues. Selection is an
+         unmistakable filled bar with an accent left edge and bright text;
+         hover is a subtle wash; the keyboard focus ring is a distinct outline
+         so "focused" never reads the same as "selected". Backgrounds live here
+         (not inline) so :hover can win over the row's resting state. */
+      .file-tree-row { background: transparent; color: #cfd8e0; }
+      .file-tree-row:hover { background: rgba(255, 255, 255, 0.06); }
+      .file-tree-row.is-selected {
+        background: #294c6b;
+        color: #ffffff;
+        box-shadow: inset 3px 0 0 #5aa2ff;
+      }
+      .file-tree-row:focus-visible {
+        outline: 2px solid #5aa2ff;
+        outline-offset: -2px;
+      }
     </style>
   </head>
   <body>
