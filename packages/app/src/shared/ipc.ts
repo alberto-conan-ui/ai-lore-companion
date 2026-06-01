@@ -383,6 +383,43 @@ export type TerminalSpawnEngineArg = {
   args?: string[];
 };
 
+/**
+ * The read-only AI assistant ("helper") the app drives on the user's behalf
+ * (AI Helper). A canned read-only action the assistant panel can request:
+ * `summarize-pending` reads `status.index.md`; `what-changed` summarizes the
+ * project's current drift (the app supplies the change list — the helper can't
+ * run git); `orient` is the app-fired first turn that makes the helper read
+ * `ai_readme.md` and walk the focus chain before answering anything (no button —
+ * it auto-runs once the session is ready). Free-text questions go through
+ * `helperAskText`, not this union.
+ */
+export type HelperAction = 'summarize-pending' | 'what-changed' | 'orient';
+
+/**
+ * The lifecycle phase of the app-driven helper session, pushed to the renderer
+ * as it advances. `connecting` → the read-only `claude` PTY is spawning;
+ * `ready` → its SessionStart hook reported in; `thinking` → a turn was injected
+ * and is in flight; `answered` → the Stop hook returned the answer; `error` →
+ * the turn or the connection failed.
+ */
+export type HelperPhase = 'connecting' | 'ready' | 'thinking' | 'answered' | 'error';
+
+/**
+ * Main → renderer: a state change on a window's helper session. `answer` is set
+ * on `answered`; `error` carries a human message on `error`. `ptyId` is set on
+ * the first (`connecting`) event (CR2) — it's the id of the helper's visible
+ * terminal, which the Assistant panel binds an xterm to. The single egress
+ * channel for the helper — more phases / fields grow per CR.
+ */
+export type HelperEventPayload = {
+  sessionId: string;
+  phase: HelperPhase;
+  /** The helper's visible-terminal PTY id (set on `connecting`, CR2). */
+  ptyId?: string;
+  answer?: string;
+  error?: string;
+};
+
 /** One verb in the prompts catalog (Phase D). Surfaces in the AI tab's left
  *  column; a click writes `${slash}\n` to the running engine's stdin. */
 export type PromptEntry = {

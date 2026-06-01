@@ -25,10 +25,22 @@ export type PtyServiceCallbacks = {
  */
 export type PtySpawnEngine = { binary: string; args?: readonly string[] };
 
+/** Per-spawn options that don't shape the command line. */
+export type PtySpawnOpts = {
+  /**
+   * Infrastructure PTY — excluded from {@link PtyService.hasRunningTask}. The
+   * AI Helper's visible read-only session is app-driven and tears down with its
+   * window, so a live one must not make the close/quit guard ask "a terminal is
+   * still running a task." A user shell/AI tab leaves this false.
+   */
+  infra?: boolean;
+};
+
 export type PtyService = {
   /** Spawn a shell; returns its id. When `engine` is set, the login shell
-   *  executes the engine command on first prompt (`zsh -i -l -c '<cmd>'`). */
-  spawn: (engine?: PtySpawnEngine) => string;
+   *  executes the engine command on first prompt (`zsh -i -l -c '<cmd>'`).
+   *  `opts.infra` marks the PTY as app infrastructure (see {@link PtySpawnOpts}). */
+  spawn: (engine?: PtySpawnEngine, opts?: PtySpawnOpts) => string;
   write: (id: string, data: string) => void;
   resize: (id: string, cols: number, rows: number) => void;
   kill: (id: string) => void;
@@ -71,6 +83,8 @@ type PtyEntry = {
   ttyResolved: boolean;
   /** Last status pushed to the renderer — dedupes the poll feed. */
   last: Probe;
+  /** App-infrastructure PTY — skipped by `hasRunningTask` (see {@link PtySpawnOpts}). */
+  infra: boolean;
 };
 
 /** Resolve the controlling tty of a process id via `ps`; null when it has none. */
@@ -155,7 +169,7 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
   scheduleNext();
 
   return {
-    spawn: (engine?: PtySpawnEngine) => {
+    spawn: (engine?: PtySpawnEngine, spawnOpts?: PtySpawnOpts) => {
       const id = randomUUID();
       // '-l' sources /etc/zprofile + ~/.zprofile so a Finder-launched
       // Electron app picks up the system PATH. For an engine spawn we also
@@ -187,7 +201,13 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
         // XOFF/XON, matching the shared constants.
         handleFlowControl: true,
       });
-      ptys.set(id, { pty, tty: null, ttyResolved: false, last: IDLE });
+      ptys.set(id, {
+        pty,
+        tty: null,
+        ttyResolved: false,
+        last: IDLE,
+        infra: spawnOpts?.infra ?? false,
+      });
       pty.onData((data) => opts.onData(id, data));
       pty.onExit(() => {
         ptys.delete(id);
@@ -223,6 +243,9 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
     },
     hasRunningTask: () => {
       for (const entry of ptys.values()) {
+        // Infra PTYs (the helper's read-only session) are app-driven and tear
+        // down with the window — they never gate close/quit.
+        if (entry.infra) continue;
         if (entry.last.status === 'running') return true;
       }
       return false;

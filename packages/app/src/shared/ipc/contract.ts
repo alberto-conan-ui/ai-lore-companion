@@ -34,6 +34,8 @@ import type {
   FileSearchHit,
   FocusReadArg,
   FocusReadResult,
+  HelperAction,
+  HelperEventPayload,
   OpenDiffArg,
   OpenDiffResult,
   PromptEntry,
@@ -208,6 +210,20 @@ export const CONTRACT = {
    *  native slash commands). `false` → plain-text path; the AI tab shows a
    *  "read ai_readme.md" bootstrap hint instead of the verbs catalog. */
   engineBindingInstalled: invoke<[], boolean>('engine:binding-installed'),
+
+  // ── AI assistant (helper — read-only, app-driven; AI Helper CR1) ──────────
+  /** Ensure this window's read-only helper session is connected (spawns the
+   *  `claude` PTY if not already up). Idempotent per window. */
+  helperConnect: invoke<[], void>('helper:connect'),
+  /** Run a canned read-only action: connect if needed, inject the prompt, and
+   *  submit the turn. The answer arrives later via `onHelperEvent`. */
+  helperAsk: invoke<[action: HelperAction], void>('helper:ask'),
+  /** Ask the read-only helper a free-text question — connect if needed, inject
+   *  the text as the turn, submit. Same `onHelperEvent` lifecycle as `helperAsk`. */
+  helperAskText: invoke<[text: string], void>('helper:ask-text'),
+  /** Main → renderer: a helper session state change (connecting / ready /
+   *  thinking / answered / error). */
+  onHelperEvent: push<HelperEventPayload>('helper:event'),
 } as const;
 
 type Contract = typeof CONTRACT;

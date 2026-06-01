@@ -45,18 +45,24 @@ type Panel = { tabs: WorkspaceTab[]; activeId: string };
  *  identical: pinned, unclosable, unmovable.
  */
 function panesForShape(shape: 'default' | 'publishing'): WorkspaceTab[] {
+  // The Assistant pane (AI Helper, CR1) is pinned last — the read-only helper's
+  // output surface. Like `publish`, it carries no PaneSpec (it's not a
+  // file-tree pane) and is rendered by its own component. CR8 folds it into the
+  // fuller left-pane restructure.
   if (shape === 'publishing') {
     return [
       { id: 'status', kind: 'pane', title: 'Status' },
       { id: 'payload', kind: 'pane', title: 'Payload' },
       { id: 'publish', kind: 'pane', title: 'Publish' },
       { id: 'memory', kind: 'pane', title: 'Memory' },
+      { id: 'assistant', kind: 'pane', title: 'Assistant' },
     ];
   }
   return [
     { id: 'status', kind: 'pane', title: 'Status' },
     { id: 'payload', kind: 'pane', title: 'Payload' },
     { id: 'memory', kind: 'pane', title: 'Memory' },
+    { id: 'assistant', kind: 'pane', title: 'Assistant' },
   ];
 }
 

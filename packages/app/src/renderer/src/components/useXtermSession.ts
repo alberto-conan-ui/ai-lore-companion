@@ -84,6 +84,14 @@ export interface XtermSessionConfig {
   /** Bubble the PTY's foreground status up to the caller (drives the tab title).
    *  The caller binds its own tabId. */
   onStatus?: (status: TerminalForegroundStatus, command: string) => void;
+  /**
+   * Render the session **read-only** — display the PTY's output but don't
+   * forward keystrokes to it (xterm `disableStdin`, no `onData` → input wiring).
+   * The AI Helper's visible session (CR2) uses this: the user watches the
+   * conversation, but only the app drives turns (it injects from `main`, not
+   * through this terminal). Defaults to false — Shell / AI tabs stay writable.
+   */
+  readOnly?: boolean;
 }
 
 export interface XtermSessionHandle {
@@ -106,6 +114,7 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
     exitMessage,
     initialCommand,
     onStatus,
+    readOnly = false,
   } = config;
 
   const hostRef = useRef<HTMLDivElement>(null);
@@ -168,7 +177,11 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
       theme: TERMINAL_THEME,
       fontFamily: TERMINAL_FONT_FAMILY,
       fontSize: 13,
-      cursorBlink: true,
+      cursorBlink: !readOnly,
+      // Read-only session (the helper's visible view): xterm swallows keyboard
+      // input. Programmatic `term.write` (the PTY's streamed output) is
+      // unaffected; the app drives turns from `main`, not through this terminal.
+      disableStdin: readOnly,
       // Required by the Unicode11 + search-decoration addons, which use xterm's
       // proposed API surface.
       allowProposedApi: true,
@@ -274,8 +287,13 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
       offStatus = window.cockpit.onTerminalStatus((p) => {
         if (p.id === id) onStatusRef.current?.(p.status, p.command);
       });
-      term.onData((data) => window.cockpit.sendTerminalInput({ id, data }));
-      term.focus();
+      // Read-only sessions don't forward keystrokes — the app drives turns from
+      // `main`. (`disableStdin` already blocks input; skipping the wire is belt
+      // and braces, and avoids focusing a terminal the user can't type into.)
+      if (!readOnly) {
+        term.onData((data) => window.cockpit.sendTerminalInput({ id, data }));
+        term.focus();
+      }
       if (initialCommand) {
         // A small delay lets the login shell finish writing its banner before
         // our input lands; without it the command interleaves with the prompt.
@@ -324,7 +342,7 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
     // PTY. Visibility re-fit/focus lives in the separate effect below. For the
     // Shell tab `ptyId`/`spawn` are stable so this runs once at mount; for the
     // AI tab `ptyId` changes when a new engine PTY is bound, re-running here.
-  }, [ptyId, spawn, killOnUnmount, exitMessage, initialCommand, doFit]);
+  }, [ptyId, spawn, killOnUnmount, exitMessage, initialCommand, doFit, readOnly]);
 
   // Re-fit and focus when this tab becomes the visible one (it cannot lay out
   // while `display: none`).

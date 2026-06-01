@@ -56,19 +56,25 @@ export function fakeChain(root: string, lorePath: string): ChainResult {
 
 /** A no-op ptyService whose four lifecycle methods are spies + a fixed spawn id. */
 export type FakePty = PtyService & {
-  spawnCalls: { engine?: { binary: string; args?: readonly string[] } }[];
+  spawnCalls: {
+    engine?: { binary: string; args?: readonly string[] };
+    opts?: { infra?: boolean };
+  }[];
   write: Spy<[string, string]>;
   resize: Spy<[string, number, number]>;
   kill: Spy<[string]>;
 };
 export function fakePtyService(spawnId = 'pty-1'): FakePty {
-  const spawnCalls: { engine?: { binary: string; args?: readonly string[] } }[] = [];
+  const spawnCalls: {
+    engine?: { binary: string; args?: readonly string[] };
+    opts?: { infra?: boolean };
+  }[] = [];
   const write = spy<[string, string]>();
   const resize = spy<[string, number, number]>();
   const kill = spy<[string]>();
   return {
-    spawn: (engine) => {
-      spawnCalls.push({ engine });
+    spawn: (engine, opts) => {
+      spawnCalls.push({ engine, opts });
       return spawnId;
     },
     write,

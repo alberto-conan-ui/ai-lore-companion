@@ -3,6 +3,7 @@ import { registerApps } from './apps.js';
 import { registerBrowser } from './browser.js';
 import { registerChanges } from './changes.js';
 import { registerEngines } from './engines.js';
+import { registerHelper } from './helper.js';
 import { registerProject } from './project.js';
 import { makeRegistrar } from './registrar.js';
 import { registerSettings } from './settings.js';
@@ -28,6 +29,7 @@ const MODULES: readonly RegisterModule[] = [
   registerChanges,
   registerApps,
   registerEngines,
+  registerHelper,
 ];
 
 /** Wire every cockpit IPC handler onto `ipcMain`, resolving channels off the contract. */

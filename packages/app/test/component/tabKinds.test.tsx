@@ -19,6 +19,9 @@ vi.mock('../../src/renderer/src/components/Pane.js', () => ({
 vi.mock('../../src/renderer/src/components/PublishPane.js', () => ({
   PublishPane: () => <div data-testid="body-publish" />,
 }));
+vi.mock('../../src/renderer/src/components/AssistantPanel.js', () => ({
+  AssistantPanel: () => <div data-testid="body-assistant" />,
+}));
 
 import type { WorkspaceTab } from '../../src/renderer/src/components/TabbedPanel.js';
 import {
@@ -232,6 +235,10 @@ describe('renderBody dispatches to the right body', () => {
   test('the publish pane renders the dedicated PublishPane', () => {
     render(TAB_KINDS.pane.renderBody(tab({ id: 'publish', kind: 'pane' }), true, renderCtx()));
     expect(screen.getByTestId('body-publish')).toBeTruthy();
+  });
+  test('the assistant pane renders the dedicated AssistantPanel', () => {
+    render(TAB_KINDS.pane.renderBody(tab({ id: 'assistant', kind: 'pane' }), true, renderCtx()));
+    expect(screen.getByTestId('body-assistant')).toBeTruthy();
   });
   test('a pane with a matching spec renders a Pane labelled by the spec', () => {
     const ctx = renderCtx({

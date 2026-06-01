@@ -2,6 +2,7 @@ import type { ChangeScope, EngineEntry, TabLastSession } from '@ai-lore-companio
 import type { CSSProperties, JSX, ReactNode } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { AiTab } from './AiTab.js';
+import { AssistantPanel } from './AssistantPanel.js';
 import { Banner } from './Banner.js';
 import { BrowserTab } from './BrowserTab.js';
 import { Pane, type SubRoot } from './Pane.js';
@@ -235,11 +236,15 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
   pane: {
     draggable: false,
     closable: false,
-    renderBody: (tab, _visible, ctx) => {
+    renderBody: (tab, visible, ctx) => {
       // The `publish` pane is rendered by its own component — by methodology
       // contract `publish/` is write-restricted and the companion tracks no
       // drift against it, so it carries no PaneSpec.
       if (tab.id === 'publish') return <PublishPane />;
+      // The `assistant` pane (AI Helper) is likewise its own component — a
+      // read-only helper surface, not a file-tree pane, so it has no PaneSpec.
+      // `visible` drives the embedded terminal's re-fit when the tab is shown.
+      if (tab.id === 'assistant') return <AssistantPanel active={visible} />;
       const spec = ctx.paneSpecById.get(tab.id);
       if (!spec) return null;
       return (

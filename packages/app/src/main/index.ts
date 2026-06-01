@@ -47,6 +47,7 @@ import { appsWithIcons, runAppsMigrations } from './apps.js';
 import { resolveProjectRoot } from './args.js';
 import * as browser from './browser.js';
 import { type Deps, type ProjectContext, type Wiring, registerCockpitIpc } from './ipc/index.js';
+import { disposeAllHelpers, disposeHelperForWindow } from './helper/index.js';
 import { buildAppMenu } from './menu.js';
 import {
   COMMIT_LIST_LIMIT,
@@ -921,6 +922,9 @@ async function teardownContext(winId: number): Promise<void> {
   // Browser tabs are per-window but live outside ProjectContext — tear them
   // all down regardless of whether a cockpit context was ever built.
   browser.destroyForWindow(winId);
+  // The read-only helper (AI Helper) is likewise app infra keyed by window —
+  // kill its PTY + drop its temp dir even if no cockpit context was built.
+  disposeHelperForWindow(winId);
 
   const ctx = contexts.get(winId);
   if (!ctx) return;
@@ -958,6 +962,9 @@ async function teardownContext(winId: number): Promise<void> {
 /** Tear down every remaining context — called on quit. */
 async function teardownAll(): Promise<void> {
   await Promise.all([...contexts.keys()].map((id) => teardownContext(id)));
+  // Close the shared helper middleman server too — per-window teardown above
+  // killed each helper PTY, but the singleton HTTP ingress is app-wide.
+  await disposeAllHelpers();
 }
 
 /** Open the window this launch (or dock re-activation) calls for. */
