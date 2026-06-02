@@ -10,6 +10,8 @@ let pushHandler: ((p: HelperEventPayload) => void) | null;
 const disabled = (testId: string): boolean =>
   (screen.getByTestId(testId) as HTMLButtonElement).disabled;
 
+const cards = (): HTMLElement[] => screen.queryAllByTestId('assistant-answer');
+
 beforeEach(() => {
   helperAsk = vi.fn();
   pushHandler = null;
@@ -47,7 +49,6 @@ test('starts disconnected — actions disabled, the "start it" hint, no Connect 
 
 test('ready enables the actions; clicking asks; thinking re-disables', () => {
   render(<AssistantFeed />);
-  // The session (hosted elsewhere) reports connecting → ready over Channel C.
   emit({ sessionId: 's1', phase: 'connecting', ptyId: 'pty-42' });
   emit({ sessionId: 's1', phase: 'ready' });
   expect(disabled('assistant-ask')).toBe(false);
@@ -70,11 +71,40 @@ test('the second action asks for the change summary', () => {
   expect(helperAsk).toHaveBeenCalledWith('what-changed');
 });
 
-test('renders the answer from the event (works for Claude and Gemini alike)', () => {
+test('answers accumulate into a feed, newest first, labelled by what asked', () => {
+  render(<AssistantFeed />);
+  emit({ sessionId: 's1', phase: 'connecting' });
+  emit({ sessionId: 's1', phase: 'ready' });
+
+  // The host's auto-orient answer arrives with no pending feed action → labelled
+  // "Orientation".
+  emit({ sessionId: 's1', phase: 'answered', answer: 'Oriented and ready.' });
+  expect(cards()).toHaveLength(1);
+  expect(cards()[0].textContent).toMatch(/Orientation/);
+  expect(cards()[0].textContent).toMatch(/Oriented and ready/);
+
+  // A clicked action labels its own answer, and lands on top.
+  fireEvent.click(screen.getByTestId('assistant-ask'));
+  emit({ sessionId: 's1', phase: 'thinking' });
+  emit({ sessionId: 's1', phase: 'answered', answer: 'Pending: CR9 phase 2.' });
+
+  const c = cards();
+  expect(c).toHaveLength(2);
+  expect(c[0].textContent).toMatch(/What's pending/);
+  expect(c[0].textContent).toMatch(/CR9 phase 2/);
+  expect(c[1].textContent).toMatch(/Orientation/); // older entry kept below
+});
+
+test('a new session (connecting) clears the previous feed', () => {
   render(<AssistantFeed />);
   emit({ sessionId: 's1', phase: 'ready' });
-  emit({ sessionId: 's1', phase: 'answered', answer: 'Pending: CR9 is being built.' });
-  expect(screen.getByTestId('assistant-answer').textContent).toMatch(/CR9 is being built/);
+  emit({ sessionId: 's1', phase: 'answered', answer: 'first session answer' });
+  expect(cards()).toHaveLength(1);
+
+  // Reconnect (e.g. after an engine switch) → fresh feed.
+  emit({ sessionId: 's2', phase: 'connecting' });
+  expect(cards()).toHaveLength(0);
+  expect(screen.getByTestId('assistant-hint')).toBeTruthy();
 });
 
 test('an error phase renders the error message', () => {

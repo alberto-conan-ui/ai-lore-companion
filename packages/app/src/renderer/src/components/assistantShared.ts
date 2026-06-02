@@ -148,15 +148,3 @@ export const hintStyle: React.CSSProperties = {
   color: '#6c7783',
   textAlign: 'center',
 };
-
-/** A rendered read-only answer — scrollable prose. */
-export const answerStyle: React.CSSProperties = {
-  flex: 1,
-  minHeight: 0,
-  overflow: 'auto',
-  padding: '0.8rem',
-  fontSize: '0.82rem',
-  lineHeight: 1.6,
-  color: '#dde3ea',
-  whiteSpace: 'pre-wrap',
-};

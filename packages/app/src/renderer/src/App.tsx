@@ -19,8 +19,10 @@ import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../sh
 import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
 import type { AlteredReason } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
+import { AssistantFeed } from './components/AssistantFeed.js';
 import { BaselinePicker } from './components/BaselinePicker.js';
 import { DockPanel } from './components/DockPanel.js';
+import { LeftActivityRail, type LeftSection } from './components/LeftActivityRail.js';
 import { baseDirsOf, entriesInSubRoot } from './components/Pane.js';
 import { SearchDialog, type SearchScope } from './components/SearchDialog.js';
 import {
@@ -45,25 +47,22 @@ type Panel = { tabs: WorkspaceTab[]; activeId: string };
  *  identical: pinned, unclosable, unmovable.
  */
 function panesForShape(shape: 'default' | 'publishing'): WorkspaceTab[] {
-  // The Assistant pane (AI Helper) is pinned last — the read-only helper's
-  // **output** surface (the click-driven feed). Like `publish`, it carries no
-  // PaneSpec (it's not a file-tree pane) and is rendered by its own component.
-  // Its session **host** is a separate pinned tab in the centre pane (CR9) —
-  // see CENTRE_PINNED.
+  // The "Project" panes — the orientation views. They live behind the Project
+  // button of the left activity rail (CR9 Phase 3). The Assistant's output is a
+  // sibling rail section (rendered directly, not a pane); its session host is a
+  // pinned centre tab (CENTRE_PINNED).
   if (shape === 'publishing') {
     return [
       { id: 'status', kind: 'pane', title: 'Status' },
       { id: 'payload', kind: 'pane', title: 'Payload' },
       { id: 'publish', kind: 'pane', title: 'Publish' },
       { id: 'memory', kind: 'pane', title: 'Memory' },
-      { id: 'assistant', kind: 'pane', title: 'Assistant' },
     ];
   }
   return [
     { id: 'status', kind: 'pane', title: 'Status' },
     { id: 'payload', kind: 'pane', title: 'Payload' },
     { id: 'memory', kind: 'pane', title: 'Memory' },
-    { id: 'assistant', kind: 'pane', title: 'Assistant' },
   ];
 }
 
@@ -170,6 +169,9 @@ export function App(): JSX.Element {
   // toggleable — closed by default; the chevron sits at the window's right
   // edge until the user opens it.
   const [rightOpen, setRightOpen] = useState(false);
+  // Which section the left activity rail shows (CR9 Phase 3): the Project panes
+  // or the Assistant feed. Both stay mounted; this just toggles which is shown.
+  const [leftSection, setLeftSection] = useState<LeftSection>('project');
   // Per-column bottom-dock visibility, all closed by default.
   const [leftRailBottomOpen, setLeftRailBottomOpen] = useState(false);
   const [centreBottomOpen, setCentreBottomOpen] = useState(false);
@@ -1257,19 +1259,31 @@ export function App(): JSX.Element {
         />
       ) : null}
       <div style={panelsRow}>
-        <Column
-          name="leftRail"
-          width={leftRailWidth}
-          flex={false}
-          top={panel('leftRail')}
-          bottom={panel('leftRailBottom')}
-          bottomOpen={leftRailBottomOpen}
-          onBottomToggle={setLeftRailBottomOpen}
-          bottomHeight={leftRailBottomHeight}
-          onBottomResize={setLeftRailBottomHeight}
-          accent={accent}
-          tint={tint}
-        />
+        {/* The left region (CR9 Phase 3): an activity rail switching between the
+         *  Project panes and the Assistant feed. Both stay mounted — the hidden
+         *  one is display:none — so the feed keeps its history + Channel-C
+         *  subscription across switches. The fixed leftRailWidth covers rail +
+         *  panel; the RailSash resizes the whole region. */}
+        <div style={{ ...leftRegionStyle, width: leftRailWidth }} data-column-id="left-region">
+          <LeftActivityRail section={leftSection} onSelect={setLeftSection} />
+          <div style={leftSection === 'project' ? leftSectionShownStyle : leftSectionHiddenStyle}>
+            <Column
+              name="leftRail"
+              flex
+              top={panel('leftRail')}
+              bottom={panel('leftRailBottom')}
+              bottomOpen={leftRailBottomOpen}
+              onBottomToggle={setLeftRailBottomOpen}
+              bottomHeight={leftRailBottomHeight}
+              onBottomResize={setLeftRailBottomHeight}
+              accent={accent}
+              tint={tint}
+            />
+          </div>
+          <div style={leftSection === 'assistant' ? leftSectionShownStyle : leftSectionHiddenStyle}>
+            <AssistantFeed />
+          </div>
+        </div>
         {/* Resizable accent-coloured divider between leftRail and centre.
          *  Drag horizontally to adjust leftRail's width; the value persists
          *  via the captureLayout effect. */}
@@ -1420,6 +1434,25 @@ function Column({
     </div>
   );
 }
+
+/** The left region: the activity rail plus the (mutually exclusive) Project /
+ *  Assistant sections. Fixed width (rail + panel); the inner sections flex. */
+const leftRegionStyle: React.CSSProperties = {
+  display: 'flex',
+  flexShrink: 0,
+  minWidth: 0,
+  minHeight: 0,
+  overflow: 'hidden',
+};
+
+const leftSectionShownStyle: React.CSSProperties = {
+  display: 'flex',
+  flex: 1,
+  minWidth: 0,
+  minHeight: 0,
+};
+
+const leftSectionHiddenStyle: React.CSSProperties = { display: 'none' };
 
 const appLayout: React.CSSProperties = {
   display: 'flex',
