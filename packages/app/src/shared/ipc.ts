@@ -390,10 +390,13 @@ export type TerminalSpawnEngineArg = {
  * project's current drift (the app supplies the change list — the helper can't
  * run git); `orient` is the app-fired first turn that makes the helper read
  * `ai_readme.md` and walk the focus chain before answering anything (no button —
- * it auto-runs once the session is ready). Free-text questions go through
- * `helperAskText`, not this union.
+ * it auto-runs once the session is ready). `dashboard` (CR9 Phase 4) asks the
+ * helper to read the lore and return a **structured JSON** snapshot — what the
+ * project is doing, recently done, what's next, risks — in plain human language,
+ * which the app renders as a glanceable dashboard (no walls of text). Free-text
+ * questions go through `helperAskText`, not this union.
  */
-export type HelperAction = 'summarize-pending' | 'what-changed' | 'orient';
+export type HelperAction = 'summarize-pending' | 'what-changed' | 'orient' | 'dashboard';
 
 /**
  * The lifecycle phase of the app-driven helper session, pushed to the renderer

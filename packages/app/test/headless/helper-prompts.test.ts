@@ -40,3 +40,12 @@ test('what-changed lists the supplied changed paths as a bullet list', () => {
   assert.match(p, /- \[lore\] status\/status\.index\.md/);
   assert.match(p, /what changed/i);
 });
+
+test('dashboard asks for plain-language JSON and forbids internal keys', () => {
+  const p = promptFor('dashboard', { statusPath: STATUS });
+  assert.match(p, new RegExp(STATUS)); // points the helper at the status file
+  assert.match(p, /"title"/); // the JSON shape
+  assert.match(p, /recentlyDone|whatsNext|riskAreas/);
+  assert.match(p, /non-technical/i); // the plain-language rule
+  assert.match(p, /never any internal codename|no .*codename|identifier/i); // no keys
+});

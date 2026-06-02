@@ -19,7 +19,7 @@ import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../sh
 import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
 import type { AlteredReason } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
-import { AssistantFeed } from './components/AssistantFeed.js';
+import { AssistantDashboard } from './components/AssistantDashboard.js';
 import { BaselinePicker } from './components/BaselinePicker.js';
 import { DockPanel } from './components/DockPanel.js';
 import { LeftActivityRail, type LeftSection } from './components/LeftActivityRail.js';
@@ -1281,7 +1281,7 @@ export function App(): JSX.Element {
             />
           </div>
           <div style={leftSection === 'assistant' ? leftSectionShownStyle : leftSectionHiddenStyle}>
-            <AssistantFeed />
+            <AssistantDashboard />
           </div>
         </div>
         {/* Resizable accent-coloured divider between leftRail and centre.

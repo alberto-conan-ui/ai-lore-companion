@@ -81,17 +81,14 @@ test('the connecting event binds the terminal and hides Connect', () => {
   expect(screen.queryByTestId('assistant-connect')).toBeNull();
 });
 
-test('the host orients itself automatically on the first ready (once)', () => {
+test('the host fires no turn of its own on ready (the dashboard drives the first turn)', () => {
   render(<AssistantHost active={true} />);
   fireEvent.click(screen.getByTestId('assistant-connect'));
   emit({ sessionId: 's1', phase: 'connecting', ptyId: 'pty-42' });
   emit({ sessionId: 's1', phase: 'ready' });
-  expect(helperAsk).toHaveBeenCalledWith('orient');
-
-  // A later ready (e.g. after a turn) must not re-orient.
-  helperAsk.mockClear();
-  emit({ sessionId: 's1', phase: 'ready' });
-  expect(helperAsk).not.toHaveBeenCalledWith('orient');
+  // Turns are serialized; the dashboard surface fires the first one, so the host
+  // must stay quiet or one of the two would be dropped.
+  expect(helperAsk).not.toHaveBeenCalled();
 });
 
 test('a headless engine (no ptyId) connects and shows the headless indicator, no terminal', () => {

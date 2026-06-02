@@ -1,5 +1,5 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
-import { type JSX, useEffect, useRef, useState } from 'react';
+import { type JSX, useEffect, useState } from 'react';
 import type { HelperPhase } from '../../../shared/ipc.js';
 import { HelperTerminal } from './HelperTerminal.js';
 import {
@@ -25,13 +25,12 @@ import {
  * read-only helper session *lives*. The user clicks **Connect Assistant** here
  * to start the opt-in session; the app launches it (Claude as a visible,
  * input-locked read-only PTY shown below; Gemini headless with no terminal).
- * Once it's `ready`, an `orient` turn fires automatically so every later answer
- * is grounded in the methodology + focus chain.
  *
  * This tab owns Connect + the engine pick + the live session. It produces no
- * answers of its own — the rendered output is the left-pane {@link
- * ./AssistantFeed.tsx}, which rides the same Channel-C stream. Splitting the two
- * is the v1.0 "two-surface" shape (focus "Open questions — RESOLVED").
+ * answers of its own — the rendered output is the left-pane
+ * {@link ./AssistantDashboard.tsx}, which rides the same Channel-C stream and
+ * fires the first turn itself (the dashboard hydrate, which reads the lore and
+ * so doubles as the orient). Splitting the two is the v1.0 "two-surface" shape.
  */
 export function AssistantHost({ active }: { active: boolean }): JSX.Element {
   const [phase, setPhase] = useState<HelperPhase | null>(null);
@@ -41,8 +40,6 @@ export function AssistantHost({ active }: { active: boolean }): JSX.Element {
   // picked for this project (persisted), defaulting to the first (Claude).
   const [engines, setEngines] = useState<EngineEntry[]>([]);
   const [engineId, setEngineId] = useState<string | null>(null);
-  // Fire the one-time orient turn the first time the session reports ready.
-  const orientedRef = useRef(false);
 
   // Load the engine choices + this project's persisted pick once.
   useEffect(() => {
@@ -67,13 +64,9 @@ export function AssistantHost({ active }: { active: boolean }): JSX.Element {
       setPhase(event.phase);
       if (event.ptyId) setPtyId(event.ptyId);
       setError(event.phase === 'error' ? (event.error ?? 'Something went wrong.') : '');
-      // Always orient first: the moment the session is ready, drive an orient
-      // turn before the user asks anything. Once per connected session, and only
-      // from the host (the feed rides the same stream — it must not double-fire).
-      if (event.phase === 'ready' && !orientedRef.current) {
-        orientedRef.current = true;
-        void window.cockpit.helperAsk('orient');
-      }
+      // The first turn (the dashboard hydrate) is fired by the dashboard surface
+      // on `ready`, not here — turns are serialized, so the host must not also
+      // fire one or one of them would be dropped.
     });
   }, []);
 
@@ -94,7 +87,6 @@ export function AssistantHost({ active }: { active: boolean }): JSX.Element {
     setEngineId(id);
     await window.cockpit.helperEngineSet(id);
     await window.cockpit.helperReset();
-    orientedRef.current = false;
     setPhase(null);
     setPtyId(null);
     setError('');

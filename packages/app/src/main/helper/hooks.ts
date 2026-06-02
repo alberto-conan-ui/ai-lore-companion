@@ -196,5 +196,18 @@ export function promptFor(
       const list = paths.map((p) => `- ${p}`).join('\n');
       return `These files have uncommitted changes in this project:\n${list}\n\nRead what you need to and give me a short, plain-prose summary of what changed and anything worth noting. A few sentences — no preamble.`;
     }
+    case 'dashboard':
+      // The structured-output turn (CR9 Phase 4). The helper reads the lore and
+      // returns JSON the app renders as a glanceable dashboard — the antidote to
+      // walls of text. The hard rule is **plain human language, no internal
+      // identifiers**: the lore is full of codenames/keys (the helper's source),
+      // none of which may reach a human's screen.
+      return `Read the file at ${args.statusPath} — and the active focus and most recent journal entry it points to — to understand where this project stands. Then respond with ONLY a JSON object (no prose, no markdown, no code fences) of exactly this shape:
+{"title": string, "recentlyDone": string[], "whatsNext": string[], "riskAreas": string[]}
+- "title": one short plain-language line naming what this project is doing right now.
+- "recentlyDone": 2-4 short sentences on what was just accomplished.
+- "whatsNext": 1-3 short sentences on what is being worked on next.
+- "riskAreas": 0-3 short sentences on anything worth watching, or anything you noticed is wrong or inconsistent.
+Write for a NON-TECHNICAL person glancing at a screen: full plain sentences, and NEVER any internal codename, identifier, phase number, or file name (no "CR9", no "Phase 2", no "status.index.md"). Someone with no prior context must understand every line.`;
   }
 }
