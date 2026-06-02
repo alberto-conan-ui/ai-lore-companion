@@ -53,11 +53,9 @@ function shellQuote(token: string): string {
  *  can find it. */
 function binaryResolves(binary: string): boolean {
   try {
-    execFileSync(
-      DEFAULT_SHELL,
-      ['-i', '-l', '-c', `command -v ${shellQuote(binary)}`],
-      { stdio: 'ignore' },
-    );
+    execFileSync(DEFAULT_SHELL, ['-i', '-l', '-c', `command -v ${shellQuote(binary)}`], {
+      stdio: 'ignore',
+    });
     return true;
   } catch {
     return false;
@@ -102,6 +100,10 @@ type AiStateFile = {
   lastPicked?: string;
   /** The prompts column's width in px in this project's running AI tabs (Phase C). */
   promptsColumnWidth?: number;
+  /** The engine id this project's read-only **assistant** uses (AI Helper, CR7)
+   *  — chosen in the Assistant panel dropdown, separate from `lastPicked` (the
+   *  user's own AI tab). Unset → the helper falls back to Claude. */
+  helperEngine?: string;
 };
 
 function engineStatePath(userDataDir: string, projectRoot: string): string {
@@ -116,8 +118,14 @@ function readAiState(userDataDir: string, projectRoot: string): AiStateFile {
     if (typeof parsed.lastPicked === 'string' && parsed.lastPicked.length > 0) {
       out.lastPicked = parsed.lastPicked;
     }
-    if (typeof parsed.promptsColumnWidth === 'number' && Number.isFinite(parsed.promptsColumnWidth)) {
+    if (
+      typeof parsed.promptsColumnWidth === 'number' &&
+      Number.isFinite(parsed.promptsColumnWidth)
+    ) {
       out.promptsColumnWidth = parsed.promptsColumnWidth;
+    }
+    if (typeof parsed.helperEngine === 'string' && parsed.helperEngine.length > 0) {
+      out.helperEngine = parsed.helperEngine;
     }
     return out;
   } catch {
@@ -137,21 +145,14 @@ export function loadLastEngine(userDataDir: string, projectRoot: string): string
 }
 
 /** Persist the engine the user just picked in this project. */
-export function saveLastEngine(
-  userDataDir: string,
-  projectRoot: string,
-  engineId: string,
-): void {
+export function saveLastEngine(userDataDir: string, projectRoot: string, engineId: string): void {
   const prev = readAiState(userDataDir, projectRoot);
   writeAiState(userDataDir, projectRoot, { ...prev, lastPicked: engineId });
 }
 
 /** The prompts column's width for this project's AI tabs (Phase C), or null
  *  when none persisted yet — the caller applies its default. */
-export function loadPromptsColumnWidth(
-  userDataDir: string,
-  projectRoot: string,
-): number | null {
+export function loadPromptsColumnWidth(userDataDir: string, projectRoot: string): number | null {
   return readAiState(userDataDir, projectRoot).promptsColumnWidth ?? null;
 }
 
@@ -163,4 +164,16 @@ export function savePromptsColumnWidth(
 ): void {
   const prev = readAiState(userDataDir, projectRoot);
   writeAiState(userDataDir, projectRoot, { ...prev, promptsColumnWidth: width });
+}
+
+/** The engine id this project's assistant (helper) uses, or `null` when unset
+ *  — the caller falls back to Claude (AI Helper, CR7). */
+export function loadHelperEngine(userDataDir: string, projectRoot: string): string | null {
+  return readAiState(userDataDir, projectRoot).helperEngine ?? null;
+}
+
+/** Persist the assistant engine the user picked for this project. */
+export function saveHelperEngine(userDataDir: string, projectRoot: string, engineId: string): void {
+  const prev = readAiState(userDataDir, projectRoot);
+  writeAiState(userDataDir, projectRoot, { ...prev, helperEngine: engineId });
 }

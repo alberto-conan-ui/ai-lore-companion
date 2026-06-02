@@ -30,6 +30,27 @@ export type HookWiring = { port: number; token: string; sessionId: string };
 const ALLOW_TOOLS = ['Read', 'Grep', 'Glob'] as const;
 const DENY_TOOLS = ['Write', 'Edit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch'] as const;
 
+/**
+ * The full `claude` argv for a read-only helper launch: the deny-writes
+ * `--settings` profile + the helper model. Pure so the launch shape can be
+ * asserted in tests without spawning — the `--settings` profile is the
+ * security-critical part.
+ *
+ * **Read-only rests on the deny-writes profile** (see {@link settingsJson}),
+ * *not* on a permission mode. CR5 tried `--permission-mode plan` (read-only by
+ * design, a supported API) as the first-class guard, but the real-app proof
+ * showed plan mode hijacks the helper into *planning-agent* behaviour — it
+ * tries to write a plan file and "exit plan mode" rather than just answering a
+ * read-only question. Read-only held (the write was blocked), but the Q&A UX
+ * regressed badly, so plan mode was backed out in favour of the deny-list,
+ * which CR1–CR4 already answered cleanly on. See
+ * [`blueprint/contracts/helper-read-only.contract.md`] for the standing rule
+ * and the finding.
+ */
+export function helperLaunchArgs(opts: { settingsPath: string; model: string }): string[] {
+  return ['--settings', opts.settingsPath, '--model', opts.model];
+}
+
 /** The `--settings` JSON: the deny-writes permission profile plus the two
  *  hooks, each invoking a generated script in the same temp dir. */
 export function settingsJson(opts: {
@@ -145,15 +166,25 @@ main();
  * `summarize-pending` need only `Read`. `changedPaths` carries the app-supplied
  * drift list for `what-changed` — the helper can't run git (Bash is denied), so
  * the changed files are handed in and it reads what it needs to explain them.
+ * `lightOrient` picks the cheap orient (one file read) for engines that have no
+ * AI-Lore skill — see the `orient` case.
  */
 export function promptFor(
   action: HelperAction,
-  args: { statusPath: string; changedPaths?: string[] },
+  args: { statusPath: string; changedPaths?: string[]; lightOrient?: boolean },
 ): string {
   switch (action) {
     case 'orient':
-      // Idempotent: if the project's own SessionStart hook already oriented,
-      // claude just confirms; otherwise this is the orientation.
+      // Two orient styles (CR7). The full walk — read `ai_readme.md`, load the
+      // methodology, walk the focus chain — is cheap for Claude (it loads the
+      // installed AI-Lore skill) but is a dozen+ file-read round-trips for a
+      // generic engine like headless Gemini, blowing the turn timeout. So a
+      // non-skill engine gets a **light** orient: read just `status.index.md`,
+      // the focus-chain head the methodology itself calls the "orient in
+      // seconds" hub. Both are idempotent confirmations.
+      if (args.lightOrient && args.statusPath) {
+        return `Read the file at ${args.statusPath} to ground yourself in this AI-Lore project's current focus and state. Then reply in one short line confirming you are oriented and ready — no other output.`;
+      }
       return 'Orient yourself to this AI-Lore project: if you have not already, read `ai_readme.md` at the project root and follow it to load the methodology and walk the focus chain to the active focus. Then confirm in one short line that you are oriented and ready — no other output.';
     case 'summarize-pending':
       return `Read the file at ${args.statusPath} and give me a short, plain-prose summary of what is currently pending or in progress in this project. A few sentences — no preamble.`;

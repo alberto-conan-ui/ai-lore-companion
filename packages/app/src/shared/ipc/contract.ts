@@ -221,6 +221,15 @@ export const CONTRACT = {
   /** Ask the read-only helper a free-text question — connect if needed, inject
    *  the text as the turn, submit. Same `onHelperEvent` lifecycle as `helperAsk`. */
   helperAskText: invoke<[text: string], void>('helper:ask-text'),
+  /** Which engine this project's assistant uses (CR7) — the `EngineEntry.id`
+   *  chosen in the Assistant panel's dropdown, persisted per project; `null`
+   *  when unset (falls back to Claude). */
+  helperEngineGet: invoke<[], string | null>('helper:engine-get'),
+  /** Set this project's assistant engine (CR7), persisted per project. */
+  helperEngineSet: invoke<[engineId: string], void>('helper:engine-set'),
+  /** Tear down this window's helper session (CR7) — used when the user switches
+   *  the assistant engine, so the next connect uses the new one. */
+  helperReset: invoke<[], void>('helper:reset'),
   /** Main → renderer: a helper session state change (connecting / ready /
    *  thinking / answered / error). */
   onHelperEvent: push<HelperEventPayload>('helper:event'),

@@ -82,9 +82,52 @@ test('a wrong token is rejected 401 and the callback never fires', async () => {
   assert.equal(fired, false);
 });
 
+test('an absent token is rejected 401 and the callback never fires', async () => {
+  let fired = false;
+  mm.register({
+    sessionId: 's1',
+    token: 'tok',
+    onStarted: () => {},
+    onResult: () => {
+      fired = true;
+    },
+  });
+  // No bearer header at all (token left undefined) — a stray local process that
+  // found the port but never had the per-session token.
+  const r = await post('/session/result', { sessionId: 's1', answer: 'x' });
+  assert.equal(r.status, 401);
+  assert.equal(fired, false);
+});
+
 test('an unknown session is 404', async () => {
   const r = await post('/session/result', { sessionId: 'ghost', answer: 'x' }, 'tok');
   assert.equal(r.status, 404);
+});
+
+test('a non-POST method is 405', async () => {
+  const res = await fetch(`http://127.0.0.1:${port}/session/result`, { method: 'GET' });
+  assert.equal(res.status, 405);
+});
+
+test('an oversized body is refused and never routes to a callback', async () => {
+  let fired = false;
+  mm.register({
+    sessionId: 's1',
+    token: 'tok',
+    onStarted: () => {},
+    onResult: () => {
+      fired = true;
+    },
+  });
+  // Over the 1 MB readBody cap — the server destroys the request before it can
+  // route, so the fetch may reject; either way no payload reaches the callback.
+  const huge = 'x'.repeat(1_100_000);
+  try {
+    await post('/session/result', { sessionId: 's1', answer: huge }, 'tok');
+  } catch {
+    // Connection destroyed when the cap tripped — that is the refusal.
+  }
+  assert.equal(fired, false);
 });
 
 test('a malformed body is 400', async () => {

@@ -2,8 +2,11 @@ import { join } from 'node:path';
 import { isChainError } from '@ai-lore-companion/core';
 import { BrowserWindow } from 'electron';
 import type { HelperAction } from '../../shared/ipc.js';
-import { promptFor } from '../helper/hooks.js';
-import { helperManager } from '../helper/index.js';
+import { loadEngines, loadHelperEngine, saveHelperEngine } from '../engines.js';
+import { pickHelperEngine } from '../helper/engine.js';
+import { DEFAULT_GEMINI_MODEL, type GeminiHost } from '../helper/gemini.js';
+import { helperLaunchArgs, promptFor } from '../helper/hooks.js';
+import { disposeHelperForWindow, geminiHelperManager, helperManager } from '../helper/index.js';
 import type { HelperHost } from '../helper/manager.js';
 import type { Deps, ProjectContext, RegisterModule } from './types.js';
 
@@ -21,7 +24,8 @@ const HELPER_MODEL = 'haiku';
 const MAX_CHANGED_PATHS = 60;
 
 /** The visible read-only helper PTY for a window: spawn `claude` with the
- *  deny-writes `--settings` + the fast helper model **through the window's
+ *  deny-writes `--settings` profile (the read-only guard — see
+ *  {@link helperLaunchArgs}) + the fast helper model **through the window's
  *  terminal service** — so its output streams to the renderer and an xterm
  *  binds to its id — marked `infra` so a live helper never trips the
  *  close/quit running-task guard. */
@@ -29,7 +33,7 @@ function hostFor(ctx: ProjectContext): HelperHost {
   return {
     spawn: (settingsPath) => {
       const id = ctx.ptyService.spawn(
-        { binary: 'claude', args: ['--settings', settingsPath, '--model', HELPER_MODEL] },
+        { binary: 'claude', args: helperLaunchArgs({ settingsPath, model: HELPER_MODEL }) },
         { infra: true },
       );
       return {
@@ -55,41 +59,88 @@ function changedPaths(ctx: ProjectContext): string[] {
 }
 
 /** Build the read-only prompt for a canned action, supplying the data each one
- *  needs from the project context. */
-function promptForAction(ctx: ProjectContext, action: HelperAction): string {
+ *  needs from the project context. `lightOrient` chooses the cheap one-file
+ *  orient for engines without the AI-Lore skill (headless Gemini). */
+function promptForAction(ctx: ProjectContext, action: HelperAction, lightOrient: boolean): string {
   const statusPath = isChainError(ctx.chain)
     ? ''
     : join(ctx.chain.lorePath, 'memory/status/status.index.md');
-  return promptFor(action, { statusPath, changedPaths: changedPaths(ctx) });
+  return promptFor(action, { statusPath, changedPaths: changedPaths(ctx), lightOrient });
 }
 
-/** Resolve the window + host for an IPC call — null when the call has no window
- *  or no valid AI-Lore project (the PTY needs the window's terminal service and
- *  the prompts need the chain). */
-function resolve(
-  deps: Deps,
-  event: Electron.IpcMainInvokeEvent,
-): { winId: number; ctx: ProjectContext; host: HelperHost } | null {
+/** Which engine the window's helper uses (CR7) — the **assistant engine the
+ *  user picked for this project** in the Assistant-panel dropdown
+ *  (`helperEngine`, persisted per project). The decision (incl. the default when
+ *  unpicked: the first helper-capable engine, matching the dropdown) lives in
+ *  the pure {@link pickHelperEngine} so the UI and backend never disagree. */
+function resolveHelperEngine(deps: Deps, root: string) {
+  return pickHelperEngine(
+    loadEngines(deps.getUserDataDir()),
+    loadHelperEngine(deps.getUserDataDir(), root),
+  );
+}
+
+/** One window's helper, with its engine + host already bound (CR7). The IPC
+ *  handlers drive `connect`/`submit` without caring which engine answers — the
+ *  seam ({@link HelperEngine}) keeps the renderer contract identical. */
+type BoundHelper = {
+  ctx: ProjectContext;
+  /** True for engines without the AI-Lore skill (headless Gemini) — use the
+   *  cheap one-file orient so the first turn doesn't blow the timeout. */
+  lightOrient: boolean;
+  connect: () => Promise<void>;
+  submit: (prompt: string) => Promise<void>;
+};
+
+/** Resolve the window, project context, and engine for an IPC call — null when
+ *  the call has no window or no valid AI-Lore project (the prompts need the
+ *  chain; the PTY/cwd need a real project). */
+function resolve(deps: Deps, event: Electron.IpcMainInvokeEvent): BoundHelper | null {
   const win = BrowserWindow.fromWebContents(event.sender);
   const ctx = deps.contextFor(event);
   if (!win || !ctx || isChainError(ctx.chain)) return null;
-  return { winId: win.id, ctx, host: hostFor(ctx) };
+  const winId = win.id;
+
+  const engine = resolveHelperEngine(deps, ctx.root);
+  if (engine.kind === 'gemini') {
+    const mgr = geminiHelperManager();
+    const host: GeminiHost = {
+      binary: engine.entry.binary,
+      cwd: ctx.root,
+      model: engine.entry.helperModel ?? DEFAULT_GEMINI_MODEL,
+    };
+    return {
+      ctx,
+      lightOrient: true, // Gemini has no AI-Lore skill — the cheap orient
+      connect: () => mgr.connect(winId, host),
+      submit: (prompt) => mgr.submit(winId, host, prompt),
+    };
+  }
+  const mgr = helperManager();
+  const host = hostFor(ctx);
+  return {
+    ctx,
+    lightOrient: false, // Claude loads the AI-Lore skill — the full orient is cheap
+    connect: () => mgr.connect(winId, host),
+    submit: (prompt) => mgr.submit(winId, host, prompt),
+  };
 }
 
-/** The AI-assistant (helper) channels — connect a visible, read-only `claude`
- *  for the window and drive read-only turns through it: canned actions and
- *  free-text questions (AI Helper). */
+/** The AI-assistant (helper) channels — connect a read-only assistant for the
+ *  window (a visible `claude` PTY or a headless `gemini`, per the picked engine)
+ *  and drive read-only turns through it: canned actions and free-text
+ *  questions (AI Helper). */
 export const registerHelper: RegisterModule = (reg, deps) => {
   reg.handle('helperConnect', async (event) => {
     const r = resolve(deps, event);
     if (!r) return;
-    await helperManager().connect(r.winId, r.host);
+    await r.connect();
   });
 
   reg.handle('helperAsk', async (event, action: HelperAction) => {
     const r = resolve(deps, event);
     if (!r) return;
-    await helperManager().submit(r.winId, r.host, promptForAction(r.ctx, action));
+    await r.submit(promptForAction(r.ctx, action, r.lightOrient));
   });
 
   reg.handle('helperAskText', async (event, text: string) => {
@@ -97,6 +148,24 @@ export const registerHelper: RegisterModule = (reg, deps) => {
     if (!r) return;
     const prompt = text.trim();
     if (!prompt) return;
-    await helperManager().submit(r.winId, r.host, prompt);
+    await r.submit(prompt);
+  });
+
+  reg.handle('helperEngineGet', (event) => {
+    const ctx = deps.contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return null;
+    return loadHelperEngine(deps.getUserDataDir(), ctx.root);
+  });
+
+  reg.handle('helperEngineSet', (event, engineId: string) => {
+    const ctx = deps.contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return;
+    if (typeof engineId !== 'string' || engineId.length === 0) return;
+    saveHelperEngine(deps.getUserDataDir(), ctx.root, engineId);
+  });
+
+  reg.handle('helperReset', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) disposeHelperForWindow(win.id);
   });
 };

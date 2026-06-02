@@ -1,6 +1,14 @@
+import type { EngineEntry } from '@ai-lore-companion/core';
 import { type FormEvent, type JSX, useEffect, useRef, useState } from 'react';
 import type { HelperAction, HelperPhase } from '../../../shared/ipc.js';
 import { HelperTerminal } from './HelperTerminal.js';
+
+/** The engines the read-only assistant can run on (CR7) — only Claude and
+ *  Gemini are helper-capable; other registered engines aren't offered. */
+function isHelperCapable(engine: EngineEntry): boolean {
+  const base = engine.binary.split('/').pop() ?? engine.binary;
+  return base === 'claude' || base === 'gemini';
+}
 
 /**
  * The AI-assistant panel (AI Helper, CR2) — a **visible, app-driven, read-only**
@@ -16,15 +24,42 @@ import { HelperTerminal } from './HelperTerminal.js';
 export function AssistantPanel({ active }: { active: boolean }): JSX.Element {
   const [phase, setPhase] = useState<HelperPhase | null>(null);
   const [ptyId, setPtyId] = useState<string | null>(null);
+  const [answer, setAnswer] = useState<string>('');
   const [error, setError] = useState<string>('');
   const [text, setText] = useState<string>('');
+  // The assistant-engine dropdown (CR7): the helper-capable engines and the one
+  // picked for this project (persisted), defaulting to the first (Claude).
+  const [engines, setEngines] = useState<EngineEntry[]>([]);
+  const [engineId, setEngineId] = useState<string | null>(null);
   // Fire the one-time orient turn the first time the session reports ready.
   const orientedRef = useRef(false);
+
+  // Load the engine choices + this project's persisted pick once.
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const [list, picked] = await Promise.all([
+        window.cockpit.enginesList(),
+        window.cockpit.helperEngineGet(),
+      ]);
+      if (!live) return;
+      const capable = list.filter(isHelperCapable);
+      setEngines(capable);
+      setEngineId(picked ?? capable[0]?.id ?? null);
+    })();
+    return () => {
+      live = false;
+    };
+  }, []);
 
   useEffect(() => {
     return window.cockpit.onHelperEvent((event) => {
       setPhase(event.phase);
       if (event.ptyId) setPtyId(event.ptyId);
+      // A visible engine (Claude) shows its answer in the live terminal; a
+      // headless engine (Gemini, CR7) has no terminal, so the answer arrives on
+      // the event and is rendered as a card below.
+      if (event.phase === 'answered' && event.answer) setAnswer(event.answer);
       setError(event.phase === 'error' ? (event.error ?? 'Something went wrong.') : '');
       // Always orient first: the moment the session is ready, drive an orient
       // turn before the user asks anything, so every answer is grounded in the
@@ -36,8 +71,11 @@ export function AssistantPanel({ active }: { active: boolean }): JSX.Element {
     });
   }, []);
 
-  // Connected once the helper's terminal id has arrived (the `connecting` event).
-  const connected = ptyId !== null;
+  // Connected once the session is live. A visible engine (Claude) signals this
+  // with its terminal id on `connecting`; a headless engine (Gemini, CR7) has no
+  // terminal, so any working phase means connected.
+  const connected =
+    ptyId !== null || phase === 'ready' || phase === 'thinking' || phase === 'answered';
   // No turn can be driven while connecting or thinking.
   const busy = phase === 'connecting' || phase === 'thinking';
 
@@ -45,6 +83,21 @@ export function AssistantPanel({ active }: { active: boolean }): JSX.Element {
     setError('');
     setPhase('connecting');
     void window.cockpit.helperConnect();
+  };
+
+  // Switch the assistant's engine (CR7): persist the choice for this project,
+  // tear down the current session, and reset to disconnected so the next
+  // Connect launches the newly-picked engine.
+  const onEngineChange = async (id: string): Promise<void> => {
+    if (!id || id === engineId) return;
+    setEngineId(id);
+    await window.cockpit.helperEngineSet(id);
+    await window.cockpit.helperReset();
+    orientedRef.current = false;
+    setPhase(null);
+    setPtyId(null);
+    setAnswer('');
+    setError('');
   };
 
   const onAsk = (action: HelperAction): void => {
@@ -65,7 +118,23 @@ export function AssistantPanel({ active }: { active: boolean }): JSX.Element {
     <div style={paneStyle} data-testid="pane-assistant" data-pane="assistant">
       <div style={headerStyle}>
         <span style={headerLabelStyle}>Assistant</span>
-        <span style={headerHintStyle}>read-only · you watch, the app drives</span>
+        <span style={headerHintStyle}>read-only · app-driven</span>
+        {engines.length > 1 ? (
+          <select
+            style={engineSelectStyle}
+            value={engineId ?? ''}
+            onChange={(e) => void onEngineChange(e.target.value)}
+            disabled={busy}
+            data-testid="assistant-engine"
+            title="Which AI runs the assistant (saved per project)"
+          >
+            {engines.map((engine) => (
+              <option key={engine.id} value={engine.id}>
+                {engine.name}
+              </option>
+            ))}
+          </select>
+        ) : null}
       </div>
 
       <div style={controlsStyle}>
@@ -135,11 +204,17 @@ export function AssistantPanel({ active }: { active: boolean }): JSX.Element {
       ) : null}
 
       <div style={sessionWrapStyle}>
-        {connected && ptyId ? (
+        {ptyId ? (
           <HelperTerminal ptyId={ptyId} active={active} />
+        ) : answer ? (
+          <div style={answerStyle} data-testid="assistant-answer">
+            {answer}
+          </div>
         ) : (
           <div style={hintStyle} data-testid="assistant-hint">
-            Connect a read-only assistant to watch it read this project and answer your questions.
+            {connected
+              ? 'Ask a question — the assistant reads this project and answers here.'
+              : 'Connect a read-only assistant to read this project and answer your questions.'}
           </div>
         )}
       </div>
@@ -195,6 +270,16 @@ const headerHintStyle: React.CSSProperties = {
   fontSize: '0.72rem',
   color: '#6c7783',
   fontStyle: 'italic',
+};
+
+const engineSelectStyle: React.CSSProperties = {
+  marginLeft: 'auto',
+  padding: '0.15rem 0.3rem',
+  background: '#0c121a',
+  border: '1px solid #2c4055',
+  borderRadius: '4px',
+  color: '#dde3ea',
+  fontSize: '0.72rem',
 };
 
 const controlsStyle: React.CSSProperties = {
@@ -269,4 +354,17 @@ const hintStyle: React.CSSProperties = {
   lineHeight: 1.5,
   color: '#6c7783',
   textAlign: 'center',
+};
+
+/** The answer card for a headless engine (Gemini, CR7) — no live terminal, so
+ *  the latest answer is rendered here as scrollable prose. */
+const answerStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflow: 'auto',
+  padding: '0.8rem',
+  fontSize: '0.82rem',
+  lineHeight: 1.6,
+  color: '#dde3ea',
+  whiteSpace: 'pre-wrap',
 };

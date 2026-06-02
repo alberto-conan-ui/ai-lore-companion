@@ -68,6 +68,10 @@ export type HelperManagerDeps = {
 };
 
 export type HelperManager = {
+  /** Engine id — Claude (the {@link HelperEngine} seam, CR7). */
+  readonly id: 'claude';
+  /** Claude hosts a visible PTY session the panel binds an xterm to (CR2). */
+  readonly hasVisibleSession: true;
   /** Ensure the window's helper is connected; resolves once it is `ready`. The
    *  `host` supplies the window's PTY spawn (used only on a fresh connect). */
   connect: (winId: number, host: HelperHost) => Promise<void>;
@@ -249,5 +253,5 @@ export function createHelperManager(deps: HelperManagerDeps): HelperManager {
     await deps.middleman.close();
   }
 
-  return { connect, submit, disposeForWindow, disposeAll };
+  return { id: 'claude', hasVisibleSession: true, connect, submit, disposeForWindow, disposeAll };
 }

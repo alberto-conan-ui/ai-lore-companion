@@ -22,6 +22,15 @@ export type EngineEntry = {
   binary: string;
   /** Optional argv passed to the engine on Start. */
   args?: string[];
+  /**
+   * Optional model the **read-only helper** launches this engine with (AI
+   * Helper, CR7) — free-text, since each engine names its own models (Claude:
+   * `haiku`/`sonnet`/`opus`; Gemini: `gemini-2.5-flash`/…). The helper-engine
+   * adapter maps it to the engine's model flag (`--model`); when unset, the
+   * adapter falls back to its own default. Does **not** affect the user's own
+   * interactive AI tab — only the app-driven helper.
+   */
+  helperModel?: string;
 };
 
 /** Shape-check a raw value as an `EngineEntry`. Tolerant of extra fields. */
@@ -35,6 +44,7 @@ export function isEngineEntry(value: unknown): value is EngineEntry {
     if (!Array.isArray(o.args)) return false;
     if (!o.args.every((a) => typeof a === 'string')) return false;
   }
+  if (o.helperModel !== undefined && typeof o.helperModel !== 'string') return false;
   return true;
 }
 
@@ -48,6 +58,9 @@ export function parseEngineEntry(value: unknown): EngineEntry | null {
     binary: v.binary as string,
   };
   if (Array.isArray(v.args)) out.args = (v.args as string[]).slice();
+  if (typeof v.helperModel === 'string' && v.helperModel.length > 0) {
+    out.helperModel = v.helperModel;
+  }
   return out;
 }
 
@@ -56,7 +69,8 @@ export function parseEngineEntry(value: unknown): EngineEntry | null {
  *  operate off this; the named wrappers below preserve existing call sites. */
 export const engineCatalog: CatalogModel<EngineEntry> = {
   parseEntry: parseEngineEntry,
-  identity: (e) => `${e.id}|${e.name.toLowerCase()}|${e.binary}|${(e.args ?? []).join(' ')}`,
+  identity: (e) =>
+    `${e.id}|${e.name.toLowerCase()}|${e.binary}|${(e.args ?? []).join(' ')}|${e.helperModel ?? ''}`,
 };
 
 /** Parse an array of entries from a raw value, dropping malformed elements. */

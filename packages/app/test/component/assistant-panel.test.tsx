@@ -15,6 +15,10 @@ import type { HelperEventPayload } from '../../src/shared/ipc.js';
 let helperConnect: ReturnType<typeof vi.fn>;
 let helperAsk: ReturnType<typeof vi.fn>;
 let helperAskText: ReturnType<typeof vi.fn>;
+let helperEngineSet: ReturnType<typeof vi.fn>;
+let helperReset: ReturnType<typeof vi.fn>;
+let enginesList: ReturnType<typeof vi.fn>;
+let helperEngineGet: ReturnType<typeof vi.fn>;
 let pushHandler: ((p: HelperEventPayload) => void) | null;
 
 /** The visible button's disabled state — jest-dom matchers aren't configured. */
@@ -25,11 +29,20 @@ beforeEach(() => {
   helperConnect = vi.fn();
   helperAsk = vi.fn();
   helperAskText = vi.fn();
+  helperEngineSet = vi.fn(async () => {});
+  helperReset = vi.fn(async () => {});
+  // Default: no extra engines → no dropdown. Tests that exercise it override.
+  enginesList = vi.fn(async () => []);
+  helperEngineGet = vi.fn(async () => null);
   pushHandler = null;
   (window as unknown as { cockpit: unknown }).cockpit = {
     helperConnect,
     helperAsk,
     helperAskText,
+    helperEngineSet,
+    helperReset,
+    enginesList,
+    helperEngineGet,
     onHelperEvent: (handler: (p: HelperEventPayload) => void) => {
       pushHandler = handler;
       return () => {
@@ -137,6 +150,44 @@ test('the ask box + actions are disabled while a turn is thinking', () => {
   expect(disabled('assistant-ask')).toBe(true);
   expect(disabled('assistant-what-changed')).toBe(true);
   expect((screen.getByTestId('assistant-input') as HTMLInputElement).disabled).toBe(true);
+});
+
+test('a headless engine (no ptyId) connects on ready and renders the answer as a card', () => {
+  render(<AssistantPanel active={true} />);
+  fireEvent.click(screen.getByTestId('assistant-connect'));
+  // Gemini (CR7): connecting then ready, both without a ptyId — no terminal.
+  emit({ sessionId: 'g1', phase: 'connecting' });
+  emit({ sessionId: 'g1', phase: 'ready' });
+
+  // Connected without a terminal: the action is enabled, no xterm is bound.
+  expect(disabled('assistant-ask')).toBe(false);
+  expect(screen.queryByTestId('helper-terminal')).toBeNull();
+
+  // The answer arrives on the event (not in a terminal) and renders as a card.
+  emit({ sessionId: 'g1', phase: 'answered', answer: 'Pending: CR7 is being built.' });
+  expect(screen.getByTestId('assistant-answer').textContent).toMatch(/CR7 is being built/);
+  expect(screen.queryByTestId('helper-terminal')).toBeNull();
+});
+
+test('the engine dropdown lists helper-capable engines; switching persists + resets', async () => {
+  enginesList.mockResolvedValue([
+    { id: 'default.claude', name: 'Claude', binary: 'claude' },
+    { id: 'default.gemini', name: 'Gemini', binary: 'gemini' },
+    { id: 'custom.cursor', name: 'Cursor', binary: 'cursor' }, // not helper-capable → filtered out
+  ]);
+  render(<AssistantPanel active={true} />);
+
+  const select = (await screen.findByTestId('assistant-engine')) as HTMLSelectElement;
+  // Only Claude + Gemini are offered; defaults to the first when none persisted.
+  expect([...select.options].map((o) => o.value)).toEqual(['default.claude', 'default.gemini']);
+  expect(select.value).toBe('default.claude');
+
+  await act(async () => {
+    fireEvent.change(select, { target: { value: 'default.gemini' } });
+  });
+  // Persisted per project + the current session is torn down for the switch.
+  expect(helperEngineSet).toHaveBeenCalledWith('default.gemini');
+  expect(helperReset).toHaveBeenCalled();
 });
 
 test('an error phase renders the error message', () => {

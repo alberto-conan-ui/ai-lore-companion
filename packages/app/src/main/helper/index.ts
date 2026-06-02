@@ -10,12 +10,15 @@
  * [`../ipc/helper.ts`](../ipc/helper.ts) and passed to the manager as a host.
  */
 
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BrowserWindow } from 'electron';
 import { CHANNELS, type HelperEventPayload } from '../../shared/ipc.js';
+import type { HelperEngine } from './engine.js';
+import { type GeminiHost, createGeminiHelper, readOnlyPolicyToml } from './gemini.js';
 import { sessionStartScript, settingsJson, stopScript } from './hooks.js';
 import { type HelperManager, createHelperManager } from './manager.js';
 import { createMiddleman } from './middleman.js';
@@ -47,7 +50,7 @@ function emit(winId: number, event: HelperEventPayload): void {
 
 let manager: HelperManager | null = null;
 
-/** The app-wide helper manager, built on first use. */
+/** The app-wide Claude helper manager, built on first use. */
 export function helperManager(): HelperManager {
   if (manager) return manager;
   manager = createHelperManager({
@@ -60,13 +63,92 @@ export function helperManager(): HelperManager {
   return manager;
 }
 
-/** Tear down a window's helper (called from the window teardown). No-op if the
- *  manager was never built. */
+// --- Gemini helper (CR7) — headless, no PTY/hooks/middleman -----------------
+
+const LOGIN_SHELL = process.env.SHELL ?? '/bin/zsh';
+
+/** Quote a token for the login-shell `-c` payload (mirror of `pty.ts`). */
+function shellQuote(token: string): string {
+  if (/^[A-Za-z0-9_\-./]+$/.test(token)) return token;
+  return `'${token.replace(/'/g, "'\\''")}'`;
+}
+
+/** Pull a short error line out of `gemini`'s stderr/stdout when a run fails —
+ *  the CLI reports backend failures as a JSON `{ error: { code, message } }`,
+ *  on stderr in headless mode. Returns e.g. "Gemini error 500", or null. */
+function geminiErrorMessage(text: string): string | null {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start < 0 || end <= start) return null;
+  try {
+    const obj = JSON.parse(text.slice(start, end + 1)) as { error?: { code?: unknown } };
+    if (obj.error) {
+      const code = typeof obj.error.code === 'number' ? ` ${obj.error.code}` : '';
+      return `Gemini error${code}`;
+    }
+  } catch {
+    // not JSON
+  }
+  return null;
+}
+
+/** Run `gemini` headless through the user's login shell — the same PATH source
+ *  the PTY engine spawn uses, so a bare `gemini` resolves the way the user's
+ *  terminal would. The interactive shell prints job-control noise to stderr;
+ *  the `-o json` answer comes back clean on stdout. A non-zero exit with no
+ *  stdout is a real failure — reject with the engine's own error (off stderr)
+ *  so the panel can show *why*, not a generic message. A 2-minute hard timeout
+ *  kills a hung process. */
+function runGemini(binary: string, args: string[], cwd: string): Promise<string> {
+  const cmd = [binary, ...args].map(shellQuote).join(' ');
+  return new Promise((resolve, reject) => {
+    execFile(
+      LOGIN_SHELL,
+      ['-i', '-l', '-c', cmd],
+      { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 120_000 },
+      (err, stdout, stderr) => {
+        // A normal answer comes on stdout (exit 0); let the parser judge it.
+        if (stdout?.trim()) return resolve(stdout);
+        if (err) return reject(new Error(geminiErrorMessage(stderr ?? '') ?? err.message));
+        resolve(stdout);
+      },
+    );
+  });
+}
+
+/** Materialise the read-only admin-policy TOML into a fresh temp dir — never the
+ *  user's `~/.gemini/`. */
+function materializePolicy(): { dir: string; policyPath: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'ai-lore-helper-gemini-'));
+  const policyPath = join(dir, 'readonly.policy.toml');
+  writeFileSync(policyPath, readOnlyPolicyToml());
+  return { dir, policyPath };
+}
+
+let gemini: HelperEngine<GeminiHost> | null = null;
+
+/** The app-wide Gemini helper engine, built on first use. */
+export function geminiHelperManager(): HelperEngine<GeminiHost> {
+  if (gemini) return gemini;
+  gemini = createGeminiHelper({
+    run: runGemini,
+    materializePolicy,
+    cleanup: (dir) => rmSync(dir, { recursive: true, force: true }),
+    emit,
+    newId: () => randomUUID(),
+  });
+  return gemini;
+}
+
+/** Tear down a window's helper across both engines (called from the window
+ *  teardown). No-op for an engine that never owned the window. */
 export function disposeHelperForWindow(winId: number): void {
   manager?.disposeForWindow(winId);
+  gemini?.disposeForWindow(winId);
 }
 
 /** Tear down every helper and close the middleman (called on quit). */
 export async function disposeAllHelpers(): Promise<void> {
   if (manager) await manager.disposeAll();
+  if (gemini) await gemini.disposeAll();
 }
