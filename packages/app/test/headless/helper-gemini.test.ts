@@ -12,7 +12,12 @@ import type { HelperEventPayload } from '../../src/shared/ipc.js';
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
 const PROMPT = 'Read status.index.md and summarize what is pending.';
-const HOST: GeminiHost = { binary: 'gemini', cwd: '/proj', model: 'gemini-2.5-flash' };
+const HOST: GeminiHost = {
+  binary: 'gemini',
+  cwd: '/proj/.ai-lore-x/memory',
+  includeDirs: ['/proj'],
+  model: 'gemini-2.5-flash',
+};
 
 // --- pure builders: the read-only guarantee in test form ---------------------
 
@@ -51,6 +56,23 @@ test('launch args use default approval mode (NOT plan) + the admin policy + json
 test('launch args omit --model when no model is configured', () => {
   const args = geminiLaunchArgs({ prompt: PROMPT, policyPath: '/tmp/p.toml' });
   assert.ok(!args.includes('--model'));
+});
+
+test('launch args add an --include-directories for each included root', () => {
+  const args = geminiLaunchArgs({
+    prompt: PROMPT,
+    policyPath: '/tmp/p.toml',
+    includeDirs: ['/proj', '/proj/extra'],
+  });
+  const included = args
+    .map((a, i) => (a === '--include-directories' ? args[i + 1] : null))
+    .filter((v): v is string => v !== null);
+  assert.deepEqual(included, ['/proj', '/proj/extra']);
+});
+
+test('launch args omit --include-directories when none are given', () => {
+  const args = geminiLaunchArgs({ prompt: PROMPT, policyPath: '/tmp/p.toml' });
+  assert.ok(!args.includes('--include-directories'));
 });
 
 test('parseGeminiResult reads the response field', () => {
@@ -113,12 +135,15 @@ test('the engine advertises itself: id gemini, no visible session', () => {
   assert.equal(h.helper.hasVisibleSession, false);
 });
 
-test('submit runs gemini in the project cwd and emits thinking → answered with the parsed response', async () => {
+test('submit runs gemini in the host cwd (the lore repo) with the included payload, thinking → answered', async () => {
   const h = makeGemini();
   await h.helper.submit(1, HOST, PROMPT);
   assert.equal(h.runArgs.length, 1);
-  assert.equal(h.runArgs[0]?.cwd, '/proj');
+  assert.equal(h.runArgs[0]?.cwd, '/proj/.ai-lore-x/memory');
   assert.ok(h.runArgs[0]?.args.includes('--admin-policy'));
+  // The payload root is handed in as a readable dir.
+  const args = h.runArgs[0]?.args ?? [];
+  assert.equal(args[args.indexOf('--include-directories') + 1], '/proj');
   assert.deepEqual(h.phases(), ['thinking', 'answered']);
   assert.equal(h.events.at(-1)?.answer, 'Pending: CR7 is being built.');
   // No visible terminal → never emits a ptyId.

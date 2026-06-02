@@ -2,7 +2,8 @@ import type { ChangeScope, EngineEntry, TabLastSession } from '@ai-lore-companio
 import type { CSSProperties, JSX, ReactNode } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { AiTab } from './AiTab.js';
-import { AssistantPanel } from './AssistantPanel.js';
+import { AssistantFeed } from './AssistantFeed.js';
+import { AssistantHost } from './AssistantHost.js';
 import { Banner } from './Banner.js';
 import { BrowserTab } from './BrowserTab.js';
 import { Pane, type SubRoot } from './Pane.js';
@@ -241,10 +242,13 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
       // contract `publish/` is write-restricted and the companion tracks no
       // drift against it, so it carries no PaneSpec.
       if (tab.id === 'publish') return <PublishPane />;
-      // The `assistant` pane (AI Helper) is likewise its own component — a
-      // read-only helper surface, not a file-tree pane, so it has no PaneSpec.
-      // `visible` drives the embedded terminal's re-fit when the tab is shown.
-      if (tab.id === 'assistant') return <AssistantPanel active={visible} />;
+      // The AI-assistant surfaces (AI Helper, CR9) are their own components, not
+      // file-tree panes, so they carry no PaneSpec. The two-surface split: the
+      // left `assistant` tab renders the read-only output (click-driven); the
+      // mid-pane `assistant-host` tab hosts the live session (`visible` drives
+      // its embedded Claude terminal's re-fit when shown).
+      if (tab.id === 'assistant') return <AssistantFeed />;
+      if (tab.id === 'assistant-host') return <AssistantHost active={visible} />;
       const spec = ctx.paneSpecById.get(tab.id);
       if (!spec) return null;
       return (

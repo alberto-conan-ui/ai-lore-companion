@@ -274,8 +274,13 @@ const aiRunningWrapperStyle: React.CSSProperties = {
  * Rows are grouped by a hardcoded taxonomy mirroring `verbs.index.md`'s
  * functional split. Any verb not in the taxonomy lands in Advanced, which is
  * collapsed by default so the curated groups stay visible.
+ *
+ * The whole catalog sits behind a `▸ Skills` toggle, collapsed by default: when
+ * the AI-Lore skills are installed, `claude` autocompletes the `/ai-lore-<verb>`
+ * slash forms natively, so an always-expanded list is redundant chrome. The
+ * toggle keeps it one click away without filling the sidebar.
  */
-function PromptsColumn({
+export function PromptsColumn({
   ptyId,
   focusPty,
 }: {
@@ -284,9 +289,13 @@ function PromptsColumn({
 }): JSX.Element {
   const [prompts, setPrompts] = useState<PromptEntry[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  // null = still checking (render the catalog optimistically); false → this
-  // project is on the plain-text path, so the `/ai-lore-<verb>` slash forms
-  // wouldn't resolve — show the bootstrap hint instead of the catalog.
+  // The catalog is redundant once the skills are installed (the CLI
+  // autocompletes the slash forms), so it starts collapsed.
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  // null = still checking — render the collapsed `▸ Skills` toggle so the full
+  // catalog never flashes before the check resolves; false → this project is on
+  // the plain-text path, so the `/ai-lore-<verb>` slash forms wouldn't resolve —
+  // show the bootstrap hint instead of the catalog.
   const [installed, setInstalled] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -338,8 +347,8 @@ function PromptsColumn({
 
   const grouped = groupPrompts(prompts);
 
-  return (
-    <div style={promptsListStyle} data-testid="prompts-column">
+  const catalog = (
+    <>
       {PROMPT_GROUPS.map((group) => {
         const rows = grouped[group.label] ?? [];
         if (rows.length === 0) return null;
@@ -365,6 +374,20 @@ function PromptsColumn({
           No verbs found under <code>process/verbs/</code>.
         </div>
       ) : null}
+    </>
+  );
+
+  return (
+    <div style={promptsListStyle} data-testid="prompts-column">
+      <button
+        type="button"
+        style={advancedToggleStyle}
+        onClick={() => setSkillsOpen((o) => !o)}
+        data-testid="prompts-skills-toggle"
+      >
+        {skillsOpen ? '▾' : '▸'} Skills
+      </button>
+      {skillsOpen ? catalog : null}
     </div>
   );
 }

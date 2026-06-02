@@ -24,15 +24,6 @@
 import type { HelperEventPayload, HelperPhase } from '../../shared/ipc.js';
 import type { HelperEngine } from './engine.js';
 
-/**
- * The model the Gemini helper launches with when the engine has no configured
- * `helperModel` (CR7) — the analogue of Claude's `haiku` default. A *stable,
- * fast* tier for read-only Q&A: the CLI's bare default resolves to a preview
- * model (`gemini-3-flash`) that proved flaky; `gemini-2.5-flash` answers in a
- * few seconds and is GA. A later CR makes this user-configurable.
- */
-export const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
-
 /** Mutation tools denied to the read-only helper — `deny` excludes them from
  *  the model's memory (Policy Engine). */
 const DENY_MUTATION_TOOLS = ['write_file', 'replace', 'run_shell_command'] as const;
@@ -72,6 +63,7 @@ export function geminiLaunchArgs(opts: {
   prompt: string;
   policyPath: string;
   model?: string;
+  includeDirs?: string[];
 }): string[] {
   const args = [
     '-p',
@@ -84,6 +76,11 @@ export function geminiLaunchArgs(opts: {
     'json',
     '--skip-trust',
   ];
+  // Gemini's file tools only read inside its workspace (the cwd's git tree).
+  // The helper runs anchored in the lore's git repo so it can read the
+  // (gitignored-by-the-payload) lore; each included dir adds another readable
+  // root — the project root, so it still sees the payload. See {@link GeminiHost}.
+  for (const dir of opts.includeDirs ?? []) args.push('--include-directories', dir);
   if (opts.model) args.push('--model', opts.model);
   return args;
 }
@@ -126,9 +123,18 @@ export function parseGeminiResult(stdout: string): { answer: string } | { error:
 export type GeminiHost = {
   /** The engine binary — `gemini`, or an absolute path from its `EngineEntry`. */
   binary: string;
-  /** The project root — `gemini` runs here and reads project files from it. */
+  /** Where `gemini` runs — the **lore's git repo** (`<lore>/memory`), not the
+   *  project root. Gemini's file tools only read inside the cwd's git tree, and
+   *  the lore folder is gitignored by the payload; anchoring here is what lets
+   *  the helper read `status.index.md` & co. cleanly instead of thrashing on a
+   *  refused `read_file`. */
   cwd: string;
-  /** The model to launch with, from the resolved engine's `helperModel`. */
+  /** Extra readable roots beyond `cwd` — the **project root**, so the helper
+   *  still sees the payload (its files are passed as absolute paths). */
+  includeDirs?: string[];
+  /** The model to launch with, from the resolved engine's `helperModel`. Unset
+   *  → the CLI routes to its own default (the `--model` flag is honoured when
+   *  set, but recent CLIs may route regardless). */
   model?: string;
 };
 
@@ -225,7 +231,12 @@ export function createGeminiHelper(deps: GeminiHelperDeps): HelperEngine<GeminiH
     session.busy = true;
     emit(winId, session.sessionId, 'thinking');
     try {
-      const args = geminiLaunchArgs({ prompt, policyPath: session.policyPath, model: host.model });
+      const args = geminiLaunchArgs({
+        prompt,
+        policyPath: session.policyPath,
+        model: host.model,
+        includeDirs: host.includeDirs,
+      });
       const stdout = await withTimeout(deps.run(host.binary, args, host.cwd), turnTimeoutMs);
       if (!byWindow.has(winId)) return; // torn down mid-turn
       const result = parseGeminiResult(stdout);

@@ -45,10 +45,11 @@ type Panel = { tabs: WorkspaceTab[]; activeId: string };
  *  identical: pinned, unclosable, unmovable.
  */
 function panesForShape(shape: 'default' | 'publishing'): WorkspaceTab[] {
-  // The Assistant pane (AI Helper, CR1) is pinned last — the read-only helper's
-  // output surface. Like `publish`, it carries no PaneSpec (it's not a
-  // file-tree pane) and is rendered by its own component. CR8 folds it into the
-  // fuller left-pane restructure.
+  // The Assistant pane (AI Helper) is pinned last — the read-only helper's
+  // **output** surface (the click-driven feed). Like `publish`, it carries no
+  // PaneSpec (it's not a file-tree pane) and is rendered by its own component.
+  // Its session **host** is a separate pinned tab in the centre pane (CR9) —
+  // see CENTRE_PINNED.
   if (shape === 'publishing') {
     return [
       { id: 'status', kind: 'pane', title: 'Status' },
@@ -74,6 +75,13 @@ const PANEL_IDS = [
   'centreBottom',
   'rightBottom',
 ] as const;
+
+/** The centre pane's pinned tab(s) (AI Helper, CR9). The Assistant **host** —
+ *  where the read-only helper session lives — is a pinned, unclosable tab in the
+ *  mid pane, the counterpart to the left-rail Assistant **output** tab. Like the
+ *  left-rail panes it is seeded (never restored from a snapshot); user-created
+ *  shell/AI/browser tabs sit after it. */
+const CENTRE_PINNED: WorkspaceTab[] = [{ id: 'assistant-host', kind: 'pane', title: 'Assistant' }];
 
 /** First-launch default widths/heights, in px. leftRail lands near ~33% on a
  *  1200-1400px window; centre flexes; right is closed by default and opens to
@@ -152,7 +160,7 @@ export function App(): JSX.Element {
     // `shape: 'publishing'`, an effect below reconciles leftRail to include
     // the Publish pane.
     leftRail: { tabs: panesForShape('default'), activeId: 'status' },
-    centre: { tabs: [], activeId: '' },
+    centre: { tabs: [...CENTRE_PINNED], activeId: CENTRE_PINNED[0]?.id ?? '' },
     right: { tabs: [], activeId: '' },
     leftRailBottom: { tabs: [], activeId: '' },
     centreBottom: { tabs: [], activeId: '' },
@@ -895,9 +903,18 @@ export function App(): JSX.Element {
       const activeId = tabs.some((t) => t.id === p.activeId) ? p.activeId : (tabs[0]?.id ?? '');
       return { tabs, activeId };
     };
+    // The centre's pinned Assistant host (CR9) is seeded, never restored — like
+    // the left-rail panes — so prepend it ahead of the restored user tabs and
+    // keep the snapshot's active tab if it still exists.
+    const liftCentre = (p: LayoutPanel): Panel => {
+      const restored = p.tabs.map(tabFromLayout).filter((t): t is WorkspaceTab => t !== null);
+      const tabs = [...CENTRE_PINNED, ...restored];
+      const activeId = tabs.some((t) => t.id === p.activeId) ? p.activeId : (tabs[0]?.id ?? '');
+      return { tabs, activeId };
+    };
     setPanels((prev) => ({
       ...prev,
-      centre: liftPanel(layout.panels.centre),
+      centre: liftCentre(layout.panels.centre),
       right: liftPanel(layout.panels.right),
       leftRailBottom: liftPanel(layout.panels.leftRailBottom),
       centreBottom: liftPanel(layout.panels.centreBottom),

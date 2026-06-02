@@ -19,8 +19,11 @@ vi.mock('../../src/renderer/src/components/Pane.js', () => ({
 vi.mock('../../src/renderer/src/components/PublishPane.js', () => ({
   PublishPane: () => <div data-testid="body-publish" />,
 }));
-vi.mock('../../src/renderer/src/components/AssistantPanel.js', () => ({
-  AssistantPanel: () => <div data-testid="body-assistant" />,
+vi.mock('../../src/renderer/src/components/AssistantFeed.js', () => ({
+  AssistantFeed: () => <div data-testid="body-assistant" />,
+}));
+vi.mock('../../src/renderer/src/components/AssistantHost.js', () => ({
+  AssistantHost: () => <div data-testid="body-assistant-host" />,
 }));
 
 import type { WorkspaceTab } from '../../src/renderer/src/components/TabbedPanel.js';
@@ -236,9 +239,14 @@ describe('renderBody dispatches to the right body', () => {
     render(TAB_KINDS.pane.renderBody(tab({ id: 'publish', kind: 'pane' }), true, renderCtx()));
     expect(screen.getByTestId('body-publish')).toBeTruthy();
   });
-  test('the assistant pane renders the dedicated AssistantPanel', () => {
+  test('the assistant pane renders the output feed; the host pane renders the session host', () => {
     render(TAB_KINDS.pane.renderBody(tab({ id: 'assistant', kind: 'pane' }), true, renderCtx()));
     expect(screen.getByTestId('body-assistant')).toBeTruthy();
+    cleanup();
+    render(
+      TAB_KINDS.pane.renderBody(tab({ id: 'assistant-host', kind: 'pane' }), true, renderCtx()),
+    );
+    expect(screen.getByTestId('body-assistant-host')).toBeTruthy();
   });
   test('a pane with a matching spec renders a Pane labelled by the spec', () => {
     const ctx = renderCtx({

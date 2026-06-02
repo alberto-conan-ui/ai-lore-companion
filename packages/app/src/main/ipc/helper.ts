@@ -4,7 +4,7 @@ import { BrowserWindow } from 'electron';
 import type { HelperAction } from '../../shared/ipc.js';
 import { loadEngines, loadHelperEngine, saveHelperEngine } from '../engines.js';
 import { pickHelperEngine } from '../helper/engine.js';
-import { DEFAULT_GEMINI_MODEL, type GeminiHost } from '../helper/gemini.js';
+import type { GeminiHost } from '../helper/gemini.js';
 import { helperLaunchArgs, promptFor } from '../helper/hooks.js';
 import { disposeHelperForWindow, geminiHelperManager, helperManager } from '../helper/index.js';
 import type { HelperHost } from '../helper/manager.js';
@@ -50,10 +50,14 @@ function hostFor(ctx: ProjectContext): HelperHost {
 function changedPaths(ctx: ProjectContext): string[] {
   if (!ctx.wiring) return [];
   const snap = ctx.wiring.changes.snapshot();
-  // Payload paths are readable from the helper's cwd (the project root); lore
-  // paths live under the Lore folder, so label them rather than imply a path
-  // the helper could Read directly.
-  const all = [...snap.payload.map((e) => e.path), ...snap.lore.map((e) => `[lore] ${e.path}`)];
+  // Payload paths go out **absolute** so they resolve no matter where the engine
+  // is anchored (Claude at the project root; Gemini in the lore repo with the
+  // payload added as an included dir). Lore paths are labelled rather than handed
+  // over as readable paths — context, not a file to open.
+  const all = [
+    ...snap.payload.map((e) => join(ctx.root, e.path)),
+    ...snap.lore.map((e) => `[lore] ${e.path}`),
+  ];
   if (all.length <= MAX_CHANGED_PATHS) return all;
   return [...all.slice(0, MAX_CHANGED_PATHS), `…and ${all.length - MAX_CHANGED_PATHS} more`];
 }
@@ -106,8 +110,16 @@ function resolve(deps: Deps, event: Electron.IpcMainInvokeEvent): BoundHelper | 
     const mgr = geminiHelperManager();
     const host: GeminiHost = {
       binary: engine.entry.binary,
-      cwd: ctx.root,
-      model: engine.entry.helperModel ?? DEFAULT_GEMINI_MODEL,
+      // Anchor Gemini in the lore's git repo so it can read the (payload-
+      // gitignored) lore cleanly; add the project root back so it still sees the
+      // payload. Launching at the project root made `read_file` on lore files
+      // refuse + thrash → turn timeout. See {@link GeminiHost}.
+      cwd: join(ctx.chain.lorePath, 'memory'),
+      includeDirs: [ctx.root],
+      // No forced default — the CLI routes its own model (the old
+      // `gemini-2.5-flash` pin is ignored by current CLIs). An explicit
+      // per-engine `helperModel` is still honoured.
+      model: engine.entry.helperModel,
     };
     return {
       ctx,
