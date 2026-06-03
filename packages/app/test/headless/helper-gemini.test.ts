@@ -5,10 +5,12 @@ import {
   type GeminiHost,
   createGeminiHelper,
   geminiLaunchArgs,
+  geminiMcpSettings,
   parseGeminiResult,
   readOnlyPolicyToml,
 } from '../../src/main/helper/gemini.js';
-import type { HelperEventPayload } from '../../src/shared/ipc.js';
+import type { McpReport } from '../../src/main/helper/mcp-host.js';
+import type { HelperEventPayload, HelperReportPayload } from '../../src/shared/ipc.js';
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
 const PROMPT = 'Read status.index.md and summarize what is pending.';
@@ -100,8 +102,15 @@ test('parseGeminiResult surfaces a JSON error field instead of "no answer"', () 
 
 function makeGemini(over: Partial<GeminiHelperDeps> = {}) {
   const events: HelperEventPayload[] = [];
+  const reports: HelperReportPayload[] = [];
   const runArgs: { args: string[]; cwd: string }[] = [];
   const cleaned: string[] = [];
+  const mcpSettingsWrites: { loreDir: string; url: string; token: string }[] = [];
+  const mcpSettingsCleaned: string[] = [];
+  const mcpUnregistered: string[] = [];
+  let mcpRegistered:
+    | { sessionId: string; token: string; onReport: (r: McpReport) => void }
+    | undefined;
   let idN = 0;
   const deps: GeminiHelperDeps = {
     run: async (_binary, args, cwd) => {
@@ -110,6 +119,19 @@ function makeGemini(over: Partial<GeminiHelperDeps> = {}) {
     },
     materializePolicy: () => ({ dir: '/tmp/gem-0', policyPath: '/tmp/gem-0/readonly.policy.toml' }),
     cleanup: (dir) => cleaned.push(dir),
+    mcpHost: {
+      listen: async () => 5555,
+      endpoint: (sessionId) => `http://127.0.0.1:5555/mcp/${sessionId}`,
+      register: async (s) => {
+        mcpRegistered = s;
+      },
+      unregister: async (id) => {
+        mcpUnregistered.push(id);
+      },
+    },
+    emitReport: (_winId, report) => reports.push(report),
+    writeMcpSettings: (loreDir, opts) => mcpSettingsWrites.push({ loreDir, ...opts }),
+    cleanupMcpSettings: (loreDir) => mcpSettingsCleaned.push(loreDir),
     emit: (_winId, event) => events.push(event),
     newId: () => `gid${idN++}`,
     ...over,
@@ -117,8 +139,15 @@ function makeGemini(over: Partial<GeminiHelperDeps> = {}) {
   return {
     helper: createGeminiHelper(deps),
     events,
+    reports,
     runArgs,
     cleaned,
+    mcpSettingsWrites,
+    mcpSettingsCleaned,
+    mcpUnregistered,
+    get mcpRegistered() {
+      return mcpRegistered;
+    },
     phases: () => events.map((e) => e.phase),
   };
 }
@@ -193,9 +222,60 @@ test('a second submit while a turn is in flight is ignored (serialized)', async 
   await tick();
 });
 
-test('disposeForWindow drops the materialised policy temp dir', async () => {
+test('disposeForWindow drops the policy temp dir, the .gemini settings, and unhooks the MCP host', async () => {
   const h = makeGemini();
   await h.helper.connect(1, HOST);
   h.helper.disposeForWindow(1);
   assert.deepEqual(h.cleaned, ['/tmp/gem-0']);
+  assert.deepEqual(h.mcpSettingsCleaned, ['/proj/.ai-lore-x/memory']);
+  assert.deepEqual(h.mcpUnregistered, ['gid0']);
+});
+
+// CR10 — Gemini's structured egress: connect registers the session with the MCP
+// host (same id/token), writes the `.gemini/settings.json` into the lore cwd,
+// allowlists the server on launch, and routes a report tool call to the window.
+test('connect registers the MCP host and writes the .gemini settings into the lore cwd', async () => {
+  const h = makeGemini();
+  await h.helper.connect(1, HOST);
+  assert.equal(h.mcpRegistered?.sessionId, 'gid0');
+  assert.equal(h.mcpRegistered?.token, 'gid1');
+  // The settings landed in the lore dir (Gemini's cwd) with the session endpoint.
+  assert.equal(h.mcpSettingsWrites.length, 1);
+  assert.equal(h.mcpSettingsWrites[0]?.loreDir, '/proj/.ai-lore-x/memory');
+  assert.match(h.mcpSettingsWrites[0]?.url ?? '', /\/mcp\/gid0$/);
+  assert.equal(h.mcpSettingsWrites[0]?.token, 'gid1');
+});
+
+test('submit allowlists the MCP server, and a report tool call routes to the window', async () => {
+  const h = makeGemini();
+  await h.helper.submit(1, HOST, PROMPT);
+  // The launch allowlists the ailore MCP server so the report tool needs no prompt.
+  const args = h.runArgs[0]?.args ?? [];
+  const i = args.indexOf('--allowed-mcp-server-names');
+  assert.ok(i >= 0);
+  assert.equal(args[i + 1], 'ailore');
+  // A tool call lands on the window as a structured report (not scraped stdout).
+  h.mcpRegistered?.onReport({ tool: 'report_dashboard', payload: { focuses: [] } });
+  assert.deepEqual(h.reports, [
+    { sessionId: 'gid0', tool: 'report_dashboard', payload: { focuses: [] } },
+  ]);
+});
+
+test('the .gemini MCP settings name one local http server carrying the bearer token', () => {
+  const json = geminiMcpSettings({
+    serverName: 'ailore',
+    url: 'http://127.0.0.1:7/mcp/s1',
+    token: 'tok',
+  });
+  const parsed = JSON.parse(json) as {
+    mcpServers: Record<
+      string,
+      { url: string; type: string; trust: boolean; headers: Record<string, string> }
+    >;
+  };
+  const s = parsed.mcpServers.ailore;
+  assert.equal(s?.type, 'http');
+  assert.equal(s?.url, 'http://127.0.0.1:7/mcp/s1');
+  assert.equal(s?.trust, true);
+  assert.equal(s?.headers.Authorization, 'Bearer tok');
 });

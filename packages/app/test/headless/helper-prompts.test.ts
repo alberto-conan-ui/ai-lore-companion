@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { promptFor } from '../../src/main/helper/hooks.js';
+import { consolidatePrompt, humanizePrompt, promptFor } from '../../src/main/helper/hooks.js';
 
 const STATUS = '/proj/.ai-lore-proj/memory/status/status.index.md';
 
@@ -77,4 +77,41 @@ test('dashboard with a reportTool tells the model to CALL the tool, not print (C
   // The board shape + completeness rules are unchanged — only delivery differs.
   assert.match(p, /"focuses"/);
   assert.match(p, /completeness/i);
+});
+
+// CR10 — the curation ops (Humanize / Consolidate) report structured too. The
+// prompt is built in main and the delivery clause flips on the engine, exactly
+// like the dashboard crawl.
+
+test('humanize lists the items and, without a reportTool, asks for a JSON array (Gemini)', () => {
+  const p = humanizePrompt(['CR1 thing', 'CR2 thing']);
+  assert.match(p, /1\. "CR1 thing"/);
+  assert.match(p, /2\. "CR2 thing"/);
+  assert.match(p, /plain, friendly language/i);
+  assert.match(p, /ONLY a JSON array/i);
+  assert.doesNotMatch(p, /CALLING the/i);
+});
+
+test('humanize with a reportTool tells the model to CALL report_humanized (Claude, CR10)', () => {
+  const p = humanizePrompt(['a', 'b'], 'report_humanized');
+  assert.match(p, /CALLING the `report_humanized` tool/);
+  assert.match(p, /`rewrites` argument/);
+  assert.match(p, /do NOT print/i);
+  assert.doesNotMatch(p, /ONLY a JSON array/i);
+});
+
+test('consolidate is assertive and, without a reportTool, asks for a JSON object (Gemini)', () => {
+  const p = consolidatePrompt(['x', 'y']);
+  assert.match(p, /SELECTED these items/);
+  assert.match(p, /do NOT question whether they belong/i);
+  assert.match(p, /ONLY a JSON object/i);
+  assert.doesNotMatch(p, /CALLING the/i);
+});
+
+test('consolidate with a reportTool tells the model to CALL report_consolidation (Claude, CR10)', () => {
+  const p = consolidatePrompt(['x', 'y'], 'report_consolidation');
+  assert.match(p, /CALLING the `report_consolidation` tool/);
+  assert.match(p, /`title`/);
+  assert.match(p, /`text`/);
+  assert.doesNotMatch(p, /ONLY a JSON object/i);
 });

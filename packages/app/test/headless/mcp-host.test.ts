@@ -64,11 +64,42 @@ test('a tool arg passed as a JSON string is normalized to an object (the Claude 
   await client.close();
 });
 
-test('the report tool is advertised on the session', async () => {
+test('the report tools are advertised on the session', async () => {
   await host.register({ sessionId: 's1', token: 'tok', onReport: () => {} });
   const client = await connect('s1', 'tok');
   const { tools } = await client.listTools();
-  assert.ok(tools.some((t) => t.name === 'report_dashboard'));
+  const names = tools.map((t) => t.name);
+  // The dashboard crawl plus the two curation ops (CR10).
+  assert.ok(names.includes('report_dashboard'));
+  assert.ok(names.includes('report_humanized'));
+  assert.ok(names.includes('report_consolidation'));
+  await client.close();
+});
+
+test('report_humanized routes its typed rewrites array to onReport (CR10)', async () => {
+  const reports: McpReport[] = [];
+  await host.register({ sessionId: 's1', token: 'tok', onReport: (r) => reports.push(r) });
+  const client = await connect('s1', 'tok');
+  const rewrites = ['the first thing, in plain words', 'the second thing'];
+  await client.callTool({ name: 'report_humanized', arguments: { rewrites } });
+  assert.deepEqual(reports, [{ tool: 'report_humanized', payload: rewrites }]);
+  await client.close();
+});
+
+test('report_consolidation routes its typed {title,text} merge to onReport (CR10)', async () => {
+  const reports: McpReport[] = [];
+  await host.register({ sessionId: 's1', token: 'tok', onReport: (r) => reports.push(r) });
+  const client = await connect('s1', 'tok');
+  await client.callTool({
+    name: 'report_consolidation',
+    arguments: { title: 'Ship the thing', text: 'one combined piece of work' },
+  });
+  assert.deepEqual(reports, [
+    {
+      tool: 'report_consolidation',
+      payload: { title: 'Ship the thing', text: 'one combined piece of work' },
+    },
+  ]);
   await client.close();
 });
 

@@ -394,7 +394,8 @@ export type TerminalSpawnEngineArg = {
  * helper to read the lore and return a **structured JSON** snapshot — what the
  * project is doing, recently done, what's next, risks — in plain human language,
  * which the app renders as a glanceable dashboard (no walls of text). Free-text
- * questions go through `helperAskText`, not this union.
+ * questions go through `helperAskText`; the curation ops (Humanize / Consolidate)
+ * go through `helperHumanize` / `helperConsolidate` — neither is in this union.
  */
 export type HelperAction = 'summarize-pending' | 'what-changed' | 'orient' | 'dashboard';
 

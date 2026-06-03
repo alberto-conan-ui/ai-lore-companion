@@ -222,6 +222,15 @@ export const CONTRACT = {
   /** Ask the read-only helper a free-text question — connect if needed, inject
    *  the text as the turn, submit. Same `onHelperEvent` lifecycle as `helperAsk`. */
   helperAskText: invoke<[text: string], void>('helper:ask-text'),
+  /** Curation: reword the picked rows in plain language (CR9 Humanize). The app
+   *  builds the engine-appropriate prompt; on a structured engine (Claude, CR10)
+   *  the rewrites arrive as a `report_humanized` tool call on `onHelperReport`,
+   *  on a print-JSON engine (Gemini) as text on `onHelperEvent`. */
+  helperHumanize: invoke<[texts: string[]], void>('helper:humanize'),
+  /** Curation: merge the picked loose-ends into one (CR9 Consolidate). Result
+   *  rides the same split as {@link helperHumanize} — a `report_consolidation`
+   *  tool call (Claude) or scraped text (Gemini). */
+  helperConsolidate: invoke<[texts: string[]], void>('helper:consolidate'),
   /** Which engine this project's assistant uses (CR7) — the `EngineEntry.id`
    *  chosen in the Assistant panel's dropdown, persisted per project; `null`
    *  when unset (falls back to Claude). */

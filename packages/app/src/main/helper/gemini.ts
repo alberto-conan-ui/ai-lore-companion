@@ -21,8 +21,10 @@
  * Pure builders + a DI'd `run` keep it exercisable headlessly with fakes.
  */
 
-import type { HelperEventPayload, HelperPhase } from '../../shared/ipc.js';
+import type { HelperEventPayload, HelperPhase, HelperReportPayload } from '../../shared/ipc.js';
 import type { HelperEngine, HelperSubmitOpts } from './engine.js';
+import { MCP_SERVER_KEY } from './hooks.js';
+import type { McpHost } from './mcp-host.js';
 
 /** Mutation tools denied to the read-only helper — `deny` excludes them from
  *  the model's memory (Policy Engine). */
@@ -64,6 +66,10 @@ export function geminiLaunchArgs(opts: {
   policyPath: string;
   model?: string;
   includeDirs?: string[];
+  /** When set, allowlist this MCP server name (CR10) so the helper may call its
+   *  report tool without a confirmation prompt. The server itself is declared in
+   *  the cwd's `.gemini/settings.json` (project scope). */
+  mcpServerName?: string;
 }): string[] {
   const args = [
     '-p',
@@ -81,8 +87,36 @@ export function geminiLaunchArgs(opts: {
   // (gitignored-by-the-payload) lore; each included dir adds another readable
   // root — the project root, so it still sees the payload. See {@link GeminiHost}.
   for (const dir of opts.includeDirs ?? []) args.push('--include-directories', dir);
+  if (opts.mcpServerName) args.push('--allowed-mcp-server-names', opts.mcpServerName);
   if (opts.model) args.push('--model', opts.model);
   return args;
+}
+
+/** The Gemini **project-scope** `.gemini/settings.json` declaring the local MCP
+ *  server (CR10) — the structured egress, the analogue of Claude's `mcp.json`.
+ *  Gemini has no `--mcp-config` flag, so this file lives in the cwd's `.gemini/`
+ *  (the lore dir, git-excluded so it never dirties the repo). `trust: true`
+ *  skips the per-call confirmation a headless turn cannot answer. Pure so the
+ *  shape is assertable without spawning. */
+export function geminiMcpSettings(opts: {
+  serverName: string;
+  url: string;
+  token: string;
+}): string {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        [opts.serverName]: {
+          url: opts.url,
+          type: 'http',
+          headers: { Authorization: `Bearer ${opts.token}` },
+          trust: true,
+        },
+      },
+    },
+    null,
+    2,
+  );
 }
 
 /** Extract the assistant answer from `gemini -o json` stdout. The happy path is
@@ -147,9 +181,21 @@ export type GeminiHelperDeps = {
   materializePolicy: () => { dir: string; policyPath: string };
   /** Remove a materialised temp dir on teardown. */
   cleanup: (dir: string) => void;
+  /** The app-level MCP host (CR10) — the structured egress. The engine registers
+   *  each session's report callback here at connect and unhooks it at teardown. */
+  mcpHost: Pick<McpHost, 'listen' | 'endpoint' | 'register' | 'unregister'>;
+  /** Emit a structured report (an MCP tool call) to the window (Channel C). */
+  emitReport: (winId: number, report: HelperReportPayload) => void;
+  /** Write the session's `.gemini/settings.json` (the MCP server) into the lore
+   *  `cwd`'s `.gemini/`, git-excluded so it never dirties the lore repo. Gemini
+   *  has no `--mcp-config`, so project-scope settings are the only out-of-tree
+   *  path. DI'd so the engine stays electron/fs-free and headlessly testable. */
+  writeMcpSettings: (loreDir: string, opts: { url: string; token: string }) => void;
+  /** Remove the session's `.gemini/settings.json` from the lore dir on teardown. */
+  cleanupMcpSettings: (loreDir: string) => void;
   /** Emit a helper event to the window that owns the session. */
   emit: (winId: number, event: HelperEventPayload) => void;
-  /** Mint a random id (UUID in production) — the per-window session id. */
+  /** Mint a random id (UUID in production) — the per-window session id + token. */
   newId: () => string;
   /** How long to wait for a turn before giving up (default 10min). Generous on
    *  purpose: the status-dashboard crawl is a whole-lore read that can run
@@ -189,8 +235,14 @@ function turnErrorMessage(err: unknown): string {
 
 type GeminiSession = {
   sessionId: string;
+  token: string;
   dir: string;
   policyPath: string;
+  /** The lore dir the helper runs in (its cwd) — where `.gemini/settings.json`
+   *  is written, and what teardown cleans up. Set on first connect. */
+  loreDir: string | null;
+  /** Registered with the MCP host + `.gemini/settings.json` written. */
+  mcpReady: boolean;
   /** True while a turn is in flight (serialization gate). */
   busy: boolean;
 };
@@ -214,13 +266,42 @@ export function createGeminiHelper(deps: GeminiHelperDeps): HelperEngine<GeminiH
     const existing = byWindow.get(winId);
     if (existing) return existing;
     const { dir, policyPath } = deps.materializePolicy();
-    const session: GeminiSession = { sessionId: deps.newId(), dir, policyPath, busy: false };
+    const session: GeminiSession = {
+      sessionId: deps.newId(),
+      token: deps.newId(),
+      dir,
+      policyPath,
+      loreDir: null,
+      mcpReady: false,
+      busy: false,
+    };
     byWindow.set(winId, session);
     return session;
   }
 
-  async function connect(winId: number, _host: GeminiHost): Promise<void> {
+  /** Register the session's structured egress (CR10): bind the MCP host, route
+   *  its report calls to this window, and write the `.gemini/settings.json` that
+   *  points the headless turn at it. Idempotent per session. The `cwd` is the
+   *  lore dir — Gemini's only project-scope settings location. */
+  async function ensureMcp(winId: number, session: GeminiSession, host: GeminiHost): Promise<void> {
+    if (session.mcpReady) return;
+    await deps.mcpHost.listen();
+    deps.mcpHost.register({
+      sessionId: session.sessionId,
+      token: session.token,
+      onReport: ({ tool, payload }) => {
+        deps.emitReport(winId, { sessionId: session.sessionId, tool, payload });
+      },
+    });
+    const url = deps.mcpHost.endpoint(session.sessionId) ?? '';
+    deps.writeMcpSettings(host.cwd, { url, token: session.token });
+    session.loreDir = host.cwd;
+    session.mcpReady = true;
+  }
+
+  async function connect(winId: number, host: GeminiHost): Promise<void> {
     const session = ensure(winId);
+    await ensureMcp(winId, session, host);
     // No persistent process to boot — a headless engine is ready at once. Emit
     // connecting→ready so the panel enables its controls, same as Claude.
     emit(winId, session.sessionId, 'connecting');
@@ -238,11 +319,13 @@ export function createGeminiHelper(deps: GeminiHelperDeps): HelperEngine<GeminiH
     session.busy = true;
     emit(winId, session.sessionId, 'thinking');
     try {
+      await ensureMcp(winId, session, host); // structured egress (idempotent)
       const args = geminiLaunchArgs({
         prompt,
         policyPath: session.policyPath,
         model: host.model,
         includeDirs: host.includeDirs,
+        mcpServerName: MCP_SERVER_KEY,
       });
       const stdout = await withTimeout(
         deps.run(host.binary, args, host.cwd),
@@ -269,6 +352,8 @@ export function createGeminiHelper(deps: GeminiHelperDeps): HelperEngine<GeminiH
     const session = byWindow.get(winId);
     if (!session) return;
     byWindow.delete(winId);
+    if (session.mcpReady) void deps.mcpHost.unregister(session.sessionId);
+    if (session.loreDir) deps.cleanupMcpSettings(session.loreDir);
     deps.cleanup(session.dir);
   }
 

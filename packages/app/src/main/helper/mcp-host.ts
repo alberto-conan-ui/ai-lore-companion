@@ -71,11 +71,14 @@ export type McpHost = {
   close: () => Promise<void>;
 };
 
-/** The report tools the host exposes. CR10 Phase 1 hosts the one tool the
- *  dashboard crawl needs to prove the channel end-to-end; Phase 2 tightens the
- *  schema (a real `FocusBoard`) and adds `report_humanized` /
- *  `report_consolidation` / `report_answer` beside it. Each tool routes its
- *  validated argument to the session's `onReport` as `{ tool, payload }`. */
+/** The report tools the host exposes. Each routes its validated argument to the
+ *  session's `onReport` as `{ tool, payload }`. The **dashboard** stays a loose
+ *  `z.unknown()` board (a typed `FocusBoard` schema would make a cheap model
+ *  retry-loop formatting the big nested argument — Phase 2 still owes the shared
+ *  schema; the renderer shape-guards meanwhile). The **curation** tools carry
+ *  small payloads, so they are **typed** — MCP then validates/coerces the shape
+ *  and the model self-corrects on a bad call, exactly the spike's recommendation
+ *  (2026-06-03). `report_answer` (prose Q&A) still owes its move. */
 const REPORT_TOOLS: ReadonlyArray<{
   name: string;
   description: string;
@@ -90,6 +93,22 @@ const REPORT_TOOLS: ReadonlyArray<{
       'Call this with the board instead of printing it — the app receives it directly.',
     shape: { board: z.unknown() },
     payload: (args) => args.board,
+  },
+  {
+    name: 'report_humanized',
+    description:
+      'Report the plain-language rewrites of the items the user asked to humanize. ' +
+      'Call this with the `rewrites` array — one rewrite per item, in the same order — instead of printing them.',
+    shape: { rewrites: z.array(z.string()) },
+    payload: (args) => args.rewrites,
+  },
+  {
+    name: 'report_consolidation',
+    description:
+      'Report the single merged item for the rows the user selected to consolidate. ' +
+      'Call this with `title` and `text` instead of printing them.',
+    shape: { title: z.string(), text: z.string() },
+    payload: (args) => ({ title: args.title, text: args.text }),
   },
 ];
 

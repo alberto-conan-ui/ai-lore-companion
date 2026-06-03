@@ -332,6 +332,20 @@
 .status-panel .fcard.tone-info  { box-shadow: inset 3px 0 0 -1px oklch(0.70 0.045 250 / 0.5); }
 
 .status-panel .fc-head { display: flex; gap: 14px; align-items: center; }
+/* the focus's own select toggle — the parent, independent of its children (CR10) */
+.status-panel .fc-check {
+  flex: 0 0 auto; align-self: flex-start; margin-top: 3px;
+  width: 15px; height: 15px; cursor: pointer; accent-color: var(--sp-info);
+}
+.status-panel .fc-check:disabled { cursor: default; opacity: 0.3; }
+/* the header "select all" — ticks the children, separate from the parent toggle */
+.status-panel .fc-selectall {
+  flex: 0 0 auto; align-self: flex-start; margin-top: 2px;
+  background: none; border: 0; padding: 2px 4px; cursor: pointer;
+  font-family: var(--sp-mono); font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--sp-muted);
+}
+.status-panel .fc-selectall:hover { color: var(--sp-info); }
 .status-panel .fc-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .status-panel .fc-top { display: flex; align-items: center; gap: 10px; }
 .status-panel .fc-name { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--sp-text); }

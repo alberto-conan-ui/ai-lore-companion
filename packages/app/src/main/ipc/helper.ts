@@ -5,7 +5,7 @@ import type { HelperAction } from '../../shared/ipc.js';
 import { loadEngines, loadHelperEngine, saveHelperEngine } from '../engines.js';
 import { type HelperSubmitOpts, pickHelperEngine } from '../helper/engine.js';
 import type { GeminiHost } from '../helper/gemini.js';
-import { helperLaunchArgs, promptFor } from '../helper/hooks.js';
+import { consolidatePrompt, helperLaunchArgs, humanizePrompt, promptFor } from '../helper/hooks.js';
 import { disposeHelperForWindow, geminiHelperManager, helperManager } from '../helper/index.js';
 import type { HelperHost } from '../helper/manager.js';
 import type { Deps, ProjectContext, RegisterModule } from './types.js';
@@ -78,10 +78,14 @@ function changedPaths(ctx: ProjectContext): string[] {
   return [...all.slice(0, MAX_CHANGED_PATHS), `…and ${all.length - MAX_CHANGED_PATHS} more`];
 }
 
-/** The MCP tool the `dashboard` crawl calls to deliver the board (CR10). Bare
- *  name as the model sees it — must match a tool the {@link ../helper/mcp-host.ts}
- *  registers. Engines without an MCP egress yet pass `null` (print-JSON). */
+/** The MCP report tools the structured engine (Claude) calls instead of printing
+ *  JSON (CR10). Bare names as the model sees them — each must match a tool
+ *  {@link ../helper/mcp-host.ts} registers and {@link ../helper/hooks.ts}
+ *  pre-authorizes. A non-structured engine (Gemini) prints JSON the renderer
+ *  scrapes, until its MCP egress lands. */
 const DASHBOARD_REPORT_TOOL = 'report_dashboard';
+const HUMANIZE_REPORT_TOOL = 'report_humanized';
+const CONSOLIDATE_REPORT_TOOL = 'report_consolidation';
 
 /** Turn timeout for the `dashboard` crawl. It reads the WHOLE lore before
  *  reporting — ~145s on interactive Haiku (measured 2026-06-03), past the snappy
@@ -132,9 +136,11 @@ type BoundHelper = {
   /** True for engines without the AI-Lore skill (headless Gemini) — use the
    *  cheap one-file orient so the first turn doesn't blow the timeout. */
   lightOrient: boolean;
-  /** The MCP tool the `dashboard` crawl reports through (CR10), or null for an
-   *  engine still on the print-JSON path (Gemini, until its MCP egress lands). */
-  reportTool: string | null;
+  /** True for an engine that reports through the local MCP server — it **calls**
+   *  the `report_*` tools (Claude, CR10); false for one still on the print-JSON
+   *  path the renderer scrapes (Gemini, until its MCP egress lands). Selects the
+   *  delivery clause every structured prompt carries. */
+  structured: boolean;
   connect: () => Promise<void>;
   submit: (prompt: string, opts?: HelperSubmitOpts) => Promise<void>;
 };
@@ -168,7 +174,7 @@ function resolve(deps: Deps, event: Electron.IpcMainInvokeEvent): BoundHelper | 
     return {
       ctx,
       lightOrient: true, // Gemini has no AI-Lore skill — the cheap orient
-      reportTool: null, // Gemini's MCP egress isn't wired yet — keep print-JSON
+      structured: true, // Gemini reports via the MCP report tools too (CR10)
       connect: () => mgr.connect(winId, host),
       submit: (prompt, opts) => mgr.submit(winId, host, prompt, opts),
     };
@@ -178,7 +184,7 @@ function resolve(deps: Deps, event: Electron.IpcMainInvokeEvent): BoundHelper | 
   return {
     ctx,
     lightOrient: false, // Claude loads the AI-Lore skill — the full orient is cheap
-    reportTool: DASHBOARD_REPORT_TOOL, // Claude reports the board via the MCP tool (CR10)
+    structured: true, // Claude reports via the MCP report tools (CR10)
     connect: () => mgr.connect(winId, host),
     submit: (prompt, opts) => mgr.submit(winId, host, prompt, opts),
   };
@@ -204,7 +210,26 @@ export const registerHelper: RegisterModule = (reg, deps) => {
     // longer turn timeout than a quick Q&A (CR10; measured ~145s on Haiku).
     const opts: HelperSubmitOpts | undefined =
       action === 'dashboard' ? { resultTimeoutMs: DASHBOARD_TURN_TIMEOUT_MS } : undefined;
-    await r.submit(promptForAction(r.ctx, action, r.lightOrient, r.reportTool), opts);
+    const reportTool = r.structured && action === 'dashboard' ? DASHBOARD_REPORT_TOOL : null;
+    await r.submit(promptForAction(r.ctx, action, r.lightOrient, reportTool), opts);
+  });
+
+  // The curation micro-turns (CR9 workbench). The app builds the prompt — the
+  // delivery clause flips on the engine (`structured` → call the MCP report tool,
+  // CR10; else print JSON the renderer scrapes). The picked rows' texts come from
+  // the renderer; the key→rewrite mapping stays there.
+  reg.handle('helperHumanize', async (event, texts: string[]) => {
+    const r = resolve(deps, event);
+    console.log('[helper] humanize', `${texts?.length ?? 0} item(s)`, r ? '' : 'NO-OP');
+    if (!r || !Array.isArray(texts) || texts.length === 0) return;
+    await r.submit(humanizePrompt(texts, r.structured ? HUMANIZE_REPORT_TOOL : undefined));
+  });
+
+  reg.handle('helperConsolidate', async (event, texts: string[]) => {
+    const r = resolve(deps, event);
+    console.log('[helper] consolidate', `${texts?.length ?? 0} item(s)`, r ? '' : 'NO-OP');
+    if (!r || !Array.isArray(texts) || texts.length < 2) return;
+    await r.submit(consolidatePrompt(texts, r.structured ? CONSOLIDATE_REPORT_TOOL : undefined));
   });
 
   reg.handle('helperAskText', async (event, text: string) => {

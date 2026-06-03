@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, expect, test } from 'vitest';
 
 import { AssistantDashboard } from '../../src/renderer/src/components/AssistantDashboard.js';
@@ -164,4 +164,156 @@ test('a report with an invalid board shape is rejected, not rendered', () => {
   act(() => cb?.({ sessionId: 's1', tool: 'report_dashboard', payload: { not: 'a board' } }));
   // The sample board still stands; the bad shape did not replace it.
   expect(screen.getByText('AI Helper')).toBeTruthy();
+});
+
+// CR10 — the curation ops report structured too: Humanize fires `helperHumanize`
+// and the rewrites come back on `onHelperReport` as `report_humanized`, applied
+// to the picked rows in order (no text scrape). Drive it end-to-end.
+test('Humanize fires helperHumanize and a report_humanized call rewords the picked rows', () => {
+  let reportCb: ((r: { sessionId: string; tool: string; payload: unknown }) => void) | undefined;
+  let eventCb: ((e: { sessionId: string; phase: string; ptyId?: string }) => void) | undefined;
+  const humanizeCalls: string[][] = [];
+  (window as unknown as { cockpit: unknown }).cockpit = {
+    onHelperReport: (fn: typeof reportCb) => {
+      reportCb = fn;
+      return () => {};
+    },
+    onHelperEvent: (fn: typeof eventCb) => {
+      eventCb = fn;
+      return () => {};
+    },
+    helperHumanize: (texts: string[]) => {
+      humanizeCalls.push(texts);
+      return Promise.resolve();
+    },
+  };
+  render(<AssistantDashboard />);
+  // Mark the session ready → connected, not busy → the op can fire.
+  act(() => eventCb?.({ sessionId: 's1', phase: 'ready' }));
+
+  // Pick the first two loose-ends and Humanize them.
+  const looseRows = screen.getAllByTestId('loose-row');
+  const looseChecks = looseRows.map(
+    (row) => row.querySelector('[data-testid="item-check"]') as HTMLElement,
+  );
+  fireEvent.click(looseChecks[0]);
+  fireEvent.click(looseChecks[1]);
+  fireEvent.click(screen.getByTestId('op-humanize'));
+
+  // The app sent the two picked rows' texts over the structured channel.
+  expect(humanizeCalls).toHaveLength(1);
+  expect(humanizeCalls[0]).toHaveLength(2);
+
+  // The rewrites report back as a typed tool call and replace the picked rows.
+  act(() =>
+    reportCb?.({
+      sessionId: 's1',
+      tool: 'report_humanized',
+      payload: ['a friendly first line', 'a friendly second line'],
+    }),
+  );
+  expect(screen.getByText('a friendly first line')).toBeTruthy();
+  expect(screen.getByText('a friendly second line')).toBeTruthy();
+});
+
+// Consolidate: fire `helperConsolidate`, then a `report_consolidation` tool call
+// opens the merge proposal — the typed successor to scraping a {title,text} blob.
+test('Consolidate fires helperConsolidate and a report_consolidation call opens the proposal', () => {
+  let reportCb: ((r: { sessionId: string; tool: string; payload: unknown }) => void) | undefined;
+  let eventCb: ((e: { sessionId: string; phase: string; ptyId?: string }) => void) | undefined;
+  const consolidateCalls: string[][] = [];
+  (window as unknown as { cockpit: unknown }).cockpit = {
+    onHelperReport: (fn: typeof reportCb) => {
+      reportCb = fn;
+      return () => {};
+    },
+    onHelperEvent: (fn: typeof eventCb) => {
+      eventCb = fn;
+      return () => {};
+    },
+    helperConsolidate: (texts: string[]) => {
+      consolidateCalls.push(texts);
+      return Promise.resolve();
+    },
+  };
+  render(<AssistantDashboard />);
+  act(() => eventCb?.({ sessionId: 's1', phase: 'ready' }));
+
+  const looseChecks = screen
+    .getAllByTestId('loose-row')
+    .map((row) => row.querySelector('[data-testid="item-check"]') as HTMLElement);
+  fireEvent.click(looseChecks[0]);
+  fireEvent.click(looseChecks[1]);
+  fireEvent.click(screen.getByTestId('op-consolidate'));
+
+  expect(consolidateCalls).toHaveLength(1);
+  expect(consolidateCalls[0]).toHaveLength(2);
+
+  act(() =>
+    reportCb?.({
+      sessionId: 's1',
+      tool: 'report_consolidation',
+      payload: { title: 'Merged thing', text: 'one combined piece of work' },
+    }),
+  );
+  expect(screen.getByTestId('consolidate-proposal')).toBeTruthy();
+  expect(screen.getByText('Merged thing')).toBeTruthy();
+});
+
+/* ---------- parent toggle + separate select-all (CR10 UX) ---------- */
+
+test('the header "select all" ticks every child box (without selecting the focus itself)', () => {
+  render(<AssistantDashboard />);
+  const card = screen.getByText('AI Helper').closest('[data-testid="focus-card"]') as HTMLElement;
+  const selectAll = within(card).getByTestId('focus-selectall');
+  const parent = within(card).getByTestId('focus-parent') as HTMLInputElement;
+  const boxes = within(card).getAllByTestId('item-check') as HTMLInputElement[];
+  expect(boxes.length).toBeGreaterThanOrEqual(2);
+
+  fireEvent.click(selectAll); // ticks the children…
+  expect(boxes.every((c) => c.checked)).toBe(true);
+  expect(parent.checked).toBe(false); // …but NOT the parent (independent)
+  expect(screen.getByTestId('ask-toolbar').textContent).toMatch(
+    new RegExp(`${boxes.length} selected`),
+  );
+
+  fireEvent.click(selectAll); // toggles back to clear
+  expect(boxes.some((c) => c.checked)).toBe(false);
+});
+
+test('the parent toggle selects the focus itself without ticking any child box', () => {
+  render(<AssistantDashboard />);
+  const card = screen.getByText('AI Helper').closest('[data-testid="focus-card"]') as HTMLElement;
+  const parent = within(card).getByTestId('focus-parent') as HTMLInputElement;
+  const boxes = within(card).getAllByTestId('item-check') as HTMLInputElement[];
+
+  fireEvent.click(parent);
+  expect(parent.checked).toBe(true);
+  expect(boxes.some((c) => c.checked)).toBe(false); // children untouched — decoupled
+  // The whole focus is the Consolidate clue; Humanize/Ask (child ops) don't show.
+  expect(screen.getByTestId('op-consolidate')).toBeTruthy();
+  expect(screen.queryByTestId('op-humanize')).toBeNull();
+});
+
+test('Consolidate offers for 2+ items in a single focus — steps, not just loose-ends', () => {
+  render(<AssistantDashboard />);
+  const card = screen.getByText('AI Helper').closest('[data-testid="focus-card"]') as HTMLElement;
+  const steps = within(card).getAllByTestId('item-check') as HTMLInputElement[];
+  fireEvent.click(steps[0]);
+  expect(screen.queryByTestId('op-consolidate')).toBeNull(); // one isn't enough
+  fireEvent.click(steps[1]);
+  expect(screen.getByTestId('op-consolidate')).toBeTruthy(); // two steps in one focus → mergeable
+});
+
+test('Consolidate hides when the selection spans two focuses', () => {
+  render(<AssistantDashboard />);
+  const aiCard = screen.getByText('AI Helper').closest('[data-testid="focus-card"]') as HTMLElement;
+  const step = within(aiCard).getAllByTestId('item-check')[0];
+  const loose = screen
+    .getAllByTestId('loose-row')[0]
+    .querySelector('[data-testid="item-check"]') as HTMLElement;
+  fireEvent.click(step);
+  fireEvent.click(loose);
+  expect(screen.getByTestId('ask-toolbar').textContent).toMatch(/2 selected/);
+  expect(screen.queryByTestId('op-consolidate')).toBeNull(); // spans two focuses — ambiguous
 });

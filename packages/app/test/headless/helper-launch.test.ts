@@ -57,8 +57,12 @@ test('with an mcp-config the launch loads ONLY that server and pre-authorizes th
   // --strict-mcp-config keeps the user's own MCP servers out of the read-only session.
   assert.ok(args.includes('--strict-mcp-config'));
   const a = args.indexOf('--allowedTools');
-  assert.ok(a >= 0, 'the report tool must be pre-authorized (no prompt the PTY can answer)');
-  assert.ok(args.slice(a + 1).includes('mcp__ailore__report_dashboard'));
+  assert.ok(a >= 0, 'the report tools must be pre-authorized (no prompt the PTY can answer)');
+  const allowed = args.slice(a + 1);
+  // The dashboard crawl plus the two curation ops all report structured (CR10).
+  assert.ok(allowed.includes('mcp__ailore__report_dashboard'));
+  assert.ok(allowed.includes('mcp__ailore__report_humanized'));
+  assert.ok(allowed.includes('mcp__ailore__report_consolidation'));
   // The deny-writes guard is still the launch's spine.
   assert.ok(args.includes('--settings'));
   assert.ok(!args.includes('--permission-mode'));

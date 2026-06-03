@@ -12,14 +12,25 @@
 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BrowserWindow } from 'electron';
 import { CHANNELS, type HelperEventPayload, type HelperReportPayload } from '../../shared/ipc.js';
 import type { HelperEngine } from './engine.js';
-import { type GeminiHost, createGeminiHelper, readOnlyPolicyToml } from './gemini.js';
-import { mcpConfigJson, sessionStartScript, settingsJson, stopScript } from './hooks.js';
+import {
+  type GeminiHost,
+  createGeminiHelper,
+  geminiMcpSettings,
+  readOnlyPolicyToml,
+} from './gemini.js';
+import {
+  MCP_SERVER_KEY,
+  mcpConfigJson,
+  sessionStartScript,
+  settingsJson,
+  stopScript,
+} from './hooks.js';
 import { type HelperManager, createHelperManager } from './manager.js';
 import { type McpHost, createMcpHost } from './mcp-host.js';
 import { createMiddleman } from './middleman.js';
@@ -192,6 +203,35 @@ function materializePolicy(): { dir: string; policyPath: string } {
   return { dir, policyPath };
 }
 
+/** Append a pattern to a git repo's local `.git/info/exclude` if absent — the
+ *  untracked, per-clone ignore list. Keeps the helper's `.gemini/` invisible to
+ *  the lore repo without touching the tracked `.gitignore`. Best-effort. */
+function excludeFromGit(repoDir: string, pattern: string): void {
+  try {
+    const excludePath = join(repoDir, '.git', 'info', 'exclude');
+    const cur = existsSync(excludePath) ? readFileSync(excludePath, 'utf8') : '';
+    if (cur.split('\n').some((l) => l.trim() === pattern)) return;
+    const sep = cur === '' || cur.endsWith('\n') ? '' : '\n';
+    writeFileSync(excludePath, `${cur}${sep}${pattern}\n`);
+  } catch {
+    // No .git/info/exclude (shallow/odd checkout) — cleanupMcpSettings still
+    // removes the dir; worst case it shows transiently in the lore's git status.
+  }
+}
+
+/** Write the Gemini session's MCP `.gemini/settings.json` into the lore dir
+ *  (its cwd — Gemini's only project-scope settings location, CR10), git-excluded
+ *  so it never dirties the lore repo. */
+function writeGeminiMcpSettings(loreDir: string, opts: { url: string; token: string }): void {
+  const gdir = join(loreDir, '.gemini');
+  mkdirSync(gdir, { recursive: true });
+  writeFileSync(
+    join(gdir, 'settings.json'),
+    geminiMcpSettings({ serverName: MCP_SERVER_KEY, url: opts.url, token: opts.token }),
+  );
+  excludeFromGit(loreDir, '/.gemini/');
+}
+
 let gemini: HelperEngine<GeminiHost> | null = null;
 
 /** The app-wide Gemini helper engine, built on first use. */
@@ -201,6 +241,11 @@ export function geminiHelperManager(): HelperEngine<GeminiHost> {
     run: runGemini,
     materializePolicy,
     cleanup: (dir) => rmSync(dir, { recursive: true, force: true }),
+    mcpHost: mcpHost(),
+    emitReport,
+    writeMcpSettings: writeGeminiMcpSettings,
+    cleanupMcpSettings: (loreDir) =>
+      rmSync(join(loreDir, '.gemini'), { recursive: true, force: true }),
     emit,
     newId: () => randomUUID(),
   });

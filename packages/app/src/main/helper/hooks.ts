@@ -73,9 +73,16 @@ export function helperLaunchArgs(opts: {
 export const MCP_SERVER_KEY = 'ailore';
 
 /** The report tools the read-only helper may call (CR10), in Claude's prefixed
- *  `mcp__<server>__<tool>` form. Phase 1 ships `report_dashboard`; the curation
- *  + answer tools join here as CR10 grows. */
-export const ALLOWED_MCP_TOOLS = ['report_dashboard'].map((t) => `mcp__${MCP_SERVER_KEY}__${t}`);
+ *  `mcp__<server>__<tool>` form — pre-authorized at launch so a call lands
+ *  without a permission prompt the driven PTY could never answer. The dashboard
+ *  crawl plus the two curation ops report structured; `report_answer` (prose
+ *  Q&A) still owes its move. Each must match a tool {@link ../helper/mcp-host.ts}
+ *  registers. */
+export const ALLOWED_MCP_TOOLS = [
+  'report_dashboard',
+  'report_humanized',
+  'report_consolidation',
+].map((t) => `mcp__${MCP_SERVER_KEY}__${t}`);
 
 /** The session's `--mcp-config` JSON (CR10) — a single local HTTP MCP server
  *  (the app-hosted {@link ../helper/mcp-host.ts}) the read-only helper reports
@@ -296,4 +303,39 @@ Rules:
 ${outro}`;
     }
   }
+}
+
+/** Number a list of the picked rows' texts for a curation prompt. */
+function numbered(texts: string[]): string {
+  return texts.map((t, i) => `${i + 1}. "${t}"`).join('\n');
+}
+
+/**
+ * The **Humanize** micro-turn (CR9 curation workbench): reword the picked rows in
+ * plain language. Like the dashboard, only the **delivery** differs by engine —
+ * `reportTool` set (Claude, CR10) tells the model to **call** `report_humanized`
+ * with a `rewrites` array; unset keeps the print-JSON path (Gemini) the renderer
+ * still scrapes. The wording itself is unchanged from the proven text turn.
+ */
+export function humanizePrompt(texts: string[], reportTool?: string): string {
+  const ask =
+    'Rewrite each of these project items in plain, friendly language for a non-technical project owner — say what each one actually is, with no codenames and no jargon. Keep each to one short sentence.';
+  const delivery = reportTool
+    ? `Deliver the rewrites by CALLING the \`${reportTool}\` tool with a single \`rewrites\` argument — a JSON array of strings, one rewrite per item in the same order. Do NOT print them.`
+    : 'Reply with ONLY a JSON array of strings, one rewrite per item, in the same order, nothing else:';
+  return `${ask} ${delivery}\n${numbered(texts)}`;
+}
+
+/**
+ * The **Consolidate** micro-turn (CR9): merge the picked rows into one. Assertive
+ * on purpose — the user's selection IS the decision; the model only produces the
+ * shape (spike 2026-06-03). Delivery flips per engine the same way Humanize does.
+ */
+export function consolidatePrompt(texts: string[], reportTool?: string): string {
+  const ask =
+    'The project owner has SELECTED these items, deciding they belong together as one piece of work — this is their call, do NOT question whether they belong together. Express the single combined item well.';
+  const delivery = reportTool
+    ? `Deliver the merged item by CALLING the \`${reportTool}\` tool with a \`title\` (a short plain title) and a \`text\` (one plain sentence describing the combined work). Do NOT print them.`
+    : 'Reply with ONLY a JSON object, nothing else: {"title": "a short plain title", "text": "one plain sentence describing the combined work"}';
+  return `${ask} ${delivery}\n${numbered(texts)}`;
 }

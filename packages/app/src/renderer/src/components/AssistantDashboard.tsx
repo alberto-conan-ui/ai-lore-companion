@@ -546,24 +546,85 @@ const FOCUS_STATE: Record<
   hanging: { label: 'Shipped', tone: 'green', pill: 'green' },
 };
 
+/** The focus's **own** select toggle (the parent), independent of its children:
+ * picking it selects the focus itself — the gesture that scopes Consolidate to
+ * the whole focus — without touching the child checkboxes. */
+function FocusParentToggle({
+  f,
+  selected,
+  onToggle,
+}: {
+  f: FocusWidget;
+  selected: Set<string>;
+  onToggle: (key: string) => void;
+}): JSX.Element {
+  const key = focusKey(f);
+  return (
+    <input
+      type="checkbox"
+      className="fc-check"
+      checked={selected.has(key)}
+      onChange={() => onToggle(key)}
+      onClick={(e) => e.stopPropagation()}
+      data-testid="focus-parent"
+      aria-label={`Select the ${f.name} focus`}
+    />
+  );
+}
+
+/** The header **select-all** for a focus's children — ticks every child box, or
+ * clears them when all are ticked. Independent of the parent toggle: selecting
+ * all children never selects the focus, and vice-versa. Absent for a focus with
+ * no selectable lines (e.g. a hanging focus that is only a note). */
+function SelectAllChildren({
+  f,
+  selected,
+  onSelectAll,
+}: {
+  f: FocusWidget;
+  selected: Set<string>;
+  onSelectAll: (f: FocusWidget) => void;
+}): JSX.Element | null {
+  const keys = focusItemKeys(f);
+  if (keys.length === 0) return null;
+  const allPicked = keys.every((k) => selected.has(k));
+  return (
+    <button
+      type="button"
+      className="fc-selectall"
+      onClick={(e) => {
+        e.stopPropagation();
+        onSelectAll(f);
+      }}
+      data-testid="focus-selectall"
+    >
+      {allPicked ? 'Clear' : 'Select all'}
+    </button>
+  );
+}
+
 /** A focus with a completion estimate + (optionally) its derived steps. The
  * active focus carries the "You are here" step; a hanging focus carries a note.
- * Each step is selectable so it can be batch-asked alongside loose-ends. */
+ * Each step is selectable so it can be batch-asked alongside loose-ends. The
+ * header carries a {@link FocusSelectBox} to pick the whole focus at once. */
 function FocusCard({
   f,
   mounted,
   selected,
   onToggle,
+  onToggleFocus,
 }: {
   f: FocusWidget;
   mounted: boolean;
   selected: Set<string>;
   onToggle: (key: string) => void;
+  onToggleFocus: (f: FocusWidget) => void;
 }): JSX.Element {
   const st = FOCUS_STATE[f.kind as Exclude<FocusKind, 'headless'>];
   return (
     <div className={`fcard tone-${st.tone}`} data-testid="focus-card" data-focus-state={f.kind}>
       <div className="fc-head">
+        <FocusParentToggle f={f} selected={selected} onToggle={onToggle} />
         <ProgressRing
           value={f.estimate ?? 0}
           size={54}
@@ -581,6 +642,7 @@ function FocusCard({
           </div>
           <div className="fc-line">{f.line}</div>
         </div>
+        <SelectAllChildren f={f} selected={selected} onSelectAll={onToggleFocus} />
       </div>
       {f.steps ? (
         <div className="fc-steps" data-testid="focus-steps">
@@ -607,8 +669,9 @@ function FocusCard({
 }
 
 /** An askable item — a focus step or a loose-end — flattened so any of them can
- * be selected and batch-asked together. `key` is unique across the whole board. */
-type Askable = { key: string; source: string; text: string; since?: string };
+ * be selected and batch-asked together. `key` is unique across the whole board;
+ * `focusId` groups items by their parent focus (scopes Consolidate). */
+type Askable = { key: string; focusId: string; source: string; text: string; since?: string };
 
 /** Flatten every selectable line on the board into one askable list (focus
  * steps + headless loose-ends), in render order. */
@@ -616,11 +679,34 @@ function collectAskables(board: FocusBoard): Askable[] {
   const out: Askable[] = [];
   for (const f of board.focuses) {
     for (const s of f.steps ?? [])
-      out.push({ key: `${f.id}:${s.name}`, source: f.name, text: s.name });
+      out.push({ key: `${f.id}:${s.name}`, focusId: f.id, source: f.name, text: s.name });
     for (const a of f.attention ?? [])
-      out.push({ key: `loose:${a.text}`, source: a.source, text: a.text, since: a.since });
+      out.push({
+        key: `loose:${a.text}`,
+        focusId: f.id,
+        source: a.source,
+        text: a.text,
+        since: a.since,
+      });
   }
   return out;
+}
+
+/** The selection key for a focus *itself* (the parent toggle) — distinct from
+ * its child item keys, so picking the focus and picking its children are
+ * independent gestures. */
+function focusKey(f: FocusWidget): string {
+  return `focus:${f.id}`;
+}
+
+/** Every selectable key under one focus — its steps and/or its loose-ends. The
+ * unit a focus-header checkbox selects/clears, and the membership test that
+ * scopes Consolidate to a single focus. */
+function focusItemKeys(f: FocusWidget): string[] {
+  return [
+    ...(f.steps ?? []).map((s) => `${f.id}:${s.name}`),
+    ...(f.attention ?? []).map((a) => `loose:${a.text}`),
+  ];
 }
 
 /** The staleness banner — sign-off currency. Its own concern (not a loose-end),
@@ -732,15 +818,18 @@ function HeadlessCard({
   f,
   selected,
   onToggle,
+  onToggleFocus,
 }: {
   f: FocusWidget;
   selected: Set<string>;
   onToggle: (key: string) => void;
+  onToggleFocus: (f: FocusWidget) => void;
 }): JSX.Element {
   const items = f.attention ?? [];
   return (
     <div className="fcard tone-info" data-testid="focus-card" data-focus-state="headless">
       <div className="fc-head">
+        <FocusParentToggle f={f} selected={selected} onToggle={onToggle} />
         <span className="fc-badge">
           <Glyph kind="note" size={30} />
         </span>
@@ -753,6 +842,7 @@ function HeadlessCard({
           </div>
           <div className="fc-line">{f.line}</div>
         </div>
+        <SelectAllChildren f={f} selected={selected} onSelectAll={onToggleFocus} />
       </div>
       <div className="fc-steps" data-testid="headless-list">
         {items.map((a) => (
@@ -830,14 +920,48 @@ function FocusPanel({
   const r = board.rollup;
 
   const askables = collectAskables(board);
-  const picked = askables.filter((a) => selected.has(a.key));
-  const pickedLoose = picked.filter((a) => a.key.startsWith('loose:'));
+  const picked = askables.filter((a) => selected.has(a.key)); // selected children
+  const selectedParents = board.focuses.filter((f) => selected.has(focusKey(f)));
+  // Consolidate is scoped to ONE focus. It offers when the focus *itself* is
+  // picked (its parent toggle → merge the whole focus) or 2+ of its children are
+  // (→ merge just those). A selection that spans two focuses is ambiguous, so it
+  // doesn't offer (CR10 / the HL's parent-vs-children split, 2026-06-03).
+  const involvedFocuses = board.focuses.filter(
+    (f) => selected.has(focusKey(f)) || focusItemKeys(f).some((k) => selected.has(k)),
+  );
+  const consolidateFocus = involvedFocuses.length === 1 ? (involvedFocuses[0] ?? null) : null;
+  const consolidateItems =
+    consolidateFocus && selected.has(focusKey(consolidateFocus))
+      ? askables.filter((a) => a.focusId === consolidateFocus.id) // whole focus
+      : consolidateFocus
+        ? picked.filter((a) => a.focusId === consolidateFocus.id)
+        : []; // just the picked children
+  const canConsolidate = consolidateItems.length >= 2;
+  const countLabel =
+    picked.length > 0
+      ? `${picked.length} selected`
+      : selectedParents.length === 1
+        ? `${selectedParents[0]?.name} focus`
+        : `${selectedParents.length} focuses`;
   const clear = (): void => setSelected(new Set());
   const toggle = (key: string): void =>
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
+      return next;
+    });
+  // The header "select all": tick every *child* box under a focus (never the
+  // focus's own toggle), or clear them when all are already ticked.
+  const toggleFocus = (f: FocusWidget): void =>
+    setSelected((prev) => {
+      const keys = focusItemKeys(f);
+      const next = new Set(prev);
+      const allPicked = keys.length > 0 && keys.every((k) => next.has(k));
+      for (const k of keys) {
+        if (allPicked) next.delete(k);
+        else next.add(k);
+      }
       return next;
     });
 
@@ -847,43 +971,47 @@ function FocusPanel({
       <div className="asktoolbar" data-testid="ask-toolbar">
         {selected.size > 0 ? (
           <>
-            <span className="selbar-count">{selected.size} selected</span>
-            <button
-              type="button"
-              className="op-btn"
-              disabled={opBusy}
-              onClick={() => {
-                onHumanize(picked);
-                clear();
-              }}
-              data-testid="op-humanize"
-              title="Reword the selected items in plain language"
-            >
-              ✦ Humanize
-            </button>
-            {pickedLoose.length >= 2 ? (
+            <span className="selbar-count">{countLabel}</span>
+            {picked.length > 0 ? (
               <button
                 type="button"
                 className="op-btn"
                 disabled={opBusy}
                 onClick={() => {
-                  onConsolidate(pickedLoose);
+                  onHumanize(picked);
+                  clear();
+                }}
+                data-testid="op-humanize"
+                title="Reword the selected items in plain language"
+              >
+                ✦ Humanize
+              </button>
+            ) : null}
+            {canConsolidate ? (
+              <button
+                type="button"
+                className="op-btn"
+                disabled={opBusy}
+                onClick={() => {
+                  onConsolidate(consolidateItems);
                   clear();
                 }}
                 data-testid="op-consolidate"
-                title="Merge the selected loose-ends into one"
+                title={`Merge the selected items in ${consolidateFocus?.name} into one`}
               >
                 ⊞ Consolidate
               </button>
             ) : null}
-            <button
-              type="button"
-              className="ask-batch"
-              onClick={() => setAsked(picked)}
-              data-testid="ask-batch"
-            >
-              Ask ›
-            </button>
+            {picked.length > 0 ? (
+              <button
+                type="button"
+                className="ask-batch"
+                onClick={() => setAsked(picked)}
+                data-testid="ask-batch"
+              >
+                Ask ›
+              </button>
+            ) : null}
             <button type="button" className="selbar-clear" onClick={clear} data-testid="ask-clear">
               Clear
             </button>
@@ -916,9 +1044,22 @@ function FocusPanel({
         <div className="fstack" data-testid="focus-board">
           {board.focuses.map((f) =>
             f.kind === 'headless' ? (
-              <HeadlessCard key={f.id} f={f} selected={selected} onToggle={toggle} />
+              <HeadlessCard
+                key={f.id}
+                f={f}
+                selected={selected}
+                onToggle={toggle}
+                onToggleFocus={toggleFocus}
+              />
             ) : (
-              <FocusCard key={f.id} f={f} mounted={mounted} selected={selected} onToggle={toggle} />
+              <FocusCard
+                key={f.id}
+                f={f}
+                mounted={mounted}
+                selected={selected}
+                onToggle={toggle}
+                onToggleFocus={toggleFocus}
+              />
             ),
           )}
         </div>
@@ -1297,19 +1438,22 @@ function validateBoard(payload: unknown): FocusBoard | null {
   return d as FocusBoard;
 }
 
-/* ---------- the curation micro-turns (cheap, content-only) ---------- */
-/** Reword the picked rows in plain language — sent through the free-text channel.
- *  Asks for a JSON array so a multi-select humanizes in one turn. */
-function humanizePrompt(items: Askable[]): string {
-  const list = items.map((it, i) => `${i + 1}. "${it.text}"`).join('\n');
-  return `Rewrite each of these project items in plain, friendly language for a non-technical project owner — say what each one actually is, with no codenames and no jargon. Keep each to one short sentence. Reply with ONLY a JSON array of strings, one rewrite per item, in the same order, nothing else:\n${list}`;
-}
+/* ---------- the curation micro-turns (cheap, content-only) ----------
+ * The prompts now live in main ({@link hooks.ts} `humanizePrompt` /
+ * `consolidatePrompt`) so the same builder picks the delivery — call the MCP
+ * report tool (Claude, CR10) or print JSON (Gemini). The renderer fires the op
+ * over `helperHumanize` / `helperConsolidate` and consumes the result either as
+ * a structured report (`onHelperReport`) or, for a print-JSON engine, by parsing
+ * the `answered` text below. */
 
-/** Merge the picked rows into one. Assertive on purpose — the user's selection
- *  IS the decision; the model only produces the shape (spike 2026-06-03). */
-function consolidatePrompt(items: Askable[]): string {
-  const list = items.map((it, i) => `${i + 1}. "${it.text}"`).join('\n');
-  return `The project owner has SELECTED these items, deciding they belong together as one piece of work — this is their call, do NOT question whether they belong together. Express the single combined item well. Reply with ONLY a JSON object, nothing else: {"title": "a short plain title", "text": "one plain sentence describing the combined work"}\n${list}`;
+/** Validate a structured `report_consolidation` payload (CR10) into a merge —
+ *  the typed-MCP successor to {@link parseMerged}'s text scrape. */
+function validateMerged(payload: unknown): { title: string; text: string } | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const d = payload as { title?: unknown; text?: unknown };
+  if (typeof d.title === 'string' && typeof d.text === 'string')
+    return { title: d.title, text: d.text };
+  return null;
 }
 
 function parseStringArray(answer: string): string[] | null {
@@ -1357,33 +1501,63 @@ function applyHumanize(board: FocusBoard, rewrites: Map<string, string>): FocusB
   };
 }
 
-/** Replace the picked loose-ends with one merged loose-end (title as the line,
- *  the sentence as its expandable detail). Returns a new board. */
+/** Replace the picked items in their focus with one merged item — loose-ends in
+ *  the headless focus, or steps in any other focus (CR10; the HL's "any focus's
+ *  items", 2026-06-03). The picks always resolve to a single focus (Consolidate
+ *  only offers then), so the merge stays scoped to that focus. Returns a new
+ *  board; the merged item lands where the first picked item was. */
 function applyConsolidate(
   board: FocusBoard,
   keys: Set<string>,
   merged: { title: string; text: string },
 ): FocusBoard {
-  let source = 'Backlog';
-  let since: string | undefined;
-  let seen = 0;
-  for (const f of board.focuses) {
-    for (const a of f.attention ?? []) {
-      if (keys.has(`loose:${a.text}`) && seen++ === 0) {
-        source = a.source;
-        since = a.since;
-      }
-    }
+  const target = board.focuses.find((f) => focusItemKeys(f).some((k) => keys.has(k)));
+  if (!target) return board;
+
+  // Loose-ends (the headless focus): collapse to one loose-end, the sentence as
+  // its expandable detail. Drops the merged count off the loose-ends rollup.
+  if (target.kind === 'headless') {
+    const first = (target.attention ?? []).find((a) => keys.has(`loose:${a.text}`));
+    const newItem: AttentionItem = {
+      source: first?.source ?? 'Backlog',
+      text: merged.title,
+      detail: merged.text,
+      since: first?.since,
+    };
+    return {
+      ...board,
+      focuses: board.focuses.map((f) =>
+        f.id === target.id && f.attention
+          ? {
+              ...f,
+              attention: [newItem, ...f.attention.filter((a) => !keys.has(`loose:${a.text}`))],
+            }
+          : f,
+      ),
+      rollup: { ...board.rollup, looseEnds: Math.max(0, board.rollup.looseEnds - keys.size + 1) },
+    };
   }
-  const newItem: AttentionItem = { source, text: merged.title, detail: merged.text, since };
+
+  // Steps (an active/paused focus): collapse the picked steps to one, carrying
+  // forward "active" and the average progress so the ring stays honest.
+  const steps = target.steps ?? [];
+  const isPicked = (s: Stream): boolean => keys.has(`${target.id}:${s.name}`);
+  const pickedSteps = steps.filter(isPicked);
+  if (pickedSteps.length === 0) return board;
+  const mergedStep: Stream = {
+    name: merged.title,
+    line: merged.text,
+    verdict: 'in-progress',
+    progress: Math.round(pickedSteps.reduce((a, s) => a + s.progress, 0) / pickedSteps.length),
+    active: pickedSteps.some((s) => s.active),
+  };
+  const firstIdx = steps.findIndex(isPicked);
+  const newSteps = steps.flatMap((s, i) =>
+    i === firstIdx ? [mergedStep] : isPicked(s) ? [] : [s],
+  );
   return {
     ...board,
-    focuses: board.focuses.map((f) =>
-      f.kind === 'headless' && f.attention
-        ? { ...f, attention: [newItem, ...f.attention.filter((a) => !keys.has(`loose:${a.text}`))] }
-        : f,
-    ),
-    rollup: { ...board.rollup, looseEnds: Math.max(0, board.rollup.looseEnds - keys.size + 1) },
+    focuses: board.focuses.map((f) => (f.id === target.id ? { ...f, steps: newSteps } : f)),
   };
 }
 
@@ -1483,30 +1657,68 @@ export function AssistantDashboard(): JSX.Element {
     });
   }, []);
 
-  // CR10 — the structured egress. The dashboard board now arrives as a typed
-  // `report_dashboard` MCP tool call on its own channel, not scraped from the
-  // `answer` text. This supersedes the crawl's text path (Claude): when the
-  // board reports in, we clear the in-flight crawl so the turn's trailing
+  // CR10 — the structured egress. The dashboard board AND the curation results
+  // (Humanize / Consolidate) now arrive as typed MCP tool calls on their own
+  // channel, not scraped from the `answer` text. On a structured engine (Claude)
+  // we clear the in-flight op when its report lands so the turn's trailing
   // `answered` confirmation is ignored rather than mis-parsed. (Engines still on
   // the print-JSON path keep hydrating through the `answered` handler above.)
   useEffect(() => {
     if (!window.cockpit?.onHelperReport) return;
     return window.cockpit.onHelperReport((r) => {
-      if (r.tool !== 'report_dashboard') return;
-      const b = validateBoard(r.payload);
-      pushActivity(
-        'answer',
-        `dashboard reported via MCP (${b ? `${b.focuses.length} focuses` : 'invalid shape'})`,
-      );
-      if (!b) {
-        setError('The assistant reported a dashboard, but its shape could not be read.');
+      if (r.tool === 'report_dashboard') {
+        const b = validateBoard(r.payload);
+        pushActivity(
+          'answer',
+          `dashboard reported via MCP (${b ? `${b.focuses.length} focuses` : 'invalid shape'})`,
+        );
+        if (!b) {
+          setError('The assistant reported a dashboard, but its shape could not be read.');
+          return;
+        }
+        if (opRef.current?.kind === 'crawl') opRef.current = null;
+        setBoard(b);
+        setIsLive(true);
+        setRefreshing(false);
+        setError('');
         return;
       }
-      if (opRef.current?.kind === 'crawl') opRef.current = null;
-      setBoard(b);
-      setIsLive(true);
-      setRefreshing(false);
-      setError('');
+      if (r.tool === 'report_humanized') {
+        const arr =
+          Array.isArray(r.payload) && r.payload.every((x) => typeof x === 'string')
+            ? (r.payload as string[])
+            : null;
+        const keys = opRef.current?.kind === 'humanize' ? (opRef.current.keys ?? []) : [];
+        pushActivity(
+          'answer',
+          `humanize reported via MCP (${arr ? `${arr.length} rewrites` : 'invalid shape'})`,
+        );
+        opRef.current = null;
+        setOpActive(false);
+        if (arr && keys.length) {
+          const rw = new Map<string, string>();
+          keys.forEach((k, i) => arr[i] && rw.set(k, arr[i]));
+          setBoard((b) => applyHumanize(b, rw));
+          setError('');
+        } else {
+          setError('The assistant reported rewrites, but their shape could not be read.');
+        }
+        return;
+      }
+      if (r.tool === 'report_consolidation') {
+        const m = validateMerged(r.payload);
+        const keys = opRef.current?.kind === 'consolidate' ? opRef.current.keys : undefined;
+        pushActivity('answer', `consolidation reported via MCP (${m ? 'ok' : 'invalid shape'})`);
+        opRef.current = null;
+        setOpActive(false);
+        if (m && keys) {
+          setProposal({ ...m, keys });
+          setError('');
+        } else {
+          setError('The assistant reported a merge, but its shape could not be read.');
+        }
+        return;
+      }
     });
   }, []);
 
@@ -1532,7 +1744,7 @@ export function AssistantDashboard(): JSX.Element {
 
   const onHumanize = (items: Askable[]): void => {
     if (busy || items.length === 0) return;
-    if (!connected || !window.cockpit?.helperAskText) {
+    if (!connected || !window.cockpit?.helperHumanize) {
       setError('Connect the assistant first — hit Refresh.');
       pushActivity('error', 'Humanize skipped — connect the assistant first (hit Refresh).');
       return;
@@ -1540,14 +1752,13 @@ export function AssistantDashboard(): JSX.Element {
     setError('');
     opRef.current = { kind: 'humanize', keys: items.map((i) => i.key) };
     setOpActive(true);
-    const prompt = humanizePrompt(items);
-    pushActivity('turn', `Humanize ${items.length} item${items.length === 1 ? '' : 's'}`, prompt);
-    void window.cockpit.helperAskText(prompt);
+    pushActivity('turn', `Humanize ${items.length} item${items.length === 1 ? '' : 's'}`);
+    void window.cockpit.helperHumanize(items.map((i) => i.text));
   };
 
   const onConsolidate = (items: Askable[]): void => {
     if (busy || items.length < 2) return;
-    if (!connected || !window.cockpit?.helperAskText) {
+    if (!connected || !window.cockpit?.helperConsolidate) {
       setError('Connect the assistant first — hit Refresh.');
       pushActivity('error', 'Consolidate skipped — connect the assistant first (hit Refresh).');
       return;
@@ -1555,9 +1766,8 @@ export function AssistantDashboard(): JSX.Element {
     setError('');
     opRef.current = { kind: 'consolidate', keys: items.map((i) => i.key) };
     setOpActive(true);
-    const prompt = consolidatePrompt(items);
-    pushActivity('turn', `Consolidate ${items.length} items`, prompt);
-    void window.cockpit.helperAskText(prompt);
+    pushActivity('turn', `Consolidate ${items.length} items`);
+    void window.cockpit.helperConsolidate(items.map((i) => i.text));
   };
 
   const acceptProposal = (): void => {
