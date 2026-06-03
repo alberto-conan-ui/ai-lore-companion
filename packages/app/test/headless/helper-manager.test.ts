@@ -5,8 +5,9 @@ import {
   type HelperManagerDeps,
   createHelperManager,
 } from '../../src/main/helper/manager.js';
+import type { McpReport } from '../../src/main/helper/mcp-host.js';
 import type { MiddlemanSession } from '../../src/main/helper/middleman.js';
-import type { HelperEventPayload } from '../../src/shared/ipc.js';
+import type { HelperEventPayload, HelperReportPayload } from '../../src/shared/ipc.js';
 
 /** Flush pending micro/macro-tasks (the manager's CR submit + awaits). */
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
@@ -19,7 +20,7 @@ const PROMPT = 'Read status.index.md and summarize what is pending.';
 function makeManager(over: Partial<HelperManagerDeps> = {}) {
   let registered: MiddlemanSession | undefined;
   const unregistered: string[] = [];
-  const materializeArgs: { sessionId: string; token: string; port: number }[] = [];
+  const materializeArgs: { sessionId: string; token: string; port: number; mcpUrl: string }[] = [];
   const spawnSettings: string[] = [];
   const writes: string[] = [];
   const kills: number[] = [];
@@ -30,11 +31,21 @@ function makeManager(over: Partial<HelperManagerDeps> = {}) {
   // The per-window host the IPC layer builds from the terminal service. Spawn
   // returns a visible-PTY handle with a fixed id.
   const host: HelperHost = {
-    spawn: (settingsPath) => {
+    spawn: ({ settingsPath, mcpConfigPath }) => {
       spawnSettings.push(settingsPath);
+      mcpConfigPaths.push(mcpConfigPath);
       return { id: 'pty-1', write: (d) => writes.push(d), kill: () => kills.push(1) };
     },
   };
+
+  // The CR10 MCP host stub — captures the registered session (with its report
+  // callback) so a test can simulate the assistant calling a report tool.
+  const mcpConfigPaths: string[] = [];
+  let mcpRegistered:
+    | { sessionId: string; token: string; onReport: (r: McpReport) => void }
+    | undefined;
+  const mcpUnregistered: string[] = [];
+  const reports: HelperReportPayload[] = [];
 
   const deps: HelperManagerDeps = {
     middleman: {
@@ -48,15 +59,27 @@ function makeManager(over: Partial<HelperManagerDeps> = {}) {
       },
       close: async () => {},
     },
+    mcpHost: {
+      listen: async () => 5555,
+      endpoint: (sessionId) => `http://127.0.0.1:5555/mcp/${sessionId}`,
+      register: async (s) => {
+        mcpRegistered = s;
+      },
+      unregister: async (id) => {
+        mcpUnregistered.push(id);
+      },
+    },
     materialize: (w) => {
       materializeArgs.push(w);
       return {
         dir: `/tmp/helper-${w.sessionId}`,
         settingsPath: `/tmp/helper-${w.sessionId}/settings.json`,
+        mcpConfigPath: `/tmp/helper-${w.sessionId}/mcp.json`,
       };
     },
     cleanup: (dir) => cleaned.push(dir),
     emit: (_winId, event) => events.push(event),
+    emitReport: (_winId, report) => reports.push(report),
     newId: () => `id${idN++}`,
     submitDelayMs: 0,
     readySettleMs: 0,
@@ -74,9 +97,15 @@ function makeManager(over: Partial<HelperManagerDeps> = {}) {
     get registered() {
       return registered;
     },
+    get mcpRegistered() {
+      return mcpRegistered;
+    },
+    mcpUnregistered,
+    reports,
     unregistered,
     materializeArgs,
     spawnSettings,
+    mcpConfigPaths,
     writes,
     kills,
     cleaned,
@@ -162,6 +191,34 @@ test('disposeForWindow unregisters, kills the PTY, and drops the temp dir', asyn
   assert.deepEqual(h.unregistered, ['id0']);
   assert.equal(h.kills.length, 1);
   assert.deepEqual(h.cleaned, ['/tmp/helper-id0']);
+});
+
+// CR10 — the structured egress: the session registers with the MCP host under
+// the same id/token as the middleman, the materialised mcp-config reaches the
+// spawn, and a report tool call routes to the session's window.
+test('connect registers the session with the MCP host and routes a report to the window', async () => {
+  const h = makeManager();
+  void h.mgr.submit(1, h.host, PROMPT);
+  await tick();
+
+  // Registered with the MCP host under the SAME session id + token as the middleman.
+  assert.equal(h.mcpRegistered?.sessionId, h.registered?.sessionId);
+  assert.equal(h.mcpRegistered?.token, h.registered?.token);
+  // The session endpoint was handed to materialize, and its mcp-config reached the spawn.
+  assert.match(h.materializeArgs[0]?.mcpUrl ?? '', /\/mcp\/id0$/);
+  assert.deepEqual(h.mcpConfigPaths, ['/tmp/helper-id0/mcp.json']);
+
+  // The assistant calls a report tool → the host hands the payload here → it is
+  // pushed to the window as a structured report (Channel C), not scraped from text.
+  h.mcpRegistered?.onReport({ tool: 'report_dashboard', payload: { focuses: [{ id: 'x' }] } });
+  assert.equal(h.reports.length, 1);
+  assert.equal(h.reports[0]?.tool, 'report_dashboard');
+  assert.equal(h.reports[0]?.sessionId, h.registered?.sessionId);
+  assert.deepEqual(h.reports[0]?.payload, { focuses: [{ id: 'x' }] });
+
+  h.mgr.disposeForWindow(1);
+  // Teardown unhooks the MCP host registration too.
+  assert.deepEqual(h.mcpUnregistered, ['id0']);
 });
 
 test('a ready timeout surfaces an error phase', async () => {

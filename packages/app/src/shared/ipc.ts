@@ -423,6 +423,22 @@ export type HelperEventPayload = {
   error?: string;
 };
 
+/**
+ * Main → renderer: a **structured result** the read-only helper reported by
+ * calling an MCP tool (AI Helper, CR10). The successor to scraping the board out
+ * of the `answer` text: the assistant calls `report_dashboard(board)` on the
+ * app-hosted local MCP server, the host validates the argument, and it arrives
+ * here as typed data — no stdout, no envelope, no parse. `tool` names which
+ * report fired (`report_dashboard` today; `report_humanized` /
+ * `report_consolidation` / `report_answer` as CR10 grows); `payload` is that
+ * tool's validated argument, narrowed by `tool` on the renderer.
+ */
+export type HelperReportPayload = {
+  sessionId: string;
+  tool: string;
+  payload: unknown;
+};
+
 /** One verb in the prompts catalog (Phase D). Surfaces in the AI tab's left
  *  column; a click writes `${slash}\n` to the running engine's stdin. */
 export type PromptEntry = {

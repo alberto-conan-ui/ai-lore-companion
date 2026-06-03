@@ -55,3 +55,26 @@ test('dashboard asks for the FocusBoard JSON and optimises for completeness, not
   assert.match(p, /completeness/i); // surface everything…
   assert.match(p, /do not merge/i); // …raw and unmerged — the UI cleans up
 });
+
+test('dashboard without a reportTool prints the JSON (the legacy scrape path)', () => {
+  const p = promptFor('dashboard', { statusPath: STATUS, memoryPath: '/lore/memory' });
+  assert.match(p, /Return EXACTLY this JSON/i);
+  assert.match(p, /Output ONLY the JSON object/i);
+  assert.doesNotMatch(p, /CALLING the/i);
+});
+
+test('dashboard with a reportTool tells the model to CALL the tool, not print (CR10)', () => {
+  const p = promptFor('dashboard', {
+    statusPath: STATUS,
+    memoryPath: '/lore/memory',
+    reportTool: 'report_dashboard',
+  });
+  // Delivery flips to the MCP tool call; the brittle print path is gone.
+  assert.match(p, /CALLING the `report_dashboard` tool/);
+  assert.match(p, /do NOT print/i);
+  assert.match(p, /Call `report_dashboard` exactly once/);
+  assert.doesNotMatch(p, /Output ONLY the JSON object/i);
+  // The board shape + completeness rules are unchanged — only delivery differs.
+  assert.match(p, /"focuses"/);
+  assert.match(p, /completeness/i);
+});

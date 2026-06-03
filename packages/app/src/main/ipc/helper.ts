@@ -3,7 +3,7 @@ import { isChainError } from '@ai-lore-companion/core';
 import { BrowserWindow } from 'electron';
 import type { HelperAction } from '../../shared/ipc.js';
 import { loadEngines, loadHelperEngine, saveHelperEngine } from '../engines.js';
-import { pickHelperEngine } from '../helper/engine.js';
+import { type HelperSubmitOpts, pickHelperEngine } from '../helper/engine.js';
 import type { GeminiHost } from '../helper/gemini.js';
 import { helperLaunchArgs, promptFor } from '../helper/hooks.js';
 import { disposeHelperForWindow, geminiHelperManager, helperManager } from '../helper/index.js';
@@ -44,9 +44,12 @@ const MAX_CHANGED_PATHS = 60;
  *  close/quit running-task guard. */
 function hostFor(ctx: ProjectContext): HelperHost {
   return {
-    spawn: (settingsPath) => {
+    spawn: ({ settingsPath, mcpConfigPath }) => {
       const id = ctx.ptyService.spawn(
-        { binary: 'claude', args: helperLaunchArgs({ settingsPath, model: HELPER_MODEL }) },
+        {
+          binary: 'claude',
+          args: helperLaunchArgs({ settingsPath, model: HELPER_MODEL, mcpConfigPath }),
+        },
         { infra: true },
       );
       return {
@@ -75,10 +78,27 @@ function changedPaths(ctx: ProjectContext): string[] {
   return [...all.slice(0, MAX_CHANGED_PATHS), `…and ${all.length - MAX_CHANGED_PATHS} more`];
 }
 
+/** The MCP tool the `dashboard` crawl calls to deliver the board (CR10). Bare
+ *  name as the model sees it — must match a tool the {@link ../helper/mcp-host.ts}
+ *  registers. Engines without an MCP egress yet pass `null` (print-JSON). */
+const DASHBOARD_REPORT_TOOL = 'report_dashboard';
+
+/** Turn timeout for the `dashboard` crawl. It reads the WHOLE lore before
+ *  reporting — ~145s on interactive Haiku (measured 2026-06-03), past the snappy
+ *  default a Q&A turn uses — so the crawl gets a generous window. Completeness
+ *  beats latency here (the same reason Gemini's turn timeout is minutes). */
+const DASHBOARD_TURN_TIMEOUT_MS = 300_000;
+
 /** Build the read-only prompt for a canned action, supplying the data each one
  *  needs from the project context. `lightOrient` chooses the cheap one-file
- *  orient for engines without the AI-Lore skill (headless Gemini). */
-function promptForAction(ctx: ProjectContext, action: HelperAction, lightOrient: boolean): string {
+ *  orient for engines without the AI-Lore skill (headless Gemini); `reportTool`
+ *  routes the `dashboard` crawl through the MCP egress when the engine has one. */
+function promptForAction(
+  ctx: ProjectContext,
+  action: HelperAction,
+  lightOrient: boolean,
+  reportTool: string | null,
+): string {
   const memoryPath = isChainError(ctx.chain) ? '' : join(ctx.chain.lorePath, 'memory');
   const statusPath = memoryPath ? join(memoryPath, 'status/status.index.md') : '';
   const today = new Date().toISOString().slice(0, 10);
@@ -88,6 +108,7 @@ function promptForAction(ctx: ProjectContext, action: HelperAction, lightOrient:
     today,
     changedPaths: changedPaths(ctx),
     lightOrient,
+    reportTool: reportTool ?? undefined,
   });
 }
 
@@ -111,8 +132,11 @@ type BoundHelper = {
   /** True for engines without the AI-Lore skill (headless Gemini) — use the
    *  cheap one-file orient so the first turn doesn't blow the timeout. */
   lightOrient: boolean;
+  /** The MCP tool the `dashboard` crawl reports through (CR10), or null for an
+   *  engine still on the print-JSON path (Gemini, until its MCP egress lands). */
+  reportTool: string | null;
   connect: () => Promise<void>;
-  submit: (prompt: string) => Promise<void>;
+  submit: (prompt: string, opts?: HelperSubmitOpts) => Promise<void>;
 };
 
 /** Resolve the window, project context, and engine for an IPC call — null when
@@ -144,8 +168,9 @@ function resolve(deps: Deps, event: Electron.IpcMainInvokeEvent): BoundHelper | 
     return {
       ctx,
       lightOrient: true, // Gemini has no AI-Lore skill — the cheap orient
+      reportTool: null, // Gemini's MCP egress isn't wired yet — keep print-JSON
       connect: () => mgr.connect(winId, host),
-      submit: (prompt) => mgr.submit(winId, host, prompt),
+      submit: (prompt, opts) => mgr.submit(winId, host, prompt, opts),
     };
   }
   const mgr = helperManager();
@@ -153,8 +178,9 @@ function resolve(deps: Deps, event: Electron.IpcMainInvokeEvent): BoundHelper | 
   return {
     ctx,
     lightOrient: false, // Claude loads the AI-Lore skill — the full orient is cheap
+    reportTool: DASHBOARD_REPORT_TOOL, // Claude reports the board via the MCP tool (CR10)
     connect: () => mgr.connect(winId, host),
-    submit: (prompt) => mgr.submit(winId, host, prompt),
+    submit: (prompt, opts) => mgr.submit(winId, host, prompt, opts),
   };
 }
 
@@ -174,7 +200,11 @@ export const registerHelper: RegisterModule = (reg, deps) => {
     const r = resolve(deps, event);
     console.log('[helper] ask', action, r ? '' : 'NO-OP (no engine/project)');
     if (!r) return;
-    await r.submit(promptForAction(r.ctx, action, r.lightOrient));
+    // The dashboard crawl reads the whole lore before reporting — give it a far
+    // longer turn timeout than a quick Q&A (CR10; measured ~145s on Haiku).
+    const opts: HelperSubmitOpts | undefined =
+      action === 'dashboard' ? { resultTimeoutMs: DASHBOARD_TURN_TIMEOUT_MS } : undefined;
+    await r.submit(promptForAction(r.ctx, action, r.lightOrient, r.reportTool), opts);
   });
 
   reg.handle('helperAskText', async (event, text: string) => {

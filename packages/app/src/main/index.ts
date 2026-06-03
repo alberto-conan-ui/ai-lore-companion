@@ -46,8 +46,8 @@ import {
 import { appsWithIcons, runAppsMigrations } from './apps.js';
 import { resolveProjectRoot } from './args.js';
 import * as browser from './browser.js';
+import { disposeAllHelpers, disposeHelperForWindow, startMcpHost } from './helper/index.js';
 import { type Deps, type ProjectContext, type Wiring, registerCockpitIpc } from './ipc/index.js';
-import { disposeAllHelpers, disposeHelperForWindow } from './helper/index.js';
 import { buildAppMenu } from './menu.js';
 import {
   COMMIT_LIST_LIMIT,
@@ -1008,6 +1008,11 @@ app.whenReady().then(() => {
   runAppsMigrations(userDataDir);
   registerCockpitIpc(ipcMain, ipcDeps);
   rebuildMenu();
+
+  // CR10 — bring the local MCP host up at boot so it is ready before any
+  // Connect ("provide an MCP locally as soon as you start up"). Fire-and-forget:
+  // binding is non-fatal and the rest of boot must not wait on it.
+  void startMcpHost();
 
   launchRoot = resolveProjectRoot(process.argv);
   openLaunchWindow();

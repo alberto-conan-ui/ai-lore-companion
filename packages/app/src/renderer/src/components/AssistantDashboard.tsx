@@ -1285,6 +1285,18 @@ function parseLiveBoard(answer: string): FocusBoard | null {
   }
 }
 
+/** Validate a structured `report_dashboard` payload (CR10) into a {@link FocusBoard}.
+ * The board now arrives as a typed MCP tool argument — not scraped out of free
+ * text — so this is a light shape-guard (a focuses array + a rollup), not a
+ * parse of the model's stdout. The brittle string extraction is gone. */
+function validateBoard(payload: unknown): FocusBoard | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const d = payload as Partial<FocusBoard>;
+  if (!Array.isArray(d.focuses) || d.focuses.length === 0) return null;
+  if (!d.rollup || typeof d.rollup !== 'object') return null;
+  return d as FocusBoard;
+}
+
 /* ---------- the curation micro-turns (cheap, content-only) ---------- */
 /** Reword the picked rows in plain language — sent through the free-text channel.
  *  Asks for a JSON array so a multi-select humanizes in one turn. */
@@ -1468,6 +1480,33 @@ export function AssistantDashboard(): JSX.Element {
           setError(e.error ?? 'The assistant could not finish.');
         }
       }
+    });
+  }, []);
+
+  // CR10 — the structured egress. The dashboard board now arrives as a typed
+  // `report_dashboard` MCP tool call on its own channel, not scraped from the
+  // `answer` text. This supersedes the crawl's text path (Claude): when the
+  // board reports in, we clear the in-flight crawl so the turn's trailing
+  // `answered` confirmation is ignored rather than mis-parsed. (Engines still on
+  // the print-JSON path keep hydrating through the `answered` handler above.)
+  useEffect(() => {
+    if (!window.cockpit?.onHelperReport) return;
+    return window.cockpit.onHelperReport((r) => {
+      if (r.tool !== 'report_dashboard') return;
+      const b = validateBoard(r.payload);
+      pushActivity(
+        'answer',
+        `dashboard reported via MCP (${b ? `${b.focuses.length} focuses` : 'invalid shape'})`,
+      );
+      if (!b) {
+        setError('The assistant reported a dashboard, but its shape could not be read.');
+        return;
+      }
+      if (opRef.current?.kind === 'crawl') opRef.current = null;
+      setBoard(b);
+      setIsLive(true);
+      setRefreshing(false);
+      setError('');
     });
   }, []);
 

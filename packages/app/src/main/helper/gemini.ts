@@ -22,7 +22,7 @@
  */
 
 import type { HelperEventPayload, HelperPhase } from '../../shared/ipc.js';
-import type { HelperEngine } from './engine.js';
+import type { HelperEngine, HelperSubmitOpts } from './engine.js';
 
 /** Mutation tools denied to the read-only helper — `deny` excludes them from
  *  the model's memory (Policy Engine). */
@@ -227,7 +227,12 @@ export function createGeminiHelper(deps: GeminiHelperDeps): HelperEngine<GeminiH
     emit(winId, session.sessionId, 'ready');
   }
 
-  async function submit(winId: number, host: GeminiHost, prompt: string): Promise<void> {
+  async function submit(
+    winId: number,
+    host: GeminiHost,
+    prompt: string,
+    opts?: HelperSubmitOpts,
+  ): Promise<void> {
     const session = ensure(winId);
     if (session.busy) return; // serialize: one turn in flight per window
     session.busy = true;
@@ -239,7 +244,10 @@ export function createGeminiHelper(deps: GeminiHelperDeps): HelperEngine<GeminiH
         model: host.model,
         includeDirs: host.includeDirs,
       });
-      const stdout = await withTimeout(deps.run(host.binary, args, host.cwd), turnTimeoutMs);
+      const stdout = await withTimeout(
+        deps.run(host.binary, args, host.cwd),
+        opts?.resultTimeoutMs ?? turnTimeoutMs,
+      );
       if (!byWindow.has(winId)) return; // torn down mid-turn
       const result = parseGeminiResult(stdout);
       if ('answer' in result) {

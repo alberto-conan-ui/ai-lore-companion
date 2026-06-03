@@ -22,7 +22,9 @@
  * [`./index.ts`](./index.ts); the host is built in [`../ipc/helper.ts`](../ipc/helper.ts).
  */
 
-import type { HelperEventPayload, HelperPhase } from '../../shared/ipc.js';
+import type { HelperEventPayload, HelperPhase, HelperReportPayload } from '../../shared/ipc.js';
+import type { HelperSubmitOpts } from './engine.js';
+import type { McpHost } from './mcp-host.js';
 import type { Middleman } from './middleman.js';
 
 /** A spawned read-only helper PTY — its visible-terminal id plus the leg the
@@ -37,23 +39,33 @@ export type HelperPtyHandle = {
 };
 
 /** The per-window PTY capability `connect` needs — spawns the read-only helper
- *  against the materialised `--settings` file and returns its visible handle.
- *  Built by the IPC layer from the window's terminal service. */
+ *  against the materialised `--settings` file (the deny-writes guard) and the
+ *  `--mcp-config` file (the CR10 structured-egress server) and returns its
+ *  visible handle. Built by the IPC layer from the window's terminal service. */
 export type HelperHost = {
-  spawn: (settingsPath: string) => HelperPtyHandle;
+  spawn: (launch: { settingsPath: string; mcpConfigPath: string }) => HelperPtyHandle;
 };
 
 export type HelperManagerDeps = {
   middleman: Middleman;
-  /** Materialise the deny-writes `--settings` + hooks into a fresh temp dir. */
-  materialize: (w: { sessionId: string; token: string; port: number }) => {
+  /** The app-level MCP host (CR10) — the structured egress. The manager
+   *  registers each session's `report_*` callbacks here at connect and unhooks
+   *  them at teardown; the host's HTTP server itself is owned app-wide. */
+  mcpHost: Pick<McpHost, 'listen' | 'endpoint' | 'register' | 'unregister'>;
+  /** Materialise the deny-writes `--settings` + hooks **and** the `--mcp-config`
+   *  for the session into a fresh temp dir. `mcpUrl` is the session's endpoint on
+   *  the MCP host; `token` authenticates both the middleman and the MCP host. */
+  materialize: (w: { sessionId: string; token: string; port: number; mcpUrl: string }) => {
     dir: string;
     settingsPath: string;
+    mcpConfigPath: string;
   };
   /** Remove a materialised temp dir on teardown. */
   cleanup: (dir: string) => void;
   /** Emit a helper event to the window that owns the session. */
   emit: (winId: number, event: HelperEventPayload) => void;
+  /** Emit a structured report (an MCP tool call) to the window (Channel C). */
+  emitReport: (winId: number, report: HelperReportPayload) => void;
   /** Mint a random id / token (UUID in production). */
   newId: () => string;
   /** Delay between injecting the prompt and submitting the turn (Channel A).
@@ -77,8 +89,14 @@ export type HelperManager = {
   connect: (winId: number, host: HelperHost) => Promise<void>;
   /** Connect if needed, then drive one read-only turn with `prompt`. The prompt
    *  is built by the caller (the IPC layer, which holds the project context) —
-   *  canned actions and free-text questions share this one path. */
-  submit: (winId: number, host: HelperHost, prompt: string) => Promise<void>;
+   *  canned actions and free-text questions share this one path. `opts` carries
+   *  per-turn overrides (a longer timeout for the dashboard crawl). */
+  submit: (
+    winId: number,
+    host: HelperHost,
+    prompt: string,
+    opts?: HelperSubmitOpts,
+  ) => Promise<void>;
   /** Tear down the window's helper — kill the PTY, drop the temp dir. */
   disposeForWindow: (winId: number) => void;
   /** Tear down every helper and close the middleman. */
@@ -139,9 +157,16 @@ export function createHelperManager(deps: HelperManagerDeps): HelperManager {
     }
 
     const port = await deps.middleman.listen();
+    await deps.mcpHost.listen(); // idempotent — ensures the app-level server is bound
     const sessionId = deps.newId();
     const token = deps.newId();
-    const { dir, settingsPath } = deps.materialize({ sessionId, token, port });
+    const mcpUrl = deps.mcpHost.endpoint(sessionId) ?? '';
+    const { dir, settingsPath, mcpConfigPath } = deps.materialize({
+      sessionId,
+      token,
+      port,
+      mcpUrl,
+    });
 
     const ready = deferred();
     const session: Session = {
@@ -180,9 +205,22 @@ export function createHelperManager(deps: HelperManagerDeps): HelperManager {
       },
     });
 
+    // CR10 — register the session's structured egress. When the assistant calls
+    // a `report_*` tool, the MCP host hands the validated payload here and we
+    // push it to the session's window (Channel C, structured).
+    deps.mcpHost.register({
+      sessionId,
+      token,
+      onReport: ({ tool, payload }) => {
+        const s = sessions.get(sessionId);
+        if (!s) return;
+        deps.emitReport(s.winId, { sessionId, tool, payload });
+      },
+    });
+
     // Spawn the visible PTY, then announce `connecting` carrying its id so the
     // renderer can bind an xterm to the booting session.
-    session.proc = host.spawn(settingsPath);
+    session.proc = host.spawn({ settingsPath, mcpConfigPath });
     setPhase(session, 'connecting', { ptyId: session.proc.id });
 
     session.readyTimer = setTimeout(() => {
@@ -196,7 +234,12 @@ export function createHelperManager(deps: HelperManagerDeps): HelperManager {
     return session.ready.promise;
   }
 
-  async function submit(winId: number, host: HelperHost, prompt: string): Promise<void> {
+  async function submit(
+    winId: number,
+    host: HelperHost,
+    prompt: string,
+    opts?: HelperSubmitOpts,
+  ): Promise<void> {
     await connect(winId, host);
     const sessionId = byWindow.get(winId);
     const session = sessionId ? sessions.get(sessionId) : undefined;
@@ -209,6 +252,7 @@ export function createHelperManager(deps: HelperManagerDeps): HelperManager {
     if (readySettleMs) await delay(readySettleMs);
     if (!sessions.has(session.sessionId)) return; // torn down while settling
 
+    const turnTimeoutMs = opts?.resultTimeoutMs ?? resultTimeoutMs;
     setPhase(session, 'thinking');
     await new Promise<void>((resolve) => {
       session.pending = {
@@ -219,7 +263,7 @@ export function createHelperManager(deps: HelperManagerDeps): HelperManager {
           s.pending = null;
           setPhase(s, 'error', { error: 'The assistant timed out answering.' });
           resolve();
-        }, resultTimeoutMs),
+        }, turnTimeoutMs),
       };
       // Channel A — the unsupported inject-and-submit leg, isolated here: write
       // the prompt, wait, then a bare CR submits the turn.
@@ -238,6 +282,7 @@ export function createHelperManager(deps: HelperManagerDeps): HelperManager {
     if (!session) return;
     sessions.delete(sessionId);
     deps.middleman.unregister(sessionId);
+    void deps.mcpHost.unregister(sessionId);
     if (session.readyTimer) clearTimeout(session.readyTimer);
     if (session.pending) clearTimeout(session.pending.timer);
     try {

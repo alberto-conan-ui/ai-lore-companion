@@ -57,6 +57,14 @@ export function pickHelperEngine(
   return { kind: 'claude' };
 }
 
+/** Per-turn overrides for a {@link HelperEngine.submit} call. */
+export type HelperSubmitOpts = {
+  /** Override the default turn timeout (ms). The dashboard crawl reads the WHOLE
+   *  lore before reporting — ~145s on interactive Haiku (measured 2026-06-03) —
+   *  so it needs a window well past the snappy default a Q&A turn uses. */
+  resultTimeoutMs?: number;
+};
+
 /** A helper engine — the per-window lifecycle the IPC layer drives. Both the
  *  Claude manager and the Gemini helper conform to this; the renderer never
  *  knows which one is behind a given window. */
@@ -70,8 +78,9 @@ export type HelperEngine<H> = {
   /** Ensure the window's helper is connected; resolves once it can take turns. */
   connect: (winId: number, host: H) => Promise<void>;
   /** Connect if needed, then drive one read-only turn with `prompt` (the IPC
-   *  layer builds the prompt — it holds the project context). */
-  submit: (winId: number, host: H, prompt: string) => Promise<void>;
+   *  layer builds the prompt — it holds the project context). `opts` carries
+   *  per-turn overrides (e.g. a longer timeout for the dashboard crawl). */
+  submit: (winId: number, host: H, prompt: string, opts?: HelperSubmitOpts) => Promise<void>;
   /** Tear down the window's helper. */
   disposeForWindow: (winId: number) => void;
   /** Tear down every helper this engine owns. */

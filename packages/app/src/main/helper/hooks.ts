@@ -47,8 +47,54 @@ const DENY_TOOLS = ['Write', 'Edit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSea
  * [`blueprint/contracts/helper-read-only.contract.md`] for the standing rule
  * and the finding.
  */
-export function helperLaunchArgs(opts: { settingsPath: string; model: string }): string[] {
-  return ['--settings', opts.settingsPath, '--model', opts.model];
+export function helperLaunchArgs(opts: {
+  settingsPath: string;
+  model: string;
+  /** The session's `--mcp-config` file (CR10). When set, the helper loads ONLY
+   *  this MCP server (`--strict-mcp-config`, so the user's own MCP servers never
+   *  join the read-only session) and is pre-authorized for the report tools. */
+  mcpConfigPath?: string;
+}): string[] {
+  const args = ['--settings', opts.settingsPath, '--model', opts.model];
+  if (opts.mcpConfigPath) {
+    args.push('--mcp-config', opts.mcpConfigPath, '--strict-mcp-config');
+    // Pre-authorize the report tools so the model's call lands without a
+    // permission prompt the driven PTY could never answer. The deny-writes
+    // profile is untouched — the report tool is the only new capability, and it
+    // writes to the app, not the project (read-only holds). See
+    // [`blueprint/contracts/helper-read-only.contract.md`].
+    args.push('--allowedTools', ...ALLOWED_MCP_TOOLS);
+  }
+  return args;
+}
+
+/** The MCP server key in the helper's `--mcp-config` — the prefix Claude uses to
+ *  namespace its tools (`mcp__<key>__<tool>`). */
+export const MCP_SERVER_KEY = 'ailore';
+
+/** The report tools the read-only helper may call (CR10), in Claude's prefixed
+ *  `mcp__<server>__<tool>` form. Phase 1 ships `report_dashboard`; the curation
+ *  + answer tools join here as CR10 grows. */
+export const ALLOWED_MCP_TOOLS = ['report_dashboard'].map((t) => `mcp__${MCP_SERVER_KEY}__${t}`);
+
+/** The session's `--mcp-config` JSON (CR10) — a single local HTTP MCP server
+ *  (the app-hosted {@link ../helper/mcp-host.ts}) the read-only helper reports
+ *  structured results through. The bearer token authenticates the session; the
+ *  URL is its per-session endpoint. Pure so the shape is assertable in tests. */
+export function mcpConfigJson(opts: { url: string; token: string }): string {
+  return JSON.stringify(
+    {
+      mcpServers: {
+        [MCP_SERVER_KEY]: {
+          type: 'http',
+          url: opts.url,
+          headers: { Authorization: `Bearer ${opts.token}` },
+        },
+      },
+    },
+    null,
+    2,
+  );
 }
 
 /** The `--settings` JSON: the deny-writes permission profile plus the two
@@ -177,6 +223,10 @@ export function promptFor(
     today?: string;
     changedPaths?: string[];
     lightOrient?: boolean;
+    /** CR10 — when set, the `dashboard` crawl is told to **call** this MCP tool
+     *  with the board instead of printing JSON (the structured egress, Claude).
+     *  Unset keeps the print-JSON path (Gemini, until its MCP egress lands). */
+    reportTool?: string;
   },
 ): string {
   switch (action) {
@@ -213,15 +263,26 @@ export function promptFor(
       // expensive model asked to reason and polish (Opus got 3).
       const memory = args.memoryPath ?? '';
       const today = args.today ?? '';
-      return `You are a strictly READ-ONLY assistant. Read this AI-Lore project's lore (its Memory) and return ONE JSON object listing where the project stands. Do not write or edit anything.
+      // The board's shape + the completeness rules are identical across engines;
+      // only the **delivery** differs — call the MCP tool (structured, CR10) or
+      // print the JSON (the legacy scrape, until an engine's MCP egress lands).
+      const shape = `{"project":"string","crumb":"Project · Status","rollup":{"inPlay":0,"active":0,"hanging":0,"looseEnds":0},"staleness":{"state":"behind|current","label":"string","since":"string","text":"string"},"focuses":[{"id":"kebab","name":"string","kind":"active|paused|hanging|headless","line":"string","estimate":0,"steps":[{"name":"string","line":"string","verdict":"on-track|in-progress|at-risk|not-started|blocked","progress":0,"active":false}],"note":"string","attention":[{"source":"Backlog|Bug|Idea|Drift|Lore","text":"string","since":"string"}]}]}`;
+      const delivery = args.reportTool
+        ? `Deliver the board by CALLING the \`${args.reportTool}\` tool with a single \`board\` argument matching this exact shape — do NOT print it, the app receives it through the tool call:
+${shape}`
+        : `Return EXACTLY this JSON (no prose, no markdown fences):
+${shape}`;
+      const outro = args.reportTool
+        ? `Call \`${args.reportTool}\` exactly once with the complete board. Do not print the JSON.`
+        : 'Output ONLY the JSON object.';
+      return `You are a strictly READ-ONLY assistant. Read this AI-Lore project's lore (its Memory) and report where the project stands. Do not write or edit anything.
 
 YOUR ONE GOAL IS COMPLETENESS. Surface EVERYTHING you find. Do NOT group, merge, summarize, or decide whether items belong together — list each thing separately. Do NOT polish the wording — raw is fine, and internal codenames (like "CR1") are fine to include. It is far better to over-list than to miss anything; a human cleans up, rewords, and merges afterward. When in doubt, include it.
 
 The lore Memory is at: ${memory}
 Key files: status/status.index.md (names the ACTIVE focus, PAUSED focuses, journal trail); status/focus/*.focus.md (each has a status: Active/Paused/Achieved; backlog.focus.md is a holding pen; status/focus/archive/ is CLOSED — ignore it); action-tree/<focus>/ (the active focus's steps, named CR1..CRN); journal/live/*.md (their Handover sections list "Loose ends" and "Watch"); save-points/ (the milestone ledger — the gap from the latest save-point date to today, ${today}, is the sign-off currency).
 
-Return EXACTLY this JSON (no prose, no markdown fences):
-{"project":"string","crumb":"Project · Status","rollup":{"inPlay":0,"active":0,"hanging":0,"looseEnds":0},"staleness":{"state":"behind|current","label":"string","since":"string","text":"string"},"focuses":[{"id":"kebab","name":"string","kind":"active|paused|hanging|headless","line":"string","estimate":0,"steps":[{"name":"string","line":"string","verdict":"on-track|in-progress|at-risk|not-started|blocked","progress":0,"active":false}],"note":"string","attention":[{"source":"Backlog|Bug|Idea|Drift|Lore","text":"string","since":"string"}]}]}
+${delivery}
 
 Rules:
 - "focuses": one per non-archived focus.
@@ -232,7 +293,7 @@ Rules:
 - "staleness": from the ledger. "state":"behind" if the latest save-point predates recent shipped work; "since" = the last save-point date.
 - "rollup": inPlay=#focuses, active=#active, hanging=#hanging, looseEnds=#headless attention items.
 
-Output ONLY the JSON object.`;
+${outro}`;
     }
   }
 }

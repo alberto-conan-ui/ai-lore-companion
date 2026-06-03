@@ -36,6 +36,7 @@ import type {
   FocusReadResult,
   HelperAction,
   HelperEventPayload,
+  HelperReportPayload,
   OpenDiffArg,
   OpenDiffResult,
   PromptEntry,
@@ -233,6 +234,10 @@ export const CONTRACT = {
   /** Main → renderer: a helper session state change (connecting / ready /
    *  thinking / answered / error). */
   onHelperEvent: push<HelperEventPayload>('helper:event'),
+  /** Main → renderer: a structured result reported via an MCP tool call (CR10) —
+   *  the dashboard board and the curation results arrive here as typed data,
+   *  not scraped from `answer` text. */
+  onHelperReport: push<HelperReportPayload>('helper:report'),
 } as const;
 
 type Contract = typeof CONTRACT;

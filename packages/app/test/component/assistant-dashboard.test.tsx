@@ -1,9 +1,12 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, test } from 'vitest';
 
 import { AssistantDashboard } from '../../src/renderer/src/components/AssistantDashboard.js';
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  (window as unknown as { cockpit?: unknown }).cockpit = undefined;
+});
 
 // Design-first spike (hand-written sample data, no AI yet). The Status tab is a
 // stack of focus widgets — one per focus in scope, flexing by state; Payload and
@@ -111,4 +114,54 @@ test('a Payload score card toggles its detail (aria-expanded flips)', () => {
   expect(toggle.getAttribute('aria-expanded')).toBe('true'); // open by default
   fireEvent.click(toggle);
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
+});
+
+// CR10 — the structured egress: the dashboard hydrates from a `report_dashboard`
+// MCP tool call delivered on `onHelperReport`, as validated data — not scraped
+// from the `answer` text. Mock the channel, fire a report, assert the board swaps.
+test('a report_dashboard tool call hydrates the board (structured, no text scrape)', () => {
+  let cb: ((r: { sessionId: string; tool: string; payload: unknown }) => void) | undefined;
+  (window as unknown as { cockpit: unknown }).cockpit = {
+    onHelperReport: (fn: typeof cb) => {
+      cb = fn;
+      return () => {};
+    },
+  };
+  render(<AssistantDashboard />);
+  // Starts on the hand-written sample (the active focus is "AI Helper").
+  expect(screen.queryByText('Injected Focus')).toBeNull();
+
+  const board = {
+    project: 'P',
+    rollup: { inPlay: 1, active: 1, hanging: 0, looseEnds: 0 },
+    focuses: [
+      {
+        id: 'x',
+        name: 'Injected Focus',
+        kind: 'active',
+        line: 'the live line',
+        estimate: 50,
+        steps: [{ name: 'a step', line: 'l', verdict: 'in-progress', progress: 50, active: true }],
+      },
+    ],
+  };
+  act(() => cb?.({ sessionId: 's1', tool: 'report_dashboard', payload: board }));
+
+  // The board swapped to the reported data — no parsing of stdout involved.
+  expect(screen.getByText('Injected Focus')).toBeTruthy();
+  expect(screen.queryByText('AI Helper')).toBeNull();
+});
+
+test('a report with an invalid board shape is rejected, not rendered', () => {
+  let cb: ((r: { sessionId: string; tool: string; payload: unknown }) => void) | undefined;
+  (window as unknown as { cockpit: unknown }).cockpit = {
+    onHelperReport: (fn: typeof cb) => {
+      cb = fn;
+      return () => {};
+    },
+  };
+  render(<AssistantDashboard />);
+  act(() => cb?.({ sessionId: 's1', tool: 'report_dashboard', payload: { not: 'a board' } }));
+  // The sample board still stands; the bad shape did not replace it.
+  expect(screen.getByText('AI Helper')).toBeTruthy();
 });

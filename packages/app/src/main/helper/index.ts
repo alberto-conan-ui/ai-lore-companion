@@ -16,36 +16,71 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BrowserWindow } from 'electron';
-import { CHANNELS, type HelperEventPayload } from '../../shared/ipc.js';
+import { CHANNELS, type HelperEventPayload, type HelperReportPayload } from '../../shared/ipc.js';
 import type { HelperEngine } from './engine.js';
 import { type GeminiHost, createGeminiHelper, readOnlyPolicyToml } from './gemini.js';
-import { sessionStartScript, settingsJson, stopScript } from './hooks.js';
+import { mcpConfigJson, sessionStartScript, settingsJson, stopScript } from './hooks.js';
 import { type HelperManager, createHelperManager } from './manager.js';
+import { type McpHost, createMcpHost } from './mcp-host.js';
 import { createMiddleman } from './middleman.js';
 
-/** Write the deny-writes `--settings` and the two hook scripts into a fresh
- *  temp dir; returns the dir + the settings path to pass to `claude`. */
-function materialize(w: { sessionId: string; token: string; port: number }): {
+/** Write the deny-writes `--settings`, the two hook scripts, and the CR10
+ *  `--mcp-config` into a fresh temp dir; returns the dir + the paths to pass to
+ *  `claude`. All out-of-tree — never the user's `.claude/`. */
+function materialize(w: { sessionId: string; token: string; port: number; mcpUrl: string }): {
   dir: string;
   settingsPath: string;
+  mcpConfigPath: string;
 } {
   const dir = mkdtempSync(join(tmpdir(), 'ai-lore-helper-'));
   const sessionStartPath = join(dir, 'session-start-hook.mjs');
   const stopPath = join(dir, 'stop-hook.mjs');
   const settingsPath = join(dir, 'settings.json');
+  const mcpConfigPath = join(dir, 'mcp.json');
   writeFileSync(sessionStartPath, sessionStartScript(w));
   writeFileSync(stopPath, stopScript(w));
   writeFileSync(
     settingsPath,
     settingsJson({ sessionStartScript: sessionStartPath, stopScript: stopPath }),
   );
-  return { dir, settingsPath };
+  writeFileSync(mcpConfigPath, mcpConfigJson({ url: w.mcpUrl, token: w.token }));
+  return { dir, settingsPath, mcpConfigPath };
+}
+
+/** Send a structured report (an MCP tool call, CR10) to the window. */
+function emitReport(winId: number, report: HelperReportPayload): void {
+  const win = BrowserWindow.fromId(winId);
+  if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.onHelperReport, report);
 }
 
 /** Send a helper event to the window that owns the session. */
 function emit(winId: number, event: HelperEventPayload): void {
   const win = BrowserWindow.fromId(winId);
   if (win && !win.isDestroyed()) win.webContents.send(CHANNELS.onHelperEvent, event);
+}
+
+let mcp: McpHost | null = null;
+
+/** The app-wide MCP host (AI Helper, CR10) — the structured egress the
+ *  read-only helper reports through. Built on first use; bound by
+ *  {@link startMcpHost} at app boot. */
+export function mcpHost(): McpHost {
+  if (mcp) return mcp;
+  mcp = createMcpHost();
+  return mcp;
+}
+
+/** Bind the MCP host at app boot so the local server is up before any Connect —
+ *  "provide an MCP locally as soon as you start up" (HL, 2026-06-03). A bind
+ *  failure is logged, not fatal: the host is only exercised once a session
+ *  reports, and the rest of the app must still launch. */
+export async function startMcpHost(): Promise<void> {
+  try {
+    const port = await mcpHost().listen();
+    console.log('[helper] MCP host listening on 127.0.0.1:%d', port);
+  } catch (e) {
+    console.error('[helper] MCP host failed to bind:', (e as Error).message);
+  }
 }
 
 let manager: HelperManager | null = null;
@@ -55,9 +90,11 @@ export function helperManager(): HelperManager {
   if (manager) return manager;
   manager = createHelperManager({
     middleman: createMiddleman(),
+    mcpHost: mcpHost(),
     materialize,
     cleanup: (dir) => rmSync(dir, { recursive: true, force: true }),
     emit,
+    emitReport,
     newId: () => randomUUID(),
   });
   return manager;
@@ -177,8 +214,9 @@ export function disposeHelperForWindow(winId: number): void {
   gemini?.disposeForWindow(winId);
 }
 
-/** Tear down every helper and close the middleman (called on quit). */
+/** Tear down every helper and close the middleman + MCP host (called on quit). */
 export async function disposeAllHelpers(): Promise<void> {
   if (manager) await manager.disposeAll();
   if (gemini) await gemini.disposeAll();
+  if (mcp) await mcp.close();
 }
