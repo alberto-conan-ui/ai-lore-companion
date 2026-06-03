@@ -11,13 +11,26 @@ import type { HelperHost } from '../helper/manager.js';
 import type { Deps, ProjectContext, RegisterModule } from './types.js';
 
 /**
- * The model the helper runs on. Its job is fast, read-only Q&A over the
- * project (summaries, "what's pending") — a Haiku-class task, not an Opus one.
- * Pinning the cheapest/fastest tier keeps answers snappy and cheap; the user's
- * own AI tab is unaffected. `haiku` is the CLI alias for the latest Haiku
- * (Haiku 4.5 today). (Per-engine model choice can move behind the adapter at CR7.)
+ * The model the Claude helper runs on. The dashboard crawl's job is now
+ * **surfacing, not polishing** — a cheap, fast read that lists everything raw,
+ * which the human then cleans up in the UI (Humanize / Consolidate). The spike
+ * (2026-06-03) proved a cheap model + a "surface everything, don't reason"
+ * prompt beats an expensive model + a complex prompt on completeness (Haiku
+ * went 0 → 11 loose-ends once we stopped asking it to reason). So Haiku, not
+ * Opus — quality of wording is the UI's job, not the model's. `haiku` is the
+ * CLI alias for the latest Haiku.
  */
 const HELPER_MODEL = 'haiku';
+
+/**
+ * The model the Gemini helper runs on. Same logic — surface, don't polish. With
+ * the simple prompt the cheapest Gemini was the *most* complete (13 loose-ends,
+ * ~26s). It can flake (an occasional empty reply), so a retry is owed. A model
+ * must still be pinned or the CLI's auto-router crashes on a big prompt; an
+ * explicit per-project `helperModel` overrides. (`gemini-2.5-flash` routes to
+ * gemini-3-flash on current CLIs.)
+ */
+const GEMINI_HELPER_MODEL = 'gemini-2.5-flash';
 
 /** Cap on the change list embedded in the `what-changed` prompt — a huge drift
  *  shouldn't blow the prompt. Truncation is noted in the prompt. */
@@ -66,10 +79,16 @@ function changedPaths(ctx: ProjectContext): string[] {
  *  needs from the project context. `lightOrient` chooses the cheap one-file
  *  orient for engines without the AI-Lore skill (headless Gemini). */
 function promptForAction(ctx: ProjectContext, action: HelperAction, lightOrient: boolean): string {
-  const statusPath = isChainError(ctx.chain)
-    ? ''
-    : join(ctx.chain.lorePath, 'memory/status/status.index.md');
-  return promptFor(action, { statusPath, changedPaths: changedPaths(ctx), lightOrient });
+  const memoryPath = isChainError(ctx.chain) ? '' : join(ctx.chain.lorePath, 'memory');
+  const statusPath = memoryPath ? join(memoryPath, 'status/status.index.md') : '';
+  const today = new Date().toISOString().slice(0, 10);
+  return promptFor(action, {
+    statusPath,
+    memoryPath,
+    today,
+    changedPaths: changedPaths(ctx),
+    lightOrient,
+  });
 }
 
 /** Which engine the window's helper uses (CR7) — the **assistant engine the
@@ -116,10 +135,11 @@ function resolve(deps: Deps, event: Electron.IpcMainInvokeEvent): BoundHelper | 
       // refuse + thrash → turn timeout. See {@link GeminiHost}.
       cwd: join(ctx.chain.lorePath, 'memory'),
       includeDirs: [ctx.root],
-      // No forced default — the CLI routes its own model (the old
-      // `gemini-2.5-flash` pin is ignored by current CLIs). An explicit
-      // per-engine `helperModel` is still honoured.
-      model: engine.entry.helperModel,
+      // Pin Gemini 3 Pro for the crawl — without a pinned model the CLI's
+      // auto-router crashes on the big prompt; with it, 3.1-pro-preview gives the
+      // most complete board in ~90s (trip 2026-06-03). A per-project
+      // `helperModel` still overrides.
+      model: engine.entry.helperModel ?? GEMINI_HELPER_MODEL,
     };
     return {
       ctx,
@@ -145,18 +165,21 @@ function resolve(deps: Deps, event: Electron.IpcMainInvokeEvent): BoundHelper | 
 export const registerHelper: RegisterModule = (reg, deps) => {
   reg.handle('helperConnect', async (event) => {
     const r = resolve(deps, event);
+    console.log('[helper] connect', r ? 'resolved' : 'NO-OP (no engine/project)');
     if (!r) return;
     await r.connect();
   });
 
   reg.handle('helperAsk', async (event, action: HelperAction) => {
     const r = resolve(deps, event);
+    console.log('[helper] ask', action, r ? '' : 'NO-OP (no engine/project)');
     if (!r) return;
     await r.submit(promptForAction(r.ctx, action, r.lightOrient));
   });
 
   reg.handle('helperAskText', async (event, text: string) => {
     const r = resolve(deps, event);
+    console.log('[helper] askText', `"${text.slice(0, 48)}…"`, r ? '' : 'NO-OP');
     if (!r) return;
     const prompt = text.trim();
     if (!prompt) return;

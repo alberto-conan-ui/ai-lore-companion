@@ -1,7 +1,7 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
 import { type JSX, useEffect, useState } from 'react';
 import type { HelperPhase } from '../../../shared/ipc.js';
-import { HelperTerminal } from './HelperTerminal.js';
+import { ActivityConsole } from './ActivityConsole.js';
 import {
   buttonBusyStyle,
   buttonStyle,
@@ -10,7 +10,6 @@ import {
   headerHintStyle,
   headerLabelStyle,
   headerStyle,
-  hintStyle,
   isBusy,
   isConnected,
   isHelperCapable,
@@ -32,7 +31,7 @@ import {
  * fires the first turn itself (the dashboard hydrate, which reads the lore and
  * so doubles as the orient). Splitting the two is the v1.0 "two-surface" shape.
  */
-export function AssistantHost({ active }: { active: boolean }): JSX.Element {
+export function AssistantHost(_props: { active: boolean }): JSX.Element {
   const [phase, setPhase] = useState<HelperPhase | null>(null);
   const [ptyId, setPtyId] = useState<string | null>(null);
   const [error, setError] = useState<string>('');
@@ -138,20 +137,10 @@ export function AssistantHost({ active }: { active: boolean }): JSX.Element {
         </div>
       ) : null}
 
+      {/* The assistant *is* a console: every action + its result stacks here,
+          for both engines (Claude and Gemini ride the same event stream). */}
       <div style={sessionWrapStyle}>
-        {ptyId ? (
-          <HelperTerminal ptyId={ptyId} active={active} />
-        ) : connected ? (
-          <div style={hintStyle} data-testid="assistant-host-headless">
-            The assistant is running. It has no on-screen session — its answers appear in the
-            <strong> Assistant</strong> tab on the left.
-          </div>
-        ) : (
-          <div style={hintStyle} data-testid="assistant-host-hint">
-            Connect a read-only assistant to read this project and answer your questions. Once
-            connected, drive it from the AI-assisted actions in the left-hand Assistant tab.
-          </div>
-        )}
+        <ActivityConsole variant="full" />
       </div>
     </div>
   );

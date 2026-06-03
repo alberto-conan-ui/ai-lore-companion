@@ -41,11 +41,17 @@ test('what-changed lists the supplied changed paths as a bullet list', () => {
   assert.match(p, /what changed/i);
 });
 
-test('dashboard asks for plain-language JSON and forbids internal keys', () => {
-  const p = promptFor('dashboard', { statusPath: STATUS });
-  assert.match(p, new RegExp(STATUS)); // points the helper at the status file
-  assert.match(p, /"title"/); // the JSON shape
-  assert.match(p, /recentlyDone|whatsNext|riskAreas/);
-  assert.match(p, /non-technical/i); // the plain-language rule
-  assert.match(p, /never any internal codename|no .*codename|identifier/i); // no keys
+test('dashboard asks for the FocusBoard JSON and optimises for completeness, not polish', () => {
+  const p = promptFor('dashboard', {
+    statusPath: STATUS,
+    memoryPath: '/lore/memory',
+    today: '2026-06-03',
+  });
+  assert.match(p, /\/lore\/memory/); // anchors the crawl at the Memory root
+  assert.match(p, /"focuses"/); // the FocusBoard shape
+  assert.match(p, /"headless"/); // the loose-ends bucket
+  assert.match(p, /"staleness"/); // the sign-off banner
+  assert.match(p, /2026-06-03/); // today, for sign-off currency
+  assert.match(p, /completeness/i); // surface everything…
+  assert.match(p, /do not merge/i); // …raw and unmerged — the UI cleans up
 });

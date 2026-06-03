@@ -1,4 +1,7 @@
 import { type JSX, useEffect, useRef, useState } from 'react';
+import type { HelperPhase } from '../../../shared/ipc.js';
+import { pushActivity } from './activityLog.js';
+import { isBusy, isConnected } from './assistantShared.js';
 import './StatusPanel.css';
 
 /**
@@ -16,11 +19,14 @@ import './StatusPanel.css';
  * health signals**; the **save-point** is the only real "caught up" anchor.
  *
  * The Assistant pane is **tabbed like the Project pane** — Status / Payload /
- * Memory — each its own dashboard with **domain-specific signals**: Status →
- * momentum & readiness; Payload → coverage, code quality, lint; Memory →
- * sign-off, consistency, tidiness. All **hand-written sample data** for now
- * ({@link TABS}); hydration re-attaches later, the shape unchanged. Type is
- * Geist/Geist Mono with system fallbacks.
+ * Memory. **Status** is a {@link FocusBoard}: a slim roll-up line + a stack of
+ * **focus widgets**, one per focus in scope — the active focus (ring + derived
+ * steps + "you are here"), any hanging-but-unarchived focus (flagged), and a
+ * synthetic **headless focus** that collects loose-ends no active focus owns.
+ * **Payload / Memory** stay the scored {@link StatusData} dashboard (coverage /
+ * quality / lint; sign-off / consistency / tidiness). All **hand-written sample
+ * data** for now ({@link TABS}); hydration re-attaches later, the shape
+ * unchanged. Type is Geist/Geist Mono with system fallbacks.
  */
 
 type Verdict = 'on-track' | 'in-progress' | 'at-risk' | 'not-started' | 'blocked';
@@ -37,6 +43,44 @@ type Signal = {
   attention: string[];
 };
 type Stream = { name: string; line: string; verdict: Verdict; progress: number; active?: boolean };
+
+/* ---------- focus board (the Status tab) ---------- */
+/** Each focus in scope is one widget; the widget flexes by the focus's state. */
+type FocusKind = 'active' | 'paused' | 'hanging' | 'headless';
+/** One flagged item the headless focus collects from the project-wide sweep. */
+type AttentionItem = { source: string; text: string; since?: string; detail?: string };
+type FocusWidget = {
+  id: string;
+  name: string;
+  kind: FocusKind;
+  line: string;
+  /** Completion estimate (0–100) — active/paused/hanging; omitted for headless. */
+  estimate?: number;
+  /** Derived steps under an active/paused focus. */
+  steps?: Stream[];
+  /** Why a hanging focus still needs attention (e.g. shipped but not archived). */
+  note?: string;
+  /** The headless focus's collected loose-ends. */
+  attention?: AttentionItem[];
+};
+/** Sign-off currency — its own concern, not a loose-end nobody owns. How long
+ * since the work was last formally signed off / reviewed as a milestone. */
+type Staleness = {
+  state: 'current' | 'behind';
+  label: string;
+  since: string;
+  text: string;
+  detail?: string;
+};
+export type FocusBoard = {
+  project: string;
+  crumb?: string;
+  /** The slim roll-up line above the stack. */
+  rollup: { inPlay: number; active: number; hanging: number; looseEnds: number };
+  /** The staleness banner — sign-off currency, shown above the focus stack. */
+  staleness?: Staleness;
+  focuses: FocusWidget[];
+};
 
 export type StatusData = {
   project: string;
@@ -347,12 +391,28 @@ function Chrome({ crumb }: { crumb: string }): JSX.Element {
   );
 }
 
-function StreamRow({ s }: { s: Stream }): JSX.Element {
+function StreamRow({
+  s,
+  pick,
+}: {
+  s: Stream;
+  pick?: { checked: boolean; onToggle: () => void };
+}): JSX.Element {
   const v = SP_VERDICTS[s.verdict];
   const tone = v.tone;
   const m = useMounted(160);
   return (
-    <div className={`srow ${s.active ? 'active ' : ''}t-${tone}`}>
+    <div className={`srow ${s.active ? 'active ' : ''}t-${tone}${pick?.checked ? ' picked' : ''}`}>
+      {pick ? (
+        <input
+          type="checkbox"
+          className="s-check"
+          checked={pick.checked}
+          onChange={pick.onToggle}
+          data-testid="item-check"
+          aria-label={`Select: ${s.name}`}
+        />
+      ) : null}
       <span className="s-glyph">
         <Glyph kind={v.glyph} />
       </span>
@@ -476,90 +536,547 @@ function StatusPanel({ data }: { data: StatusData }): JSX.Element {
   );
 }
 
+/* ---------- focus board (the Status tab) ---------- */
+const FOCUS_STATE: Record<
+  Exclude<FocusKind, 'headless'>,
+  { label: string; tone: Tone; pill: 'green' | 'amber' | 'muted' }
+> = {
+  active: { label: 'Active', tone: 'amber', pill: 'amber' },
+  paused: { label: 'Paused', tone: 'muted', pill: 'muted' },
+  hanging: { label: 'Shipped', tone: 'green', pill: 'green' },
+};
+
+/** A focus with a completion estimate + (optionally) its derived steps. The
+ * active focus carries the "You are here" step; a hanging focus carries a note.
+ * Each step is selectable so it can be batch-asked alongside loose-ends. */
+function FocusCard({
+  f,
+  mounted,
+  selected,
+  onToggle,
+}: {
+  f: FocusWidget;
+  mounted: boolean;
+  selected: Set<string>;
+  onToggle: (key: string) => void;
+}): JSX.Element {
+  const st = FOCUS_STATE[f.kind as Exclude<FocusKind, 'headless'>];
+  return (
+    <div className={`fcard tone-${st.tone}`} data-testid="focus-card" data-focus-state={f.kind}>
+      <div className="fc-head">
+        <ProgressRing
+          value={f.estimate ?? 0}
+          size={54}
+          stroke={6}
+          tone={st.tone}
+          mounted={mounted}
+        />
+        <div className="fc-id">
+          <div className="fc-top">
+            <span className="fc-name">{f.name}</span>
+            <span className={`fstate c-${st.pill}`}>
+              <span className="dotk" />
+              {st.label}
+            </span>
+          </div>
+          <div className="fc-line">{f.line}</div>
+        </div>
+      </div>
+      {f.steps ? (
+        <div className="fc-steps" data-testid="focus-steps">
+          {f.steps.map((s) => {
+            const key = `${f.id}:${s.name}`;
+            return (
+              <StreamRow
+                key={s.name}
+                s={s}
+                pick={{ checked: selected.has(key), onToggle: () => onToggle(key) }}
+              />
+            );
+          })}
+        </div>
+      ) : null}
+      {f.note ? (
+        <div className="fhang" data-testid="focus-hanging">
+          <Glyph kind="warn" size={15} />
+          <span>{f.note}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** An askable item — a focus step or a loose-end — flattened so any of them can
+ * be selected and batch-asked together. `key` is unique across the whole board. */
+type Askable = { key: string; source: string; text: string; since?: string };
+
+/** Flatten every selectable line on the board into one askable list (focus
+ * steps + headless loose-ends), in render order. */
+function collectAskables(board: FocusBoard): Askable[] {
+  const out: Askable[] = [];
+  for (const f of board.focuses) {
+    for (const s of f.steps ?? [])
+      out.push({ key: `${f.id}:${s.name}`, source: f.name, text: s.name });
+    for (const a of f.attention ?? [])
+      out.push({ key: `loose:${a.text}`, source: a.source, text: a.text, since: a.since });
+  }
+  return out;
+}
+
+/** The staleness banner — sign-off currency. Its own concern (not a loose-end),
+ * shown above the focus stack; click anywhere to read why. */
+function StalenessCard({ s }: { s: Staleness }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const expandable = Boolean(s.detail);
+  const tone = s.state === 'behind' ? 'amber' : 'green';
+  return (
+    <div className={`stale-wrap${open ? ' open' : ''}`} data-testid="staleness">
+      <div
+        className={`stale tone-${tone}${expandable ? ' can-exp' : ''}`}
+        onClick={() => expandable && setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (expandable && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
+        role={expandable ? 'button' : undefined}
+        tabIndex={expandable ? 0 : undefined}
+        aria-expanded={expandable ? open : undefined}
+      >
+        <span className="stale-glyph">
+          <Glyph kind={s.state === 'behind' ? 'warn' : 'good'} size={16} />
+        </span>
+        <div className="stale-main">
+          <div className="stale-top">
+            <span className="stale-label">Sign-off</span>
+            <span className={`stale-state c-${tone}`}>{s.label}</span>
+            <span className="since">since {s.since}</span>
+          </div>
+          <div className="stale-text">{s.text}</div>
+        </div>
+        {expandable ? (
+          <span className="chv" aria-hidden="true">
+            ›
+          </span>
+        ) : null}
+      </div>
+      {expandable ? (
+        <div className="att-detail">
+          <div className="att-detail-inner">
+            <p>{s.detail}</p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** One loose-end row: a selection checkbox + the flagged item, expandable to its
+ * deeper note — but only when it *has* one (`detail`). Click anywhere on the row
+ * to expand; the checkbox stops propagation, so ticking it only selects. */
+function LooseEndRow({
+  a,
+  selected,
+  onToggle,
+}: {
+  a: AttentionItem;
+  selected: Set<string>;
+  onToggle: (key: string) => void;
+}): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const key = `loose:${a.text}`;
+  const expandable = Boolean(a.detail);
+  return (
+    <div className={`att-wrap${open ? ' open' : ''}`} data-testid="loose-row">
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the checkbox is the keyboard path; row-click is a pointer convenience */}
+      <div
+        className={`att${selected.has(key) ? ' picked' : ''}${expandable ? ' can-exp' : ''}`}
+        onClick={() => expandable && setOpen((o) => !o)}
+        aria-expanded={expandable ? open : undefined}
+      >
+        <input
+          type="checkbox"
+          className="att-check"
+          checked={selected.has(key)}
+          onChange={() => onToggle(key)}
+          onClick={(e) => e.stopPropagation()}
+          data-testid="item-check"
+          aria-label={`Select: ${a.text}`}
+        />
+        <span className="src">{a.source}</span>
+        <span style={{ flex: 1 }}>{a.text}</span>
+        {a.since ? <span className="since">buried {a.since}</span> : null}
+        {expandable ? (
+          <span className="chv" data-testid="loose-expand" aria-hidden="true">
+            ›
+          </span>
+        ) : null}
+      </div>
+      {expandable ? (
+        <div className="att-detail">
+          <div className="att-detail-inner">
+            <p>{a.detail}</p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The synthetic focus: things flagged across the project that no active focus
+ * owns (the Backlog + an annotation sweep). No ring — a count of loose-ends.
+ * Every row is selectable so it can be batch-asked from the top toolbar; rows
+ * that carry a deeper note expand to show it. */
+function HeadlessCard({
+  f,
+  selected,
+  onToggle,
+}: {
+  f: FocusWidget;
+  selected: Set<string>;
+  onToggle: (key: string) => void;
+}): JSX.Element {
+  const items = f.attention ?? [];
+  return (
+    <div className="fcard tone-info" data-testid="focus-card" data-focus-state="headless">
+      <div className="fc-head">
+        <span className="fc-badge">
+          <Glyph kind="note" size={30} />
+        </span>
+        <div className="fc-id">
+          <div className="fc-top">
+            <span className="fc-name">{f.name}</span>
+            <span className="fcount" data-testid="headless-count">
+              {items.length} loose ends
+            </span>
+          </div>
+          <div className="fc-line">{f.line}</div>
+        </div>
+      </div>
+      <div className="fc-steps" data-testid="headless-list">
+        {items.map((a) => (
+          <LooseEndRow key={a.text} a={a} selected={selected} onToggle={onToggle} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Where a drill-down answer loads: a drawer docked at the bottom of the
+ * Assistant pane (the left pane is the read-only *output* surface). Static for
+ * now — the body is where the assistant's deeper read will render once wired. */
+function DetailDrawer({
+  items,
+  onClose,
+}: {
+  items: Askable[];
+  onClose: () => void;
+}): JSX.Element {
+  return (
+    <div className="detail" data-testid="detail-drawer">
+      <div className="detail-head">
+        <span className="detail-title">
+          {items.length === 1 ? 'More on this' : `More on ${items.length} items`}
+        </span>
+        <button type="button" className="detail-close" onClick={onClose} aria-label="Close">
+          ×
+        </button>
+      </div>
+      <div className="detail-body">
+        {items.map((it) => (
+          <div className="detail-item" key={it.key}>
+            <div className="detail-q">
+              <span className="src">{it.source}</span>
+              <span>{it.text}</span>
+            </div>
+            <div className="detail-a">The assistant’s deeper read on this loads here.</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A pending consolidate suggestion: the assistant's merged shape for the rows
+ * the user picked, awaiting accept/reject. */
+type Proposal = { title: string; text: string; keys: string[] };
+
+/** The Status tab: a slim roll-up line + a stack of focus widgets. Every line is
+ * selectable; the top toolbar turns a selection into the three actions —
+ * **Humanize** (reword in place), **Consolidate** (merge the picked rows), and
+ * **Ask** (load a deeper read). Humanize/Consolidate fire real turns (handled by
+ * the parent); Ask opens the docked drawer. */
+function FocusPanel({
+  board,
+  opBusy,
+  onHumanize,
+  onConsolidate,
+  proposal,
+  onAcceptProposal,
+  onRejectProposal,
+}: {
+  board: FocusBoard;
+  opBusy: boolean;
+  onHumanize: (items: Askable[]) => void;
+  onConsolidate: (items: Askable[]) => void;
+  proposal: Proposal | null;
+  onAcceptProposal: () => void;
+  onRejectProposal: () => void;
+}): JSX.Element {
+  const mounted = useMounted(120);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [asked, setAsked] = useState<Askable[] | null>(null);
+  const r = board.rollup;
+
+  const askables = collectAskables(board);
+  const picked = askables.filter((a) => selected.has(a.key));
+  const pickedLoose = picked.filter((a) => a.key.startsWith('loose:'));
+  const clear = (): void => setSelected(new Set());
+  const toggle = (key: string): void =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  return (
+    <div className="status-panel">
+      <Chrome crumb={board.crumb || 'Project · Status'} />
+      <div className="asktoolbar" data-testid="ask-toolbar">
+        {selected.size > 0 ? (
+          <>
+            <span className="selbar-count">{selected.size} selected</span>
+            <button
+              type="button"
+              className="op-btn"
+              disabled={opBusy}
+              onClick={() => {
+                onHumanize(picked);
+                clear();
+              }}
+              data-testid="op-humanize"
+              title="Reword the selected items in plain language"
+            >
+              ✦ Humanize
+            </button>
+            {pickedLoose.length >= 2 ? (
+              <button
+                type="button"
+                className="op-btn"
+                disabled={opBusy}
+                onClick={() => {
+                  onConsolidate(pickedLoose);
+                  clear();
+                }}
+                data-testid="op-consolidate"
+                title="Merge the selected loose-ends into one"
+              >
+                ⊞ Consolidate
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="ask-batch"
+              onClick={() => setAsked(picked)}
+              data-testid="ask-batch"
+            >
+              Ask ›
+            </button>
+            <button type="button" className="selbar-clear" onClick={clear} data-testid="ask-clear">
+              Clear
+            </button>
+          </>
+        ) : (
+          <span className="ask-hint">
+            {opBusy ? 'Working…' : 'Tick items, then Humanize, Consolidate, or Ask.'}
+          </span>
+        )}
+      </div>
+      <div className="panel-scroll">
+        <div className="frollup" data-testid="focus-rollup">
+          <span>
+            <b>{r.inPlay}</b> focuses in play
+          </span>
+          <span className="dot">·</span>
+          <span>
+            <b className="c-amber">{r.active}</b> active
+          </span>
+          <span className="dot">·</span>
+          <span>
+            <b className="c-green">{r.hanging}</b> hanging
+          </span>
+          <span className="dot">·</span>
+          <span>
+            <b className="c-amber">{r.looseEnds}</b> loose ends
+          </span>
+        </div>
+        {board.staleness ? <StalenessCard s={board.staleness} /> : null}
+        <div className="fstack" data-testid="focus-board">
+          {board.focuses.map((f) =>
+            f.kind === 'headless' ? (
+              <HeadlessCard key={f.id} f={f} selected={selected} onToggle={toggle} />
+            ) : (
+              <FocusCard key={f.id} f={f} mounted={mounted} selected={selected} onToggle={toggle} />
+            ),
+          )}
+        </div>
+      </div>
+      {proposal ? (
+        <div className="proposal" data-testid="consolidate-proposal">
+          <div className="proposal-head">Combine {proposal.keys.length} items into one?</div>
+          <div className="proposal-title">{proposal.title}</div>
+          <div className="proposal-text">{proposal.text}</div>
+          <div className="proposal-actions">
+            <button type="button" className="op-btn primary" onClick={onAcceptProposal}>
+              Combine
+            </button>
+            <button type="button" className="selbar-clear" onClick={onRejectProposal}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {asked ? <DetailDrawer items={asked} onClose={() => setAsked(null)} /> : null}
+    </div>
+  );
+}
+
 /* Design-spike sample data for this project, grounded in the real lore.
  * Replaced by AI hydration later — the shape stays identical. One data set per
  * Assistant tab (CR9 Phase 5 spike): Status = the whole project; Payload = the
  * codebase; Memory = the lore. The StatusPanel layout is the same for all three;
  * only the content (and the two health-card slots) differ. */
-const STATUS_SAMPLE: StatusData = {
+const STATUS_FOCUSES: FocusBoard = {
   project: 'AI-Lore Companion',
-  release: 'v1.0',
   crumb: 'Project · Status',
-  now: 'Turning the companion into an AI assistant',
-  verdict: 'on-track',
-  streams: [
-    {
-      name: 'Core assistant',
-      line: 'Reads your project and answers — on Claude or Gemini.',
-      verdict: 'on-track',
-      progress: 100,
-    },
-    {
-      name: 'Safety & trust',
-      line: 'Strictly read-only. Never edits your work.',
-      verdict: 'on-track',
-      progress: 100,
-    },
-    {
-      name: 'In-app home',
-      line: 'A tidy home for it in the side rail.',
-      verdict: 'on-track',
-      progress: 100,
-    },
-    {
-      name: 'Status dashboard',
-      line: 'This at-a-glance view of where things stand.',
-      verdict: 'in-progress',
-      progress: 60,
-      active: true,
-    },
-    {
-      name: 'Multi-track projects',
-      line: 'Make it work with the newer multi-track projects.',
-      verdict: 'at-risk',
-      progress: 15,
-    },
-    {
-      name: 'Per-assistant models',
-      line: 'Choose which model each assistant uses.',
-      verdict: 'not-started',
-      progress: 0,
-    },
-  ],
-  caughtUp: {
-    date: 'June 1',
-    context: 'when the idea was just proven and the work was planned',
-    items: [
-      'Built the whole assistant, end to end, on both engines',
-      'Locked in the read-only safety guarantee',
-      'Fixed the Gemini engine timing out',
-      'Reworked the left side into a clean rail',
-      'Started this dashboard',
-    ],
+  rollup: { inPlay: 3, active: 1, hanging: 1, looseEnds: 8 },
+  staleness: {
+    state: 'behind',
+    label: 'Behind',
+    since: 'June 1',
+    text: 'Nothing has been formally signed off since June 1.',
+    detail:
+      'A lot has landed since you last drew a line and called the work reviewed and done — an entire session of finished features that are saved but never formally signed off. This is the project’s own “are we caught up?” marker, and right now it’s behind.',
   },
-  watching: [
-    'A lot of recent work is saved but not formally signed off',
-    'The bigger multi-track rework still needs a plan',
-  ],
-  signals: [
+  focuses: [
     {
-      id: 'momentum',
-      title: 'Momentum',
-      subtitle: 'Pace over the last stretch',
-      score: 78,
-      label: 'Strong',
-      solid: ['Four features shipped end to end', 'The assistant works on both engines'],
-      attention: ['The dashboard is the live focus right now'],
+      id: 'ai-helper',
+      name: 'AI Helper',
+      kind: 'active',
+      line: 'The v1.0 arc — a read-only assistant that reads your project and answers.',
+      estimate: 62,
+      steps: [
+        {
+          name: 'Core assistant',
+          line: 'Reads your project and answers — on Claude or Gemini.',
+          verdict: 'on-track',
+          progress: 100,
+        },
+        {
+          name: 'Safety & trust',
+          line: 'Strictly read-only. Never edits your work.',
+          verdict: 'on-track',
+          progress: 100,
+        },
+        {
+          name: 'In-app home',
+          line: 'A tidy home in the side rail, driven by clicking.',
+          verdict: 'on-track',
+          progress: 100,
+        },
+        {
+          name: 'Status dashboard',
+          line: 'This at-a-glance view of where things stand.',
+          verdict: 'in-progress',
+          progress: 60,
+          active: true,
+        },
+        {
+          name: 'Multi-track support',
+          line: 'Work with the newer multi-track projects.',
+          verdict: 'at-risk',
+          progress: 15,
+        },
+        {
+          name: 'Per-assistant models',
+          line: 'Choose which model each assistant uses.',
+          verdict: 'not-started',
+          progress: 0,
+        },
+      ],
     },
     {
-      id: 'readiness',
-      title: 'Readiness',
-      subtitle: 'How close to shipping v1.0',
-      score: 62,
-      label: 'Getting there',
+      id: 'companion-v0.9.4',
+      name: 'Companion v0.9.4',
+      kind: 'hanging',
+      line: 'The last UX-polish release — both Mac builds shipped.',
+      estimate: 100,
+      note: 'Shipped June 1 — finished, but still not tidied into the archive (owed for four sessions now).',
+    },
+    {
+      id: 'headless',
+      name: 'No focus owns these',
+      kind: 'headless',
+      line: 'Flagged across the project, but no active focus is driving them. Found by a deep crawl of the lore.',
       attention: [
-        'Two features still ahead — multi-track support and the model picker',
-        'The dashboard needs real data wired in before it ships',
+        {
+          source: 'Bug',
+          since: 'June 1',
+          text: 'Resizing the Changes panel is forgotten when you quit and reopen the app.',
+          detail:
+            'A small day-to-day annoyance: when you set that panel to the height you like, the app forgets it after a restart — even though the rest of your layout comes back just fine.',
+        },
+        {
+          source: 'Bug',
+          since: 'June 1',
+          text: 'A terminal with an adaptive prompt stacks duplicate lines when you drag-resize the window.',
+          detail:
+            'A cosmetic glitch: dragging the window to resize can leave a terminal’s prompt repeated and stacked on top of itself. It looks untidy, but nothing is actually broken.',
+        },
+        {
+          source: 'Backlog',
+          since: 'May 30',
+          text: 'Content search still needs ripgrep installed on your PATH.',
+          detail:
+            'Project-wide search leans on a small search tool that isn’t yet bundled inside the app. It works on your machine because that tool happens to be installed — but on a clean install, search would quietly come up empty.',
+        },
+        {
+          source: 'Drift',
+          since: 'June 2',
+          text: 'Dead assistant code is left over since the dashboard replaced the text feed — owes a prune.',
+          detail:
+            'When this dashboard replaced the old plain-text answer panel, the parts that powered the old way were left behind, unused. Nothing’s broken — it’s just clutter worth clearing once the dashboard design settles.',
+        },
+        {
+          source: 'Idea',
+          since: 'June 2',
+          text: 'Remember the shortcuts a terminal ran, and offer them as click-to-reopen on restore.',
+          detail:
+            'Something you wanted: when a terminal reopens after a restart, show the handy shortcuts you’d been running in it — as buttons you can click to carry on right where you left off.',
+        },
+        {
+          source: 'Idea',
+          since: 'June 1',
+          text: 'Richer browser history and an address bar with autocomplete.',
+          detail:
+            'Something you wanted: give the built-in browser a real memory — keep your history between sessions and let the address bar suggest places as you type, the way an ordinary browser does.',
+        },
+        {
+          source: 'Idea',
+          since: 'May 29',
+          text: 'The “lean & fast boot” slimming work was scoped but never opened.',
+          detail:
+            'A bigger piece never started: trimming the app so it launches faster and ships smaller. It was parked as low-value for a local tool, but it’s still sitting there, unscoped.',
+        },
+        {
+          source: 'Idea',
+          since: 'May 31',
+          text: 'The next big goal — multi-track awareness — is scoped but unopened, with open questions.',
+          detail:
+            'The likely next big goal: supporting the newer projects that run several streams of work at once. It’s been sketched but never properly opened, and a few decisions are still waiting on you.',
+        },
       ],
     },
   ],
@@ -746,14 +1263,283 @@ const MEMORY_SAMPLE: StatusData = {
 };
 
 const TABS = [
-  { id: 'status', label: 'Status', data: STATUS_SAMPLE },
-  { id: 'payload', label: 'Payload', data: PAYLOAD_SAMPLE },
-  { id: 'memory', label: 'Memory', data: MEMORY_SAMPLE },
+  { id: 'status', label: 'Status', kind: 'focus', board: STATUS_FOCUSES },
+  { id: 'payload', label: 'Payload', kind: 'panel', data: PAYLOAD_SAMPLE },
+  { id: 'memory', label: 'Memory', kind: 'panel', data: MEMORY_SAMPLE },
 ] as const;
+
+/** Pull a {@link FocusBoard} out of a helper answer — the `dashboard` turn
+ * returns the board as JSON (Claude may fence it, Gemini wraps it). Tolerant:
+ * extract the outermost object, require a `focuses` array. Returns null for any
+ * non-board answer (e.g. an orient confirmation) so those are simply ignored. */
+function parseLiveBoard(answer: string): FocusBoard | null {
+  const match = answer.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const d = JSON.parse(match[0]) as Partial<FocusBoard>;
+    if (!Array.isArray(d.focuses) || d.focuses.length === 0) return null;
+    if (!d.rollup || typeof d.rollup !== 'object') return null;
+    return d as FocusBoard;
+  } catch {
+    return null;
+  }
+}
+
+/* ---------- the curation micro-turns (cheap, content-only) ---------- */
+/** Reword the picked rows in plain language — sent through the free-text channel.
+ *  Asks for a JSON array so a multi-select humanizes in one turn. */
+function humanizePrompt(items: Askable[]): string {
+  const list = items.map((it, i) => `${i + 1}. "${it.text}"`).join('\n');
+  return `Rewrite each of these project items in plain, friendly language for a non-technical project owner — say what each one actually is, with no codenames and no jargon. Keep each to one short sentence. Reply with ONLY a JSON array of strings, one rewrite per item, in the same order, nothing else:\n${list}`;
+}
+
+/** Merge the picked rows into one. Assertive on purpose — the user's selection
+ *  IS the decision; the model only produces the shape (spike 2026-06-03). */
+function consolidatePrompt(items: Askable[]): string {
+  const list = items.map((it, i) => `${i + 1}. "${it.text}"`).join('\n');
+  return `The project owner has SELECTED these items, deciding they belong together as one piece of work — this is their call, do NOT question whether they belong together. Express the single combined item well. Reply with ONLY a JSON object, nothing else: {"title": "a short plain title", "text": "one plain sentence describing the combined work"}\n${list}`;
+}
+
+function parseStringArray(answer: string): string[] | null {
+  const m = answer.match(/\[[\s\S]*\]/);
+  if (!m) return null;
+  try {
+    const arr: unknown = JSON.parse(m[0]);
+    if (Array.isArray(arr) && arr.every((x) => typeof x === 'string')) return arr as string[];
+  } catch {
+    /* not an array */
+  }
+  return null;
+}
+
+function parseMerged(answer: string): { title: string; text: string } | null {
+  const m = answer.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try {
+    const d = JSON.parse(m[0]) as { title?: unknown; text?: unknown };
+    if (typeof d.title === 'string' && typeof d.text === 'string') {
+      return { title: d.title, text: d.text };
+    }
+  } catch {
+    /* not an object */
+  }
+  return null;
+}
+
+/** Apply reworded text to the board in place (by key — a step name or a
+ *  loose-end's text). Returns a new board. */
+function applyHumanize(board: FocusBoard, rewrites: Map<string, string>): FocusBoard {
+  return {
+    ...board,
+    focuses: board.focuses.map((f) => ({
+      ...f,
+      steps: f.steps?.map((s) => {
+        const v = rewrites.get(`${f.id}:${s.name}`);
+        return v ? { ...s, name: v } : s;
+      }),
+      attention: f.attention?.map((a) => {
+        const v = rewrites.get(`loose:${a.text}`);
+        return v ? { ...a, text: v } : a;
+      }),
+    })),
+  };
+}
+
+/** Replace the picked loose-ends with one merged loose-end (title as the line,
+ *  the sentence as its expandable detail). Returns a new board. */
+function applyConsolidate(
+  board: FocusBoard,
+  keys: Set<string>,
+  merged: { title: string; text: string },
+): FocusBoard {
+  let source = 'Backlog';
+  let since: string | undefined;
+  let seen = 0;
+  for (const f of board.focuses) {
+    for (const a of f.attention ?? []) {
+      if (keys.has(`loose:${a.text}`) && seen++ === 0) {
+        source = a.source;
+        since = a.since;
+      }
+    }
+  }
+  const newItem: AttentionItem = { source, text: merged.title, detail: merged.text, since };
+  return {
+    ...board,
+    focuses: board.focuses.map((f) =>
+      f.kind === 'headless' && f.attention
+        ? { ...f, attention: [newItem, ...f.attention.filter((a) => !keys.has(`loose:${a.text}`))] }
+        : f,
+    ),
+    rollup: { ...board.rollup, looseEnds: Math.max(0, board.rollup.looseEnds - keys.size + 1) },
+  };
+}
 
 export function AssistantDashboard(): JSX.Element {
   const [tab, setTab] = useState<(typeof TABS)[number]['id']>('status');
+  const [phase, setPhase] = useState<HelperPhase | null>(null);
+  const [ptyId, setPtyId] = useState<string | null>(null);
+  const [board, setBoard] = useState<FocusBoard>(STATUS_FOCUSES);
+  const [isLive, setIsLive] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [opActive, setOpActive] = useState(false);
+  const [proposal, setProposal] = useState<Proposal | null>(null);
+  const [error, setError] = useState('');
+  // waiting for connect→orient to finish before firing the crawl:
+  const pendingRef = useRef(false);
+  // which turn we're awaiting an answer for:
+  const opRef = useRef<{ kind: 'crawl' | 'humanize' | 'consolidate'; keys?: string[] } | null>(
+    null,
+  );
+
+  // Ride the same Channel-C stream as the host: dispatch each answer by the turn
+  // we fired. (Guarded so component tests — no window.cockpit — show the sample.)
+  useEffect(() => {
+    if (!window.cockpit?.onHelperEvent) return;
+    return window.cockpit.onHelperEvent((e) => {
+      setPhase(e.phase);
+      if (e.ptyId) setPtyId(e.ptyId);
+      // Mirror every event into the in-app console (both engines, uniformly) so
+      // the HL can see what's happening and copy a raw answer or error.
+      if (e.phase === 'answered') {
+        pushActivity('answer', `answer received (${(e.answer ?? '').length} chars)`, e.answer);
+      } else if (e.phase === 'error') {
+        pushActivity('error', e.error ?? 'The assistant returned an error.', e.error);
+      } else {
+        pushActivity('status', e.phase);
+      }
+      // The dashboard owns the first turn: the host fires no orient (it would race
+      // ours), so once the session is ready we fire the crawl ourselves.
+      if (e.phase === 'ready' && pendingRef.current) {
+        pendingRef.current = false;
+        opRef.current = { kind: 'crawl' };
+        setRefreshing(true);
+        pushActivity('turn', 'Reading the project (dashboard crawl)…');
+        void window.cockpit.helperAsk('dashboard');
+        return;
+      }
+      if (e.phase === 'answered') {
+        const op = opRef.current;
+        const ans = e.answer ?? '';
+        if (op?.kind === 'humanize') {
+          opRef.current = null;
+          setOpActive(false);
+          const arr = parseStringArray(ans);
+          const keys = op.keys ?? [];
+          if (arr) {
+            const rw = new Map<string, string>();
+            keys.forEach((k, i) => arr[i] && rw.set(k, arr[i]));
+            setBoard((b) => applyHumanize(b, rw));
+          } else if (keys.length === 1 && ans.trim()) {
+            setBoard((b) => applyHumanize(b, new Map([[keys[0], ans.trim()]])));
+          } else {
+            setError('Could not read the reworded text.');
+          }
+          return;
+        }
+        if (op?.kind === 'consolidate') {
+          opRef.current = null;
+          setOpActive(false);
+          const merged = parseMerged(ans);
+          if (merged && op.keys) setProposal({ ...merged, keys: op.keys });
+          else setError('Could not read the merge suggestion.');
+          return;
+        }
+        if (op?.kind === 'crawl') {
+          opRef.current = null;
+          setRefreshing(false);
+          const b = parseLiveBoard(ans);
+          if (b) {
+            setBoard(b);
+            setIsLive(true);
+            setError('');
+          } else {
+            setError('The assistant replied, but the dashboard data could not be read.');
+          }
+          return;
+        }
+        // op null → a stray/host answer we didn't initiate; ignore it.
+      } else if (e.phase === 'error') {
+        if (opRef.current || pendingRef.current) {
+          opRef.current = null;
+          pendingRef.current = false;
+          setRefreshing(false);
+          setOpActive(false);
+          setError(e.error ?? 'The assistant could not finish.');
+        }
+      }
+    });
+  }, []);
+
+  const connected = isConnected(phase, ptyId);
+  const busy = isBusy(phase) || refreshing || opActive;
+
+  const refresh = (): void => {
+    if (busy || !window.cockpit?.helperAsk) return;
+    setError('');
+    if (connected) {
+      opRef.current = { kind: 'crawl' };
+      setRefreshing(true);
+      pushActivity('turn', 'Reading the project (dashboard crawl)…');
+      void window.cockpit.helperAsk('dashboard');
+    } else {
+      // not connected — start the session; the crawl fires once it's ready
+      pendingRef.current = true;
+      setRefreshing(true);
+      pushActivity('turn', 'Connecting the assistant…');
+      void window.cockpit.helperConnect();
+    }
+  };
+
+  const onHumanize = (items: Askable[]): void => {
+    if (busy || items.length === 0) return;
+    if (!connected || !window.cockpit?.helperAskText) {
+      setError('Connect the assistant first — hit Refresh.');
+      pushActivity('error', 'Humanize skipped — connect the assistant first (hit Refresh).');
+      return;
+    }
+    setError('');
+    opRef.current = { kind: 'humanize', keys: items.map((i) => i.key) };
+    setOpActive(true);
+    const prompt = humanizePrompt(items);
+    pushActivity('turn', `Humanize ${items.length} item${items.length === 1 ? '' : 's'}`, prompt);
+    void window.cockpit.helperAskText(prompt);
+  };
+
+  const onConsolidate = (items: Askable[]): void => {
+    if (busy || items.length < 2) return;
+    if (!connected || !window.cockpit?.helperAskText) {
+      setError('Connect the assistant first — hit Refresh.');
+      pushActivity('error', 'Consolidate skipped — connect the assistant first (hit Refresh).');
+      return;
+    }
+    setError('');
+    opRef.current = { kind: 'consolidate', keys: items.map((i) => i.key) };
+    setOpActive(true);
+    const prompt = consolidatePrompt(items);
+    pushActivity('turn', `Consolidate ${items.length} items`, prompt);
+    void window.cockpit.helperAskText(prompt);
+  };
+
+  const acceptProposal = (): void => {
+    if (!proposal) return;
+    setBoard((b) =>
+      applyConsolidate(b, new Set(proposal.keys), { title: proposal.title, text: proposal.text }),
+    );
+    setProposal(null);
+  };
+
   const active = TABS.find((t) => t.id === tab) ?? TABS[0];
+  const source = refreshing
+    ? 'Reading your project…'
+    : opActive
+      ? 'Working…'
+      : error
+        ? '⚠ couldn’t finish'
+        : isLive
+          ? 'Live from your project'
+          : 'Sample data';
+
   return (
     <div style={paneWrapStyle} data-testid="pane-assistant" data-pane="assistant">
       <div style={tabStripStyle} data-testid="assistant-tabs">
@@ -769,10 +1555,43 @@ export function AssistantDashboard(): JSX.Element {
             {t.label}
           </button>
         ))}
+        <div style={refreshWrapStyle}>
+          <span
+            style={error ? refreshErrStyle : refreshStatusStyle}
+            title={error || undefined}
+            data-testid="dashboard-source"
+          >
+            {source}
+          </span>
+          <button
+            type="button"
+            style={{ ...refreshBtnStyle, ...(busy ? refreshBtnBusyStyle : null) }}
+            onClick={refresh}
+            disabled={busy}
+            data-testid="dashboard-refresh"
+            title={connected ? 'Re-read the project' : 'Connect the assistant and read the project'}
+          >
+            {refreshing ? '…' : '⟳'} Refresh
+          </button>
+        </div>
       </div>
       <div style={scrollWrapStyle}>
-        {/* re-mount the panel per tab so the count-up / bar animations replay */}
-        <StatusPanel key={active.id} data={active.data} />
+        {/* re-mount per tab (and on a live swap) so the animations replay. Status
+            is the focus-board — live from the crawl when available, else sample. */}
+        {active.kind === 'focus' ? (
+          <FocusPanel
+            key={isLive ? 'status-live' : 'status'}
+            board={board}
+            opBusy={busy}
+            onHumanize={onHumanize}
+            onConsolidate={onConsolidate}
+            proposal={proposal}
+            onAcceptProposal={acceptProposal}
+            onRejectProposal={() => setProposal(null)}
+          />
+        ) : (
+          <StatusPanel key={active.id} data={active.data} />
+        )}
       </div>
     </div>
   );
@@ -789,11 +1608,46 @@ const paneWrapStyle: React.CSSProperties = {
 
 const tabStripStyle: React.CSSProperties = {
   display: 'flex',
+  alignItems: 'center',
   gap: 2,
   padding: '6px 8px 0',
   borderBottom: '1px solid #161e29',
   flexShrink: 0,
 };
+
+const refreshWrapStyle: React.CSSProperties = {
+  marginLeft: 'auto',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  paddingBottom: 4,
+};
+
+const refreshStatusStyle: React.CSSProperties = {
+  fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+  fontSize: '0.62rem',
+  letterSpacing: '0.02em',
+  color: '#6b7785',
+  whiteSpace: 'nowrap',
+};
+
+const refreshErrStyle: React.CSSProperties = { ...refreshStatusStyle, color: '#d98a6a' };
+
+const refreshBtnStyle: React.CSSProperties = {
+  appearance: 'none',
+  background: '#142031',
+  border: '1px solid #1f3147',
+  borderRadius: 6,
+  color: '#9fd0e8',
+  fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
+  fontSize: '0.66rem',
+  fontWeight: 600,
+  padding: '0.28rem 0.6rem',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+};
+
+const refreshBtnBusyStyle: React.CSSProperties = { opacity: 0.55, cursor: 'default' };
 
 const tabStyle: React.CSSProperties = {
   appearance: 'none',
@@ -820,8 +1674,11 @@ const tabActiveStyle: React.CSSProperties = {
 const scrollWrapStyle: React.CSSProperties = {
   flex: 1,
   minHeight: 0,
-  overflow: 'auto',
+  // the panel itself fills this height and scrolls internally (.panel-scroll),
+  // so the selection bar / detail drawer can dock to its bottom
+  overflow: 'hidden',
   display: 'flex',
+  alignItems: 'stretch',
   justifyContent: 'center',
   padding: '12px 10px',
 };

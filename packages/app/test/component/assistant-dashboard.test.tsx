@@ -5,51 +5,110 @@ import { AssistantDashboard } from '../../src/renderer/src/components/AssistantD
 
 afterEach(() => cleanup());
 
-// Design-first spike: a near-verbatim port of the Claude "Direction A" mock,
-// rendered from hand-written sample data (no AI yet). These pin the shape — a
-// portfolio of work-streams plus scored Lore & Code signals.
+// Design-first spike (hand-written sample data, no AI yet). The Status tab is a
+// stack of focus widgets — one per focus in scope, flexing by state; Payload and
+// Memory stay the scored "Direction A" dashboard.
 
-test('renders the header — project headline + an overall verdict', () => {
+test('Status tab: a slim roll-up line + a stack of focus widgets', () => {
   render(<AssistantDashboard />);
-  expect(screen.getByTestId('dashboard-headline').textContent).toBeTruthy();
-  expect(screen.getByTestId('dashboard-overall').textContent).toMatch(
-    /track|progress|risk|blocked|started/i,
-  );
+  expect(screen.getByTestId('focus-rollup').textContent).toMatch(/focuses in play/i);
+  // Every focus in scope gets a widget — active + hanging + headless.
+  expect(screen.getAllByTestId('focus-card').length).toBeGreaterThanOrEqual(3);
 });
 
-test('one row per focus, with a single "you are here" on the active stream', () => {
+test('the active focus shows derived steps with a single "you are here"', () => {
   render(<AssistantDashboard />);
-  expect(screen.getByTestId('dashboard-streams')).toBeTruthy();
+  const active = screen.getByText('AI Helper').closest('[data-focus-state]');
+  expect(active?.getAttribute('data-focus-state')).toBe('active');
+  expect(screen.getByTestId('focus-steps')).toBeTruthy();
   expect(screen.getAllByTestId('dashboard-here')).toHaveLength(1);
 });
 
-test('renders domain-specific scored health cards', () => {
+test('a hanging (achieved-but-unarchived) focus is shown and flagged', () => {
   render(<AssistantDashboard />);
-  // Status has 2+ signals; each shows a score out of 100.
-  expect(screen.getAllByTestId('dashboard-signal').length).toBeGreaterThanOrEqual(2);
-  expect(screen.getAllByTestId('dashboard-score')[0].textContent).toMatch(/^\d+$/);
+  const hanging = screen.getByText('Companion v0.9.4').closest('[data-focus-state]');
+  expect(hanging?.getAttribute('data-focus-state')).toBe('hanging');
+  expect(screen.getByTestId('focus-hanging').textContent).toMatch(/archive/i);
 });
 
-test('a score card toggles its detail (aria-expanded flips)', () => {
+test('the headless focus collects loose-ends from a project-wide sweep', () => {
   render(<AssistantDashboard />);
+  expect(screen.getByTestId('headless-list')).toBeTruthy();
+  expect(screen.getByTestId('headless-count').textContent).toMatch(/loose ends/i);
+});
+
+test('every focus step and loose-end is selectable (checkboxes on all items)', () => {
+  render(<AssistantDashboard />);
+  // 6 active-focus steps + 8 loose-ends; the hanging focus + staleness have no checkbox.
+  expect(screen.getAllByTestId('item-check').length).toBe(14);
+});
+
+test('sign-off staleness is its own banner, not a loose-end', () => {
+  render(<AssistantDashboard />);
+  const stale = screen.getByTestId('staleness');
+  expect(stale.textContent).toMatch(/sign-off/i);
+  expect(stale.textContent).toMatch(/behind/i);
+  // and it's no longer one of the loose-ends
+  expect(screen.getAllByTestId('loose-row').length).toBe(8);
+});
+
+test('selecting items reveals the toolbar with the count + Humanize/Ask; Ask opens the drawer', () => {
+  render(<AssistantDashboard />);
+  expect(screen.queryByTestId('ask-batch')).toBeNull(); // nothing selected yet
+  const checks = screen.getAllByTestId('item-check');
+  fireEvent.click(checks[0]);
+  fireEvent.click(checks[1]);
+  expect(screen.getByTestId('ask-toolbar').textContent).toMatch(/2 selected/);
+  // every selection offers Humanize + Ask
+  expect(screen.getByTestId('op-humanize')).toBeTruthy();
+  const ask = screen.getByTestId('ask-batch');
+  expect(screen.queryByTestId('detail-drawer')).toBeNull(); // not until asked
+  fireEvent.click(ask);
+  expect(screen.getByTestId('detail-drawer')).toBeTruthy();
+});
+
+test('Consolidate appears only when 2+ loose-ends are selected', () => {
+  render(<AssistantDashboard />);
+  const looseChecks = screen
+    .getAllByTestId('loose-row')
+    .map((row) => row.querySelector('[data-testid="item-check"]') as HTMLElement);
+  fireEvent.click(looseChecks[0]);
+  expect(screen.queryByTestId('op-consolidate')).toBeNull(); // one isn't enough
+  fireEvent.click(looseChecks[1]);
+  expect(screen.getByTestId('op-consolidate')).toBeTruthy(); // two → mergeable
+});
+
+test('loose-ends expand on a single row-click, only when they carry extra info', () => {
+  render(<AssistantDashboard />);
+  const rows = screen.getAllByTestId('loose-row');
+  const expanders = screen.getAllByTestId('loose-expand');
+  // each of the 8 loose-ends carries an orienting note → expandable; the row is
+  // gated on `detail`, so a bare item would show no chevron and not expand.
+  expect(rows.length).toBe(8);
+  expect(expanders.length).toBe(8);
+  // a single click anywhere on the row toggles expansion, without selecting it
+  const clickable = rows[0].querySelector('[aria-expanded]') as HTMLElement;
+  expect(clickable.getAttribute('aria-expanded')).toBe('false');
+  fireEvent.click(clickable);
+  expect(clickable.getAttribute('aria-expanded')).toBe('true');
+  expect(screen.queryByTestId('ask-batch')).toBeNull(); // expanding did not select
+});
+
+test('Payload / Memory tabs keep their scored dashboards', () => {
+  render(<AssistantDashboard />);
+  fireEvent.click(screen.getByTestId('assistant-tab-payload'));
+  expect(screen.getByTestId('dashboard-headline').textContent).toMatch(/Electron/i);
+  expect(screen.getAllByTestId('dashboard-signal').length).toBeGreaterThanOrEqual(2);
+  expect(screen.getByTestId('dashboard-caughtup')).toBeTruthy();
+  fireEvent.click(screen.getByTestId('assistant-tab-memory'));
+  expect(screen.getByTestId('dashboard-headline').textContent).toMatch(/memory/i);
+});
+
+test('a Payload score card toggles its detail (aria-expanded flips)', () => {
+  render(<AssistantDashboard />);
+  fireEvent.click(screen.getByTestId('assistant-tab-payload'));
   const toggle = screen.getAllByTestId('dashboard-toggle')[0];
   expect(toggle.getAttribute('aria-expanded')).toBe('true'); // open by default
   fireEvent.click(toggle);
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
-});
-
-test('keeps the save-point "caught up" anchor and the watch list', () => {
-  render(<AssistantDashboard />);
-  expect(screen.getByTestId('dashboard-caughtup')).toBeTruthy();
-  expect(screen.getByTestId('dashboard-watch')).toBeTruthy();
-});
-
-test('Status / Payload / Memory tabs each swap in their own dashboard', () => {
-  render(<AssistantDashboard />);
-  // Status (default) shows the project headline.
-  expect(screen.getByTestId('dashboard-headline').textContent).toMatch(/AI assistant/i);
-  fireEvent.click(screen.getByTestId('assistant-tab-payload'));
-  expect(screen.getByTestId('dashboard-headline').textContent).toMatch(/Electron/i);
-  fireEvent.click(screen.getByTestId('assistant-tab-memory'));
-  expect(screen.getByTestId('dashboard-headline').textContent).toMatch(/memory/i);
 });

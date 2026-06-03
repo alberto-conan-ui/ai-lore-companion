@@ -97,23 +97,53 @@ function geminiErrorMessage(text: string): string | null {
  *  terminal would. The interactive shell prints job-control noise to stderr;
  *  the `-o json` answer comes back clean on stdout. A non-zero exit with no
  *  stdout is a real failure — reject with the engine's own error (off stderr)
- *  so the panel can show *why*, not a generic message. A 2-minute hard timeout
- *  kills a hung process. */
-function runGemini(binary: string, args: string[], cwd: string): Promise<string> {
+ *  so the panel can show *why*, not a generic message. A generous 10-minute hard
+ *  timeout kills a genuinely hung process without cutting off the dashboard crawl
+ *  (a whole-lore read can run minutes on a strong model — trip 2026-06-03). */
+function runGeminiOnce(binary: string, args: string[], cwd: string): Promise<string> {
   const cmd = [binary, ...args].map(shellQuote).join(' ');
   return new Promise((resolve, reject) => {
     execFile(
       LOGIN_SHELL,
       ['-i', '-l', '-c', cmd],
-      { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 120_000 },
+      { cwd, maxBuffer: 16 * 1024 * 1024, timeout: 600_000 },
       (err, stdout, stderr) => {
         // A normal answer comes on stdout (exit 0); let the parser judge it.
+        console.log(
+          '[helper] gemini returned',
+          stdout?.length ?? 0,
+          'bytes',
+          err ? `(err: ${err.message.slice(0, 80)})` : '',
+          stdout?.trim() ? `head: ${stdout.trim().slice(0, 80).replace(/\n/g, ' ')}` : '(empty)',
+        );
         if (stdout?.trim()) return resolve(stdout);
         if (err) return reject(new Error(geminiErrorMessage(stderr ?? '') ?? err.message));
-        resolve(stdout);
+        resolve(stdout); // exit 0 with empty stdout — the cheap-model flake
       },
     );
   });
+}
+
+/** Run `gemini`, retrying the known cheap-model flake: gemini-flash occasionally
+ *  returns an **empty** reply (or a transient error) on exit 0. Up to 3 attempts
+ *  before letting the empty result fall through to the parser's error. */
+async function runGemini(binary: string, args: string[], cwd: string): Promise<string> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const out = await runGeminiOnce(binary, args, cwd);
+      if (out.trim()) return out;
+      console.log('[helper] gemini empty reply — retry', attempt, 'of 3');
+    } catch (e) {
+      if (attempt === 3) throw e;
+      console.log(
+        '[helper] gemini error — retry',
+        attempt,
+        'of 3:',
+        (e as Error).message.slice(0, 60),
+      );
+    }
+  }
+  return ''; // all attempts empty → the parser surfaces a read error
 }
 
 /** Materialise the read-only admin-policy TOML into a fresh temp dir — never the

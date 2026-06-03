@@ -151,9 +151,11 @@ export type GeminiHelperDeps = {
   emit: (winId: number, event: HelperEventPayload) => void;
   /** Mint a random id (UUID in production) — the per-window session id. */
   newId: () => string;
-  /** How long to wait for a turn before giving up (default 120s). Without it a
-   *  hung/slow engine (or a backend outage) leaves the panel on "thinking…"
-   *  indefinitely. */
+  /** How long to wait for a turn before giving up (default 10min). Generous on
+   *  purpose: the status-dashboard crawl is a whole-lore read that can run
+   *  minutes on a strong model, and quality beats latency here (trip 2026-06-03).
+   *  Still bounded so a genuinely hung engine / backend outage eventually
+   *  surfaces an error rather than spinning forever. */
   turnTimeoutMs?: number;
 };
 
@@ -197,7 +199,7 @@ type GeminiSession = {
  *  layer drives it exactly like the Claude manager (same Channel-C events). */
 export function createGeminiHelper(deps: GeminiHelperDeps): HelperEngine<GeminiHost> {
   const byWindow = new Map<number, GeminiSession>();
-  const turnTimeoutMs = deps.turnTimeoutMs ?? 120_000;
+  const turnTimeoutMs = deps.turnTimeoutMs ?? 600_000;
 
   function emit(
     winId: number,

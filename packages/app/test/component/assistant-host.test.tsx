@@ -1,16 +1,11 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
-// HelperTerminal pulls xterm; stub it so the host's connect wiring and the
-// terminal-binding logic are assertable without a real terminal.
-vi.mock('../../src/renderer/src/components/HelperTerminal.js', () => ({
-  HelperTerminal: ({ ptyId }: { ptyId: string }) => (
-    <div data-testid="helper-terminal" data-pty={ptyId} />
-  ),
-}));
-
 import { AssistantHost } from '../../src/renderer/src/components/AssistantHost.js';
 import type { HelperEventPayload } from '../../src/shared/ipc.js';
+
+// The host body is now the Activity console (both engines report there); there is
+// no per-engine terminal or headless hint anymore.
 
 let helperConnect: ReturnType<typeof vi.fn>;
 let helperAsk: ReturnType<typeof vi.fn>;
@@ -57,11 +52,10 @@ function emit(event: HelperEventPayload): void {
   act(() => pushHandler?.(event));
 }
 
-test('starts disconnected — Connect shown, no terminal, the host hint', () => {
+test('starts disconnected — Connect shown, the activity console is the body', () => {
   render(<AssistantHost active={true} />);
   expect(screen.getByTestId('assistant-connect')).toBeTruthy();
-  expect(screen.queryByTestId('helper-terminal')).toBeNull();
-  expect(screen.getByTestId('assistant-host-hint')).toBeTruthy();
+  expect(screen.getByTestId('activity-console')).toBeTruthy();
 });
 
 test('Connect launches the session and shows connecting', () => {
@@ -72,12 +66,10 @@ test('Connect launches the session and shows connecting', () => {
   expect(disabled('assistant-connect')).toBe(true);
 });
 
-test('the connecting event binds the terminal and hides Connect', () => {
+test('a connecting event (with a ptyId) marks connected and hides Connect', () => {
   render(<AssistantHost active={true} />);
   fireEvent.click(screen.getByTestId('assistant-connect'));
   emit({ sessionId: 's1', phase: 'connecting', ptyId: 'pty-42' });
-
-  expect(screen.getByTestId('helper-terminal').getAttribute('data-pty')).toBe('pty-42');
   expect(screen.queryByTestId('assistant-connect')).toBeNull();
 });
 
@@ -91,15 +83,14 @@ test('the host fires no turn of its own on ready (the dashboard drives the first
   expect(helperAsk).not.toHaveBeenCalled();
 });
 
-test('a headless engine (no ptyId) connects and shows the headless indicator, no terminal', () => {
+test('a headless engine (no ptyId) connects on ready and hides Connect', () => {
   render(<AssistantHost active={true} />);
   fireEvent.click(screen.getByTestId('assistant-connect'));
-  // Gemini (CR7): connecting then ready, both without a ptyId — no terminal.
+  // Gemini (CR7): connecting then ready, both without a ptyId.
   emit({ sessionId: 'g1', phase: 'connecting' });
   emit({ sessionId: 'g1', phase: 'ready' });
-
-  expect(screen.queryByTestId('helper-terminal')).toBeNull();
-  expect(screen.getByTestId('assistant-host-headless')).toBeTruthy();
+  expect(screen.queryByTestId('assistant-connect')).toBeNull();
+  expect(screen.getByTestId('activity-console')).toBeTruthy();
 });
 
 test('the engine dropdown lists helper-capable engines; switching persists + resets', async () => {

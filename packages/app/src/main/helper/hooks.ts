@@ -171,7 +171,13 @@ main();
  */
 export function promptFor(
   action: HelperAction,
-  args: { statusPath: string; changedPaths?: string[]; lightOrient?: boolean },
+  args: {
+    statusPath: string;
+    memoryPath?: string;
+    today?: string;
+    changedPaths?: string[];
+    lightOrient?: boolean;
+  },
 ): string {
   switch (action) {
     case 'orient':
@@ -196,18 +202,37 @@ export function promptFor(
       const list = paths.map((p) => `- ${p}`).join('\n');
       return `These files have uncommitted changes in this project:\n${list}\n\nRead what you need to and give me a short, plain-prose summary of what changed and anything worth noting. A few sentences — no preamble.`;
     }
-    case 'dashboard':
-      // The structured-output turn (CR9 Phase 4). The helper reads the lore and
-      // returns JSON the app renders as a glanceable dashboard — the antidote to
-      // walls of text. The hard rule is **plain human language, no internal
-      // identifiers**: the lore is full of codenames/keys (the helper's source),
-      // none of which may reach a human's screen.
-      return `Read the file at ${args.statusPath} — and the active focus and most recent journal entry it points to — to understand where this project stands. Then respond with ONLY a JSON object (no prose, no markdown, no code fences) of exactly this shape:
-{"title": string, "recentlyDone": string[], "whatsNext": string[], "riskAreas": string[]}
-- "title": one short plain-language line naming what this project is doing right now.
-- "recentlyDone": 2-4 short sentences on what was just accomplished.
-- "whatsNext": 1-3 short sentences on what is being worked on next.
-- "riskAreas": 0-3 short sentences on anything worth watching, or anything you noticed is wrong or inconsistent.
-Write for a NON-TECHNICAL person glancing at a screen: full plain sentences, and NEVER any internal codename, identifier, phase number, or file name (no "CR9", no "Phase 2", no "status.index.md"). Someone with no prior context must understand every line.`;
+    case 'dashboard': {
+      // The surfacing crawl (CR9 Phase 4 → live hydration). The helper reads the
+      // WHOLE lore and returns a `FocusBoard` the app renders as a glanceable
+      // dashboard. The job is **completeness, not polish** — list everything raw
+      // and unmerged; the human cleans up the wording (Humanize) and groups
+      // related items (Consolidate) in the UI. The spike (2026-06-03) proved this
+      // "surface everything, don't reason" framing makes even the cheapest model
+      // far more complete (Haiku 0 → 11 loose-ends, Gemini flash → 13) than an
+      // expensive model asked to reason and polish (Opus got 3).
+      const memory = args.memoryPath ?? '';
+      const today = args.today ?? '';
+      return `You are a strictly READ-ONLY assistant. Read this AI-Lore project's lore (its Memory) and return ONE JSON object listing where the project stands. Do not write or edit anything.
+
+YOUR ONE GOAL IS COMPLETENESS. Surface EVERYTHING you find. Do NOT group, merge, summarize, or decide whether items belong together — list each thing separately. Do NOT polish the wording — raw is fine, and internal codenames (like "CR1") are fine to include. It is far better to over-list than to miss anything; a human cleans up, rewords, and merges afterward. When in doubt, include it.
+
+The lore Memory is at: ${memory}
+Key files: status/status.index.md (names the ACTIVE focus, PAUSED focuses, journal trail); status/focus/*.focus.md (each has a status: Active/Paused/Achieved; backlog.focus.md is a holding pen; status/focus/archive/ is CLOSED — ignore it); action-tree/<focus>/ (the active focus's steps, named CR1..CRN); journal/live/*.md (their Handover sections list "Loose ends" and "Watch"); save-points/ (the milestone ledger — the gap from the latest save-point date to today, ${today}, is the sign-off currency).
+
+Return EXACTLY this JSON (no prose, no markdown fences):
+{"project":"string","crumb":"Project · Status","rollup":{"inPlay":0,"active":0,"hanging":0,"looseEnds":0},"staleness":{"state":"behind|current","label":"string","since":"string","text":"string"},"focuses":[{"id":"kebab","name":"string","kind":"active|paused|hanging|headless","line":"string","estimate":0,"steps":[{"name":"string","line":"string","verdict":"on-track|in-progress|at-risk|not-started|blocked","progress":0,"active":false}],"note":"string","attention":[{"source":"Backlog|Bug|Idea|Drift|Lore","text":"string","since":"string"}]}]}
+
+Rules:
+- "focuses": one per non-archived focus.
+  * ACTIVE/PAUSED -> kind "active"/"paused", estimate 0-100, and "steps" = EVERY node in its action tree (list them all; raw "CR" names are fine; set active:true on the one in progress).
+  * ACHIEVED-but-unarchived -> kind "hanging", estimate 100, a "note".
+  * EXACTLY ONE kind "headless", name "No focus owns these", "attention" = EVERY flagged thing that no active focus owns: every backlog item, every bug, every deferred idea, every watch-out, every loose end in the journals. ONE ENTRY EACH — DO NOT MERGE related ones. Err on the side of MORE entries.
+- each "attention": source, text (one sentence, raw is fine), since (a date).
+- "staleness": from the ledger. "state":"behind" if the latest save-point predates recent shipped work; "since" = the last save-point date.
+- "rollup": inPlay=#focuses, active=#active, hanging=#hanging, looseEnds=#headless attention items.
+
+Output ONLY the JSON object.`;
+    }
   }
 }
