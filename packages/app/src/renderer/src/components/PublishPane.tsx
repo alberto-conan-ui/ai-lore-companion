@@ -1,5 +1,5 @@
 import type { AppEntry, TreeNode } from '@ai-lore-companion/core';
-import { type JSX, useCallback, useMemo, useState } from 'react';
+import { type JSX, useCallback, useMemo, useRef, useState } from 'react';
 import { FileTree } from './FileTree.js';
 import { useCockpitStore } from '../store.js';
 
@@ -20,6 +20,7 @@ import { useCockpitStore } from '../store.js';
  */
 export function PublishPane(): JSX.Element {
   const tree = useCockpitStore((s) => s.trees.publish);
+  const expandTree = useCockpitStore((s) => s.expandTree);
   const apps = useCockpitStore((s) => s.apps);
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set());
@@ -31,14 +32,46 @@ export function PublishPane(): JSX.Element {
     setExpandedPaths(new Set([tree.path]));
   }
 
-  const handleToggleExpand = useCallback((path: string) => {
-    setExpandedPaths((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }, []);
+  // The publish tree is sent one level deep (like every pane tree). A folder
+  // whose `children` is still `undefined` has never been read — fetch it once
+  // on first navigation/expand so its contents appear. Without this, sub-folders
+  // render in the tree but their contents stay empty (notably a `publish/`
+  // symlink whose top level is all folders). Mirrors `Pane.tsx`'s lazy load.
+  const inFlight = useRef<Set<string>>(new Set());
+  const ensureLoaded = useCallback(
+    (path: string) => {
+      const node = tree ? findNode(tree, path) : null;
+      if (!node?.isDir || node.children !== undefined) return;
+      if (inFlight.current.has(path)) return;
+      inFlight.current.add(path);
+      void window.cockpit.treeExpand({ scope: 'lore', path }).then((children) => {
+        inFlight.current.delete(path);
+        expandTree('publish', path, children);
+      });
+    },
+    [tree, expandTree],
+  );
+
+  const handleSelectFolder = useCallback(
+    (path: string) => {
+      setSelectedFolder(path);
+      ensureLoaded(path);
+    },
+    [ensureLoaded],
+  );
+
+  const handleToggleExpand = useCallback(
+    (path: string) => {
+      setExpandedPaths((prev) => {
+        const next = new Set(prev);
+        if (next.has(path)) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+      ensureLoaded(path);
+    },
+    [ensureLoaded],
+  );
 
   // Drift in a view-only pane is always idle — the pane shows no drift glyph.
   const driftLevelFor = useCallback(() => 'idle' as const, []);
@@ -88,7 +121,7 @@ export function PublishPane(): JSX.Element {
           <FileTree
             root={tree}
             selectedPath={selectedFolder}
-            onSelectFolder={setSelectedFolder}
+            onSelectFolder={handleSelectFolder}
             expandedPaths={expandedPaths}
             onToggleExpand={handleToggleExpand}
             driftLevelFor={driftLevelFor}
@@ -107,7 +140,7 @@ export function PublishPane(): JSX.Element {
                   onRevealInFinder={handleRevealInFinder}
                   onOpenWith={handleOpenWith}
                   onOpenFolder={(p) => {
-                    setSelectedFolder(p);
+                    handleSelectFolder(p);
                     setExpandedPaths((prev) => new Set([...prev, p]));
                   }}
                 />

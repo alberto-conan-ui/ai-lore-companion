@@ -152,7 +152,7 @@ type State = {
   applySavePoints: (payload: SavePointsPayload) => void;
   setTrees: (init: TreeInitPayload) => void;
   applyTreeUpdate: (update: TreeUpdatePayload) => void;
-  expandTree: (scope: ChangeScope, path: string, children: TreeNode[]) => void;
+  expandTree: (scope: PaneScope, path: string, children: TreeNode[]) => void;
   setApps: (apps: AppEntry[]) => void;
   setShowIndexFiles: (value: boolean) => void;
 };
@@ -209,7 +209,7 @@ export const useCockpitStore = create<State>((set) => ({
  *  scope's path index to match. Returns the partial state to `set`. */
 function patchTree(
   state: State,
-  scope: ChangeScope,
+  scope: PaneScope,
   path: string,
   children: TreeNode[],
 ): Partial<State> {
