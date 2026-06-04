@@ -223,7 +223,7 @@ function patchTree(
 }
 
 function replaceChildren(node: TreeNode, path: string, children: TreeNode[]): TreeNode {
-  if (node.path === path) return { ...node, children };
+  if (node.path === path) return { ...node, children: mergeChildren(node.children, children) };
   if (!node.children) return node;
   let changed = false;
   const next = node.children.map((child) => {
@@ -232,4 +232,26 @@ function replaceChildren(node: TreeNode, path: string, children: TreeNode[]): Tr
     return updated;
   });
   return changed ? { ...node, children: next } : node;
+}
+
+/**
+ * Merge a watcher's fresh one-level read with the previously-loaded children,
+ * carrying over the loaded subtree of any folder that still exists.
+ *
+ * A re-read only knows a directory's *immediate* entries — sub-folders come
+ * back `children: undefined`. Replacing wholesale would collapse every open
+ * sub-folder back to unloaded, so the grid renders them empty until the pane is
+ * re-opened. That is wrong: a change inside a sub-folder fires its *own* watcher
+ * event, so the parent re-read has no business discarding deeper loaded state.
+ * New entries appear unloaded; removed entries drop; surviving folders keep the
+ * subtree they had, with their own metadata refreshed from the fresh read.
+ */
+function mergeChildren(prev: TreeNode[] | undefined, fresh: TreeNode[]): TreeNode[] {
+  if (!prev || prev.length === 0) return fresh;
+  const prevByPath = new Map(prev.map((c) => [c.path, c]));
+  return fresh.map((f) => {
+    if (!f.isDir || f.children !== undefined) return f;
+    const old = prevByPath.get(f.path);
+    return old?.isDir && old.children !== undefined ? { ...f, children: old.children } : f;
+  });
 }
