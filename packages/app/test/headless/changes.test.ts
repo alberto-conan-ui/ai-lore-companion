@@ -70,6 +70,14 @@ test('readFileBaseline reports no-save-point when HEAD resolves to none', () => 
   );
 });
 
+test('fileHistory fails cleanly with no project context', () => {
+  h.setCtx(undefined);
+  assert.deepEqual(h.invoke('fileHistory', { scope: 'payload', relPath: 'a.ts' }), {
+    kind: 'failed',
+    message: 'no project context',
+  });
+});
+
 test('readFileBaseline refuses a path that escapes the repo working tree', () => {
   const r = h.invoke('readFileBaseline', {
     scope: 'payload',

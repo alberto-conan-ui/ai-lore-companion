@@ -95,6 +95,85 @@ export function readBaselineText(input: MaterialiseBaselineInput): ReadBaselineT
   return { kind: 'ok', text: result.stdout.toString('utf8') };
 }
 
+/**
+ * Read a git blob's content as text — `git cat-file blob <sha>`. The file's
+ * `--follow` history carries each version's blob (path-independent), so this
+ * fetches a past version correctly **even across renames/moves**, where
+ * `git show <commit>:<current-path>` would miss it.
+ */
+export function readBlobText(workingTreeRoot: string, blob: string): ReadBaselineTextResult {
+  // The all-zero blob marks "absent" (e.g. the add side's source) — empty text.
+  if (/^0+$/.test(blob)) return { kind: 'ok', text: '' };
+  let result: SpawnSyncReturns<Buffer>;
+  try {
+    result = spawnSync('git', ['-C', workingTreeRoot, 'cat-file', 'blob', blob], {
+      encoding: 'buffer',
+    });
+  } catch (err) {
+    return { kind: 'failed', message: `git cat-file failed to start: ${(err as Error).message}` };
+  }
+  if (result.error)
+    return { kind: 'failed', message: `git cat-file error: ${result.error.message}` };
+  if (result.status !== 0) return { kind: 'ok', text: '' };
+  return { kind: 'ok', text: result.stdout.toString('utf8') };
+}
+
+export type FileLogEntry = { sha: string; subject: string; timestamp: number; blob: string };
+export type FileLogResult =
+  | { kind: 'ok'; entries: FileLogEntry[] }
+  | { kind: 'failed'; message: string };
+
+/**
+ * The commit history of one file — `git log --follow --raw`, newest first — for
+ * the in-editor diff's per-file history column (Read-only IDE P3+). `--raw`
+ * appends, after each commit's `<sha>\x1f<unix-seconds>\x1f<subject>` line, a
+ * line `:<m1> <m2> <srcblob> <dstblob> <status>\t<path…>`; `<dstblob>` is the
+ * file's blob **at that commit**, which we carry so a past version can be read
+ * by blob (rename-safe). A path with no history is an empty list, not an error.
+ */
+export function fileLog(input: { workingTreeRoot: string; gitRelPath: string }): FileLogResult {
+  let result: SpawnSyncReturns<string>;
+  try {
+    result = spawnSync(
+      'git',
+      [
+        '-C',
+        input.workingTreeRoot,
+        'log',
+        '--follow',
+        '--raw',
+        '--no-abbrev',
+        '--format=%x01%H%x1f%ct%x1f%s',
+        '--',
+        input.gitRelPath,
+      ],
+      { encoding: 'utf8' },
+    );
+  } catch (err) {
+    return { kind: 'failed', message: `git log failed to start: ${(err as Error).message}` };
+  }
+  if (result.error) return { kind: 'failed', message: `git log error: ${result.error.message}` };
+  if (result.status !== 0) return { kind: 'ok', entries: [] };
+  // Records are split on the \x01 we prefixed each commit's format line with.
+  const entries: FileLogEntry[] = [];
+  for (const record of result.stdout.split('\x01')) {
+    if (record.length === 0) continue;
+    const lines = record.split('\n');
+    const [sha, ts, subject] = (lines[0] ?? '').split('\x1f');
+    if (!sha) continue;
+    // The raw line for the followed file: `:… <srcblob> <dstblob> <status>\t…`.
+    const raw = lines.find((l) => l.startsWith(':'));
+    const dstBlob = raw ? (raw.slice(1).split('\t')[0] ?? '').split(/\s+/)[3] : undefined;
+    entries.push({
+      sha,
+      subject: subject ?? '',
+      timestamp: Number(ts) * 1000,
+      blob: dstBlob ?? '',
+    });
+  }
+  return { kind: 'ok', entries };
+}
+
 export type LaunchDiffInput = {
   cli: string;
   template: string;

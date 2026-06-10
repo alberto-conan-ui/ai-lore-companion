@@ -3,13 +3,23 @@ import { findDiffApp, isChainError, latestSavePoint, readDiffText } from '@ai-lo
 import type {
   DiffTextArg,
   DiffTextResult,
+  FileHistoryArg,
+  FileHistoryResult,
   OpenDiffArg,
   OpenDiffResult,
+  ReadBlobArg,
+  ReadBlobResult,
   ReadFileBaselineArg,
   ReadFileBaselineResult,
   SetBaselineArg,
 } from '../../shared/ipc.js';
-import { launchDiff, materialiseBaseline, readBaselineText } from '../diff.js';
+import {
+  fileLog,
+  launchDiff,
+  materialiseBaseline,
+  readBaselineText,
+  readBlobText,
+} from '../diff.js';
 import { projectToRepoRelative } from '../path-mapping.js';
 import { loadGlobalSettings } from '../settings.js';
 import type { RegisterModule } from './types.js';
@@ -43,37 +53,59 @@ export const registerChanges: RegisterModule = (reg, deps) => {
       : { kind: 'failed', message: result.message };
   });
 
-  reg.handle(
-    'readFileBaseline',
-    (event, arg: ReadFileBaselineArg): ReadFileBaselineResult => {
-      const ctx = deps.contextFor(event);
-      if (!ctx || isChainError(ctx.chain)) {
-        return { kind: 'failed', message: 'no project context' };
-      }
-      // Per-repo working tree (the lore repo's .git/ lives at <lore>/memory/.git/).
-      const workingTreeRoot =
-        arg.scope === 'payload' ? ctx.root : resolve(ctx.chain.lorePath, 'memory');
-      // Resolve the baseline commit — `'HEAD'` falls back to the latest save-point,
-      // matching openDiff so the in-app diff and the external one agree.
-      let commit: string;
-      if (arg.baseline === 'HEAD') {
-        const savePoint = latestSavePoint(resolve(ctx.chain.lorePath, 'memory/save-points'));
-        if (!savePoint) return { kind: 'no-save-point' };
-        commit = arg.scope === 'payload' ? savePoint.payloadCommit : savePoint.loreCommit;
-      } else {
-        commit = arg.baseline;
-      }
-      // A renamed/copied entry's baseline lives at the OLD path.
-      const baselineRel = arg.oldPath ?? arg.relPath;
-      const absBaseline = isAbsolute(baselineRel) ? baselineRel : resolve(ctx.root, baselineRel);
-      const gitRelPath = relative(workingTreeRoot, absBaseline);
-      if (gitRelPath.startsWith('..') || isAbsolute(gitRelPath)) {
-        return { kind: 'failed', message: 'path is outside the repo working tree' };
-      }
-      const result = readBaselineText({ workingTreeRoot, commit, gitRelPath });
-      return result.kind === 'ok' ? { kind: 'ok', text: result.text } : result;
-    },
-  );
+  reg.handle('readFileBaseline', (event, arg: ReadFileBaselineArg): ReadFileBaselineResult => {
+    const ctx = deps.contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) {
+      return { kind: 'failed', message: 'no project context' };
+    }
+    // Per-repo working tree (the lore repo's .git/ lives at <lore>/memory/.git/).
+    const workingTreeRoot =
+      arg.scope === 'payload' ? ctx.root : resolve(ctx.chain.lorePath, 'memory');
+    // Resolve the baseline commit — `'HEAD'` falls back to the latest save-point,
+    // matching openDiff so the in-app diff and the external one agree.
+    let commit: string;
+    if (arg.baseline === 'HEAD') {
+      const savePoint = latestSavePoint(resolve(ctx.chain.lorePath, 'memory/save-points'));
+      if (!savePoint) return { kind: 'no-save-point' };
+      commit = arg.scope === 'payload' ? savePoint.payloadCommit : savePoint.loreCommit;
+    } else {
+      commit = arg.baseline;
+    }
+    // A renamed/copied entry's baseline lives at the OLD path.
+    const baselineRel = arg.oldPath ?? arg.relPath;
+    const absBaseline = isAbsolute(baselineRel) ? baselineRel : resolve(ctx.root, baselineRel);
+    const gitRelPath = relative(workingTreeRoot, absBaseline);
+    if (gitRelPath.startsWith('..') || isAbsolute(gitRelPath)) {
+      return { kind: 'failed', message: 'path is outside the repo working tree' };
+    }
+    const result = readBaselineText({ workingTreeRoot, commit, gitRelPath });
+    return result.kind === 'ok' ? { kind: 'ok', text: result.text } : result;
+  });
+
+  reg.handle('readBlob', (event, arg: ReadBlobArg): ReadBlobResult => {
+    const ctx = deps.contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) {
+      return { kind: 'failed', message: 'no project context' };
+    }
+    const workingTreeRoot =
+      arg.scope === 'payload' ? ctx.root : resolve(ctx.chain.lorePath, 'memory');
+    return readBlobText(workingTreeRoot, arg.blob);
+  });
+
+  reg.handle('fileHistory', (event, arg: FileHistoryArg): FileHistoryResult => {
+    const ctx = deps.contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) {
+      return { kind: 'failed', message: 'no project context' };
+    }
+    const workingTreeRoot =
+      arg.scope === 'payload' ? ctx.root : resolve(ctx.chain.lorePath, 'memory');
+    const absFile = isAbsolute(arg.relPath) ? arg.relPath : resolve(ctx.root, arg.relPath);
+    const gitRelPath = relative(workingTreeRoot, absFile);
+    if (gitRelPath.startsWith('..') || isAbsolute(gitRelPath)) {
+      return { kind: 'failed', message: 'path is outside the repo working tree' };
+    }
+    return fileLog({ workingTreeRoot, gitRelPath });
+  });
 
   reg.handle('openDiff', (event, arg: OpenDiffArg): OpenDiffResult => {
     const ctx = deps.contextFor(event);

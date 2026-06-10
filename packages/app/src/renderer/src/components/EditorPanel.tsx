@@ -1,7 +1,12 @@
 import { type JSX, useEffect, useRef, useState } from 'react';
+import type { FileHistoryEntry, SavePointInfo } from '../../shared/ipc.js';
 import { type EditorDoc, useCockpitStore } from '../store.js';
+import { CommitRow } from './CommitRow.js';
 import { MarkdownPreview } from './editor/MarkdownPreview.js';
-import { makeCodeView, makeDiffView } from './editor/codemirror.js';
+import { makeCodeView, makeDiffView, makeTripleView } from './editor/codemirror.js';
+
+/** How the history column diffs a picked commit. */
+type HistoryMode = 'current' | 'commit' | 'all3';
 
 /** Markdown files get the third "Preview" view. */
 function isMarkdown(name: string): boolean {
@@ -133,7 +138,54 @@ export function EditorPanel(): JSX.Element | null {
  *  live against both the selected save-point and the file on disk. */
 function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
-  const baseline = useCockpitStore((s) => s.baselineByScope[doc.scope]);
+  const globalBaseline = useCockpitStore((s) => s.baselineByScope[doc.scope]);
+  const setDocDiffBaseline = useCockpitStore((s) => s.setDocDiffBaseline);
+  // The history column's width, dragged via the divider beside it. Local to the
+  // editor and persists across doc switches (DocView stays mounted).
+  const [historyWidth, setHistoryWidth] = useState(240);
+  const onHistoryResize = (e: React.MouseEvent): void => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = historyWidth;
+    const onMove = (ev: MouseEvent): void =>
+      setHistoryWidth(Math.max(150, Math.min(480, startW + (ev.clientX - startX))));
+    const onUp = (): void => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+  // How the history column diffs a picked commit: against your **current** file
+  // (the chosen point vs the working tree — the default), the commit's own
+  // **change** (that commit vs its parent), or **all 3** (parent · commit ·
+  // current side by side).
+  const [historyMode, setHistoryMode] = useState<HistoryMode>('current');
+  // This file's commit history (newest first). Each version carries its git
+  // **blob** so a past version is fetched by blob — rename/move-safe, unlike
+  // `git show <commit>:<current-path>` which misses a file that has since moved.
+  const [entries, setEntries] = useState<FileHistoryEntry[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void window.cockpit.fileHistory({ scope: doc.scope, relPath: doc.path }).then((r) => {
+      if (!cancelled) setEntries(r.kind === 'ok' ? r.entries : []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc.path, doc.scope]);
+
+  // The effective diff baseline: this file's per-file pin (from its history
+  // column), else the global baseline picker.
+  const baseline = doc.diffBaseline ?? globalBaseline;
+  // When pinned to a commit in this file's history, read the version + its
+  // predecessor by blob. `pinnedIdx + 1` is the file's *previous* version.
+  const pinnedIdx = doc.diffBaseline ? entries.findIndex((e) => e.sha === doc.diffBaseline) : -1;
+  const pinnedInHistory = pinnedIdx >= 0;
+  const commitBlob = pinnedInHistory ? (entries[pinnedIdx]?.blob ?? '') : '';
+  const parentBlob = pinnedInHistory ? (entries[pinnedIdx + 1]?.blob ?? '') : '';
+  const changeMode = historyMode === 'commit' && pinnedInHistory;
+  const threeMode = historyMode === 'all3' && pinnedInHistory;
   // The changes snapshot for this scope ticks whenever a file under it changes
   // on disk — use it as the "re-read from disk" signal for the open doc.
   const diskSignal = useCockpitStore((s) => s.changes[doc.scope]);
@@ -148,6 +200,10 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
     let cancelled = false;
     let view: { destroy: () => void } | null = null;
     setStatus('loading');
+    const readBlob = (blob: string): Promise<{ kind: 'ok'; text: string } | { kind: 'failed' }> =>
+      blob
+        ? window.cockpit.readBlob({ scope: doc.scope, blob })
+        : Promise.resolve({ kind: 'ok', text: '' });
     void (async () => {
       const current = await window.cockpit.readFile({ path: doc.path });
       if (cancelled || !hostRef.current) return;
@@ -160,6 +216,40 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
         setStatus('ready');
         return;
       }
+      // Parent-relative modes: the picked version vs the file's previous version,
+      // both fetched by blob. The oldest version has no predecessor → empty
+      // parent → it reads as a full add.
+      if (changeMode || threeMode) {
+        const [parent, commit] = await Promise.all([readBlob(parentBlob), readBlob(commitBlob)]);
+        if (cancelled || !hostRef.current) return;
+        const parentText = parent.kind === 'ok' ? parent.text : '';
+        const commitText = commit.kind === 'ok' ? commit.text : '';
+        if (threeMode) {
+          // "All 3": parent · commit · current side by side; the SHA tells the story.
+          const sha = String(doc.diffBaseline ?? '').slice(0, 7);
+          view = makeTripleView(el, doc.name, [
+            { label: 'Parent', text: parentText },
+            { label: `Commit ${sha}`, text: commitText },
+            { label: 'Current', text: current.text },
+          ]);
+        } else {
+          // "Change": what the picked commit changed — its predecessor vs itself.
+          view = makeDiffView(el, doc.name, parentText, commitText);
+        }
+        setStatus('ready');
+        return;
+      }
+      // "Current" mode, pinned to a history commit: that version (by blob) vs
+      // your current file.
+      if (pinnedInHistory) {
+        const commit = await readBlob(commitBlob);
+        if (cancelled || !hostRef.current) return;
+        view = makeDiffView(el, doc.name, commit.kind === 'ok' ? commit.text : '', current.text);
+        setStatus('ready');
+        return;
+      }
+      // "Current" mode, following the global baseline picker (a milestone that
+      // isn't necessarily in this file's history): resolve by commit+path.
       const base = await window.cockpit.readFileBaseline({
         scope: doc.scope,
         relPath: doc.path,
@@ -180,9 +270,23 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
       view?.destroy();
       if (el) el.replaceChildren();
     };
-  }, [doc.path, doc.name, doc.scope, doc.mode, doc.oldPath, baseline, diskSignal]);
+  }, [
+    doc.path,
+    doc.name,
+    doc.scope,
+    doc.mode,
+    doc.oldPath,
+    doc.diffBaseline,
+    baseline,
+    changeMode,
+    threeMode,
+    pinnedInHistory,
+    commitBlob,
+    parentBlob,
+    diskSignal,
+  ]);
 
-  return (
+  const body = (
     <div style={docBodyStyle}>
       <div ref={hostRef} style={cmHostStyle} data-testid="editor-cm-host" />
       {status !== 'ready' ? (
@@ -196,6 +300,163 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
       ) : null}
     </div>
   );
+
+  // In diff mode the file's commit history sits in a left column; clicking an
+  // entry pins this file's diff to that commit (toggle to unpin → follow global).
+  if (doc.mode === 'diff') {
+    return (
+      <div style={diffLayoutStyle}>
+        <DiffHistoryColumn
+          doc={doc}
+          entries={entries}
+          effective={baseline}
+          width={historyWidth}
+          mode={historyMode}
+          onModeChange={setHistoryMode}
+          onPick={(sha) => setDocDiffBaseline(doc.path, doc.diffBaseline === sha ? null : sha)}
+        />
+        <div
+          style={historyResizeStyle}
+          onMouseDown={onHistoryResize}
+          title="Drag to resize the history column"
+          data-testid="diff-history-resize"
+        />
+        {body}
+      </div>
+    );
+  }
+  return body;
+}
+
+/** The diff's per-file history column: every ack/save-point that touched this
+ *  file, newest first. Clicking one re-bases *this file's* diff against that
+ *  commit, leaving the global picker and every other open file untouched. */
+function DiffHistoryColumn({
+  doc,
+  entries,
+  effective,
+  width,
+  mode,
+  onModeChange,
+  onPick,
+}: {
+  doc: EditorDoc;
+  entries: FileHistoryEntry[];
+  effective: string;
+  width: number;
+  mode: HistoryMode;
+  onModeChange: (mode: HistoryMode) => void;
+  onPick: (sha: string) => void;
+}): JSX.Element {
+  const savePoints = useCockpitStore((s) => s.savePoints);
+
+  const spCommit = (sp: SavePointInfo): string =>
+    doc.scope === 'payload' ? sp.payloadCommit : sp.loreCommit;
+  // The global default `'HEAD'` resolves to the latest save-point — highlight
+  // that row so "following the picker" reads correctly.
+  const resolvedEffective =
+    effective === 'HEAD' && savePoints[0] ? spCommit(savePoints[0]) : effective;
+
+  const modes: { id: HistoryMode; label: string; title: string }[] = [
+    {
+      id: 'current',
+      label: 'Current',
+      title: 'Compare the selected commit against your current file',
+    },
+    {
+      id: 'commit',
+      label: 'Change',
+      title: 'What the selected commit changed (vs the commit before it)',
+    },
+    { id: 'all3', label: 'All 3', title: 'Parent · commit · current, side by side' },
+  ];
+
+  return (
+    <div style={{ ...historyColStyle, width }} data-testid="diff-history">
+      <div style={historyHeadStyle}>History</div>
+      <div style={historyToggleRowStyle} aria-label="Compare mode">
+        {modes.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            style={mode === m.id ? historyToggleOnStyle : historyToggleStyle}
+            aria-pressed={mode === m.id}
+            title={m.title}
+            data-testid={`history-mode-${m.id}`}
+            onClick={() => onModeChange(m.id)}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+      {entries.length === 0 && savePoints.length === 0 ? (
+        <div style={historyMsgStyle}>No history.</div>
+      ) : (
+        <div style={historyListStyle}>
+          {/* Every save-point shows as a ★ reference marker — clickable when it
+              touched this file, a dim label when it didn't — with the file's own
+              acks (•) slotted in between by date. */}
+          {buildTimeline(entries, savePoints, doc.scope).map((item) => (
+            <CommitRow
+              key={`${item.kind}-${item.sha}`}
+              kind={item.kind}
+              label={item.label}
+              sha={item.sha}
+              timestamp={Math.floor(item.ts / 1000)}
+              active={item.clickable && item.sha === resolvedEffective}
+              disabled={!item.clickable}
+              testId={`history-${item.sha}`}
+              onClick={() => onPick(item.sha)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type TimelineItem = {
+  sha: string;
+  kind: 'save-point' | 'ack';
+  label: string;
+  /** Epoch ms. */
+  ts: number;
+  clickable: boolean;
+};
+
+/**
+ * The per-file diff timeline: **all** save-points as reference markers (clickable
+ * only when the save-point's commit actually touched this file), with the file's
+ * own acks slotted in between by date — so you can read how the file changed
+ * across save-points. Newest first.
+ */
+function buildTimeline(
+  entries: FileHistoryEntry[],
+  savePoints: SavePointInfo[],
+  scope: 'payload' | 'lore',
+): TimelineItem[] {
+  const spSha = (sp: SavePointInfo): string =>
+    scope === 'payload' ? sp.payloadCommit : sp.loreCommit;
+  const fileBySha = new Map(entries.map((e) => [e.sha, e]));
+  const spShaSet = new Set(savePoints.map(spSha));
+  const items: TimelineItem[] = [];
+  for (const sp of savePoints) {
+    const sha = spSha(sp);
+    const fe = fileBySha.get(sha);
+    items.push({
+      sha,
+      kind: 'save-point',
+      label: sp.title,
+      ts: fe ? fe.timestamp : Date.parse(sp.date) || 0,
+      clickable: fe !== undefined,
+    });
+  }
+  for (const e of entries) {
+    if (spShaSet.has(e.sha)) continue;
+    items.push({ sha: e.sha, kind: 'ack', label: e.subject, ts: e.timestamp, clickable: true });
+  }
+  items.sort((a, b) => b.ts - a.ts);
+  return items;
 }
 
 const panelStyle: React.CSSProperties = {
@@ -295,6 +556,89 @@ const externalBtnStyle: React.CSSProperties = {
   fontWeight: 600,
   padding: '0.2rem 0.6rem',
   cursor: 'pointer',
+};
+
+/** Diff mode: the per-file history column beside the merge view. */
+const diffLayoutStyle: React.CSSProperties = {
+  display: 'flex',
+  flex: 1,
+  minHeight: 0,
+  minWidth: 0,
+};
+
+const historyColStyle: React.CSSProperties = {
+  flexShrink: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  overflowY: 'auto',
+  background: '#0c121a',
+};
+
+const historyHeadStyle: React.CSSProperties = {
+  padding: '0.45rem 0.7rem',
+  fontSize: '0.66rem',
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: '#6c7783',
+  borderBottom: '1px solid #1f2933',
+  position: 'sticky',
+  top: 0,
+  background: '#0c121a',
+};
+
+const historyMsgStyle: React.CSSProperties = {
+  padding: '0.6rem 0.7rem',
+  fontSize: '0.74rem',
+  color: '#6c7783',
+};
+
+const historyListStyle: React.CSSProperties = {
+  padding: '0.25rem',
+};
+
+/** The compare-mode toggle row beneath the History header. */
+const historyToggleRowStyle: React.CSSProperties = {
+  display: 'flex',
+  gap: '2px',
+  padding: '0.3rem 0.4rem',
+  borderBottom: '1px solid #1f2933',
+  position: 'sticky',
+  top: '1.55rem',
+  background: '#0c121a',
+  zIndex: 1,
+};
+
+const historyToggleStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  background: 'transparent',
+  border: '1px solid #2f3a45',
+  borderRadius: '4px',
+  color: '#9fb1bd',
+  fontSize: '0.66rem',
+  fontWeight: 600,
+  padding: '0.15rem 0',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+};
+
+const historyToggleOnStyle: React.CSSProperties = {
+  ...historyToggleStyle,
+  background: '#1d4e74',
+  borderColor: '#1d4e74',
+  color: '#e6f2ff',
+};
+
+/** The draggable divider between the history column and the diff. */
+const historyResizeStyle: React.CSSProperties = {
+  width: '6px',
+  flexShrink: 0,
+  cursor: 'col-resize',
+  background: '#0c121a',
+  borderRight: '1px solid #1f2933',
 };
 
 const docBodyStyle: React.CSSProperties = {

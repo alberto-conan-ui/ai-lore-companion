@@ -30,6 +30,8 @@ import type {
   ContentSearchResult,
   DiffTextArg,
   DiffTextResult,
+  FileHistoryArg,
+  FileHistoryResult,
   FileSearchArg,
   FileSearchHit,
   FocusReadArg,
@@ -40,6 +42,8 @@ import type {
   OpenDiffArg,
   OpenDiffResult,
   PromptEntry,
+  ReadBlobArg,
+  ReadBlobResult,
   ReadFileArg,
   ReadFileBaselineArg,
   ReadFileBaselineResult,
@@ -116,6 +120,12 @@ export const CONTRACT = {
   setBaseline: invoke<[arg: SetBaselineArg], void>('cockpit:set-baseline'),
   diffText: invoke<[arg: DiffTextArg], DiffTextResult>('cockpit:diff-text'),
   openDiff: invoke<[arg: OpenDiffArg], OpenDiffResult>('cockpit:open-diff'),
+  /** The commit history for one file — every ack/save-point that touched it,
+   *  newest first. Drives the in-editor diff's per-file history column. */
+  fileHistory: invoke<[arg: FileHistoryArg], FileHistoryResult>('cockpit:file-history'),
+  /** Read a past file version's content by its git blob SHA — rename-safe (the
+   *  history carries each version's blob). */
+  readBlob: invoke<[arg: ReadBlobArg], ReadBlobResult>('cockpit:read-blob'),
 
   // ── File trees ────────────────────────────────────────────────────────────
   onTreeInit: push<TreeInitPayload>('cockpit:tree-init'),

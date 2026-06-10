@@ -126,11 +126,20 @@ export function Pane({
   );
   const apps = useCockpitStore((s) => s.apps);
   const openDoc = useCockpitStore((s) => s.openDoc);
+  // The lore repo's working tree, for deciding a file's diff scope by where it
+  // actually lives (below) — not which pane opened it.
+  const loreMemoryPath = useCockpitStore((s) =>
+    s.chain && !('error' in s.chain) ? `${s.chain.lorePath}/memory` : null,
+  );
 
   // Open a file in the in-app editor (Read-only IDE). From the navigator we
   // probe text-vs-binary first and hand binaries to the OS; the changes panel
   // opens straight in diff mode (DocView reads both sides + shows an overlay if
-  // a side is unreadable). `absPath` is the doc id; `scope` resolves its baseline.
+  // a side is unreadable). `absPath` is the doc id. The diff **scope** is the
+  // file's *real* repo — a file under the lore memory tree is `lore` even when
+  // it's opened from the Payload pane (whose tree contains the lore folder);
+  // otherwise the lore commits resolve against the payload repo (which gitignores
+  // the lore) and every diff comes back empty.
   const openInEditor = useCallback(
     async (absPath: string, mode: 'code' | 'diff', oldPath?: string): Promise<void> => {
       const name = absPath.slice(absPath.lastIndexOf('/') + 1);
@@ -141,9 +150,11 @@ export function Pane({
           return;
         }
       }
-      openDoc({ path: absPath, scope, name, mode, oldPath });
+      const docScope: ChangeScope =
+        loreMemoryPath && absPath.startsWith(`${loreMemoryPath}/`) ? 'lore' : 'payload';
+      openDoc({ path: absPath, scope: docScope, name, mode, oldPath });
     },
-    [openDoc, scope],
+    [openDoc, loreMemoryPath],
   );
 
   // Context-menu actions shared across tree, grid, and (eventually) queue.

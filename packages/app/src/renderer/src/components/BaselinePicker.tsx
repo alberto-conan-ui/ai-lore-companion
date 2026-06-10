@@ -7,6 +7,7 @@ import {
   findMilestone,
 } from '../../../shared/baseline.js';
 import { useCockpitStore } from '../store.js';
+import { CommitRow, formatStamp, shortSha } from './CommitRow.js';
 
 /**
  * The global baseline picker — one control beside the pinned tabs that drives
@@ -171,49 +172,26 @@ function Row({
   onSelect: (m: Milestone) => void;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      style={{ ...rowStyle, ...(active ? rowActiveStyle : null) }}
-      data-testid={`baseline-option-${m.id}`}
-      aria-current={active}
+    <CommitRow
+      kind={m.kind}
+      label={m.label}
+      sha={m.commitSha}
+      timestamp={m.timestamp}
+      active={active}
+      testId={`baseline-option-${m.id}`}
       onClick={() => onSelect(m)}
     >
-      <span style={badgeStyle(m.kind)}>{m.kind === 'save-point' ? '★' : '•'}</span>
-      <span style={rowMainStyle}>
-        <span style={rowTopStyle}>
-          <span style={rowLabelStyle}>{m.label}</span>
-          <span style={rowShaStyle}>{shortSha(m.commitSha)}</span>
-          <span style={rowDateStyle}>{formatStamp(m.timestamp)}</span>
+      {showBound && m.boundAck ? (
+        <span style={boundAckStyle}>
+          <span style={boundArrowStyle}>↳</span>
+          <span style={boundDotStyle}>•</span>
+          <span style={boundLabelStyle}>{m.boundAck.label}</span>
+          <span style={boundShaStyle}>{shortSha(m.boundAck.sha)}</span>
+          <span style={boundDateStyle}>{formatStamp(m.boundAck.timestamp)}</span>
         </span>
-        {showBound && m.boundAck ? (
-          <span style={boundAckStyle}>
-            <span style={boundArrowStyle}>↳</span>
-            <span style={boundDotStyle}>•</span>
-            <span style={rowLabelStyle}>{m.boundAck.label}</span>
-            <span style={rowShaStyle}>{shortSha(m.boundAck.sha)}</span>
-            <span style={rowDateStyle}>{formatStamp(m.boundAck.timestamp)}</span>
-          </span>
-        ) : null}
-      </span>
-    </button>
+      ) : null}
+    </CommitRow>
   );
-}
-
-/** First 7 chars — the git short-SHA convention. */
-function shortSha(sha: string): string {
-  return sha.slice(0, 7);
-}
-
-/** Epoch seconds → a compact local date + time. `0` (unknown) renders blank. */
-function formatStamp(epochSeconds: number): string {
-  if (!epochSeconds) return '';
-  const d = new Date(epochSeconds * 1000);
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 const rootStyle: React.CSSProperties = {
@@ -305,47 +283,9 @@ const emptyStyle: React.CSSProperties = {
   fontStyle: 'italic',
 };
 
-const rowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'flex-start',
-  gap: '0.5rem',
-  width: '100%',
-  padding: '0.35rem 0.5rem',
-  background: 'transparent',
-  border: 'none',
-  borderRadius: '4px',
-  color: '#dde3ea',
-  fontSize: '0.74rem',
-  textAlign: 'left',
-  cursor: 'pointer',
-};
-
-const rowActiveStyle: React.CSSProperties = { background: '#1d4e6b' };
-
-function badgeStyle(kind: Milestone['kind']): React.CSSProperties {
-  return {
-    flex: 'none',
-    lineHeight: '1.3rem',
-    color: kind === 'save-point' ? '#e0b048' : '#7fa8c9',
-  };
-}
-
-/** The row's text column — the save-point line, and the bound-ack line below. */
-const rowMainStyle: React.CSSProperties = {
-  flex: 1,
-  minWidth: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.1rem',
-};
-
-const rowTopStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'baseline',
-  gap: '0.5rem',
-};
-
-const rowLabelStyle: React.CSSProperties = {
+/** The bound-ack line's text spans (rollup mode) — the main commit row is the
+ *  shared {@link CommitRow}; this sub-line stays local to the picker. */
+const boundLabelStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   overflow: 'hidden',
@@ -353,14 +293,14 @@ const rowLabelStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const rowShaStyle: React.CSSProperties = {
+const boundShaStyle: React.CSSProperties = {
   flex: 'none',
   color: '#7c8893',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontSize: '0.66rem',
 };
 
-const rowDateStyle: React.CSSProperties = {
+const boundDateStyle: React.CSSProperties = {
   flex: 'none',
   color: '#6c7783',
   fontSize: '0.68rem',

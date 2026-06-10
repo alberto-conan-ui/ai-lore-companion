@@ -70,6 +70,49 @@ export function makeCodeView(parent: HTMLElement, name: string, text: string): E
 }
 
 /**
+ * Build three labelled read-only panes side by side (e.g. parent · commit ·
+ * current) — the "All 3" history view. CodeMirror's merge addon is two-way, so
+ * these panes are plain read-only views (no cross-pane highlighting); the value
+ * is seeing the three versions of the file at once. Returns a disposer.
+ */
+export function makeTripleView(
+  parent: HTMLElement,
+  name: string,
+  panes: { label: string; text: string }[],
+): { destroy: () => void } {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;flex:1;min-width:0;min-height:0;height:100%;';
+  // Build the column DOM first, collecting each host with its text.
+  const slots: { host: HTMLDivElement; text: string }[] = [];
+  panes.forEach((p, i) => {
+    const col = document.createElement('div');
+    col.style.cssText = `display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;${
+      i < panes.length - 1 ? 'border-right:1px solid #1f2933;' : ''
+    }`;
+    const head = document.createElement('div');
+    head.textContent = p.label;
+    head.style.cssText =
+      'flex:none;padding:0.3rem 0.6rem;font-size:0.62rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#6c7783;background:#0f1620;border-bottom:1px solid #1f2933;';
+    const host = document.createElement('div');
+    host.style.cssText = 'flex:1;min-width:0;min-height:0;overflow:hidden;';
+    col.appendChild(head);
+    col.appendChild(host);
+    wrap.appendChild(col);
+    slots.push({ host, text: p.text });
+  });
+  // Attach to the document *before* creating the editors — CodeMirror measures
+  // on construction, so a detached host would render blank until a later resize.
+  parent.appendChild(wrap);
+  const views = slots.map(({ host, text }) => makeCodeView(host, name, text));
+  return {
+    destroy: () => {
+      for (const v of views) v.destroy();
+      wrap.remove();
+    },
+  };
+}
+
+/**
  * Build a side-by-side read-only diff of the baseline (`a`, left) against the
  * current contents (`b`, right). Unchanged stretches collapse so the changes
  * read at a glance.

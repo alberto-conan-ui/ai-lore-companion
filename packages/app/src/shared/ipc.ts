@@ -134,6 +134,22 @@ export type ReadFileBaselineResult =
   | { kind: 'no-save-point' }
   | { kind: 'failed'; message: string };
 
+/** Renderer → main: the commit history for one file (every ack/save-point that
+ *  touched it), newest first — drives the in-editor diff's per-file history
+ *  column (Read-only IDE P3+). Follows renames. */
+export type FileHistoryArg = { scope: ChangeScope; relPath: string };
+/** One commit that touched the file. `timestamp` is epoch **milliseconds**;
+ *  `blob` is the file's git blob SHA at that commit (read by blob → rename-safe). */
+export type FileHistoryEntry = { sha: string; subject: string; timestamp: number; blob: string };
+export type FileHistoryResult =
+  | { kind: 'ok'; entries: FileHistoryEntry[] }
+  | { kind: 'failed'; message: string };
+
+/** Renderer → main: read a git blob's content as text (a past file version,
+ *  fetched by blob so renames/moves don't break it). */
+export type ReadBlobArg = { scope: ChangeScope; blob: string };
+export type ReadBlobResult = { kind: 'ok'; text: string } | { kind: 'failed'; message: string };
+
 /** A project folder the user has opened — an entry in the recents list. */
 export type RecentProject = { path: string; openedAt: number };
 

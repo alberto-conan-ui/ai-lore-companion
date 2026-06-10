@@ -1,9 +1,4 @@
-import type {
-  AppEntry,
-  ChangeEntry,
-  ChangeScope,
-  TreeNode,
-} from '@ai-lore-companion/core';
+import type { AppEntry, ChangeEntry, ChangeScope, TreeNode } from '@ai-lore-companion/core';
 import { create } from 'zustand';
 import type {
   ChainPayload,
@@ -122,6 +117,13 @@ export type EditorDoc = {
   mode: EditorMode;
   /** Rename/copy source (project-relative or absolute) for the diff baseline. */
   oldPath?: string;
+  /**
+   * A per-file diff baseline override (a commit SHA), set by clicking an entry
+   * in the diff's history column. When set, this file's diff compares against
+   * this commit instead of the global baseline picker — only for this file.
+   * `undefined` follows the global baseline.
+   */
+  diffBaseline?: string;
 };
 
 type State = {
@@ -191,6 +193,9 @@ type State = {
   setActiveDoc: (path: string) => void;
   /** Flip an open doc between content and diff. */
   setDocMode: (path: string, mode: EditorMode) => void;
+  /** Pin an open doc's diff to a specific commit (from its history column), or
+   *  `null` to follow the global baseline picker again. */
+  setDocDiffBaseline: (path: string, baseline: string | null) => void;
 };
 
 export const useCockpitStore = create<State>((set) => ({
@@ -235,6 +240,12 @@ export const useCockpitStore = create<State>((set) => ({
   setDocMode: (path, mode) =>
     set((state) => ({
       editorDocs: state.editorDocs.map((d) => (d.path === path ? { ...d, mode } : d)),
+    })),
+  setDocDiffBaseline: (path, baseline) =>
+    set((state) => ({
+      editorDocs: state.editorDocs.map((d) =>
+        d.path === path ? { ...d, diffBaseline: baseline ?? undefined } : d,
+      ),
     })),
   setChain: (chain) => set({ chain }),
   applyChanges: (payload) =>
