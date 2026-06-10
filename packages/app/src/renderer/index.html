@@ -30,6 +30,12 @@
         transition: opacity 0.1s;
         line-height: 1;
       }
+      /* ag-grid syncs row hover across its pinned/centre containers via the
+         .ag-row-hover class (the native :hover only covers the cell fragment
+         under the cursor — so a pinned-right affordance would stay hidden unless
+         you aimed straight at it). Key off the class so the reveal ↗ + kebab
+         come up whenever the row is hovered anywhere. */
+      .ag-row-hover .row-kebab,
       .ag-row:hover .row-kebab,
       .ag-row.ag-row-focus .row-kebab,
       .row-kebab-host:hover .row-kebab,
@@ -37,6 +43,12 @@
       .row-kebab:hover,
       .row-kebab:focus-visible {
         opacity: 1;
+      }
+      /* One font across every ag-grid column — headers, native value cells, and
+         custom React cell renderers (the Name cell) — instead of ag-grid's own
+         default leaking into the columns this app doesn't render itself. */
+      .ag-root-wrapper {
+        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
       }
       .row-kebab:hover,
       .row-kebab:focus-visible {

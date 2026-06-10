@@ -1,0 +1,148 @@
+/* Rendered markdown preview (Read-only IDE P4) — Typora-inspired: a centred
+   reading column, generous line-height, restrained dark-theme typography that
+   sits on the cockpit's #0a0f17 ground. */
+
+.md-preview {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2rem 2.4rem 4rem;
+  color: #c9d3dd;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 15px;
+  line-height: 1.72;
+  word-wrap: break-word;
+}
+
+.md-preview > :first-child {
+  margin-top: 0;
+}
+
+.md-preview h1,
+.md-preview h2,
+.md-preview h3,
+.md-preview h4,
+.md-preview h5,
+.md-preview h6 {
+  color: #e9eef4;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.8em 0 0.6em;
+}
+
+.md-preview h1 {
+  font-size: 1.9em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid #1f2933;
+}
+.md-preview h2 {
+  font-size: 1.5em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid #1f2933;
+}
+.md-preview h3 {
+  font-size: 1.25em;
+}
+.md-preview h4 {
+  font-size: 1.08em;
+}
+.md-preview h5,
+.md-preview h6 {
+  font-size: 1em;
+  color: #aab6c2;
+}
+
+.md-preview p,
+.md-preview ul,
+.md-preview ol,
+.md-preview blockquote,
+.md-preview table,
+.md-preview pre {
+  margin: 0 0 1.1em;
+}
+
+.md-preview a {
+  color: #6cb0ee;
+  text-decoration: none;
+}
+.md-preview a:hover {
+  text-decoration: underline;
+}
+
+.md-preview strong {
+  color: #e9eef4;
+  font-weight: 600;
+}
+
+.md-preview ul,
+.md-preview ol {
+  padding-left: 1.6em;
+}
+.md-preview li {
+  margin: 0.25em 0;
+}
+.md-preview li > ul,
+.md-preview li > ol {
+  margin: 0.25em 0;
+}
+
+.md-preview blockquote {
+  padding: 0.2em 1em;
+  border-left: 3px solid #2f3a45;
+  color: #9fb1bd;
+}
+.md-preview blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* Inline code + fenced blocks — one monospace voice. */
+.md-preview code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
+  background: #161e29;
+  border: 1px solid #1f2933;
+  border-radius: 4px;
+  padding: 0.12em 0.36em;
+}
+.md-preview pre {
+  background: #0d141d;
+  border: 1px solid #1f2933;
+  border-radius: 6px;
+  padding: 0.9em 1.1em;
+  overflow: auto;
+}
+.md-preview pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.86em;
+  color: #cdd6e0;
+}
+
+.md-preview hr {
+  border: none;
+  border-top: 1px solid #1f2933;
+  margin: 2em 0;
+}
+
+.md-preview table {
+  border-collapse: collapse;
+  display: block;
+  overflow: auto;
+}
+.md-preview th,
+.md-preview td {
+  border: 1px solid #243040;
+  padding: 0.45em 0.8em;
+}
+.md-preview th {
+  background: #121a24;
+  font-weight: 600;
+  color: #e9eef4;
+}
+.md-preview tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.md-preview img {
+  max-width: 100%;
+}

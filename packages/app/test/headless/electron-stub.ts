@@ -45,6 +45,10 @@ export const shell = {
   showItemInFolder: makeSpy(),
 };
 
+export const clipboard = {
+  writeText: makeSpy(),
+};
+
 /** `utilityProcess` is referenced by `main/search/service.ts` (the worker-backed
  *  search). The headless tier uses the in-process service and never forks, so
  *  this only needs to exist for the named import to link. */
@@ -59,6 +63,7 @@ export function resetElectronStub(): void {
   shell.openPath.calls.length = 0;
   shell.openExternal.calls.length = 0;
   shell.showItemInFolder.calls.length = 0;
+  clipboard.writeText.calls.length = 0;
   fakeWindow = { id: 1, webContents: { send: () => {} } };
   allWindows = [];
 }

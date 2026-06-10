@@ -21,9 +21,12 @@ import {
   useRef,
 } from 'react';
 import { type DriftKind, categoriseDriftCode } from '../store.js';
+import { FONT_SIZE_PX, FONT_UI } from '../theme.js';
 import type { DriftRow } from './ChangesPanel.js';
-import { buildNodeContextMenu } from './nodeContextMenu.js';
+import { FileIcon } from './FileIcon.js';
+import { RowCopyMenu } from './RowCopyMenu.js';
 import { RowKebab } from './RowKebab.js';
+import { buildNodeContextMenu } from './nodeContextMenu.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the grid. */
 export type FileGridHandle = {
@@ -51,6 +54,10 @@ export const cockpitGridTheme = themeQuartz.withPart(colorSchemeDark).withParams
   foregroundColor: '#dde3ea',
   borderColor: '#1f2933',
   accentColor: '#5a9bd4',
+  // One font + size across the file lists — matches the app's UI font and the
+  // navigator tree's row text instead of ag-grid's larger default (P4 facelift).
+  fontFamily: FONT_UI,
+  fontSize: FONT_SIZE_PX,
 });
 
 type Props = {
@@ -182,10 +189,13 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
         minWidth: 200,
         filter: 'agTextColumnFilter',
         floatingFilter: true,
-        cellRenderer: (params: { value: string; data: TreeNode }) => {
-          const glyph = params.data.isDir ? '📁' : '📄';
-          return `${glyph}  ${params.value}`;
-        },
+        cellRenderer: (params: { value: string; data?: TreeNode }) =>
+          params.data ? (
+            <span style={nameCellStyle}>
+              <FileIcon name={params.data.name} isDir={params.data.isDir} />
+              <span style={nameTextStyle}>{params.value}</span>
+            </span>
+          ) : null,
       },
       {
         colId: 'type',
@@ -219,39 +229,61 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
         // ~150px after the tree column).
         colId: 'kebab',
         headerName: '',
-        width: 36,
+        width: 84,
         pinned: 'right',
         sortable: false,
         filter: false,
         suppressMovable: true,
         suppressColumnsToolPanel: true,
-        cellStyle: { padding: 0, textAlign: 'center' },
+        cellStyle: { padding: 0 },
         cellRenderer: (params: {
           data?: TreeNode;
           node: { group?: boolean };
-          api: { showContextMenu: (p: { rowNode: unknown; value: unknown; x: number; y: number }) => void };
+          api: {
+            showContextMenu: (p: {
+              rowNode: unknown;
+              value: unknown;
+              x: number;
+              y: number;
+            }) => void;
+          };
         }): JSX.Element | null => {
           if (!params.data || params.node.group) return null;
           const row = params.data;
           const node = params.node;
           return (
-            <RowKebab
-              testId={`row-kebab-grid-${row.path}`}
-              onActivate={(e) => {
-                const ev = e as React.MouseEvent<HTMLButtonElement>;
-                params.api.showContextMenu({
-                  rowNode: node,
-                  value: row,
-                  x: ev.clientX,
-                  y: ev.clientY,
-                });
-              }}
-            />
+            <span style={rowActionsStyle}>
+              <button
+                type="button"
+                className="row-kebab"
+                title="Reveal in Finder"
+                aria-label="Reveal in Finder"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRevealInFinder(row);
+                }}
+              >
+                ↗
+              </button>
+              <RowCopyMenu name={row.name} path={row.path} />
+              <RowKebab
+                testId={`row-kebab-grid-${row.path}`}
+                onActivate={(e) => {
+                  const ev = e as React.MouseEvent<HTMLButtonElement>;
+                  params.api.showContextMenu({
+                    rowNode: node,
+                    value: row,
+                    x: ev.clientX,
+                    y: ev.clientY,
+                  });
+                }}
+              />
+            </span>
           );
         },
       },
     ],
-    [driftByPath],
+    [driftByPath, onRevealInFinder],
   );
 
   useEffect(() => {
@@ -361,5 +393,29 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
 const containerStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
+  height: '100%',
+};
+
+/** Name cell — the file-type icon sits flush before the name. */
+const nameCellStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.45rem',
+  height: '100%',
+  minWidth: 0,
+};
+
+const nameTextStyle: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+/** The pinned per-row action cluster: reveal-in-Finder arrow + the kebab, both
+ *  hover-revealed via the shared `.row-kebab` class. */
+const rowActionsStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'flex-end',
   height: '100%',
 };

@@ -103,9 +103,10 @@ type Trees = {
  *  emits a `publish` scope. */
 export type PaneScope = ChangeScope | 'publish';
 
-/** How an open editor doc is being viewed — its file content, or a diff of that
- *  content against the selected save-point/ack (Read-only IDE P1/P3). */
-export type EditorMode = 'code' | 'diff';
+/** How an open editor doc is being viewed — its file content, a diff against the
+ *  selected save-point/ack (Read-only IDE P1/P3), or a rendered markdown preview
+ *  (markdown files only). */
+export type EditorMode = 'code' | 'diff' | 'preview';
 
 /**
  * One file open in the in-app editor (Read-only IDE). The app is read-only — a

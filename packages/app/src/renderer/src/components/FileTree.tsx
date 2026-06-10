@@ -11,6 +11,8 @@ import {
   useState,
 } from 'react';
 import type { DriftLevel } from '../store.js';
+import { FONT_SIZE } from '../theme.js';
+import { FileIcon } from './FileIcon.js';
 import { RowKebab } from './RowKebab.js';
 
 /** Imperative handle the Pane uses to move keyboard focus into the tree. */
@@ -390,7 +392,9 @@ function Row({
         data-testid={isRoot ? 'tree-root' : undefined}
       >
         <span style={{ ...twistyStyle, color: '#aeb9c4' }}>{open ? '▾' : '▸'}</span>
-        <span style={glyphStyle}>{open ? '📂' : '📁'}</span>
+        <span style={glyphStyle}>
+          <FileIcon name={node.name} isDir />
+        </span>
         <span style={{ ...nameStyle, fontWeight: open ? 600 : 400 }}>{node.name}</span>
         <span style={{ ...driftDotStyle, background: DOT_COLOR[driftLevelFor(node.path)] }} />
         {synthetic ? null : (
@@ -454,7 +458,7 @@ const nodeRow: React.CSSProperties = {
   border: 'none',
   textAlign: 'left',
   font: 'inherit',
-  fontSize: '0.78rem',
+  fontSize: FONT_SIZE,
   cursor: 'pointer',
   whiteSpace: 'nowrap',
 };
@@ -467,11 +471,11 @@ const twistyStyle: React.CSSProperties = {
 };
 
 const glyphStyle: React.CSSProperties = {
-  width: '1rem',
+  width: '14px',
   flexShrink: 0,
-  textAlign: 'center',
-  fontSize: '0.82rem',
-  filter: 'grayscale(0.15)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
 };
 
 const nameStyle: React.CSSProperties = {

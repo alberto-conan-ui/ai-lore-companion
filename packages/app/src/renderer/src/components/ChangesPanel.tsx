@@ -18,9 +18,11 @@ import {
   useState,
 } from 'react';
 import { type DriftKind, categoriseDriftCode } from '../store.js';
+import { cockpitGridTheme } from './FileGrid.js';
 // Importing the theme also evaluates FileGrid.tsx, which registers the AG Grid
 // modules and license — so this grid has them without repeating the setup.
-import { cockpitGridTheme } from './FileGrid.js';
+import { FileIcon } from './FileIcon.js';
+import { RowCopyMenu } from './RowCopyMenu.js';
 import { RowKebab } from './RowKebab.js';
 import { buildNodeContextMenu } from './nodeContextMenu.js';
 
@@ -194,6 +196,13 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
               minWidth: 160,
               valueGetter: (p: ValueGetterParams<DriftRow>) =>
                 p.data ? basename(p.data.projectRelPath) : '',
+              cellRenderer: (p: { value: string; data?: DriftRow }) =>
+                p.data ? (
+                  <span style={nameCellStyle}>
+                    <FileIcon name={basename(p.data.projectRelPath)} isDir={false} />
+                    <span style={nameTextStyle}>{p.value}</span>
+                  </span>
+                ) : null,
               filter: 'agTextColumnFilter',
               floatingFilter: true,
             },
@@ -214,12 +223,12 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
         // away without aiming for the row's secondary click area.
         colId: 'kebab',
         headerName: '',
-        width: 36,
+        width: 84,
         sortable: false,
         filter: false,
         suppressMovable: true,
         suppressColumnsToolPanel: true,
-        cellStyle: { padding: 0, textAlign: 'center' },
+        cellStyle: { padding: 0 },
         cellRenderer: (params: {
           data?: DriftRow;
           node: { group?: boolean };
@@ -236,23 +245,38 @@ export const ChangesPanel = forwardRef<ChangesPanelHandle, Props>(function Chang
           const row = params.data;
           const node = params.node;
           return (
-            <RowKebab
-              testId={`row-kebab-changes-${row.projectRelPath}`}
-              onActivate={(e) => {
-                const ev = e as React.MouseEvent<HTMLButtonElement>;
-                params.api.showContextMenu({
-                  rowNode: node,
-                  value: row,
-                  x: ev.clientX,
-                  y: ev.clientY,
-                });
-              }}
-            />
+            <span style={rowActionsStyle}>
+              <button
+                type="button"
+                className="row-kebab"
+                title="Reveal in Finder"
+                aria-label="Reveal in Finder"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRevealInFinder(nodeForRow(row));
+                }}
+              >
+                ↗
+              </button>
+              <RowCopyMenu name={basename(row.projectRelPath)} path={row.absPath} />
+              <RowKebab
+                testId={`row-kebab-changes-${row.projectRelPath}`}
+                onActivate={(e) => {
+                  const ev = e as React.MouseEvent<HTMLButtonElement>;
+                  params.api.showContextMenu({
+                    rowNode: node,
+                    value: row,
+                    x: ev.clientX,
+                    y: ev.clientY,
+                  });
+                }}
+              />
+            </span>
           );
         },
       },
     ],
-    [displayPath, viewMode],
+    [displayPath, viewMode, onRevealInFinder],
   );
 
   const onAnyRowClicked = useCallback(
@@ -360,6 +384,28 @@ const containerStyle: React.CSSProperties = {
   minHeight: 0,
   height: '100%',
   background: '#0c121a',
+};
+
+const nameCellStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.45rem',
+  height: '100%',
+  minWidth: 0,
+};
+
+const nameTextStyle: React.CSSProperties = {
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+};
+
+/** Reveal-in-Finder arrow + kebab, hover-revealed via the shared `.row-kebab`. */
+const rowActionsStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'flex-end',
+  height: '100%',
 };
 
 const headerStyle: React.CSSProperties = {

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
 import { registerTree } from '../../src/main/ipc/tree.js';
-import { resetElectronStub, shell } from './electron-stub.js';
+import { clipboard, resetElectronStub, shell } from './electron-stub.js';
 import { type Harness, fakeContext, harnessFor } from './harness.js';
 
 let h: Harness;
@@ -49,6 +49,11 @@ test('treeExpand returns the directory children', () => {
 test('treeExpand returns [] with no project context', () => {
   h.setCtx(undefined);
   assert.deepEqual(h.invoke('treeExpand', { path: root, scope: 'payload' }), []);
+});
+
+test('copyText writes the text to the clipboard', () => {
+  h.invoke('copyText', 'packages/app/src/main.ts');
+  assert.deepEqual(clipboard.writeText.calls, [['packages/app/src/main.ts']]);
 });
 
 test('readFile returns text for a small text file', () => {

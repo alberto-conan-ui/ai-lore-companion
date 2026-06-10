@@ -136,6 +136,9 @@ export const CONTRACT = {
   ),
   revealInFinder: send<[path: string]>('cockpit:reveal-in-finder'),
   openExternal: invoke<[url: string], void>('cockpit:open-external'),
+  /** Copy text to the OS clipboard (via Electron's clipboard — robust regardless
+   *  of the renderer's clipboard-permission state). Backs the per-row Copy menu. */
+  copyText: send<[text: string]>('cockpit:copy-text'),
   /** Open a shortcut URL externally — normalised in main (a bare `localhost:3000`
    *  is fixed up like the address bar), unlike `openExternal` which expects a
    *  ready URL. Backs the `↗` on web-shortcut dropdown rows. */

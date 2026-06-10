@@ -6,7 +6,7 @@ import {
   rankPaths,
   readDirectory,
 } from '@ai-lore-companion/core';
-import { shell } from 'electron';
+import { clipboard, shell } from 'electron';
 import type {
   ContentSearchArg,
   ContentSearchResult,
@@ -30,6 +30,8 @@ const MAX_TEXT_BYTES = 2_000_000;
 /** Trees, file search, and path open/reveal. */
 export const registerTree: RegisterModule = (reg, deps) => {
   reg.handle('openPath', (_event, path) => shell.openPath(path));
+
+  reg.on('copyText', (_event, text) => clipboard.writeText(text));
 
   // Read a file's text for the in-app viewer. The decision of what opens in-app
   // vs hands off to the OS lives here (content sniff + size cap), so the renderer

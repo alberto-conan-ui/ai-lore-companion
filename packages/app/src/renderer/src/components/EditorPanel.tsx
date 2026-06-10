@@ -1,6 +1,14 @@
 import { type JSX, useEffect, useRef, useState } from 'react';
 import { type EditorDoc, useCockpitStore } from '../store.js';
+import { MarkdownPreview } from './editor/MarkdownPreview.js';
 import { makeCodeView, makeDiffView } from './editor/codemirror.js';
+
+/** Markdown files get the third "Preview" view. */
+function isMarkdown(name: string): boolean {
+  const dot = name.lastIndexOf('.');
+  const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  return ext === 'md' || ext === 'markdown' || ext === 'mdx';
+}
 
 /**
  * The editor column of the Read-only IDE. When one or more files are open the
@@ -85,6 +93,18 @@ export function EditorPanel(): JSX.Element | null {
               >
                 Diff
               </button>
+              {isMarkdown(active.name) ? (
+                <button
+                  type="button"
+                  style={active.mode === 'preview' ? segOnStyle : segStyle}
+                  aria-pressed={active.mode === 'preview'}
+                  data-testid="editor-mode-preview"
+                  title="Rendered markdown preview"
+                  onClick={() => setDocMode(active.path, 'preview')}
+                >
+                  Preview
+                </button>
+              ) : null}
             </div>
             <span style={toolbarSpacerStyle} />
             <button
@@ -97,7 +117,11 @@ export function EditorPanel(): JSX.Element | null {
               Open externally ↗
             </button>
           </div>
-          <DocView doc={active} />
+          {active.mode === 'preview' && isMarkdown(active.name) ? (
+            <MarkdownPreview doc={active} />
+          ) : (
+            <DocView doc={active} />
+          )}
         </>
       ) : null}
     </section>
