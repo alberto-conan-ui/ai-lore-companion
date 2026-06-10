@@ -22,6 +22,7 @@ import { AlteredScreen } from './components/AlteredScreen.js';
 import { AssistantDashboard } from './components/AssistantDashboard.js';
 import { BaselinePicker } from './components/BaselinePicker.js';
 import { DockPanel } from './components/DockPanel.js';
+import { EditorPanel } from './components/EditorPanel.js';
 import { LeftActivityRail, type LeftSection } from './components/LeftActivityRail.js';
 import { baseDirsOf, entriesInSubRoot } from './components/Pane.js';
 import { SearchDialog, type SearchScope } from './components/SearchDialog.js';
@@ -88,6 +89,8 @@ const CENTRE_PINNED: WorkspaceTab[] = [{ id: 'assistant-host', kind: 'pane', tit
 const DEFAULT_LEFT_RAIL_WIDTH = 400;
 const DEFAULT_RIGHT_WIDTH = 480;
 const DEFAULT_BOTTOM_HEIGHT = 240;
+/** The editor column's first-open width (Read-only IDE P1). */
+const DEFAULT_EDITOR_WIDTH = 560;
 
 /** Kinds the layout snapshot can restore. `pane` tabs are seeded by
  *  `panesForShape`, never restored — and an unknown kind from an older
@@ -179,6 +182,11 @@ export function App(): JSX.Element {
   // leftRail's fixed width; right's width when open. Centre flexes.
   const [leftRailWidth, setLeftRailWidth] = useState(DEFAULT_LEFT_RAIL_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
+  // The editor column's width (Read-only IDE P1). Only rendered when a file is
+  // open; the nav | editor split appears beside the left region and the centre
+  // flexes to fill the rest. (Auto-fit reflow + persistence are P2.)
+  const [editorWidth, setEditorWidth] = useState(DEFAULT_EDITOR_WIDTH);
+  const editorOpen = useCockpitStore((s) => s.editorDocs.length > 0);
   // Per-column bottom-dock heights.
   const [leftRailBottomHeight, setLeftRailBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
   const [centreBottomHeight, setCentreBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
@@ -1288,6 +1296,17 @@ export function App(): JSX.Element {
          *  Drag horizontally to adjust leftRail's width; the value persists
          *  via the captureLayout effect. */}
         <RailSash size={leftRailWidth} onResize={setLeftRailWidth} accent={accent} />
+        {/* The editor column (Read-only IDE P1): present only while a file is
+         *  open, so the left panel reads as nav | editor; the centre flexes to
+         *  fill what's left. A sash on its right edge resizes it. */}
+        {editorOpen ? (
+          <>
+            <div style={{ ...editorColumnStyle, width: editorWidth }} data-column-id="editor">
+              <EditorPanel />
+            </div>
+            <RailSash size={editorWidth} onResize={setEditorWidth} accent={accent} />
+          </>
+        ) : null}
         <Column
           name="centre"
           flex
@@ -1453,6 +1472,16 @@ const leftSectionShownStyle: React.CSSProperties = {
 };
 
 const leftSectionHiddenStyle: React.CSSProperties = { display: 'none' };
+
+/** The editor column wrapper — fixed width (resized by its sash), the
+ *  EditorPanel fills it. */
+const editorColumnStyle: React.CSSProperties = {
+  display: 'flex',
+  flexShrink: 0,
+  minWidth: 0,
+  minHeight: 0,
+  overflow: 'hidden',
+};
 
 const appLayout: React.CSSProperties = {
   display: 'flex',

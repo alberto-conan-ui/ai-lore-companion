@@ -40,6 +40,10 @@ import type {
   OpenDiffArg,
   OpenDiffResult,
   PromptEntry,
+  ReadFileArg,
+  ReadFileBaselineArg,
+  ReadFileBaselineResult,
+  ReadFileResult,
   RecentProject,
   SavePointsPayload,
   SetBaselineArg,
@@ -122,6 +126,14 @@ export const CONTRACT = {
 
   // ── Files + paths ─────────────────────────────────────────────────────────
   openPath: invoke<[path: string], string>('cockpit:open-path'),
+  /** Read a file's text for the in-app read-only viewer (Read-only IDE P1).
+   *  Main decides text-vs-binary + caps size; non-text routes back to `openPath`. */
+  readFile: invoke<[arg: ReadFileArg], ReadFileResult>('cockpit:read-file'),
+  /** Read a file's content at a baseline commit, for the in-app side-by-side
+   *  diff (Read-only IDE P3). */
+  readFileBaseline: invoke<[arg: ReadFileBaselineArg], ReadFileBaselineResult>(
+    'cockpit:read-file-baseline',
+  ),
   revealInFinder: send<[path: string]>('cockpit:reveal-in-finder'),
   openExternal: invoke<[url: string], void>('cockpit:open-external'),
   /** Open a shortcut URL externally — normalised in main (a bare `localhost:3000`

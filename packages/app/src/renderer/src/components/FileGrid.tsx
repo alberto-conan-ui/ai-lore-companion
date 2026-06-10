@@ -60,6 +60,9 @@ type Props = {
   onSelectPath: (path: string) => void;
   /** Double-clicking a folder row navigates the pane into that folder. */
   onOpenFolder: (path: string) => void;
+  /** Open a file row — routed through the in-app editor (Read-only IDE P1).
+   *  The handler decides text-vs-binary; binary falls back to the OS opener. */
+  onOpenFile: (node: TreeNode) => void;
   driftByPath: Map<string, DriftRow>;
   /** Right-click ▸ Ignore — create a project ignore rule for the row's path. */
   onIgnore: (node: TreeNode) => void;
@@ -132,6 +135,7 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
     selectedPath,
     onSelectPath,
     onOpenFolder,
+    onOpenFile,
     driftByPath,
     onIgnore,
     onDiff,
@@ -294,7 +298,7 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
       if (keyEvent.key === 'Enter' && e.data) {
         keyEvent.preventDefault();
         if (e.data.isDir) onOpenFolder(e.data.path);
-        else void window.cockpit.openPath(e.data.path);
+        else onOpenFile(e.data);
         return;
       }
       if (keyEvent.key === 'Escape') {
@@ -307,7 +311,7 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
         typeAhead(keyEvent.key);
       }
     },
-    [onOpenFolder, typeAhead],
+    [onOpenFolder, onOpenFile, typeAhead],
   );
 
   return (
@@ -343,9 +347,10 @@ export const FileGrid = forwardRef<FileGridHandle, Props>(function FileGrid(
         }}
         onRowDoubleClicked={(e) => {
           if (!e.data) return;
-          // A folder navigates the pane into it; a file opens in the OS app.
+          // A folder navigates the pane into it; a file opens in the in-app
+          // editor (binary falls back to the OS opener — decided in onOpenFile).
           if (e.data.isDir) onOpenFolder(e.data.path);
-          else void window.cockpit.openPath(e.data.path);
+          else onOpenFile(e.data);
         }}
         onCellKeyDown={onCellKeyDown}
       />

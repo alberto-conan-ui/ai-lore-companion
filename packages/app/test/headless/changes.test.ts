@@ -52,3 +52,29 @@ test('openDiff returns no-cli when no diff app is configured', () => {
   const result = h.invoke('openDiff', { scope: 'payload', relPath: 'a.ts', baseline: 'abc123' });
   assert.deepEqual(result, { kind: 'no-cli' });
 });
+
+test('readFileBaseline fails cleanly with no project context', () => {
+  h.setCtx(undefined);
+  assert.deepEqual(
+    h.invoke('readFileBaseline', { scope: 'payload', relPath: 'a.ts', baseline: 'HEAD' }),
+    { kind: 'failed', message: 'no project context' },
+  );
+});
+
+test('readFileBaseline reports no-save-point when HEAD resolves to none', () => {
+  // The fake context's lore dir has no save-point ledger, so HEAD has nothing
+  // to fall back to — same resolution openDiff uses.
+  assert.deepEqual(
+    h.invoke('readFileBaseline', { scope: 'payload', relPath: 'a.ts', baseline: 'HEAD' }),
+    { kind: 'no-save-point' },
+  );
+});
+
+test('readFileBaseline refuses a path that escapes the repo working tree', () => {
+  const r = h.invoke('readFileBaseline', {
+    scope: 'payload',
+    relPath: '../../../etc/passwd',
+    baseline: 'abc123',
+  }) as { kind: string };
+  assert.equal(r.kind, 'failed');
+});

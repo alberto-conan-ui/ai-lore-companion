@@ -1,4 +1,4 @@
-import { statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import {
   createIgnoreMatcher,
@@ -12,6 +12,8 @@ import type {
   ContentSearchResult,
   FileSearchArg,
   FileSearchHit,
+  ReadFileArg,
+  ReadFileResult,
   TreeExpandArg,
 } from '../../shared/ipc.js';
 import { loreHide, treeHideFor } from '../path-mapping.js';
@@ -21,9 +23,32 @@ import type { RegisterModule } from './types.js';
 /** Max content hits returned to the renderer per keystroke. */
 const CONTENT_CAP = 50;
 
+/** Cap for the in-app read-only viewer (Read-only IDE P1). Larger files route
+ *  back to the OS opener rather than loading megabytes into the renderer. */
+const MAX_TEXT_BYTES = 2_000_000;
+
 /** Trees, file search, and path open/reveal. */
 export const registerTree: RegisterModule = (reg, deps) => {
   reg.handle('openPath', (_event, path) => shell.openPath(path));
+
+  // Read a file's text for the in-app viewer. The decision of what opens in-app
+  // vs hands off to the OS lives here (content sniff + size cap), so the renderer
+  // routes uniformly: 'text' → editor, anything else → openPath. Read-only — this
+  // only reads; nothing is written.
+  reg.handle('readFile', (_event, arg: ReadFileArg): ReadFileResult => {
+    try {
+      const st = statSync(arg.path);
+      if (!st.isFile()) return { kind: 'failed', message: 'not a regular file' };
+      if (st.size > MAX_TEXT_BYTES) return { kind: 'too-large', bytes: st.size };
+      const buf = readFileSync(arg.path);
+      // A NUL byte in the first 8 KB marks the file binary — the same heuristic
+      // git uses. Cheap, and right for the source/markdown/JSON this app shows.
+      if (buf.subarray(0, 8192).includes(0)) return { kind: 'binary' };
+      return { kind: 'text', text: buf.toString('utf8') };
+    } catch (err) {
+      return { kind: 'failed', message: (err as Error).message };
+    }
+  });
 
   reg.on('revealInFinder', (_event, path) => {
     // `showItemInFolder` reveals files (highlights them in their parent). For

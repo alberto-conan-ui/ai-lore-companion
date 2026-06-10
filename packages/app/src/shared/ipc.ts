@@ -107,6 +107,33 @@ export type DiffTextArg = { scope: ChangeScope; baseline: string; relPath: strin
 /** Result of an `IPC.DiffText` invoke. */
 export type DiffTextResult = { kind: 'ok'; text: string } | { kind: 'failed'; message: string };
 
+/** Renderer → main: read a file's text for the in-app read-only viewer. Main
+ *  owns the text-vs-binary decision (content sniff) and the size cap; binary or
+ *  oversized files route back to the OS opener. */
+export type ReadFileArg = { path: string };
+export type ReadFileResult =
+  | { kind: 'text'; text: string }
+  | { kind: 'binary' }
+  | { kind: 'too-large'; bytes: number }
+  | { kind: 'failed'; message: string };
+
+/** Renderer → main: the text of a file at a baseline commit, for the in-app
+ *  side-by-side diff. Mirrors {@link OpenDiffArg}'s resolution but returns the
+ *  baseline content instead of launching an external diff. */
+export type ReadFileBaselineArg = {
+  scope: ChangeScope;
+  /** Path relative to the Payload project root, or absolute (both accepted). */
+  relPath: string;
+  /** Rename/copy source — the baseline ("before") side reads from here. */
+  oldPath?: string;
+  /** Commit to read; `'HEAD'` falls back to the latest save-point. */
+  baseline: string;
+};
+export type ReadFileBaselineResult =
+  | { kind: 'ok'; text: string }
+  | { kind: 'no-save-point' }
+  | { kind: 'failed'; message: string };
+
 /** A project folder the user has opened — an entry in the recents list. */
 export type RecentProject = { path: string; openedAt: number };
 

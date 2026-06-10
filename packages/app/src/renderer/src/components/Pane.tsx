@@ -8,7 +8,6 @@ import type {
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type DriftLevel,
-  categoriseDriftCode,
   driftLevel,
   findTreeNode,
   useCockpitStore,
@@ -126,6 +125,26 @@ export function Pane({
     s.chain && !('error' in s.chain) ? s.chain.hasSavePoint : false,
   );
   const apps = useCockpitStore((s) => s.apps);
+  const openDoc = useCockpitStore((s) => s.openDoc);
+
+  // Open a file in the in-app editor (Read-only IDE). From the navigator we
+  // probe text-vs-binary first and hand binaries to the OS; the changes panel
+  // opens straight in diff mode (DocView reads both sides + shows an overlay if
+  // a side is unreadable). `absPath` is the doc id; `scope` resolves its baseline.
+  const openInEditor = useCallback(
+    async (absPath: string, mode: 'code' | 'diff', oldPath?: string): Promise<void> => {
+      const name = absPath.slice(absPath.lastIndexOf('/') + 1);
+      if (mode === 'code') {
+        const probe = await window.cockpit.readFile({ path: absPath });
+        if (probe.kind !== 'text') {
+          void window.cockpit.openPath(absPath);
+          return;
+        }
+      }
+      openDoc({ path: absPath, scope, name, mode, oldPath });
+    },
+    [openDoc, scope],
+  );
 
   // Context-menu actions shared across tree, grid, and (eventually) queue.
   const handleRevealInFinder = useCallback((node: TreeNode) => {
@@ -405,32 +424,16 @@ export function Pane({
     if (revealRequest) void revealFile(revealRequest.path);
   }, [revealRequest, revealFile]);
 
-  // Queue double-click. A new file (untracked, or added since the baseline) has
-  // no baseline version to diff against — open it straight in the OS-default
-  // app rather than attempting a diff or prompting for a diff app. Everything
-  // else prefers the configured external diff, falling back to OS-default open
-  // when no diff app is configured or anything goes wrong.
+  // Queue double-click opens the row in the in-app editor's **diff** mode
+  // (Read-only IDE P3) — content vs the selected save-point/ack, side by side.
+  // Renamed/copied rows carry their source path so the baseline reads from the
+  // old path. A new file (`add`) has an empty baseline → the diff shows it whole
+  // as added. The Code | Diff toggle in the editor flips to plain content.
   const handleQueueDouble = useCallback(
-    async (entry: DriftRow) => {
-      if (categoriseDriftCode(entry.code) === 'add') {
-        void window.cockpit.openPath(entry.absPath);
-        return;
-      }
-      const result = await window.cockpit.openDiff({
-        scope,
-        relPath: entry.projectRelPath,
-        // Renamed/copied rows carry their source path; pass it so the baseline
-        // is read from the old path (otherwise the move shows as a new file).
-        oldPath: entry.oldPath,
-        baseline,
-      });
-      if (result.kind === 'ok') return;
-      if (result.kind === 'failed') {
-        console.warn('[diff]', result.message);
-      }
-      void window.cockpit.openPath(entry.absPath);
+    (entry: DriftRow) => {
+      void openInEditor(entry.absPath, 'diff', entry.oldPath);
     },
-    [scope, baseline],
+    [openInEditor],
   );
 
   // Diff target awaiting a freshly-picked app. When the user clicks *Diff*
@@ -549,6 +552,7 @@ export function Pane({
             selectedPath={selectedFile}
             onSelectPath={setSelectedFile}
             onOpenFolder={handleOpenFolder}
+            onOpenFile={(node) => void openInEditor(node.path, 'code')}
             driftByPath={driftByPath}
             onIgnore={(node) => void ignorePath(node)}
             onDiff={(node) => void handleDiff(node)}

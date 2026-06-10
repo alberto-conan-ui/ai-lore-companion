@@ -66,6 +66,35 @@ export function materialiseBaseline(input: MaterialiseBaselineInput): Materialis
   return { kind: 'ok', tempPath };
 }
 
+export type ReadBaselineTextResult =
+  | { kind: 'ok'; text: string }
+  | { kind: 'failed'; message: string };
+
+/**
+ * Read the baseline content of a file as text — `git show <commit>:<path>`,
+ * decoded UTF-8. Backs the in-app side-by-side diff (Read-only IDE P3), which
+ * needs both sides' full text rather than a tempfile to hand an external tool.
+ * A file absent at the commit (non-zero status) yields empty text, so a diff of
+ * a newly-added file still renders (empty "before" vs the current contents).
+ */
+export function readBaselineText(input: MaterialiseBaselineInput): ReadBaselineTextResult {
+  let result: SpawnSyncReturns<Buffer>;
+  try {
+    result = spawnSync(
+      'git',
+      ['-C', input.workingTreeRoot, 'show', `${input.commit}:${input.gitRelPath}`],
+      { encoding: 'buffer' },
+    );
+  } catch (err) {
+    return { kind: 'failed', message: `git show failed to start: ${(err as Error).message}` };
+  }
+  if (result.error) {
+    return { kind: 'failed', message: `git show error: ${result.error.message}` };
+  }
+  if (result.status !== 0) return { kind: 'ok', text: '' };
+  return { kind: 'ok', text: result.stdout.toString('utf8') };
+}
+
 export type LaunchDiffInput = {
   cli: string;
   template: string;

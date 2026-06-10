@@ -103,6 +103,26 @@ type Trees = {
  *  emits a `publish` scope. */
 export type PaneScope = ChangeScope | 'publish';
 
+/** How an open editor doc is being viewed — its file content, or a diff of that
+ *  content against the selected save-point/ack (Read-only IDE P1/P3). */
+export type EditorMode = 'code' | 'diff';
+
+/**
+ * One file open in the in-app editor (Read-only IDE). The app is read-only — a
+ * doc is *viewed*, never edited to disk. Keyed by its absolute `path`; `scope`
+ * resolves its baseline for the diff view.
+ */
+export type EditorDoc = {
+  /** Absolute path — also the doc's stable id. */
+  path: string;
+  scope: ChangeScope;
+  /** Basename, shown on the editor tab. */
+  name: string;
+  mode: EditorMode;
+  /** Rename/copy source (project-relative or absolute) for the diff baseline. */
+  oldPath?: string;
+};
+
 type State = {
   chain: ChainPayload | null;
   /**
@@ -145,6 +165,13 @@ type State = {
    * across panes so a single click reveals or hides them everywhere.
    */
   showIndexFiles: boolean;
+  /**
+   * Files open in the in-app editor (Read-only IDE). The left panel splits into
+   * nav | editor whenever this is non-empty, and collapses back when it empties.
+   */
+  editorDocs: EditorDoc[];
+  /** The active editor doc's path, or `null` when none are open. */
+  activeDocPath: string | null;
   setChain: (chain: ChainPayload) => void;
   applyChanges: (payload: ChangesPayload) => void;
   setBaseline: (scope: ChangeScope, baseline: string) => void;
@@ -155,6 +182,14 @@ type State = {
   expandTree: (scope: PaneScope, path: string, children: TreeNode[]) => void;
   setApps: (apps: AppEntry[]) => void;
   setShowIndexFiles: (value: boolean) => void;
+  /** Open a file in the editor (or refocus + re-mode it if already open). */
+  openDoc: (doc: EditorDoc) => void;
+  /** Close an open doc; focus shifts to a neighbour, or clears when none remain. */
+  closeDoc: (path: string) => void;
+  /** Focus an already-open doc. */
+  setActiveDoc: (path: string) => void;
+  /** Flip an open doc between content and diff. */
+  setDocMode: (path: string, mode: EditorMode) => void;
 };
 
 export const useCockpitStore = create<State>((set) => ({
@@ -167,8 +202,39 @@ export const useCockpitStore = create<State>((set) => ({
   treeIndex: { payload: new Map(), lore: new Map(), publish: new Map() },
   apps: [],
   showIndexFiles: false,
+  editorDocs: [],
+  activeDocPath: null,
   setApps: (apps) => set({ apps }),
   setShowIndexFiles: (value) => set({ showIndexFiles: value }),
+  openDoc: (doc) =>
+    set((state) => {
+      const idx = state.editorDocs.findIndex((d) => d.path === doc.path);
+      if (idx === -1) {
+        return { editorDocs: [...state.editorDocs, doc], activeDocPath: doc.path };
+      }
+      // Re-opening: the entry point (nav → code, changes → diff) sets the mode,
+      // and the rename source refreshes; everything else stays.
+      const next = [...state.editorDocs];
+      next[idx] = { ...next[idx], mode: doc.mode, oldPath: doc.oldPath ?? next[idx].oldPath };
+      return { editorDocs: next, activeDocPath: doc.path };
+    }),
+  closeDoc: (path) =>
+    set((state) => {
+      const idx = state.editorDocs.findIndex((d) => d.path === path);
+      if (idx === -1) return {};
+      const next = state.editorDocs.filter((d) => d.path !== path);
+      let activeDocPath = state.activeDocPath;
+      if (activeDocPath === path) {
+        // Focus the previous tab, else the one that slid into this slot, else none.
+        activeDocPath = (next[idx - 1] ?? next[idx])?.path ?? null;
+      }
+      return { editorDocs: next, activeDocPath };
+    }),
+  setActiveDoc: (path) => set({ activeDocPath: path }),
+  setDocMode: (path, mode) =>
+    set((state) => ({
+      editorDocs: state.editorDocs.map((d) => (d.path === path ? { ...d, mode } : d)),
+    })),
   setChain: (chain) => set({ chain }),
   applyChanges: (payload) =>
     set((state) => ({

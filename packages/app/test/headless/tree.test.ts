@@ -51,6 +51,38 @@ test('treeExpand returns [] with no project context', () => {
   assert.deepEqual(h.invoke('treeExpand', { path: root, scope: 'payload' }), []);
 });
 
+test('readFile returns text for a small text file', () => {
+  assert.deepEqual(h.invoke('readFile', { path: join(root, 'alpha.txt') }), {
+    kind: 'text',
+    text: 'a',
+  });
+});
+
+test('readFile flags a binary file (a NUL byte in the sniff window)', () => {
+  const bin = join(root, 'blob.bin');
+  writeFileSync(bin, Buffer.from([0x68, 0x00, 0x69]));
+  assert.deepEqual(h.invoke('readFile', { path: bin }), { kind: 'binary' });
+});
+
+test('readFile flags a file past the size cap', () => {
+  const big = join(root, 'big.txt');
+  writeFileSync(big, Buffer.alloc(2_000_001, 0x61));
+  const r = h.invoke('readFile', { path: big }) as { kind: string; bytes: number };
+  assert.equal(r.kind, 'too-large');
+  assert.equal(r.bytes, 2_000_001);
+});
+
+test('readFile fails for a missing path and for a directory', () => {
+  assert.equal(
+    (h.invoke('readFile', { path: join(root, 'nope.txt') }) as { kind: string }).kind,
+    'failed',
+  );
+  assert.equal(
+    (h.invoke('readFile', { path: join(root, 'sub') }) as { kind: string }).kind,
+    'failed',
+  );
+});
+
 // `searchFiles` is async — it awaits the search service (a `utilityProcess` in
 // production, the in-process index in these tests).
 async function search(query: string): Promise<string[]> {
