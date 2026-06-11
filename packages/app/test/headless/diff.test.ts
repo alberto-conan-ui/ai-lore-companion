@@ -86,3 +86,31 @@ test('fileLog carries each version blob; readBlobText reads it across a rename',
   // exist at that commit. This is the move-safe path `git show <c>:b.txt` misses.
   assert.deepEqual(readBlobText(root, older.blob), { kind: 'ok', text: 'hello\nworld\n' });
 });
+
+test('fileLog flags a content-free move with its rename status, paths, and equal blobs', () => {
+  // A pure `git mv` (no content edit) is the case that made the "All 3" view show
+  // identical Parent/Commit panes. The rename commit must carry status `R…`, the
+  // old/new paths, and `prevBlob === blob` (so the UI can describe the move).
+  git('mv', 'a.txt', 'b.txt');
+  git('commit', '-q', '-m', 'rename a→b');
+  const r = fileLog({ workingTreeRoot: root, gitRelPath: 'b.txt' });
+  assert.equal(r.kind, 'ok');
+  if (r.kind !== 'ok') return;
+  const move = r.entries[0];
+  assert.ok(move, 'rename commit present');
+  assert.ok(move?.change.startsWith('R'), `status is a rename, got ${move?.change}`);
+  assert.equal(move?.oldPath, 'a.txt');
+  assert.equal(move?.newPath, 'b.txt');
+  assert.equal(move?.prevBlob, move?.blob, 'a move with no content edit has equal blobs');
+});
+
+test('fileLog marks an added file: status A, all-zero prevBlob', () => {
+  // The oldest version (the file's creation) has no earlier blob — `prevBlob` is
+  // all-zeros, which the "All 3" Parent pane renders as "added in this commit".
+  const r = fileLog({ workingTreeRoot: root, gitRelPath: 'a.txt' });
+  assert.equal(r.kind, 'ok');
+  if (r.kind !== 'ok') return;
+  const added = r.entries[r.entries.length - 1];
+  assert.equal(added?.change, 'A');
+  assert.ok(added && /^0+$/.test(added.prevBlob), 'added file has an all-zero prevBlob');
+});

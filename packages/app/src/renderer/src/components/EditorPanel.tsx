@@ -3,7 +3,13 @@ import type { FileHistoryEntry, SavePointInfo } from '../../shared/ipc.js';
 import { type EditorDoc, useCockpitStore } from '../store.js';
 import { CommitRow } from './CommitRow.js';
 import { MarkdownPreview } from './editor/MarkdownPreview.js';
-import { makeCodeView, makeDiffView, makeTripleView } from './editor/codemirror.js';
+import {
+  makeCodeView,
+  makeDiffView,
+  makeNoticeView,
+  makeTripleDiffView,
+  makeTripleView,
+} from './editor/codemirror.js';
 
 /** How the history column diffs a picked commit. */
 type HistoryMode = 'current' | 'commit' | 'all3';
@@ -161,6 +167,11 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
   // **change** (that commit vs its parent), or **all 3** (parent · commit ·
   // current side by side).
   const [historyMode, setHistoryMode] = useState<HistoryMode>('current');
+  // In "All 3", which boundary the highlighted diff lens sits on: `before`
+  // = before↔this-commit (what the commit changed), `current` = this-commit↔
+  // current (what changed since). `@codemirror/merge` is two-way, so the lens
+  // highlights one boundary while the third column stays plain for reference.
+  const [all3Boundary, setAll3Boundary] = useState<'before' | 'current'>('before');
   // This file's commit history (newest first). Each version carries its git
   // **blob** so a past version is fetched by blob — rename/move-safe, unlike
   // `git show <commit>:<current-path>` which misses a file that has since moved.
@@ -184,6 +195,38 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
   const pinnedInHistory = pinnedIdx >= 0;
   const commitBlob = pinnedInHistory ? (entries[pinnedIdx]?.blob ?? '') : '';
   const parentBlob = pinnedInHistory ? (entries[pinnedIdx + 1]?.blob ?? '') : '';
+  // For the "All 3" view, a pane that represents a *structural* change — the file
+  // was added (no earlier version), moved with no content edit, or deleted — is
+  // shown as a full-pane description instead of a blank or a duplicate twin. The
+  // picked commit's history entry carries the change kind and rename paths.
+  const picked = pinnedInHistory ? entries[pinnedIdx] : undefined;
+  const parentAbsent = pinnedInHistory && pinnedIdx + 1 >= entries.length;
+  const movedOnly =
+    !!picked &&
+    (picked.change.startsWith('R') || picked.change.startsWith('C')) &&
+    picked.prevBlob === picked.blob &&
+    !/^0+$/.test(picked.blob);
+  const deletedHere = !!picked && /^0+$/.test(picked.blob);
+  const parentNote = parentAbsent
+    ? `No earlier version.\n\n${doc.name} was added in this commit.`
+    : undefined;
+  const commitNote = deletedHere
+    ? `${doc.name} was deleted in this commit.`
+    : movedOnly
+      ? `This commit only moved the file —\nits contents did not change.\n\nfrom   ${picked?.oldPath ?? '—'}\nto       ${picked?.newPath ?? doc.path}`
+      : undefined;
+  // When a two-way diff's two sides turn out identical, `@codemirror/merge`
+  // collapses to a bare "N unchanged lines" stub that reads as a broken diff —
+  // these notices say plainly that there's nothing to show, and why.
+  const movedDetail = movedOnly
+    ? `It only moved the file —\nfrom ${picked?.oldPath ?? '—'}\nto ${picked?.newPath ?? doc.path}.`
+    : '';
+  const changeIdenticalNote = movedOnly
+    ? `This commit didn't change the file's text.\n\n${movedDetail}`
+    : 'No content change — this commit left the file’s text unchanged.';
+  const currentIdenticalNote = `No differences.\n\nYour current file is identical to this version.${movedOnly ? `\n\n${movedDetail}` : ''}`;
+  const baselineIdenticalNote =
+    'No differences.\n\nYour current file matches the selected save-point/ack.';
   const changeMode = historyMode === 'commit' && pinnedInHistory;
   const threeMode = historyMode === 'all3' && pinnedInHistory;
   // The changes snapshot for this scope ticks whenever a file under it changes
@@ -225,26 +268,53 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
         const parentText = parent.kind === 'ok' ? parent.text : '';
         const commitText = commit.kind === 'ok' ? commit.text : '';
         if (threeMode) {
-          // "All 3": parent · commit · current side by side; the SHA tells the story.
+          // "All 3": before this commit · this commit · current. A highlighted
+          // diff lens sits on one boundary (toggle: before↔commit or commit↔
+          // current) with the third column plain for reference. A pane standing
+          // for a move/add/delete shows that description instead.
           const sha = String(doc.diffBaseline ?? '').slice(0, 7);
-          view = makeTripleView(el, doc.name, [
-            { label: 'Parent', text: parentText },
-            { label: `Commit ${sha}`, text: commitText },
-            { label: 'Current', text: current.text },
-          ]);
+          const before =
+            parentNote != null
+              ? { label: 'Before this commit', note: parentNote }
+              : { label: 'Before this commit', text: parentText };
+          const commitPane =
+            commitNote != null
+              ? { label: `This commit · ${sha}`, note: commitNote }
+              : { label: `This commit · ${sha}`, text: commitText };
+          const currentPane = { label: 'Current', text: current.text };
+          // Highlighting is meaningless for a structural-only commit (a move has
+          // no content diff), so fall back to the plain noted triple there.
+          view =
+            parentNote != null || commitNote != null
+              ? makeTripleView(el, doc.name, [before, commitPane, currentPane])
+              : makeTripleDiffView(
+                  el,
+                  doc.name,
+                  { before, commit: commitPane, current: currentPane },
+                  all3Boundary,
+                );
         } else {
           // "Change": what the picked commit changed — its predecessor vs itself.
-          view = makeDiffView(el, doc.name, parentText, commitText);
+          // Identical sides (a move-only commit) collapse to nothing — say so.
+          view =
+            parentText === commitText
+              ? makeNoticeView(el, changeIdenticalNote)
+              : makeDiffView(el, doc.name, parentText, commitText);
         }
         setStatus('ready');
         return;
       }
       // "Current" mode, pinned to a history commit: that version (by blob) vs
-      // your current file.
+      // your current file. If they're identical (e.g. a commit that only moved
+      // the file, with no edit since) the diff is empty — say so plainly.
       if (pinnedInHistory) {
         const commit = await readBlob(commitBlob);
         if (cancelled || !hostRef.current) return;
-        view = makeDiffView(el, doc.name, commit.kind === 'ok' ? commit.text : '', current.text);
+        const commitText = commit.kind === 'ok' ? commit.text : '';
+        view =
+          commitText === current.text
+            ? makeNoticeView(el, currentIdenticalNote)
+            : makeDiffView(el, doc.name, commitText, current.text);
         setStatus('ready');
         return;
       }
@@ -262,7 +332,10 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
         return;
       }
       const baseText = base.kind === 'ok' ? base.text : '';
-      view = makeDiffView(el, doc.name, baseText, current.text);
+      view =
+        baseText === current.text
+          ? makeNoticeView(el, baselineIdenticalNote)
+          : makeDiffView(el, doc.name, baseText, current.text);
       setStatus('ready');
     })();
     return () => {
@@ -280,9 +353,15 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
     baseline,
     changeMode,
     threeMode,
+    all3Boundary,
     pinnedInHistory,
     commitBlob,
     parentBlob,
+    parentNote,
+    commitNote,
+    changeIdenticalNote,
+    currentIdenticalNote,
+    baselineIdenticalNote,
     diskSignal,
   ]);
 
@@ -313,6 +392,8 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
           width={historyWidth}
           mode={historyMode}
           onModeChange={setHistoryMode}
+          boundary={all3Boundary}
+          onBoundaryChange={setAll3Boundary}
           onPick={(sha) => setDocDiffBaseline(doc.path, doc.diffBaseline === sha ? null : sha)}
         />
         <div
@@ -338,6 +419,8 @@ function DiffHistoryColumn({
   width,
   mode,
   onModeChange,
+  boundary,
+  onBoundaryChange,
   onPick,
 }: {
   doc: EditorDoc;
@@ -346,6 +429,8 @@ function DiffHistoryColumn({
   width: number;
   mode: HistoryMode;
   onModeChange: (mode: HistoryMode) => void;
+  boundary: 'before' | 'current';
+  onBoundaryChange: (boundary: 'before' | 'current') => void;
   onPick: (sha: string) => void;
 }): JSX.Element {
   const savePoints = useCockpitStore((s) => s.savePoints);
@@ -368,7 +453,20 @@ function DiffHistoryColumn({
       label: 'Change',
       title: 'What the selected commit changed (vs the commit before it)',
     },
-    { id: 'all3', label: 'All 3', title: 'Parent · commit · current, side by side' },
+    {
+      id: 'all3',
+      label: 'All 3',
+      title: 'Before this commit · this commit · current, with a movable diff lens',
+    },
+  ];
+
+  const boundaries: { id: 'before' | 'current'; label: string; title: string }[] = [
+    { id: 'before', label: 'vs before', title: 'Highlight before ↔ this commit (what it changed)' },
+    {
+      id: 'current',
+      label: 'vs current',
+      title: 'Highlight this commit ↔ current (what changed since)',
+    },
   ];
 
   return (
@@ -389,6 +487,23 @@ function DiffHistoryColumn({
           </button>
         ))}
       </div>
+      {mode === 'all3' ? (
+        <div style={historyToggleRowStyle} aria-label="Diff lens">
+          {boundaries.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              style={boundary === b.id ? historyToggleOnStyle : historyToggleStyle}
+              aria-pressed={boundary === b.id}
+              title={b.title}
+              data-testid={`history-boundary-${b.id}`}
+              onClick={() => onBoundaryChange(b.id)}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       {entries.length === 0 && savePoints.length === 0 ? (
         <div style={historyMsgStyle}>No history.</div>
       ) : (

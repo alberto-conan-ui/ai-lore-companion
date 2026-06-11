@@ -69,21 +69,34 @@ export function makeCodeView(parent: HTMLElement, name: string, text: string): E
   });
 }
 
+/** One column of the "All 3" view: either a read-only code pane (`text`) or a
+ *  full-pane description of a structural change (`note`) — a move/add/delete,
+ *  where showing the file's text would be a blank or a confusing duplicate. */
+export type TriplePane = { label: string; text?: string; note?: string };
+
+/** A `note` pane: a centred, muted message that fills the column. */
+const noteCss =
+  'flex:1;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;white-space:pre-wrap;color:#8b97a3;font-size:0.78rem;line-height:1.55;';
+
 /**
  * Build three labelled read-only panes side by side (e.g. parent · commit ·
  * current) — the "All 3" history view. CodeMirror's merge addon is two-way, so
- * these panes are plain read-only views (no cross-pane highlighting); the value
- * is seeing the three versions of the file at once. Returns a disposer.
+ * the text panes are plain read-only views (no cross-pane highlighting); the
+ * value is seeing the three versions of the file at once. A pane carrying a
+ * `note` instead of `text` renders that message full-pane — used when the picked
+ * commit *moved*, *added*, or *deleted* the file, so the pane explains the
+ * structural change rather than showing a blank or a duplicate. Returns a
+ * disposer.
  */
 export function makeTripleView(
   parent: HTMLElement,
   name: string,
-  panes: { label: string; text: string }[],
+  panes: TriplePane[],
 ): { destroy: () => void } {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex:1;min-width:0;min-height:0;height:100%;';
-  // Build the column DOM first, collecting each host with its text.
-  const slots: { host: HTMLDivElement; text: string }[] = [];
+  // Build the column DOM first, collecting each host with its pane spec.
+  const slots: { host: HTMLDivElement; pane: TriplePane }[] = [];
   panes.forEach((p, i) => {
     const col = document.createElement('div');
     col.style.cssText = `display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;${
@@ -98,18 +111,43 @@ export function makeTripleView(
     col.appendChild(head);
     col.appendChild(host);
     wrap.appendChild(col);
-    slots.push({ host, text: p.text });
+    slots.push({ host, pane: p });
   });
   // Attach to the document *before* creating the editors — CodeMirror measures
   // on construction, so a detached host would render blank until a later resize.
   parent.appendChild(wrap);
-  const views = slots.map(({ host, text }) => makeCodeView(host, name, text));
+  const views: EditorView[] = [];
+  for (const { host, pane } of slots) {
+    if (pane.note != null) {
+      const msg = document.createElement('div');
+      msg.style.cssText = noteCss;
+      msg.textContent = pane.note;
+      host.appendChild(msg);
+    } else {
+      views.push(makeCodeView(host, name, pane.text ?? ''));
+    }
+  }
   return {
     destroy: () => {
       for (const v of views) v.destroy();
       wrap.remove();
     },
   };
+}
+
+/**
+ * A full-surface muted notice. Used when a two-way diff's two sides are
+ * byte-identical: `@codemirror/merge` collapses every line into an "N unchanged
+ * lines" stub, which reads as a broken or empty diff. This says so plainly —
+ * e.g. "no differences", or that the picked commit only *moved* the file.
+ */
+export function makeNoticeView(parent: HTMLElement, message: string): { destroy: () => void } {
+  const el = document.createElement('div');
+  el.style.cssText =
+    'height:100%;width:100%;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;white-space:pre-wrap;color:#8b97a3;font-size:0.82rem;line-height:1.6;';
+  el.textContent = message;
+  parent.appendChild(el);
+  return { destroy: () => el.remove() };
 }
 
 /**
@@ -131,4 +169,101 @@ export function makeDiffView(
     highlightChanges: true,
     gutter: true,
   });
+}
+
+/** Column header styling, shared by the triple views. */
+const paneHeadCss =
+  'flex:none;padding:0.3rem 0.6rem;font-size:0.62rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#6c7783;background:#0f1620;border-bottom:1px solid #1f2933;';
+const paneBorderR = 'border-right:1px solid #1f2933;';
+
+/**
+ * The "All 3" view with a **diff lens**: three columns (before · this commit ·
+ * current), but one *boundary* is a highlighted two-way diff while the third
+ * column sits plain beside it for reference. `boundary: 'before'` highlights
+ * before↔commit (what the commit changed); `'current'` highlights
+ * commit↔current (what changed since). `@codemirror/merge` is two-way, so only
+ * one boundary can be highlighted at a time — the toggle moves the lens. A pane
+ * carrying a `note` (move/add/delete) renders that message instead of text.
+ * Returns a disposer.
+ */
+export function makeTripleDiffView(
+  parent: HTMLElement,
+  name: string,
+  panes: { before: TriplePane; commit: TriplePane; current: TriplePane },
+  boundary: 'before' | 'current',
+): { destroy: () => void } {
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;flex:1;min-width:0;min-height:0;height:100%;';
+  // CodeMirror measures on construction, so build the DOM, attach, *then* run
+  // these constructors against hosts already in the document.
+  const builders: (() => { destroy: () => void })[] = [];
+
+  const fillHost = (host: HTMLDivElement, p: TriplePane): void => {
+    if (p.note != null) {
+      const msg = document.createElement('div');
+      msg.style.cssText =
+        'flex:1;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;white-space:pre-wrap;color:#8b97a3;font-size:0.78rem;line-height:1.55;';
+      builders.push(() => {
+        host.appendChild(msg);
+        return { destroy: () => msg.remove() };
+      });
+    } else {
+      const text = p.text ?? '';
+      builders.push(() => {
+        const v = makeCodeView(host, name, text);
+        return { destroy: () => v.destroy() };
+      });
+    }
+  };
+
+  // A single plain column: header + (code or note).
+  const plainColumn = (p: TriplePane, withBorder: boolean): HTMLDivElement => {
+    const col = document.createElement('div');
+    col.style.cssText = `display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;${withBorder ? paneBorderR : ''}`;
+    const head = document.createElement('div');
+    head.textContent = p.label;
+    head.style.cssText = paneHeadCss;
+    const host = document.createElement('div');
+    host.style.cssText = 'flex:1;min-width:0;min-height:0;overflow:hidden;';
+    col.append(head, host);
+    fillHost(host, p);
+    return col;
+  };
+
+  // The highlighted pair: two headers over one MergeView (a | b).
+  const mergedPair = (a: TriplePane, b: TriplePane, withBorder: boolean): HTMLDivElement => {
+    const group = document.createElement('div');
+    group.style.cssText = `display:flex;flex-direction:column;flex:2;min-width:0;min-height:0;${withBorder ? paneBorderR : ''}`;
+    const heads = document.createElement('div');
+    heads.style.cssText = 'display:flex;flex:none;';
+    const h1 = document.createElement('div');
+    h1.textContent = a.label;
+    h1.style.cssText = `${paneHeadCss}flex:1;${paneBorderR}`;
+    const h2 = document.createElement('div');
+    h2.textContent = b.label;
+    h2.style.cssText = `${paneHeadCss}flex:1;`;
+    heads.append(h1, h2);
+    const host = document.createElement('div');
+    host.style.cssText = 'flex:1;min-width:0;min-height:0;overflow:hidden;';
+    group.append(heads, host);
+    builders.push(() => {
+      const mv = makeDiffView(host, name, a.text ?? '', b.text ?? '');
+      return { destroy: () => mv.destroy() };
+    });
+    return group;
+  };
+
+  if (boundary === 'before') {
+    wrap.append(mergedPair(panes.before, panes.commit, true), plainColumn(panes.current, false));
+  } else {
+    wrap.append(plainColumn(panes.before, true), mergedPair(panes.commit, panes.current, false));
+  }
+  parent.appendChild(wrap);
+  const built = builders.map((b) => b());
+  return {
+    destroy: () => {
+      for (const x of built) x.destroy();
+      wrap.remove();
+    },
+  };
 }

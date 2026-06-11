@@ -139,8 +139,22 @@ export type ReadFileBaselineResult =
  *  column (Read-only IDE P3+). Follows renames. */
 export type FileHistoryArg = { scope: ChangeScope; relPath: string };
 /** One commit that touched the file. `timestamp` is epoch **milliseconds**;
- *  `blob` is the file's git blob SHA at that commit (read by blob → rename-safe). */
-export type FileHistoryEntry = { sha: string; subject: string; timestamp: number; blob: string };
+ *  `blob` is the file's git blob SHA at that commit (read by blob → rename-safe).
+ *  `prevBlob` is its blob *before* this commit (all-zero ⇒ added here); `change`
+ *  is the `--raw` status (`A`/`M`/`D`/`R…`/`C…`); `oldPath`/`newPath` are the
+ *  rename source/destination, present only for `R…`/`C…`. These let the in-app
+ *  "All 3" view *describe* a structural change (move/add/delete) instead of
+ *  rendering a blank or duplicate pane. */
+export type FileHistoryEntry = {
+  sha: string;
+  subject: string;
+  timestamp: number;
+  blob: string;
+  prevBlob: string;
+  change: string;
+  oldPath?: string;
+  newPath?: string;
+};
 export type FileHistoryResult =
   | { kind: 'ok'; entries: FileHistoryEntry[] }
   | { kind: 'failed'; message: string };

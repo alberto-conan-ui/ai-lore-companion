@@ -118,7 +118,21 @@ export function readBlobText(workingTreeRoot: string, blob: string): ReadBaselin
   return { kind: 'ok', text: result.stdout.toString('utf8') };
 }
 
-export type FileLogEntry = { sha: string; subject: string; timestamp: number; blob: string };
+export type FileLogEntry = {
+  sha: string;
+  subject: string;
+  timestamp: number;
+  /** The file's git blob at this commit (its content here). Read by blob → rename-safe. */
+  blob: string;
+  /** The file's blob *before* this commit's change. All-zero ⇒ the file was added here. */
+  prevBlob: string;
+  /** Raw `--raw` status: `A`(dd) · `M`(odify) · `D`(elete) · `R…`/`C…` (rename/copy). */
+  change: string;
+  /** Rename/copy source path (git-rel), set only for `R…`/`C…`. */
+  oldPath?: string;
+  /** Rename/copy destination path (git-rel) at this commit, set only for `R…`/`C…`. */
+  newPath?: string;
+};
 export type FileLogResult =
   | { kind: 'ok'; entries: FileLogEntry[] }
   | { kind: 'failed'; message: string };
@@ -161,14 +175,25 @@ export function fileLog(input: { workingTreeRoot: string; gitRelPath: string }):
     const lines = record.split('\n');
     const [sha, ts, subject] = (lines[0] ?? '').split('\x1f');
     if (!sha) continue;
-    // The raw line for the followed file: `:… <srcblob> <dstblob> <status>\t…`.
+    // The raw line for the followed file:
+    //   `:<m1> <m2> <srcblob> <dstblob> <status>\t<path>[\t<newpath>]`
+    // We carry the dst blob (its content here), the src blob (its content *before*
+    // this commit — all-zero ⇒ added), the status (A/M/D/R…/C…), and, for a
+    // rename/copy, the old & new paths — so a structural change (move/add/delete)
+    // can be *described* rather than shown as a blank or duplicate twin pane.
     const raw = lines.find((l) => l.startsWith(':'));
-    const dstBlob = raw ? (raw.slice(1).split('\t')[0] ?? '').split(/\s+/)[3] : undefined;
+    const segs = raw ? raw.slice(1).split('\t') : [];
+    const meta = (segs[0] ?? '').split(/\s+/);
+    const change = meta[4] ?? '';
+    const renamed = change.startsWith('R') || change.startsWith('C');
     entries.push({
       sha,
       subject: subject ?? '',
       timestamp: Number(ts) * 1000,
-      blob: dstBlob ?? '',
+      blob: meta[3] ?? '',
+      prevBlob: meta[2] ?? '',
+      change,
+      ...(renamed && segs[1] ? { oldPath: segs[1], newPath: segs[2] } : {}),
     });
   }
   return { kind: 'ok', entries };
