@@ -1507,7 +1507,7 @@ test.describe('window modes', () => {
     }
   });
 
-  test('the Changes panel List/Tree dropdown swaps between flat list and tree-data layout', async () => {
+  test('the Changes panel renders changed files in the shared navigator tree', async () => {
     const fixture = makeProject();
     try {
       seedLoreChanges(fixture.root);
@@ -1516,31 +1516,24 @@ test.describe('window modes', () => {
       await page.getByTestId('tab-memory').click();
       const panel = page.getByTestId('changes-memory');
       await expect(panel).toBeVisible({ timeout: 5_000 });
-      await expect(panel.getByText('example.md', { exact: false })).toBeVisible({
+
+      // Read-only IDE P2: the Changes panel now shares the navigator's tree
+      // engine — the same `FileTree` renders a tree pruned to the changed
+      // files. It defaults fully expanded, so both the ancestor `blueprint`
+      // folder row and the changed leaf file are visible without a swap.
+      await expect(panel.getByText('blueprint', { exact: false })).toBeVisible({
         timeout: 5_000,
       });
+      await expect(panel.getByText('example.md', { exact: false })).toBeVisible();
 
-      // List mode (default) renders the Location / Name / Folder header — the
-      // 'Path' auto-group header is the tree-mode signature, so it should be
-      // absent here.
-      await expect(panel.getByRole('columnheader', { name: 'Path', exact: true })).toHaveCount(0);
+      // The old AG-Grid List/Tree dropdown is gone — one engine, one layout.
+      await expect(panel.getByTestId('changes-view-mode-memory')).toHaveCount(0);
 
-      // Swap to Tree mode — the auto-group column with the path tree replaces
-      // the flat columns. The Path header is the cheapest tree-mode tell. The
-      // tree starts collapsed, so the leaf file is not visible until expanded;
-      // the root `blueprint` folder is shown with its count instead.
-      await panel.getByTestId('changes-view-mode-memory').selectOption('tree');
-      await expect(panel.getByRole('columnheader', { name: 'Path', exact: true })).toBeVisible({
-        timeout: 5_000,
-      });
-      await expect(panel.getByText('blueprint', { exact: false })).toBeVisible();
-      // Leaf rows are hidden by the collapsed default — opening them is the
-      // user's choice, not a guarantee the test should make.
+      // The search box filters the pruned tree to matching paths.
+      await panel.getByTestId('changes-search-memory').fill('nonexistent-zzz');
       await expect(panel.getByText('example.md', { exact: false })).toHaveCount(0);
-
-      // Swap back to List — the Path header disappears again.
-      await panel.getByTestId('changes-view-mode-memory').selectOption('list');
-      await expect(panel.getByRole('columnheader', { name: 'Path', exact: true })).toHaveCount(0);
+      await panel.getByTestId('changes-search-memory').fill('');
+      await expect(panel.getByText('example.md', { exact: false })).toBeVisible();
 
       await app.close();
     } finally {

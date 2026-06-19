@@ -86,7 +86,9 @@ type Props = {
   subRoot: SubRoot;
   /** Project root — queue entry paths are relative to it; needed to absolutise them. */
   projectRoot: string;
-  /** Maps an absolute path to its tab-relative display path (for the queue grid). */
+  /** Maps an absolute path to its tab-relative display path. Part of the shared
+   *  tab context; the Pane no longer consumes it (the Changes tree uses real
+   *  paths now), but it stays on the contract other tab kinds rely on. */
   displayPath: (absPath: string) => string;
   /** Set by a global-search pick: reveal this file. A new token re-triggers. */
   revealRequest?: { path: string; token: number };
@@ -104,7 +106,6 @@ export function Pane({
   testId,
   subRoot,
   projectRoot,
-  displayPath,
   revealRequest,
 }: Props): JSX.Element {
   const index = useCockpitStore((s) => s.treeIndex[scope]);
@@ -179,19 +180,17 @@ export function Pane({
   // node's id. `headerPath` is what the header shows: the path, or the grouped
   // folders' names for a synthetic root.
   const rootId = subRoot.kind === 'path' ? subRoot.path : subRoot.id;
+  // The change tree roots here too, mirroring the navigator's root row. A path
+  // sub-root shows its folder name (from the rendered node); a synthetic group
+  // shows the group's name.
+  const rootName =
+    subRoot.kind === 'path'
+      ? (renderedRoot?.name ?? subRoot.path.slice(subRoot.path.lastIndexOf('/') + 1))
+      : subRoot.name;
   const headerPath =
     subRoot.kind === 'path'
       ? subRoot.path
       : subRoot.childPaths.map((p) => p.slice(p.lastIndexOf('/') + 1)).join('  +  ');
-
-  // Queue entry paths are relative to the project root; tree/grid paths are absolute.
-  const toAbs = useCallback((relPath: string) => `${projectRoot}/${relPath}`, [projectRoot]);
-
-  // The queue grid shows tab-relative paths — absolutise, then map to display.
-  const queueDisplayPath = useCallback(
-    (relPath: string) => displayPath(toAbs(relPath)),
-    [displayPath, toAbs],
-  );
 
   // Scope entries narrowed to the ones that fall within this pane's sub-root.
   const paneEntries = useMemo(
@@ -206,10 +205,6 @@ export function Pane({
   // Seed the root expanded so its children show under the new root row.
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([rootId]));
   const [queueHeight, setQueueHeight] = useState(220);
-  // Per-pane Changes-panel view mode — List (default, grouped by location) or
-  // Tree (file-explorer hierarchy). User asked for this on the Payload pane
-  // specifically; making it per-pane keeps each panel's preference independent.
-  const [viewMode, setViewMode] = useState<'list' | 'tree'>('list');
   // The tree's right-click ignore menu: the node and where to draw it.
   const [treeMenu, setTreeMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null);
 
@@ -412,9 +407,12 @@ export function Pane({
     [scope, bases, expandTree],
   );
 
-  const handleQueueClick = useCallback(
-    (entry: DriftRow) => {
-      void revealFile(entry.absPath);
+  // Single-click a changed file in the Changes tree → reveal it in the
+  // navigator above (the two trees share an engine; this is the cross-tree
+  // link the shared-engine step buys).
+  const handleRevealChange = useCallback(
+    (absPath: string) => {
+      void revealFile(absPath);
     },
     [revealFile],
   );
@@ -425,16 +423,16 @@ export function Pane({
     if (revealRequest) void revealFile(revealRequest.path);
   }, [revealRequest, revealFile]);
 
-  // Queue double-click opens the row in the in-app editor's **diff** mode
+  // Double-click a changed file → open it in the in-app editor's **diff** mode
   // (Read-only IDE P3) — content vs the selected save-point/ack, side by side.
-  // Renamed/copied rows carry their source path so the baseline reads from the
-  // old path. A new file (`add`) has an empty baseline → the diff shows it whole
-  // as added. The Code | Diff toggle in the editor flips to plain content.
-  const handleQueueDouble = useCallback(
-    (entry: DriftRow) => {
-      void openInEditor(entry.absPath, 'diff', entry.oldPath);
+  // Renamed/copied rows carry their source path (looked up by abs path) so the
+  // baseline reads from the old path. A new file (`add`) has an empty baseline
+  // → the diff shows it whole as added. The Code | Diff toggle flips to content.
+  const handleOpenChangeDiff = useCallback(
+    (absPath: string) => {
+      void openInEditor(absPath, 'diff', driftByPath.get(absPath)?.oldPath);
     },
-    [openInEditor],
+    [openInEditor, driftByPath],
   );
 
   // Diff target awaiting a freshly-picked app. When the user clicks *Diff*
@@ -554,18 +552,15 @@ export function Pane({
         <ChangesPanel
           ref={queueHandle}
           label={label}
+          rootId={rootId}
+          rootName={rootName}
+          bases={bases}
           entries={paneEntries}
-          displayPath={queueDisplayPath}
-          onRowClick={handleQueueClick}
-          onRowDoubleClick={handleQueueDouble}
-          apps={apps}
-          hasSavePoint={hasSavePoint}
-          onOpenWith={(app, node) => void handleOpenWith(app, node)}
-          onRevealInFinder={handleRevealInFinder}
-          onDiff={(node) => void handleDiff(node)}
-          onIgnore={(node) => void ignorePath(node)}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
+          driftLevelFor={driftLevelFor}
+          driftKindFor={driftKindFor}
+          onSelectFile={handleRevealChange}
+          onActivateFile={handleOpenChangeDiff}
+          onContextMenu={(node, x, y) => setTreeMenu({ node, x, y })}
         />
       </div>
 

@@ -75,6 +75,81 @@ export function indexTree(root: TreeNode | null): Map<string, TreeNode> {
   return index;
 }
 
+/** Basename of a `/`-separated path (the segment after the last slash). */
+function baseName(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i === -1 ? p : p.slice(i + 1);
+}
+
+/** Sort a built tree's children dirs-first then alphabetically, in place —
+ *  matching the navigator's `readDirectory` order so the two trees read
+ *  identically. */
+function sortTreeChildren(node: TreeNode): void {
+  if (!node.children) return;
+  node.children.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+  for (const child of node.children) sortTreeChildren(child);
+}
+
+/**
+ * Build a pruned `TreeNode` tree from a set of changed files, for the Changes
+ * panel (Read-only IDE P2 — the changes view shares the navigator's tree
+ * *engine*: same `FileTree`, same rows, drift dots, context menu). Only the
+ * changed files and their ancestor folders appear; every folder carries its
+ * real on-disk path, so the shared drift/menu machinery (`driftLevelFor`,
+ * Reveal, Ignore) behaves exactly as in the navigator.
+ *
+ * `bases` are the real directories the pane covers — one for a `path` sub-root,
+ * several for a synthetic group; each file's absolute path descends from one of
+ * them. The tree roots at `rootId`/`rootName` (the rendered root — a real path,
+ * or a synthetic id) with the base folders nested beneath it (or, when the pane
+ * is rooted at a single real path, files hang directly off the root).
+ */
+export function buildChangeTree(
+  rootId: string,
+  rootName: string,
+  bases: readonly string[],
+  files: readonly { absPath: string }[],
+): TreeNode {
+  const root: TreeNode = { name: rootName, path: rootId, isDir: true, children: [] };
+  const folders = new Map<string, TreeNode>([[rootId, root]]);
+
+  /** Get or create the folder node at `path`, attaching it under `parent`. */
+  const folderAt = (path: string, name: string, parent: TreeNode): TreeNode => {
+    let node = folders.get(path);
+    if (!node) {
+      node = { name, path, isDir: true, children: [] };
+      folders.set(path, node);
+      (parent.children as TreeNode[]).push(node);
+    }
+    return node;
+  };
+
+  for (const { absPath } of files) {
+    const base = bases.find((b) => absPath === b || absPath.startsWith(`${b}/`));
+    if (!base) continue;
+    // The base folder sits directly under the root, or *is* the root when the
+    // pane is rooted at a single real path.
+    let parent = base === rootId ? root : folderAt(base, baseName(base), root);
+    const segs = absPath.slice(base.length + 1).split('/');
+    let cur = base;
+    for (let i = 0; i < segs.length - 1; i++) {
+      cur = `${cur}/${segs[i]}`;
+      parent = folderAt(cur, segs[i] as string, parent);
+    }
+    (parent.children as TreeNode[]).push({
+      name: segs[segs.length - 1] as string,
+      path: absPath,
+      isDir: false,
+    });
+  }
+
+  sortTreeChildren(root);
+  return root;
+}
+
 /** A path → node index per scope, mirroring `trees`. */
 export type TreeIndex = {
   payload: Map<string, TreeNode>;
