@@ -49,7 +49,7 @@ test('listSavePoints returns [] for an empty directory', () => {
 test('listSavePoints reads a single save-point', () => {
   const { dir, cleanup } = makeScratch();
   try {
-    writeSavePointFile(dir,'2026-05-26_alpha.save-point.md', {
+    writeSavePointFile(dir, '2026-05-26_alpha.save-point.md', {
       title: 'Alpha',
       date: '2026-05-26',
       lore: 'abc1234',
@@ -70,17 +70,17 @@ test('listSavePoints reads a single save-point', () => {
 test('listSavePoints sorts newest first by date, then by filename desc as tiebreak', () => {
   const { dir, cleanup } = makeScratch();
   try {
-    writeSavePointFile(dir,'2026-05-20_alpha.save-point.md', {
+    writeSavePointFile(dir, '2026-05-20_alpha.save-point.md', {
       date: '2026-05-20',
       lore: 'a1',
       payload: 'p1',
     });
-    writeSavePointFile(dir,'2026-05-26_beta.save-point.md', {
+    writeSavePointFile(dir, '2026-05-26_beta.save-point.md', {
       date: '2026-05-26',
       lore: 'a2',
       payload: 'p2',
     });
-    writeSavePointFile(dir,'2026-05-26_gamma.save-point.md', {
+    writeSavePointFile(dir, '2026-05-26_gamma.save-point.md', {
       date: '2026-05-26',
       lore: 'a3',
       payload: 'p3',
@@ -99,7 +99,7 @@ test('listSavePoints sorts newest first by date, then by filename desc as tiebre
 test('listSavePoints skips files with no/malformed frontmatter', () => {
   const { dir, cleanup } = makeScratch();
   try {
-    writeSavePointFile(dir,'good.save-point.md', {
+    writeSavePointFile(dir, 'good.save-point.md', {
       date: '2026-05-25',
       lore: 'good-l',
       payload: 'good-p',
@@ -117,6 +117,39 @@ test('listSavePoints skips files with no/malformed frontmatter', () => {
   }
 });
 
+test('listSavePoints reads a save-point with no `updated` field', () => {
+  // Real-world projects (e.g. IBERIA_MESA) generate save-points without the
+  // common `updated` field. The picker keys on date/commits, not `updated`, so
+  // these must still surface rather than be dropped from the dropdown.
+  const { dir, cleanup } = makeScratch();
+  try {
+    writeFileSync(
+      join(dir, '2026-06-19_no-updated.save-point.md'),
+      `---
+type: save-point
+title: "Iberia_mesa — sin updated"
+date: 2026-06-19
+slug: no-updated
+lore_commit: 228f8f8
+payload_commit: f184192
+references:
+  - group: "Parent"
+    path: "./save-points.index.md"
+---
+
+Milestone body.
+`,
+    );
+    const sp = listSavePoints(dir);
+    assert.equal(sp.length, 1);
+    assert.equal(sp[0]?.date, '2026-06-19');
+    assert.equal(sp[0]?.loreCommit, '228f8f8');
+    assert.equal(sp[0]?.payloadCommit, 'f184192');
+  } finally {
+    cleanup();
+  }
+});
+
 test('listSavePoints skips the save-points.index.md (filtered by listMemoryDir)', () => {
   const { dir, cleanup } = makeScratch();
   try {
@@ -124,7 +157,7 @@ test('listSavePoints skips the save-points.index.md (filtered by listMemoryDir)'
       join(dir, 'save-points.index.md'),
       '---\ntype: index\ntitle: idx\nupdated: 2026-05-26\nreferences: []\n---\n\nindex\n',
     );
-    writeSavePointFile(dir,'2026-05-26_real.save-point.md', {
+    writeSavePointFile(dir, '2026-05-26_real.save-point.md', {
       date: '2026-05-26',
       lore: 'r-l',
       payload: 'r-p',
@@ -149,12 +182,12 @@ test('latestSavePoint returns null when nothing is recorded', () => {
 test('latestSavePoint returns the newest entry', () => {
   const { dir, cleanup } = makeScratch();
   try {
-    writeSavePointFile(dir,'2026-05-20_older.save-point.md', {
+    writeSavePointFile(dir, '2026-05-20_older.save-point.md', {
       date: '2026-05-20',
       lore: 'old-l',
       payload: 'old-p',
     });
-    writeSavePointFile(dir,'2026-05-26_newer.save-point.md', {
+    writeSavePointFile(dir, '2026-05-26_newer.save-point.md', {
       date: '2026-05-26',
       lore: 'new-l',
       payload: 'new-p',

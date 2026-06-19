@@ -156,6 +156,25 @@ test('parseMemoryFile reports a warning when required fields are missing', () =>
   assert.match(result.warning ?? '', /updated|status|focus_type/);
 });
 
+test('parseMemoryFile tolerates a missing `updated`, falling back to `date`', () => {
+  // A save-point with no `updated` (as real projects generate) still parses;
+  // `updated` falls back to the file's `date`.
+  const fixture =
+    '---\ntype: save-point\ntitle: no updated\ndate: 2026-06-19\nlore_commit: aaa\npayload_commit: bbb\nreferences: []\n---\n\nbody\n';
+  const result = parseMemoryFile(fixture);
+  assert.ok(result.frontmatter, 'should parse without `updated`');
+  assert.equal(result.warning, undefined);
+  assert.equal(result.frontmatter?.updated, '2026-06-19');
+  assert.equal(result.frontmatter?.type, 'save-point');
+});
+
+test('parseMemoryFile defaults `updated` to empty when neither it nor `date` is present', () => {
+  const fixture = '---\ntype: index\ntitle: idx\nreferences: []\n---\n\nbody\n';
+  const result = parseMemoryFile(fixture);
+  assert.ok(result.frontmatter);
+  assert.equal(result.frontmatter?.updated, '');
+});
+
 test('parseMemoryFile rejects an unknown `type` value', () => {
   const unknown =
     '---\ntype: not-a-real-type\ntitle: x\nupdated: 2026-05-26\nreferences: []\n---\n\nbody\n';

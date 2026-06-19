@@ -96,10 +96,18 @@ function validateFrontmatter(
   }
   const title = raw.title;
   if (!isString(title)) return { warning: 'frontmatter missing required `title` field' };
-  const updated = raw.updated;
-  if (!isDateLike(updated)) {
-    return { warning: 'frontmatter `updated` field is missing or not a date' };
-  }
+
+  // `updated` is best-effort metadata the companion stores but never keys on.
+  // Real-world projects drift from the schema — e.g. save-points generated
+  // without it — and a read-only viewer should still surface those files rather
+  // than drop the whole list. Tolerate a missing/malformed `updated`: fall back
+  // to `date` when present, otherwise empty.
+  const rawUpdated = raw.updated;
+  const updated = isDateLike(rawUpdated)
+    ? normalizeDate(rawUpdated)
+    : isDateLike(raw.date)
+      ? normalizeDate(raw.date)
+      : '';
 
   const references = parseReferences(raw.references);
   if ('warning' in references) return references;
@@ -107,7 +115,7 @@ function validateFrontmatter(
   const common = {
     type: type as MemoryFileType,
     title,
-    updated: normalizeDate(updated),
+    updated,
     references: references.value,
   };
 
