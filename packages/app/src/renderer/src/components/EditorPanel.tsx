@@ -162,11 +162,14 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
-  // How the history column diffs a picked commit: against your **current** file
-  // (the chosen point vs the working tree — the default), the commit's own
-  // **change** (that commit vs its parent), or **all 3** (parent · commit ·
-  // current side by side).
-  const [historyMode, setHistoryMode] = useState<HistoryMode>('current');
+  // How the history column diffs a picked commit: the commit's own **change**
+  // (that commit vs its previous version — the **default**, so clicking a commit
+  // always shows *what it changed* and never reads as "identical"), against your
+  // **current** file (the chosen point vs the working tree), or **all 3** (before
+  // · commit · current side by side). The default only bites once a commit is
+  // pinned — an unpinned doc follows the global picker as current-vs-baseline
+  // regardless of this mode, since `changeMode`/`threeMode` require a pin.
+  const [historyMode, setHistoryMode] = useState<HistoryMode>('commit');
   // In "All 3", which boundary the highlighted diff lens sits on: `before`
   // = before↔this-commit (what the commit changed), `current` = this-commit↔
   // current (what changed since). `@codemirror/merge` is two-way, so the lens
@@ -435,6 +438,11 @@ function DiffHistoryColumn({
 }): JSX.Element {
   const savePoints = useCockpitStore((s) => s.savePoints);
 
+  // The commit currently pinned in this column (if any) — its full metadata
+  // feeds the details panel at the bottom. A pin always names an entry in this
+  // file's own history (save-points that didn't touch the file aren't clickable).
+  const picked = entries.find((e) => e.sha === doc.diffBaseline);
+
   const spCommit = (sp: SavePointInfo): string =>
     doc.scope === 'payload' ? sp.payloadCommit : sp.loreCommit;
   // The global default `'HEAD'` resolves to the latest save-point — highlight
@@ -504,28 +512,117 @@ function DiffHistoryColumn({
           ))}
         </div>
       ) : null}
-      {entries.length === 0 && savePoints.length === 0 ? (
-        <div style={historyMsgStyle}>No history.</div>
-      ) : (
-        <div style={historyListStyle}>
-          {/* Every save-point shows as a ★ reference marker — clickable when it
-              touched this file, a dim label when it didn't — with the file's own
-              acks (•) slotted in between by date. */}
-          {buildTimeline(entries, savePoints, doc.scope).map((item) => (
-            <CommitRow
-              key={`${item.kind}-${item.sha}`}
-              kind={item.kind}
-              label={item.label}
-              sha={item.sha}
-              timestamp={Math.floor(item.ts / 1000)}
-              active={item.clickable && item.sha === resolvedEffective}
-              disabled={!item.clickable}
-              testId={`history-${item.sha}`}
-              onClick={() => onPick(item.sha)}
-            />
-          ))}
-        </div>
-      )}
+      <div style={historyListWrapStyle}>
+        {entries.length === 0 && savePoints.length === 0 ? (
+          <div style={historyMsgStyle}>No history.</div>
+        ) : (
+          <div style={historyListStyle}>
+            {/* Every save-point shows as a ★ reference marker — clickable when it
+                touched this file, a dim label when it didn't — with the file's own
+                acks (•) slotted in between by date. */}
+            {buildTimeline(entries, savePoints, doc.scope).map((item) => (
+              <CommitRow
+                key={`${item.kind}-${item.sha}`}
+                kind={item.kind}
+                label={item.label}
+                sha={item.sha}
+                timestamp={Math.floor(item.ts / 1000)}
+                active={item.clickable && item.sha === resolvedEffective}
+                disabled={!item.clickable}
+                testId={`history-${item.sha}`}
+                onClick={() => onPick(item.sha)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+      {picked ? <CommitDetails entry={picked} currentPath={doc.path} /> : null}
+    </div>
+  );
+}
+
+/** Describe a `--raw` change status as a human phrase, with the rename path pair
+ *  when the commit moved the file. */
+function describeChange(entry: FileHistoryEntry): string {
+  const c = entry.change;
+  if (c.startsWith('A')) return 'Added';
+  if (c.startsWith('M')) return 'Modified';
+  if (c.startsWith('D')) return 'Deleted';
+  const move = entry.oldPath && entry.newPath ? ` — ${entry.oldPath} → ${entry.newPath}` : '';
+  if (c.startsWith('R')) return `Renamed${move}`;
+  if (c.startsWith('C')) return `Copied${move}`;
+  return c || 'Changed';
+}
+
+/** Epoch ms → a full local date + time for the details panel (the timeline rows
+ *  already carry the compact stamp). */
+function formatFullStamp(epochMs: number): string {
+  if (!epochMs) return '';
+  return new Date(epochMs).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/**
+ * The commit-details panel pinned at the bottom of the history column. Shows the
+ * picked commit's full SHA, author, date, message, and change kind, with a Copy
+ * button that puts a plain-text block on the clipboard — so the details can be
+ * pasted or shared without leaving the app.
+ */
+function CommitDetails({
+  entry,
+  currentPath,
+}: {
+  entry: FileHistoryEntry;
+  currentPath: string;
+}): JSX.Element {
+  const [copied, setCopied] = useState(false);
+  const change = describeChange(entry);
+  const date = formatFullStamp(entry.timestamp);
+  const copyText = [
+    entry.subject,
+    '',
+    `Commit:  ${entry.sha}`,
+    `Author:  ${entry.author}`,
+    `Date:    ${date}`,
+    `Change:  ${change}`,
+    `File:    ${entry.newPath ?? currentPath}`,
+    ...(entry.body ? ['', entry.body] : []),
+  ].join('\n');
+  const onCopy = (): void => {
+    window.cockpit.copyText(copyText);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div style={detailsStyle} data-testid="commit-details">
+      <div style={detailsHeadRowStyle}>
+        <span style={detailsHeadStyle}>Commit</span>
+        <button
+          type="button"
+          style={detailsCopyStyle}
+          data-testid="commit-details-copy"
+          title="Copy these details to the clipboard"
+          onClick={onCopy}
+        >
+          {copied ? 'Copied ✓' : 'Copy'}
+        </button>
+      </div>
+      <div style={detailsBodyStyle}>
+        <div style={detailsSubjectStyle}>{entry.subject}</div>
+        <dl style={detailsGridStyle}>
+          <dt style={detailsKeyStyle}>SHA</dt>
+          <dd style={detailsShaStyle} data-testid="commit-details-sha">
+            {entry.sha}
+          </dd>
+          <dt style={detailsKeyStyle}>Author</dt>
+          <dd style={detailsValStyle}>{entry.author || '—'}</dd>
+          <dt style={detailsKeyStyle}>Date</dt>
+          <dd style={detailsValStyle}>{date || '—'}</dd>
+          <dt style={detailsKeyStyle}>Change</dt>
+          <dd style={detailsValStyle}>{change}</dd>
+        </dl>
+        {entry.body ? <pre style={detailsBodyTextStyle}>{entry.body}</pre> : null}
+      </div>
     </div>
   );
 }
@@ -685,8 +782,18 @@ const historyColStyle: React.CSSProperties = {
   flexShrink: 0,
   display: 'flex',
   flexDirection: 'column',
-  overflowY: 'auto',
+  // The column itself doesn't scroll — the timeline list does, so the details
+  // panel can pin to the bottom.
+  overflow: 'hidden',
   background: '#0c121a',
+};
+
+/** The scrolling timeline list — sits between the (fixed) toggles and the
+ *  (pinned) details panel. */
+const historyListWrapStyle: React.CSSProperties = {
+  flex: 1,
+  minHeight: 0,
+  overflowY: 'auto',
 };
 
 const historyHeadStyle: React.CSSProperties = {
@@ -783,4 +890,94 @@ const overlayStyle: React.CSSProperties = {
   fontSize: '0.82rem',
   background: '#0a0f17',
   pointerEvents: 'none',
+};
+
+/** The commit-details panel pinned at the bottom of the history column. */
+const detailsStyle: React.CSSProperties = {
+  flexShrink: 0,
+  maxHeight: '45%',
+  display: 'flex',
+  flexDirection: 'column',
+  borderTop: '1px solid #1f2933',
+  background: '#0a0f17',
+};
+
+const detailsHeadRowStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  padding: '0.4rem 0.7rem',
+  flexShrink: 0,
+};
+
+const detailsHeadStyle: React.CSSProperties = {
+  fontSize: '0.66rem',
+  fontWeight: 700,
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  color: '#6c7783',
+};
+
+const detailsCopyStyle: React.CSSProperties = {
+  background: 'transparent',
+  border: '1px solid #2f3a45',
+  borderRadius: '4px',
+  color: '#9fb1bd',
+  fontSize: '0.66rem',
+  fontWeight: 600,
+  padding: '0.1rem 0.5rem',
+  cursor: 'pointer',
+};
+
+const detailsBodyStyle: React.CSSProperties = {
+  overflowY: 'auto',
+  padding: '0 0.7rem 0.6rem',
+};
+
+const detailsSubjectStyle: React.CSSProperties = {
+  color: '#dde3ea',
+  fontSize: '0.78rem',
+  fontWeight: 600,
+  marginBottom: '0.4rem',
+  wordBreak: 'break-word',
+};
+
+const detailsGridStyle: React.CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'auto 1fr',
+  columnGap: '0.6rem',
+  rowGap: '0.2rem',
+  margin: 0,
+};
+
+const detailsKeyStyle: React.CSSProperties = {
+  fontSize: '0.66rem',
+  fontWeight: 700,
+  letterSpacing: '0.04em',
+  textTransform: 'uppercase',
+  color: '#6c7783',
+};
+
+const detailsValStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: '0.72rem',
+  color: '#9fb1bd',
+  wordBreak: 'break-word',
+};
+
+const detailsShaStyle: React.CSSProperties = {
+  ...detailsValStyle,
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.68rem',
+  color: '#7fa9cc',
+};
+
+const detailsBodyTextStyle: React.CSSProperties = {
+  margin: '0.5rem 0 0',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.7rem',
+  lineHeight: 1.5,
+  color: '#9fb1bd',
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-word',
 };

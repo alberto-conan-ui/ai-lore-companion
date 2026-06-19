@@ -148,6 +148,10 @@ export type FileHistoryArg = { scope: ChangeScope; relPath: string };
 export type FileHistoryEntry = {
   sha: string;
   subject: string;
+  /** Author name — shown in the commit-details panel. */
+  author: string;
+  /** Full commit message body (trailing whitespace trimmed; empty when none). */
+  body: string;
   timestamp: number;
   blob: string;
   prevBlob: string;

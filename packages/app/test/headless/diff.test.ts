@@ -64,6 +64,24 @@ test('fileLog lists the commits that touched a file, newest first', () => {
   assert.ok((r.entries[0]?.timestamp ?? 0) > 0, 'timestamp populated (epoch ms)');
 });
 
+test('fileLog carries the author and full multi-line body (commit-details panel)', () => {
+  // A body with its own `:`-prefixed line is the trap: it looks like a `--raw`
+  // diff line. The \x02 sentinel closing the header is what keeps the body from
+  // fooling the raw-line finder — assert the body survives intact and the raw
+  // metadata (change status) is still read from the right place.
+  writeFileSync(join(root, 'a.txt'), 'hello\nworld\nmore\n');
+  git('add', 'a.txt');
+  git('commit', '-q', '-m', 'second\n\nWhy: it matters\n:not-a-raw-line still body');
+  const r = fileLog({ workingTreeRoot: root, gitRelPath: 'a.txt' });
+  assert.equal(r.kind, 'ok');
+  if (r.kind !== 'ok') return;
+  const top = r.entries[0];
+  assert.equal(top?.subject, 'second');
+  assert.equal(top?.author, 'Test');
+  assert.equal(top?.body, 'Why: it matters\n:not-a-raw-line still body');
+  assert.equal(top?.change, 'M', 'raw status still parsed past a `:`-line body');
+});
+
 test('fileLog returns an empty list for an untracked path', () => {
   assert.deepEqual(fileLog({ workingTreeRoot: root, gitRelPath: 'never.txt' }), {
     kind: 'ok',

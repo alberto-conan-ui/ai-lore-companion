@@ -121,6 +121,11 @@ export function readBlobText(workingTreeRoot: string, blob: string): ReadBaselin
 export type FileLogEntry = {
   sha: string;
   subject: string;
+  /** The author name (`%an`). Shown in the commit-details panel. */
+  author: string;
+  /** The full commit message body (`%b`), trailing whitespace trimmed — empty
+   *  when the commit has only a subject. Shown in the commit-details panel. */
+  body: string;
   timestamp: number;
   /** The file's git blob at this commit (its content here). Read by blob → rename-safe. */
   blob: string;
@@ -157,7 +162,12 @@ export function fileLog(input: { workingTreeRoot: string; gitRelPath: string }):
         '--follow',
         '--raw',
         '--no-abbrev',
-        '--format=%x01%H%x1f%ct%x1f%s',
+        // Header fields are \x1f-separated and the whole header is closed by a
+        // \x02 sentinel — because the body (%b) carries newlines (and can hold
+        // its own `:`-prefixed lines), the sentinel is what lets us split the
+        // header from the `--raw` block that follows without the body fooling
+        // the raw-line finder.
+        '--format=%x01%H%x1f%ct%x1f%an%x1f%s%x1f%b%x02',
         '--',
         input.gitRelPath,
       ],
@@ -172,8 +182,13 @@ export function fileLog(input: { workingTreeRoot: string; gitRelPath: string }):
   const entries: FileLogEntry[] = [];
   for (const record of result.stdout.split('\x01')) {
     if (record.length === 0) continue;
-    const lines = record.split('\n');
-    const [sha, ts, subject] = (lines[0] ?? '').split('\x1f');
+    // The \x02 sentinel closes the header; the `--raw` block follows it. The
+    // header's five \x1f-separated fields are all newline-free except %b, which
+    // is last, so a plain split yields exactly [sha, ts, author, subject, body].
+    const sentinel = record.indexOf('\x02');
+    const header = sentinel >= 0 ? record.slice(0, sentinel) : record;
+    const rawBlock = sentinel >= 0 ? record.slice(sentinel + 1) : '';
+    const [sha, ts, author, subject, body] = header.split('\x1f');
     if (!sha) continue;
     // The raw line for the followed file:
     //   `:<m1> <m2> <srcblob> <dstblob> <status>\t<path>[\t<newpath>]`
@@ -181,7 +196,7 @@ export function fileLog(input: { workingTreeRoot: string; gitRelPath: string }):
     // this commit — all-zero ⇒ added), the status (A/M/D/R…/C…), and, for a
     // rename/copy, the old & new paths — so a structural change (move/add/delete)
     // can be *described* rather than shown as a blank or duplicate twin pane.
-    const raw = lines.find((l) => l.startsWith(':'));
+    const raw = rawBlock.split('\n').find((l) => l.startsWith(':'));
     const segs = raw ? raw.slice(1).split('\t') : [];
     const meta = (segs[0] ?? '').split(/\s+/);
     const change = meta[4] ?? '';
@@ -189,6 +204,8 @@ export function fileLog(input: { workingTreeRoot: string; gitRelPath: string }):
     entries.push({
       sha,
       subject: subject ?? '',
+      author: author ?? '',
+      body: (body ?? '').trimEnd(),
       timestamp: Number(ts) * 1000,
       blob: meta[3] ?? '',
       prevBlob: meta[2] ?? '',
