@@ -24,7 +24,11 @@ import { AssistantDashboard } from './components/AssistantDashboard.js';
 import { BaselinePicker } from './components/BaselinePicker.js';
 import { DockPanel } from './components/DockPanel.js';
 import { EditorPanel } from './components/EditorPanel.js';
-import { LeftActivityRail, type LeftSection } from './components/LeftActivityRail.js';
+import {
+  LEFT_RAIL_WIDTH,
+  LeftActivityRail,
+  type LeftSection,
+} from './components/LeftActivityRail.js';
 import { baseDirsOf, entriesInSubRoot } from './components/Pane.js';
 import { SearchDialog, type SearchScope } from './components/SearchDialog.js';
 import {
@@ -37,6 +41,7 @@ import { TrackerStrip } from './components/TrackerStrip.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { type PaneSpec, TAB_KINDS, type TabRenderContext } from './components/tabKinds.js';
 import { TERMINAL_FIND_EVENT } from './components/useXtermSession.js';
+import { reflowEditorThirds, scaleForResize } from './layout.js';
 import { accentColor, accentTint, hueFor, projectName } from './projectAccent.js';
 import { type EditorDoc, useCockpitStore } from './store.js';
 
@@ -1009,21 +1014,57 @@ export function App(): JSX.Element {
     };
   }, [mode, applyLayout]);
 
-  // Auto-fit the editor column to the window the first time a file opens this
-  // session, so the nav | editor | centre split starts balanced instead of at a
-  // fixed width that crowds the centre on a narrow window. Targets ~60% of the
-  // window for the whole left region (nav + editor), clamped, and leaves the
-  // centre to flex. The guard is sticky once set — a later manual drag and a
-  // restored width both persist, and closing the last file simply hands the
-  // space back to the centre (the column unmounts). Every divider stays
-  // hand-draggable regardless.
+  // The width shared by the nav | editor | centre trio — the window minus the
+  // fixed activity rail and the (optional) right dock. The sashes are a few px
+  // each; folding them in would only shift the split imperceptibly, so the trio
+  // math ignores them.
+  const trioAvail = useCallback(
+    () => window.innerWidth - LEFT_RAIL_WIDTH - (rightOpen ? rightWidth : 0),
+    [rightOpen, rightWidth],
+  );
+
+  // Auto-fit when the editor opens (Read-only IDE P2): the editor takes an equal
+  // third of the trio, and the nav & centre keep their pre-open ratio in the
+  // remaining two-thirds (so 50/50 → 33/33/33, 75/25 → 50/33/17). The guard
+  // holds across manual drags and a restored width within an open session, so
+  // neither is overridden; it clears when the last file closes so the next open
+  // refits to the current window size. Every divider stays hand-draggable.
   useEffect(() => {
-    if (!editorOpen || editorFitted.current) return;
+    if (!editorOpen) {
+      editorFitted.current = false;
+      return;
+    }
+    if (editorFitted.current) return;
     editorFitted.current = true;
-    const w = window.innerWidth;
-    const fitted = Math.round(w * 0.6) - leftRailWidth;
-    setEditorWidth(Math.max(DEFAULT_EDITOR_WIDTH * 0.7, Math.min(fitted, Math.round(w * 0.5))));
-  }, [editorOpen, leftRailWidth]);
+    const avail = trioAvail();
+    const { nav, editor } = reflowEditorThirds(avail, leftRailWidth - LEFT_RAIL_WIDTH);
+    // Clamp for safety on a narrow window; the ratio holds in the common case.
+    const editorPx = Math.max(DEFAULT_EDITOR_WIDTH * 0.6, Math.min(editor, avail * 0.6));
+    setEditorWidth(Math.round(editorPx));
+    setLeftRailWidth(Math.round(LEFT_RAIL_WIDTH + Math.max(160, nav)));
+  }, [editorOpen, leftRailWidth, trioAvail]);
+
+  // Keep the trio's proportions across a window resize: scale the nav content
+  // and (when open) the editor by the change in available width, so the centre
+  // — the flexed remainder — keeps its fraction too. Re-seeds its baseline on
+  // every structural change (editor open/close, right dock toggle) so a one-off
+  // jump in available width is never mistaken for a resize.
+  const prevAvailRef = useRef<number | null>(null);
+  useEffect(() => {
+    prevAvailRef.current = trioAvail();
+    const onResize = (): void => {
+      const next = trioAvail();
+      const prev = prevAvailRef.current;
+      prevAvailRef.current = next;
+      if (prev == null || Math.abs(next - prev) < 1) return;
+      setLeftRailWidth((w) =>
+        Math.round(LEFT_RAIL_WIDTH + scaleForResize(w - LEFT_RAIL_WIDTH, prev, next)),
+      );
+      if (editorOpen) setEditorWidth((w) => Math.round(scaleForResize(w, prev, next)));
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [editorOpen, trioAvail]);
 
   // Capture on layout changes, debounced, from the focused window only — but
   // not until restore has settled (so the default layout never overwrites a

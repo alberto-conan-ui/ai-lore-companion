@@ -40,6 +40,13 @@ export function EditorPanel(): JSX.Element | null {
   );
 
   const active = docs.find((d) => d.path === activePath) ?? null;
+  // Keep the active tab visible in the horizontally-scrolling strip — opening or
+  // refocusing a file off-screen scrolls it into view (many open files).
+  const activeTabRef = useRef<HTMLDivElement>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: activePath is a deliberate re-run trigger — it isn't read in the body (the ref is), but a change of active doc is exactly when the strip must re-scroll.
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }, [activePath]);
   if (docs.length === 0) return null;
 
   return (
@@ -50,9 +57,17 @@ export function EditorPanel(): JSX.Element | null {
           return (
             <div
               key={doc.path}
+              ref={isActive ? activeTabRef : undefined}
               style={{ ...tabStyle, ...(isActive ? tabActiveStyle : null) }}
               data-testid={`editor-tab-${doc.name}`}
               data-active={isActive}
+              // Middle-click closes the tab — the usual IDE/browser convention.
+              onAuxClick={(e) => {
+                if (e.button === 1) {
+                  e.preventDefault();
+                  closeDoc(doc.path);
+                }
+              }}
             >
               <button
                 type="button"
