@@ -1,5 +1,6 @@
 import type {
   EngineEntry,
+  LayoutEditorDoc,
   LayoutPanel,
   LayoutTab,
   TabLastSession,
@@ -37,7 +38,7 @@ import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { type PaneSpec, TAB_KINDS, type TabRenderContext } from './components/tabKinds.js';
 import { TERMINAL_FIND_EVENT } from './components/useXtermSession.js';
 import { accentColor, accentTint, hueFor, projectName } from './projectAccent.js';
-import { useCockpitStore } from './store.js';
+import { type EditorDoc, useCockpitStore } from './store.js';
 
 type Panel = { tabs: WorkspaceTab[]; activeId: string };
 
@@ -184,9 +185,13 @@ export function App(): JSX.Element {
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
   // The editor column's width (Read-only IDE P1). Only rendered when a file is
   // open; the nav | editor split appears beside the left region and the centre
-  // flexes to fill the rest. (Auto-fit reflow + persistence are P2.)
+  // flexes to fill the rest. Width + open files persist across restart (P2).
   const [editorWidth, setEditorWidth] = useState(DEFAULT_EDITOR_WIDTH);
-  const editorOpen = useCockpitStore((s) => s.editorDocs.length > 0);
+  // The open editor docs drive both `editorOpen` and layout capture — subscribed
+  // here so opening/closing a file re-snapshots the layout.
+  const editorDocs = useCockpitStore((s) => s.editorDocs);
+  const activeDocPath = useCockpitStore((s) => s.activeDocPath);
+  const editorOpen = editorDocs.length > 0;
   // Per-column bottom-dock heights.
   const [leftRailBottomHeight, setLeftRailBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
   const [centreBottomHeight, setCentreBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
@@ -209,6 +214,13 @@ export function App(): JSX.Element {
   // one before it is read back.
   const restoreStarted = useRef(false);
   const captureReady = useRef(false);
+  // Tracks the focus state so the capture can flush on the focus→blur edge.
+  const wasFocused = useRef(false);
+  // Auto-fit guard: the editor column is fitted to the window once per open
+  // (the false→true edge), and the guard clears when the last file closes so the
+  // next open refits to the current window size. A restored layout sets it true
+  // up front so a saved editor width is never overridden.
+  const editorFitted = useRef(false);
   // URL + terminal shortcuts surfaced inside Shell / Web tab sidebars and the
   // `+ shell ▾` / `+ web ▾` start-with-shortcut dropdowns. Project/lore
   // shortcuts live in the header rows instead.
@@ -889,6 +901,21 @@ export function App(): JSX.Element {
       leftRailBottomHeight,
       centreBottomHeight,
       rightBottomHeight,
+      editorWidth,
+      editor: {
+        docs: editorDocs.map((d) => {
+          const ld: LayoutEditorDoc = {
+            path: d.path,
+            scope: d.scope,
+            name: d.name,
+            mode: d.mode,
+          };
+          if (d.oldPath !== undefined) ld.oldPath = d.oldPath;
+          if (d.diffBaseline !== undefined) ld.diffBaseline = d.diffBaseline;
+          return ld;
+        }),
+        activePath: activeDocPath,
+      },
     };
   }, [
     panels,
@@ -902,6 +929,9 @@ export function App(): JSX.Element {
     leftRailBottomHeight,
     centreBottomHeight,
     rightBottomHeight,
+    editorWidth,
+    editorDocs,
+    activeDocPath,
   ]);
 
   /** Rebuild the workspace from a stored snapshot — the five free panels as
@@ -944,6 +974,21 @@ export function App(): JSX.Element {
     setLeftRailBottomHeight(layout.leftRailBottomHeight);
     setCentreBottomHeight(layout.centreBottomHeight);
     setRightBottomHeight(layout.rightBottomHeight);
+    // Editor column + open files (P2) — optional on older snapshots. A restored
+    // width is the user's own; suppress the first-open auto-fit so it stands.
+    if (typeof layout.editorWidth === 'number') {
+      setEditorWidth(layout.editorWidth);
+      editorFitted.current = true;
+    }
+    if (layout.editor) {
+      const docs: EditorDoc[] = layout.editor.docs.map((d) => {
+        const doc: EditorDoc = { path: d.path, scope: d.scope, name: d.name, mode: d.mode };
+        if (d.oldPath !== undefined) doc.oldPath = d.oldPath;
+        if (d.diffBaseline !== undefined) doc.diffBaseline = d.diffBaseline;
+        return doc;
+      });
+      useCockpitStore.getState().restoreDocs(docs, layout.editor.activePath);
+    }
   }, []);
 
   // Restore once, when the window first enters cockpit mode. Reads the project
@@ -964,6 +1009,22 @@ export function App(): JSX.Element {
     };
   }, [mode, applyLayout]);
 
+  // Auto-fit the editor column to the window the first time a file opens this
+  // session, so the nav | editor | centre split starts balanced instead of at a
+  // fixed width that crowds the centre on a narrow window. Targets ~60% of the
+  // window for the whole left region (nav + editor), clamped, and leaves the
+  // centre to flex. The guard is sticky once set — a later manual drag and a
+  // restored width both persist, and closing the last file simply hands the
+  // space back to the centre (the column unmounts). Every divider stays
+  // hand-draggable regardless.
+  useEffect(() => {
+    if (!editorOpen || editorFitted.current) return;
+    editorFitted.current = true;
+    const w = window.innerWidth;
+    const fitted = Math.round(w * 0.6) - leftRailWidth;
+    setEditorWidth(Math.max(DEFAULT_EDITOR_WIDTH * 0.7, Math.min(fitted, Math.round(w * 0.5))));
+  }, [editorOpen, leftRailWidth]);
+
   // Capture on layout changes, debounced, from the focused window only — but
   // not until restore has settled (so the default layout never overwrites a
   // stored one first).
@@ -975,6 +1036,21 @@ export function App(): JSX.Element {
     }, 300);
     return () => window.clearTimeout(handle);
   }, [mode, chain, hasFocus, captureLayout]);
+
+  // Flush the moment the window loses focus. The debounced capture above only
+  // runs while focused and is cleared on blur, so a change made just before
+  // switching away (clicking to the terminal, ⌘-Tab) would otherwise sit
+  // unwritten — and an abrupt process kill (Ctrl-C in dev) never reaches the
+  // `beforeunload` flush below. Firing once on the focus→blur edge persists the
+  // latest state before either happens. (`beforeunload` still covers a graceful
+  // window close, which fires no blur.)
+  useEffect(() => {
+    const lostFocus = wasFocused.current && !hasFocus;
+    wasFocused.current = hasFocus;
+    if (!lostFocus) return;
+    if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain) || !captureReady.current) return;
+    void captureLayout().then((layout) => window.cockpit.settingsSetLayout({ layout }));
+  }, [hasFocus, mode, chain, captureLayout]);
 
   // Final flush on window close — fire-and-forget; main records what reaches it.
   useEffect(() => {

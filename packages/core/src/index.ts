@@ -85,6 +85,7 @@ export {
 } from './settings/settings.js';
 export type {
   LayoutPanel,
+  LayoutEditorDoc,
   LayoutTab,
   SettingDef,
   SettingTier,
@@ -92,6 +93,7 @@ export type {
   SettingValue,
   SettingsFile,
   TabLastSession,
+  WorkspaceEditor,
   WorkspaceLayout,
   WriteTier,
 } from './settings/types.js';

@@ -56,3 +56,25 @@ test('setDocMode flips one doc; setActiveDoc moves focus', () => {
   expect(s.editorDocs.find((d) => d.path === '/p/b.ts')?.mode).toBe('code');
   expect(s.activeDocPath).toBe('/p/a.ts');
 });
+
+test('restoreDocs replaces the open set and honours the saved active doc', () => {
+  const { openDoc, restoreDocs } = useCockpitStore.getState();
+  openDoc(doc('/p/stale.ts'));
+  restoreDocs([doc('/p/a.ts'), doc('/p/b.ts', 'diff')], '/p/b.ts');
+  const s = useCockpitStore.getState();
+  expect(s.editorDocs.map((d) => d.path)).toEqual(['/p/a.ts', '/p/b.ts']);
+  expect(s.activeDocPath).toBe('/p/b.ts');
+});
+
+test('restoreDocs falls back to the first doc when the saved active is gone', () => {
+  useCockpitStore.getState().restoreDocs([doc('/p/a.ts'), doc('/p/b.ts')], '/p/missing.ts');
+  expect(useCockpitStore.getState().activeDocPath).toBe('/p/a.ts');
+});
+
+test('restoreDocs with an empty set clears the editor', () => {
+  useCockpitStore.getState().openDoc(doc('/p/a.ts'));
+  useCockpitStore.getState().restoreDocs([], null);
+  const s = useCockpitStore.getState();
+  expect(s.editorDocs).toEqual([]);
+  expect(s.activeDocPath).toBeNull();
+});

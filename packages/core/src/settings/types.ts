@@ -102,6 +102,23 @@ export type LayoutPanel = {
   activeId: string;
 };
 
+/** One file open in the read-only-IDE editor, as persisted in the layout —
+ *  restored on next open so the editor reopens where it was left. */
+export type LayoutEditorDoc = {
+  path: string;
+  scope: 'payload' | 'lore';
+  name: string;
+  mode: 'code' | 'diff' | 'preview';
+  oldPath?: string;
+  diffBaseline?: string;
+};
+
+/** The editor column's persisted state: the open docs and which one was active. */
+export type WorkspaceEditor = {
+  docs: LayoutEditorDoc[];
+  activePath: string | null;
+};
+
 /**
  * A project window's workspace layout — what every panel held, the column /
  * dock open + size state. Restored on next open when `workspace.restoreLayout`
@@ -130,4 +147,10 @@ export type WorkspaceLayout = {
   leftRailBottomHeight: number;
   centreBottomHeight: number;
   rightBottomHeight: number;
+  /** Editor column width when open. Optional — absent on pre-editor snapshots,
+   *  which still restore (the editor simply opens at its default width). */
+  editorWidth?: number;
+  /** Open editor docs + the active one, so the editor reopens where it was left
+   *  ("start always opened"). Optional for the same backward-compat reason. */
+  editor?: WorkspaceEditor;
 };

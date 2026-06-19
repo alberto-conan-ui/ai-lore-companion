@@ -302,6 +302,53 @@ test('parseSettingsFile drops a layout missing a panel, and malformed tabs withi
   assert.equal(f2.layout?.panels.centre.tabs[0]?.id, 'tab-1');
 });
 
+test('parseSettingsFile round-trips the editor column (width + open docs)', () => {
+  const layout: WorkspaceLayout = {
+    ...sampleLayout(),
+    editorWidth: 620,
+    editor: {
+      docs: [
+        { path: '/p/a.md', scope: 'payload', name: 'a.md', mode: 'code' },
+        { path: '/l/b.md', scope: 'lore', name: 'b.md', mode: 'diff', diffBaseline: 'abc123' },
+      ],
+      activePath: '/l/b.md',
+    },
+  };
+  const parsed = parseSettingsFile(serializeSettingsFile(withLayout(emptySettingsFile(), layout)));
+  assert.equal(parsed.layout?.editorWidth, 620);
+  assert.deepEqual(parsed.layout?.editor, layout.editor);
+});
+
+test('parseSettingsFile accepts a pre-editor snapshot (no editor fields)', () => {
+  // The editor fields are optional — an older snapshot still restores, just with
+  // no width override and no reopened files.
+  const parsed = parseSettingsFile(
+    serializeSettingsFile(withLayout(emptySettingsFile(), sampleLayout())),
+  );
+  assert.ok(parsed.layout, 'the snapshot still parses');
+  assert.equal(parsed.layout?.editorWidth, undefined);
+  assert.equal(parsed.layout?.editor, undefined);
+});
+
+test('parseSettingsFile drops a malformed editor doc but keeps the rest', () => {
+  const layout = {
+    ...sampleLayout(),
+    editor: {
+      docs: [
+        { path: '/p/a.md', scope: 'payload', name: 'a.md', mode: 'code' },
+        { path: '/p/bad.md', scope: 'nope', name: 'bad.md', mode: 'code' }, // bad scope
+        { scope: 'payload', name: 'no-path.md', mode: 'code' }, // no path
+      ],
+      activePath: '/p/a.md',
+    },
+  };
+  const parsed = parseSettingsFile(
+    JSON.stringify(withLayout(emptySettingsFile(), layout as never)),
+  );
+  assert.equal(parsed.layout?.editor?.docs.length, 1);
+  assert.equal(parsed.layout?.editor?.docs[0]?.path, '/p/a.md');
+});
+
 const sampleApp: AppEntry = {
   id: 'vscode',
   label: 'VS Code',

@@ -191,6 +191,9 @@ type State = {
   closeDoc: (path: string) => void;
   /** Focus an already-open doc. */
   setActiveDoc: (path: string) => void;
+  /** Replace the open docs wholesale — used to restore the editor on launch from
+   *  the persisted layout ("start always opened"). */
+  restoreDocs: (docs: EditorDoc[], activePath: string | null) => void;
   /** Flip an open doc between content and diff. */
   setDocMode: (path: string, mode: EditorMode) => void;
   /** Pin an open doc's diff to a specific commit (from its history column), or
@@ -237,6 +240,13 @@ export const useCockpitStore = create<State>((set) => ({
       return { editorDocs: next, activeDocPath };
     }),
   setActiveDoc: (path) => set({ activeDocPath: path }),
+  restoreDocs: (docs, activePath) =>
+    set({
+      editorDocs: docs,
+      // Keep the active pointer only if it names a restored doc; else fall back
+      // to the first, or null when nothing was restored.
+      activeDocPath: docs.some((d) => d.path === activePath) ? activePath : (docs[0]?.path ?? null),
+    }),
   setDocMode: (path, mode) =>
     set((state) => ({
       editorDocs: state.editorDocs.map((d) => (d.path === path ? { ...d, mode } : d)),

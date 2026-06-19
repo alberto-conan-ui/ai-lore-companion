@@ -8,12 +8,14 @@
 import { type AppEntry, parseAppEntries } from '../apps/apps.js';
 import { type IgnoreRule, isIgnoreRule } from '../ignore.js';
 import type {
+  LayoutEditorDoc,
   LayoutPanel,
   LayoutTab,
   SettingDef,
   SettingValue,
   SettingsFile,
   TabLastSession,
+  WorkspaceEditor,
   WorkspaceLayout,
 } from './types.js';
 
@@ -139,10 +141,35 @@ const LAYOUT_SIZE_KEYS = [
   'rightBottomHeight',
 ] as const;
 
+/** One persisted editor doc, or `null` if malformed (dropped, not fatal). */
+function parseLayoutEditorDoc(value: unknown): LayoutEditorDoc | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const o = value as Record<string, unknown>;
+  if (typeof o.path !== 'string' || typeof o.name !== 'string') return null;
+  if (o.scope !== 'payload' && o.scope !== 'lore') return null;
+  if (o.mode !== 'code' && o.mode !== 'diff' && o.mode !== 'preview') return null;
+  const doc: LayoutEditorDoc = { path: o.path, scope: o.scope, name: o.name, mode: o.mode };
+  if (typeof o.oldPath === 'string') doc.oldPath = o.oldPath;
+  if (typeof o.diffBaseline === 'string') doc.diffBaseline = o.diffBaseline;
+  return doc;
+}
+
+/** The editor column's persisted docs. Malformed docs drop individually; a
+ *  malformed container yields `null` (the editor opens empty). */
+function parseWorkspaceEditor(value: unknown): WorkspaceEditor | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const o = value as Record<string, unknown>;
+  if (!Array.isArray(o.docs)) return null;
+  const docs = o.docs.map(parseLayoutEditorDoc).filter((d): d is LayoutEditorDoc => d !== null);
+  return { docs, activePath: typeof o.activePath === 'string' ? o.activePath : null };
+}
+
 /**
  * Read a workspace-layout snapshot out of a parsed `layout` field. Returns
  * `null` for absent, malformed, or unknown-version snapshots — the caller
- * treats that as "no snapshot" and the window opens with defaults.
+ * treats that as "no snapshot" and the window opens with defaults. The editor
+ * fields (`editorWidth`, `editor`) are optional: a pre-editor snapshot still
+ * restores, just without reopening any files.
  */
 function parseWorkspaceLayout(value: unknown): WorkspaceLayout | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -162,7 +189,7 @@ function parseWorkspaceLayout(value: unknown): WorkspaceLayout | null {
   for (const key of LAYOUT_SIZE_KEYS) {
     if (typeof o[key] !== 'number' || !Number.isFinite(o[key] as number)) return null;
   }
-  return {
+  const layout: WorkspaceLayout = {
     schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
     panels,
     rightOpen: o.rightOpen as boolean,
@@ -175,6 +202,12 @@ function parseWorkspaceLayout(value: unknown): WorkspaceLayout | null {
     centreBottomHeight: o.centreBottomHeight as number,
     rightBottomHeight: o.rightBottomHeight as number,
   };
+  if (typeof o.editorWidth === 'number' && Number.isFinite(o.editorWidth)) {
+    layout.editorWidth = o.editorWidth;
+  }
+  const editor = parseWorkspaceEditor(o.editor);
+  if (editor) layout.editor = editor;
+  return layout;
 }
 
 /** Whether `value` is a primitive the store can persist. */
