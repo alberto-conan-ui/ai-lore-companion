@@ -43,17 +43,17 @@ type Props = {
 
 /** Folder drift dot — the four-level scale, tuned to read on the tree's dark background. */
 const DOT_COLOR: Record<DriftLevel, string> = {
-  idle: '#3a4654',
-  live: '#5fb87f',
-  warn: '#e0a23a',
-  alert: '#e0564e',
+  idle: 'var(--color-dot-idle)',
+  live: 'var(--color-success)',
+  warn: 'var(--color-warn)',
+  alert: 'var(--color-danger)',
 };
 
 /** Per-file drift dot — by change kind, matching the grid/changes-panel palette. */
 const FILE_DOT_COLOR: Record<DriftKind, string> = {
-  add: '#5fb87f',
-  change: '#e0a23a',
-  unlink: '#e0564e',
+  add: 'var(--color-success)',
+  change: 'var(--color-warn)',
+  unlink: 'var(--color-danger)',
 };
 
 /** Fixed row height (px) — the unit virtualization windows on. Every tree row is
@@ -463,7 +463,7 @@ function Row({
         title={synthetic ? node.name : node.path}
         data-testid={isRoot ? 'tree-root' : undefined}
       >
-        <span style={{ ...twistyStyle, color: '#aeb9c4' }}>{isDir ? (open ? '▾' : '▸') : ''}</span>
+        <span style={{ ...twistyStyle, color: 'var(--color-text-secondary)' }}>{isDir ? (open ? '▾' : '▸') : ''}</span>
         <span style={glyphStyle}>
           <FileIcon name={node.name} isDir={isDir} />
         </span>
@@ -581,9 +581,9 @@ const finderBtnStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   background: 'transparent',
-  border: '1px solid #2f3a45',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#8a96a2',
+  color: 'var(--color-text-dim)',
   fontSize: '0.72rem',
   cursor: 'pointer',
   padding: 0,

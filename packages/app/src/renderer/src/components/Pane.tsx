@@ -646,13 +646,13 @@ const paneStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   minHeight: 0,
-  borderRight: '1px solid #1f2933',
+  borderRight: '1px solid var(--color-border)',
 };
 
 /** A 1-px accent outline on the Pane's currently-focused region (tree / grid /
  *  queue). Outline rather than border so layout doesn't shift on focus change. */
 const activeRegionStyle: React.CSSProperties = {
-  outline: '1px solid #5a9bd4',
+  outline: '1px solid var(--color-accent)',
   outlineOffset: '-1px',
 };
 
@@ -661,8 +661,8 @@ const paneHeaderStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.6rem',
   padding: '0.5rem 0.8rem',
-  background: '#0f1620',
-  borderBottom: '1px solid #1f2933',
+  background: 'var(--color-header)',
+  borderBottom: '1px solid var(--color-border)',
 };
 
 // Same height/shape as the DriftPill it sits next to so they read as one
@@ -678,22 +678,22 @@ const indexPillStyle: React.CSSProperties = {
   fontFamily: 'monospace',
   fontWeight: 700,
   letterSpacing: '0.04em',
-  background: '#2d3a44',
-  color: '#9fb1bd',
+  background: 'var(--color-neutral-pill)',
+  color: 'var(--color-text-secondary)',
   border: '1px solid transparent',
   cursor: 'pointer',
 };
 
 const indexPillOnStyle: React.CSSProperties = {
   ...indexPillStyle,
-  background: '#2c5b3f',
-  color: '#bcefcd',
+  background: 'var(--color-success-bg)',
+  color: 'var(--color-success-fg)',
 };
 
 const paneLabelStyle: React.CSSProperties = {
   fontWeight: 700,
   fontSize: '0.85rem',
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
 };
@@ -702,7 +702,7 @@ const pathStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   fontSize: '0.72rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
@@ -724,12 +724,12 @@ const treeColumnStyle: React.CSSProperties = {
   flexDirection: 'column',
   minWidth: 0,
   overflow: 'hidden',
-  background: '#0c121a',
+  background: 'var(--color-panel)',
 };
 
 const treeLoadingStyle: React.CSSProperties = {
   padding: '0.6rem 0.8rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.76rem',
 };
 
@@ -744,8 +744,8 @@ const queueResizeHandleStyle: React.CSSProperties = {
   height: '7px',
   flexShrink: 0,
   cursor: 'ns-resize',
-  background: '#0c121a',
-  borderTop: '1px solid #1f2933',
+  background: 'var(--color-panel)',
+  borderTop: '1px solid var(--color-border)',
 };
 
 /** Full-window catcher that dismisses the tree's right-click ignore menu. */
@@ -758,8 +758,8 @@ const menuBackdropStyle: React.CSSProperties = {
 const treeMenuStyle: React.CSSProperties = {
   position: 'fixed',
   zIndex: 51,
-  background: '#121a24',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-raised)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
   padding: '0.2rem',
@@ -772,7 +772,7 @@ const treeMenuItemStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
   borderRadius: '4px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.78rem',
   textAlign: 'left',
   whiteSpace: 'nowrap',
@@ -781,6 +781,6 @@ const treeMenuItemStyle: React.CSSProperties = {
 
 const treeMenuSeparatorStyle: React.CSSProperties = {
   height: '1px',
-  background: '#2f3a45',
+  background: 'var(--color-border-strong)',
   margin: '0.25rem 0.3rem',
 };

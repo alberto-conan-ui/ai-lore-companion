@@ -243,8 +243,8 @@ const paneStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   minHeight: 0,
-  background: '#0a0f17',
-  color: '#dde3ea',
+  background: 'var(--color-shell)',
+  color: 'var(--color-text)',
 };
 
 const headerStyle: React.CSSProperties = {
@@ -252,20 +252,20 @@ const headerStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.6rem',
   padding: '0.4rem 0.7rem',
-  background: '#0c121a',
-  borderBottom: '1px solid #1f2933',
+  background: 'var(--color-panel)',
+  borderBottom: '1px solid var(--color-border)',
   flexShrink: 0,
 };
 
 const headerLabelStyle: React.CSSProperties = {
   fontSize: '0.78rem',
   fontWeight: 700,
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
 };
 
 const headerHintStyle: React.CSSProperties = {
   fontSize: '0.72rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontStyle: 'italic',
 };
 
@@ -278,7 +278,7 @@ const bodyStyle: React.CSSProperties = {
 const treeColumnStyle: React.CSSProperties = {
   width: '240px',
   flexShrink: 0,
-  borderRight: '1px solid #1f2933',
+  borderRight: '1px solid var(--color-border)',
   overflow: 'auto',
 };
 
@@ -305,12 +305,12 @@ const rowStyle: React.CSSProperties = {
 };
 
 const rowGlyphStyle: React.CSSProperties = {
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
 };
 
 const rowNameStyle: React.CSSProperties = {
-  color: '#dde3ea',
+  color: 'var(--color-text)',
 };
 
 const emptyWrapStyle: React.CSSProperties = {
@@ -323,7 +323,7 @@ const emptyWrapStyle: React.CSSProperties = {
 
 const emptyMessageStyle: React.CSSProperties = {
   fontSize: '0.85rem',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   textAlign: 'center',
   maxWidth: '24rem',
   lineHeight: 1.5,
@@ -332,7 +332,7 @@ const emptyMessageStyle: React.CSSProperties = {
 const emptyGridStyle: React.CSSProperties = {
   padding: '1rem 0.7rem',
   fontSize: '0.78rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
 };
 
 const menuStyle: React.CSSProperties = {
@@ -340,8 +340,8 @@ const menuStyle: React.CSSProperties = {
   top: '100%',
   left: '0.5rem',
   zIndex: 10,
-  background: '#101822',
-  border: '1px solid #243044',
+  background: 'var(--color-inset)',
+  border: '1px solid var(--color-border-2)',
   borderRadius: '4px',
   boxShadow: '0 8px 20px rgba(0, 0, 0, 0.55)',
   display: 'flex',
@@ -354,7 +354,7 @@ const menuItemStyle: React.CSSProperties = {
   padding: '0.35rem 0.7rem',
   background: 'transparent',
   border: 'none',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.78rem',
   textAlign: 'left',
   cursor: 'pointer',
@@ -363,6 +363,6 @@ const menuItemStyle: React.CSSProperties = {
 
 const menuDividerStyle: React.CSSProperties = {
   height: '1px',
-  background: '#243044',
+  background: 'var(--color-border-2)',
   margin: '0.2rem 0.4rem',
 };

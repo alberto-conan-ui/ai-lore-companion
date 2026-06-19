@@ -76,9 +76,9 @@ export function RegisterChips({
   );
 }
 
-const POSTURE_ACCENT = '#9ad0ff';
-const DIAL_ACCENT = '#c4e1a8';
-const FOCUS_TYPE_ACCENT = '#e9c489';
+const POSTURE_ACCENT = 'var(--color-reg-posture)';
+const DIAL_ACCENT = 'var(--color-reg-dial)';
+const FOCUS_TYPE_ACCENT = 'var(--color-reg-focus)';
 
 function RegisterChip<T extends string>({
   label,
@@ -185,9 +185,9 @@ function chipButtonStyle(_accent: string): React.CSSProperties {
     gap: '0.35rem',
     height: '1.55rem',
     padding: '0 0.55rem',
-    background: '#1f2933',
-    color: '#cbd5dd',
-    border: '1px solid #2f3a45',
+    background: 'var(--color-border)',
+    color: 'var(--color-text-2)',
+    border: '1px solid var(--color-border-strong)',
     borderRadius: '4px',
     fontSize: '0.72rem',
     fontWeight: 600,
@@ -198,7 +198,7 @@ function chipButtonStyle(_accent: string): React.CSSProperties {
 }
 
 const chipLabelStyle: React.CSSProperties = {
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
 };
@@ -218,8 +218,8 @@ const popoverStyle: React.CSSProperties = {
   zIndex: 30,
   display: 'flex',
   flexDirection: 'column',
-  background: '#0f1620',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-header)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
   padding: '0.25rem',
   minWidth: '6rem',
@@ -229,8 +229,8 @@ const popoverStyle: React.CSSProperties = {
 function popoverItemStyle(selected: boolean, accent: string): React.CSSProperties {
   return {
     padding: '0.3rem 0.55rem',
-    background: selected ? '#1f2933' : 'transparent',
-    color: selected ? accent : '#cbd5dd',
+    background: selected ? 'var(--color-border)' : 'transparent',
+    color: selected ? accent : 'var(--color-text-2)',
     border: 'none',
     borderRadius: '3px',
     fontSize: '0.78rem',

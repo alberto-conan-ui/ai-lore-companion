@@ -11,9 +11,9 @@ export type BannerTone = 'warn' | 'info' | 'error';
 
 /** Per-tone colours. `warn` mirrors the strip's amber token in `TabbedPanel`. */
 const TONES: Record<BannerTone, { bg: string; fg: string }> = {
-  warn: { bg: '#7a5a14', fg: '#ffdf91' },
-  info: { bg: '#13405e', fg: '#bfe3ff' },
-  error: { bg: '#6e1f1f', fg: '#ffc9c9' },
+  warn: { bg: 'var(--color-warn-bg)', fg: 'var(--color-warn-fg)' },
+  info: { bg: 'var(--color-info-banner-bg)', fg: 'var(--color-info-banner-fg)' },
+  error: { bg: 'var(--color-danger-banner-bg)', fg: 'var(--color-danger-fg-light)' },
 };
 
 export function Banner({

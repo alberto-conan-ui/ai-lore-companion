@@ -179,7 +179,7 @@ const splitContainerStyle: React.CSSProperties = {
   flex: 1,
   minHeight: 0,
   minWidth: 0,
-  background: '#0a0f17',
+  background: 'var(--color-shell)',
 };
 
 const railStyle: React.CSSProperties = {
@@ -190,8 +190,8 @@ const railStyle: React.CSSProperties = {
   alignItems: 'center',
   paddingTop: 6,
   gap: 4,
-  background: '#0a0f17',
-  borderRight: '1px solid #1a2230',
+  background: 'var(--color-shell)',
+  borderRight: '1px solid var(--color-border-rail)',
 };
 
 const railIconStyle: React.CSSProperties = {
@@ -203,7 +203,7 @@ const railIconStyle: React.CSSProperties = {
   background: 'transparent',
   border: '1px solid transparent',
   borderRadius: 5,
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   fontSize: '0.95rem',
   cursor: 'pointer',
   padding: 0,
@@ -211,9 +211,9 @@ const railIconStyle: React.CSSProperties = {
 
 const railIconActiveStyle: React.CSSProperties = {
   ...railIconStyle,
-  background: '#16202c',
-  border: '1px solid #28384a',
-  color: '#cfd8e0',
+  background: 'var(--color-rail-active)',
+  border: '1px solid var(--color-rail-border)',
+  color: 'var(--color-text-2)',
 };
 
 const sidebarColumnStyle: React.CSSProperties = {
@@ -221,8 +221,8 @@ const sidebarColumnStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   overflow: 'hidden',
-  background: '#0c121a',
-  borderRight: '1px solid #1a2230',
+  background: 'var(--color-panel)',
+  borderRight: '1px solid var(--color-border-rail)',
   position: 'relative',
 };
 
@@ -233,7 +233,7 @@ const panelHeaderStyle: React.CSSProperties = {
   height: 26,
   flexShrink: 0,
   padding: '0 4px 0 8px',
-  borderBottom: '1px solid #161e29',
+  borderBottom: '1px solid var(--color-border-faint)',
 };
 
 const panelLabelStyle: React.CSSProperties = {
@@ -243,7 +243,7 @@ const panelLabelStyle: React.CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.05em',
   textTransform: 'uppercase',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -258,7 +258,7 @@ const headerBtnStyle: React.CSSProperties = {
   justifyContent: 'center',
   background: 'transparent',
   border: 'none',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.85rem',
   lineHeight: 1,
   cursor: 'pointer',
@@ -275,7 +275,7 @@ const sidebarBodyStyle: React.CSSProperties = {
 const resizerStyle: React.CSSProperties = {
   flexShrink: 0,
   width: '4px',
-  background: '#1a2230',
+  background: 'var(--color-border-rail)',
   cursor: 'col-resize',
   border: 'none',
   padding: 0,

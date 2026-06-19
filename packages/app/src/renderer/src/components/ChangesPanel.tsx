@@ -175,7 +175,7 @@ const containerStyle: React.CSSProperties = {
   flexDirection: 'column',
   minHeight: 0,
   height: '100%',
-  background: '#0c121a',
+  background: 'var(--color-panel)',
 };
 
 const headerStyle: React.CSSProperties = {
@@ -183,22 +183,22 @@ const headerStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.6rem',
   padding: '0.4rem 0.7rem',
-  borderBottom: '1px solid #1f2933',
-  background: '#0f1620',
+  borderBottom: '1px solid var(--color-border)',
+  background: 'var(--color-header)',
 };
 
 const labelStyle: React.CSSProperties = {
   fontSize: '0.78rem',
   fontWeight: 600,
   letterSpacing: '0.04em',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   textTransform: 'uppercase',
 };
 
 const countStyle: React.CSSProperties = {
   fontSize: '0.72rem',
-  color: '#9fb1bd',
-  background: '#1f2933',
+  color: 'var(--color-text-secondary)',
+  background: 'var(--color-border)',
   padding: '0.05rem 0.35rem',
   borderRadius: '999px',
 };
@@ -208,10 +208,10 @@ const searchStyle: React.CSSProperties = {
   minWidth: 0,
   maxWidth: '14rem',
   padding: '0.2rem 0.5rem',
-  background: '#0c121a',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-panel)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.72rem',
 };
 
@@ -224,6 +224,6 @@ const bodyStyle: React.CSSProperties = {
 
 const emptyStyle: React.CSSProperties = {
   padding: '0.6rem 0.8rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.76rem',
 };

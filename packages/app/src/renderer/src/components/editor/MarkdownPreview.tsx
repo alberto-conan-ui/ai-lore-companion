@@ -72,7 +72,7 @@ const wrapStyle: React.CSSProperties = {
   minHeight: 0,
   minWidth: 0,
   overflow: 'auto',
-  background: '#0a0f17',
+  background: 'var(--color-shell)',
 };
 
 const overlayStyle: React.CSSProperties = {
@@ -80,6 +80,6 @@ const overlayStyle: React.CSSProperties = {
   alignItems: 'center',
   justifyContent: 'center',
   height: '100%',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.82rem',
 };

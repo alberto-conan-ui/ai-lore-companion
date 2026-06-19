@@ -1,0 +1,97 @@
+/* ============================================================
+   Theme tokens — the single source for the cockpit's colour layer (v1.0 P1).
+   Every themeable colour lives here as a CSS custom property; components read
+   `var(--color-*)` (inline styles, CSS, and SVG fill/stroke all resolve it).
+   Dark is the default. The light palette lands in P3 as a [data-theme="light"]
+   override of this same vocabulary.
+
+   Two documented allowlists keep their literal hexes (not CSS-var-resolvable):
+   • useXtermSession.ts — xterm.js canvas theme (swapped in JS at P3)
+   • FileIcon.tsx — per-language identity colours (theme-invariant lookup table)
+   ============================================================ */
+:root {
+  color-scheme: dark;
+  --color-shell: #0a0f17;
+  --color-shell-deep: #070b11;
+  --color-panel: #0c121a;
+  --color-header: #0f1620;
+  --color-raised: #121a24;
+  --color-code-bg: #0d141d;
+  --color-inset: #101822;
+  --color-surface-2: #1a1f27;
+  --color-rail-active: #16202c;
+  --color-surface-blue: #1c2c3e;
+  --color-bubble: #1b2a3d;
+  --color-row-active: #1d4e6b;
+  --color-tab-active: #1d4e74;
+  --color-match-bg: #1f3a4d;
+  --color-shortcut-active: #27496d;
+  --color-chip-disabled: #2a323a;
+  --color-neutral-pill: #2d3a44;
+  --color-success-bg: #2c5b3f;
+  --color-warn-bg: #7a5a14;
+  --color-danger-bg: #7a1f1f;
+  --color-info-bg: #142031;
+  --color-info-banner-bg: #13405e;
+  --color-danger-banner-bg: #6e1f1f;
+  --color-warn-banner-bg: #2a2418;
+  --color-amber-tag-bg: #3a2f1f;
+  --color-purple-strong: #5a3ec2;
+  --color-danger-box-bg: #1a1212;
+  --color-border: #1f2933;
+  --color-border-strong: #2f3a45;
+  --color-border-faint: #161e29;
+  --color-border-rail: #1a2230;
+  --color-border-2: #243044;
+  --color-rail-border: #28384a;
+  --color-surface-blue-border: #2f4860;
+  --color-bubble-border: #2c4055;
+  --color-accent-border: #3a6da4;
+  --color-warn-banner-border: #4a3f23;
+  --color-amber-tag-border: #5a4a2c;
+  --color-danger-box-border: #5b2222;
+  --color-info-border: #1f3147;
+  --color-text: #dde3ea;
+  --color-text-bright: #e6edf3;
+  --color-text-2: #cbd5dd;
+  --color-text-secondary: #9fb1bd;
+  --color-text-muted: #6c7783;
+  --color-text-dim: #8a96a2;
+  --color-text-soft: #7a8590;
+  --color-text-faint: #4a5762;
+  --color-on-accent: #ffffff;
+  --color-ink-inverse: #1a0f0c;
+  --color-accent: #5a9bd4;
+  --color-accent-strong: #3a78c2;
+  --color-accent-soft: #7fa8c9;
+  --color-accent-tint: #a7c3e1;
+  --color-accent-bright: #86c5ff;
+  --color-link: #6cb0ee;
+  --color-tab-active-fg: #e6f2ff;
+  --color-success: #5fb87f;
+  --color-success-text: #86d9a0;
+  --color-success-fg: #bcefcd;
+  --color-warn: #e0a23a;
+  --color-warn-fg: #ffdf91;
+  --color-amber: #e0b048;
+  --color-amber-tag-fg: #c9a06a;
+  --color-orange: #e08a6a;
+  --color-danger: #e0564e;
+  --color-danger-fg: #ff8a8a;
+  --color-danger-fg-light: #ffc2c2;
+  --color-running: #4cd07d;
+  --color-dot-idle: #3a4654;
+  --color-info: #9fd0e8;
+  --color-info-banner-fg: #bfe3ff;
+  --color-reg-posture: #9ad0ff;
+  --color-reg-dial: #c4e1a8;
+  --color-reg-focus: #e9c489;
+  --color-purple: #c7b3ff;
+  --color-purple-border: #7757d8;
+  --color-purple-fg: #f3eeff;
+}
+
+/* Light palette — filled in P3. Overrides only the tokens that change. */
+[data-theme="light"] {
+  color-scheme: light;
+}

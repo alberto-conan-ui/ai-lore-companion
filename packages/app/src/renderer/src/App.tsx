@@ -1268,10 +1268,10 @@ export function App(): JSX.Element {
     return (
       <main style={fullCenter} data-testid="loading">
         <div style={{ textAlign: 'center' }}>
-          <h1 style={{ margin: 0, fontSize: '1.1rem', color: '#dde3ea', fontWeight: 600 }}>
+          <h1 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-text)', fontWeight: 600 }}>
             AI-Lore
           </h1>
-          <p style={{ margin: '0.4rem 0 0', color: '#6c7783', fontSize: '0.85rem' }}>Starting…</p>
+          <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Starting…</p>
         </div>
       </main>
     );
@@ -1294,10 +1294,10 @@ export function App(): JSX.Element {
     return (
       <main style={fullCenter} data-testid="loading">
         <div style={{ textAlign: 'center' }}>
-          <h1 style={{ margin: 0, fontSize: '1.1rem', color: '#dde3ea', fontWeight: 600 }}>
+          <h1 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-text)', fontWeight: 600 }}>
             AI-Lore
           </h1>
-          <p style={{ margin: '0.4rem 0 0', color: '#6c7783', fontSize: '0.85rem' }}>
+          <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
             Reading tracker chain…
           </p>
         </div>
@@ -1309,9 +1309,9 @@ export function App(): JSX.Element {
     return (
       <main style={fullCenter} data-testid="chain-error">
         <div style={errorCard}>
-          <h2 style={{ margin: '0 0 0.5rem', color: '#ff8a8a' }}>Cannot read tracker chain</h2>
-          <p style={{ margin: 0, color: '#dde3ea' }}>{chain.error}</p>
-          <p style={{ margin: '0.8rem 0 0', color: '#6c7783', fontSize: '0.85rem' }}>
+          <h2 style={{ margin: '0 0 0.5rem', color: 'var(--color-danger-fg)' }}>Cannot read tracker chain</h2>
+          <p style={{ margin: 0, color: 'var(--color-text)' }}>{chain.error}</p>
+          <p style={{ margin: '0.8rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
             Run with <code>--root &lt;path&gt;</code> or launch from a project that contains a{' '}
             <code>.ai-lore-&lt;name&gt;/</code> folder.
           </p>
@@ -1605,8 +1605,8 @@ const appLayout: React.CSSProperties = {
   flexDirection: 'column',
   height: '100vh',
   width: '100vw',
-  background: '#0a0f17',
-  color: '#dde3ea',
+  background: 'var(--color-shell)',
+  color: 'var(--color-text)',
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
   margin: 0,
 };
@@ -1618,8 +1618,8 @@ const cockpitShell: React.CSSProperties = {
   height: '100vh',
   width: '100vw',
   margin: 0,
-  background: '#0a0f17',
-  color: '#dde3ea',
+  background: 'var(--color-shell)',
+  color: 'var(--color-text)',
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
 };
 
@@ -1665,7 +1665,7 @@ const fullCenter: React.CSSProperties = {
 const errorCard: React.CSSProperties = {
   maxWidth: '560px',
   padding: '1.2rem 1.5rem',
-  background: '#1a1212',
-  border: '1px solid #5b2222',
+  background: 'var(--color-danger-box-bg)',
+  border: '1px solid var(--color-danger-box-border)',
   borderRadius: '6px',
 };

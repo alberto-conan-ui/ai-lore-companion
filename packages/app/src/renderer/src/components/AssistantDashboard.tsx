@@ -1852,7 +1852,7 @@ const paneWrapStyle: React.CSSProperties = {
   minHeight: 0,
   display: 'flex',
   flexDirection: 'column',
-  background: '#0a0f17',
+  background: 'var(--color-shell)',
 };
 
 const tabStripStyle: React.CSSProperties = {
@@ -1860,7 +1860,7 @@ const tabStripStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: 2,
   padding: '6px 8px 0',
-  borderBottom: '1px solid #161e29',
+  borderBottom: '1px solid var(--color-border-faint)',
   flexShrink: 0,
 };
 
@@ -1876,18 +1876,18 @@ const refreshStatusStyle: React.CSSProperties = {
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.62rem',
   letterSpacing: '0.02em',
-  color: '#6b7785',
+  color: 'var(--color-text-muted)',
   whiteSpace: 'nowrap',
 };
 
-const refreshErrStyle: React.CSSProperties = { ...refreshStatusStyle, color: '#d98a6a' };
+const refreshErrStyle: React.CSSProperties = { ...refreshStatusStyle, color: 'var(--color-orange)' };
 
 const refreshBtnStyle: React.CSSProperties = {
   appearance: 'none',
-  background: '#142031',
-  border: '1px solid #1f3147',
+  background: 'var(--color-info-bg)',
+  border: '1px solid var(--color-info-border)',
   borderRadius: 6,
-  color: '#9fd0e8',
+  color: 'var(--color-info)',
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.66rem',
   fontWeight: 600,
@@ -1904,7 +1904,7 @@ const tabStyle: React.CSSProperties = {
   border: '1px solid transparent',
   borderBottom: 'none',
   borderRadius: '6px 6px 0 0',
-  color: '#8b96a2',
+  color: 'var(--color-text-dim)',
   fontSize: '0.74rem',
   fontWeight: 600,
   padding: '0.35rem 0.7rem',
@@ -1913,10 +1913,10 @@ const tabStyle: React.CSSProperties = {
 
 const tabActiveStyle: React.CSSProperties = {
   ...tabStyle,
-  background: '#0e141d',
-  border: '1px solid #1b2430',
-  borderBottom: '1px solid #0e141d',
-  color: '#e8edf3',
+  background: 'var(--color-code-bg)',
+  border: '1px solid var(--color-border-rail)',
+  borderBottom: '1px solid var(--color-code-bg)',
+  color: 'var(--color-text-bright)',
   marginBottom: -1,
 };
 

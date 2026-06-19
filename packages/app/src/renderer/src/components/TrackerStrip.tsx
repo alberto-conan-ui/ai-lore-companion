@@ -57,7 +57,7 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
   if (!chain || isChainErrorPayload(chain)) {
     return (
       <header style={stripStyle}>
-        <div style={{ color: '#aaa' }}>No active focus</div>
+        <div style={{ color: 'var(--color-text-secondary)' }}>No active focus</div>
       </header>
     );
   }
@@ -78,7 +78,7 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
     <header style={accentHeaderStyle}>
       <div style={identityRowStyle} data-testid="header-identity">
         <span
-          style={{ ...projectNameStyle, color: showAccent ? accent : '#e6edf3' }}
+          style={{ ...projectNameStyle, color: showAccent ? accent : 'var(--color-text-bright)' }}
           title={chain.root}
         >
           {name}
@@ -150,7 +150,7 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
 }
 
 function Sep(): JSX.Element {
-  return <span style={{ color: '#4a5762' }}>›</span>;
+  return <span style={{ color: 'var(--color-text-faint)' }}>›</span>;
 }
 
 /**
@@ -206,8 +206,8 @@ const stripStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: '0.7rem',
   padding: '0.95rem 1rem 0.85rem',
-  borderBottom: '1px solid #1f2933',
-  background: '#0f1620',
+  borderBottom: '1px solid var(--color-border)',
+  background: 'var(--color-header)',
 };
 
 /** Row 1 — identity & orientation. Roomier than the cramped current strip. */
@@ -242,14 +242,14 @@ const projectNameStyle: React.CSSProperties = {
 
 const focusTitle: React.CSSProperties = {
   fontWeight: 600,
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
 };
 
 const activeChild: React.CSSProperties = {
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -264,8 +264,8 @@ const focusViewToggleStyle: React.CSSProperties = {
   marginLeft: '0.1rem',
   padding: 0,
   background: 'transparent',
-  color: '#9fb1bd',
-  border: '1px solid #2f3a45',
+  color: 'var(--color-text-secondary)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
   fontSize: '0.78rem',
   fontWeight: 700,

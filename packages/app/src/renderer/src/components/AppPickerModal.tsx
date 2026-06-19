@@ -365,8 +365,8 @@ const modalStyle: React.CSSProperties = {
   width: 'min(520px, 90vw)',
   maxHeight: '85vh',
   overflow: 'auto',
-  background: '#0f1620',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-header)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '8px',
   padding: '1.2rem',
   zIndex: 51,
@@ -385,13 +385,13 @@ const titleStyle: React.CSSProperties = {
   margin: 0,
   fontSize: '1.05rem',
   fontWeight: 600,
-  color: '#dde3ea',
+  color: 'var(--color-text)',
 };
 
 const closeBtnStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
-  color: '#aab4be',
+  color: 'var(--color-text-secondary)',
   fontSize: '1rem',
   cursor: 'pointer',
 };
@@ -399,14 +399,14 @@ const closeBtnStyle: React.CSSProperties = {
 const tabsStyle: React.CSSProperties = {
   display: 'flex',
   gap: '0.5rem',
-  borderBottom: '1px solid #1f2933',
+  borderBottom: '1px solid var(--color-border)',
   paddingBottom: '0.25rem',
 };
 
 const tabButtonStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.82rem',
   fontWeight: 600,
   padding: '0.3rem 0.7rem',
@@ -415,9 +415,9 @@ const tabButtonStyle: React.CSSProperties = {
 };
 
 const tabButtonActiveStyle: React.CSSProperties = {
-  color: '#dde3ea',
-  background: '#0c121a',
-  borderBottom: '2px solid #3a78c2',
+  color: 'var(--color-text)',
+  background: 'var(--color-panel)',
+  borderBottom: '2px solid var(--color-accent-strong)',
 };
 
 const presetListStyle: React.CSSProperties = {
@@ -428,11 +428,11 @@ const presetListStyle: React.CSSProperties = {
 
 const presetButtonStyle: React.CSSProperties = {
   textAlign: 'left',
-  background: '#0c121a',
-  border: '1px solid #1f2933',
+  background: 'var(--color-panel)',
+  border: '1px solid var(--color-border)',
   borderRadius: '5px',
   padding: '0.55rem 0.8rem',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.85rem',
   cursor: 'pointer',
 };
@@ -444,20 +444,20 @@ const presetLabelStyle: React.CSSProperties = {
 const presetHintStyle: React.CSSProperties = {
   marginTop: '0.15rem',
   fontSize: '0.74rem',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
 };
 
 const separatorStyle: React.CSSProperties = {
   height: '1px',
-  background: '#1f2933',
+  background: 'var(--color-border)',
 };
 
 const customToggleStyle: React.CSSProperties = {
   alignSelf: 'flex-start',
   background: 'transparent',
-  border: '1px dashed #2f3a45',
+  border: '1px dashed var(--color-border-strong)',
   borderRadius: '5px',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   padding: '0.35rem 0.85rem',
   fontSize: '0.82rem',
   cursor: 'pointer',
@@ -479,21 +479,21 @@ const fieldLabelStyle: React.CSSProperties = {
   fontSize: '0.74rem',
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
 };
 
 const fieldHintStyle: React.CSSProperties = {
   fontSize: '0.72rem',
-  color: '#7a8794',
+  color: 'var(--color-text-soft)',
   marginTop: '0.1rem',
 };
 
 const inputStyle: React.CSSProperties = {
-  background: '#0c121a',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-panel)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
   padding: '0.35rem 0.5rem',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.85rem',
   fontFamily: 'inherit',
 };
@@ -506,17 +506,17 @@ const footerStyle: React.CSSProperties = {
 
 const cancelBtnStyle: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid #2f3a45',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
   padding: '0.35rem 0.85rem',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.82rem',
   cursor: 'pointer',
 };
 
 const confirmBtnStyle: React.CSSProperties = {
-  background: '#3a78c2',
-  color: '#ffffff',
+  background: 'var(--color-accent-strong)',
+  color: 'var(--color-on-accent)',
   border: 'none',
   borderRadius: '5px',
   padding: '0.35rem 0.95rem',
@@ -526,7 +526,7 @@ const confirmBtnStyle: React.CSSProperties = {
 };
 
 const confirmBtnDisabledStyle: React.CSSProperties = {
-  background: '#2a323a',
-  color: '#7a8590',
+  background: 'var(--color-chip-disabled)',
+  color: 'var(--color-text-soft)',
   cursor: 'default',
 };

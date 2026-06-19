@@ -76,7 +76,7 @@ export type TriplePane = { label: string; text?: string; note?: string };
 
 /** A `note` pane: a centred, muted message that fills the column. */
 const noteCss =
-  'flex:1;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;white-space:pre-wrap;color:#8b97a3;font-size:0.78rem;line-height:1.55;';
+  'flex:1;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;white-space:pre-wrap;color:var(--color-text-dim);font-size:0.78rem;line-height:1.55;';
 
 /**
  * Build three labelled read-only panes side by side (e.g. parent · commit ·
@@ -100,12 +100,12 @@ export function makeTripleView(
   panes.forEach((p, i) => {
     const col = document.createElement('div');
     col.style.cssText = `display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;${
-      i < panes.length - 1 ? 'border-right:1px solid #1f2933;' : ''
+      i < panes.length - 1 ? 'border-right:1px solid var(--color-border);' : ''
     }`;
     const head = document.createElement('div');
     head.textContent = p.label;
     head.style.cssText =
-      'flex:none;padding:0.3rem 0.6rem;font-size:0.62rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#6c7783;background:#0f1620;border-bottom:1px solid #1f2933;';
+      'flex:none;padding:0.3rem 0.6rem;font-size:0.62rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);background:var(--color-header);border-bottom:1px solid var(--color-border);';
     const host = document.createElement('div');
     host.style.cssText = 'flex:1;min-width:0;min-height:0;overflow:hidden;';
     col.appendChild(head);
@@ -144,7 +144,7 @@ export function makeTripleView(
 export function makeNoticeView(parent: HTMLElement, message: string): { destroy: () => void } {
   const el = document.createElement('div');
   el.style.cssText =
-    'height:100%;width:100%;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;white-space:pre-wrap;color:#8b97a3;font-size:0.82rem;line-height:1.6;';
+    'height:100%;width:100%;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;white-space:pre-wrap;color:var(--color-text-dim);font-size:0.82rem;line-height:1.6;';
   el.textContent = message;
   parent.appendChild(el);
   return { destroy: () => el.remove() };
@@ -173,8 +173,8 @@ export function makeDiffView(
 
 /** Column header styling, shared by the triple views. */
 const paneHeadCss =
-  'flex:none;padding:0.3rem 0.6rem;font-size:0.62rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#6c7783;background:#0f1620;border-bottom:1px solid #1f2933;';
-const paneBorderR = 'border-right:1px solid #1f2933;';
+  'flex:none;padding:0.3rem 0.6rem;font-size:0.62rem;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--color-text-muted);background:var(--color-header);border-bottom:1px solid var(--color-border);';
+const paneBorderR = 'border-right:1px solid var(--color-border);';
 
 /**
  * The "All 3" view with a **diff lens**: three columns (before · this commit ·
@@ -202,7 +202,7 @@ export function makeTripleDiffView(
     if (p.note != null) {
       const msg = document.createElement('div');
       msg.style.cssText =
-        'flex:1;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;white-space:pre-wrap;color:#8b97a3;font-size:0.78rem;line-height:1.55;';
+        'flex:1;display:flex;align-items:center;justify-content:center;padding:1.25rem;text-align:center;white-space:pre-wrap;color:var(--color-text-dim);font-size:0.78rem;line-height:1.55;';
       builders.push(() => {
         host.appendChild(msg);
         return { destroy: () => msg.remove() };

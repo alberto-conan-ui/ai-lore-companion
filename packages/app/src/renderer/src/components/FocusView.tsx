@@ -89,26 +89,26 @@ function FrontmatterChips({ fm }: { fm: MemoryFrontmatter }): JSX.Element {
     chips.push({
       label: 'Type',
       value: fm.focus_type,
-      accent: '#e9c489',
+      accent: 'var(--color-reg-focus)',
       testId: 'focus-view-focus-type',
     });
     chips.push({
       label: 'Status',
       value: fm.status,
-      accent: '#c4e1a8',
+      accent: 'var(--color-reg-dial)',
       testId: 'focus-view-status',
     });
   } else if (fm.type === 'at-node') {
     chips.push({
       label: 'Kind',
       value: fm.node_kind,
-      accent: '#e9c489',
+      accent: 'var(--color-reg-focus)',
       testId: 'focus-view-node-kind',
     });
     chips.push({
       label: 'Status',
       value: fm.status,
-      accent: '#c4e1a8',
+      accent: 'var(--color-reg-dial)',
       testId: 'focus-view-status',
     });
   }
@@ -233,9 +233,9 @@ const backdropStyle: React.CSSProperties = {
 };
 
 const sheetStyle: React.CSSProperties = {
-  background: '#0f1620',
-  color: '#e6edf3',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-header)',
+  color: 'var(--color-text-bright)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '8px',
   width: 'min(880px, 96vw)',
   maxHeight: '90vh',
@@ -249,7 +249,7 @@ const headerStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.75rem',
   padding: '1rem 1.1rem',
-  borderBottom: '1px solid #2f3a45',
+  borderBottom: '1px solid var(--color-border-strong)',
 };
 
 const titleStyle: React.CSSProperties = {
@@ -263,9 +263,9 @@ const titleStyle: React.CSSProperties = {
 };
 
 const closeButtonStyle: React.CSSProperties = {
-  background: '#1f2933',
-  color: '#cbd5dd',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-border)',
+  color: 'var(--color-text-2)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
   fontSize: '0.78rem',
   fontWeight: 600,
@@ -288,39 +288,39 @@ const sectionHeadingStyle: React.CSSProperties = {
   fontWeight: 700,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
 };
 
 const sectionBodyStyle: React.CSSProperties = {
   margin: 0,
   padding: '0.75rem 0.9rem',
-  background: '#0a1018',
-  border: '1px solid #1f2933',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-border)',
   borderRadius: '5px',
   fontFamily:
     'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
   fontSize: '0.82rem',
   lineHeight: 1.55,
-  color: '#cbd5dd',
+  color: 'var(--color-text-2)',
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
 };
 
 const sectionEmptyStyle: React.CSSProperties = {
   margin: 0,
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.8rem',
   fontStyle: 'italic',
 };
 
 const loadingStyle: React.CSSProperties = {
   margin: 0,
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
 };
 
 const errorStyle: React.CSSProperties = {
   margin: 0,
-  color: '#e58a8a',
+  color: 'var(--color-danger-fg)',
 };
 
 const chipRowStyle: React.CSSProperties = {
@@ -334,8 +334,8 @@ function chipPillStyle(_accent: string): React.CSSProperties {
     alignItems: 'center',
     gap: '0.3rem',
     padding: '0.2rem 0.5rem',
-    background: '#1f2933',
-    border: '1px solid #2f3a45',
+    background: 'var(--color-border)',
+    border: '1px solid var(--color-border-strong)',
     borderRadius: '4px',
     fontSize: '0.7rem',
     fontWeight: 600,
@@ -344,7 +344,7 @@ function chipPillStyle(_accent: string): React.CSSProperties {
 }
 
 const chipLabelStyle: React.CSSProperties = {
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.06em',
 };

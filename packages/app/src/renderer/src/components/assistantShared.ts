@@ -57,8 +57,8 @@ export const paneStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   minHeight: 0,
-  background: '#0a0f17',
-  color: '#dde3ea',
+  background: 'var(--color-shell)',
+  color: 'var(--color-text)',
 };
 
 export const headerStyle: React.CSSProperties = {
@@ -66,30 +66,30 @@ export const headerStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.6rem',
   padding: '0.4rem 0.7rem',
-  background: '#0c121a',
-  borderBottom: '1px solid #1f2933',
+  background: 'var(--color-panel)',
+  borderBottom: '1px solid var(--color-border)',
   flexShrink: 0,
 };
 
 export const headerLabelStyle: React.CSSProperties = {
   fontSize: '0.78rem',
   fontWeight: 700,
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
 };
 
 export const headerHintStyle: React.CSSProperties = {
   fontSize: '0.72rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontStyle: 'italic',
 };
 
 export const engineSelectStyle: React.CSSProperties = {
   marginLeft: 'auto',
   padding: '0.15rem 0.3rem',
-  background: '#0c121a',
-  border: '1px solid #2c4055',
+  background: 'var(--color-panel)',
+  border: '1px solid var(--color-bubble-border)',
   borderRadius: '4px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.72rem',
 };
 
@@ -104,10 +104,10 @@ export const controlsStyle: React.CSSProperties = {
 
 export const buttonStyle: React.CSSProperties = {
   padding: '0.4rem 0.8rem',
-  background: '#1b2a3d',
-  border: '1px solid #2c4055',
+  background: 'var(--color-bubble)',
+  border: '1px solid var(--color-bubble-border)',
   borderRadius: '4px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.8rem',
   fontWeight: 600,
   cursor: 'pointer',
@@ -120,14 +120,14 @@ export const buttonBusyStyle: React.CSSProperties = {
 
 export const statusStyle: React.CSSProperties = {
   fontSize: '0.75rem',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
 };
 
 export const errorStyle: React.CSSProperties = {
   margin: '0 0.7rem 0.4rem',
   fontSize: '0.8rem',
   lineHeight: 1.5,
-  color: '#ff8a8a',
+  color: 'var(--color-danger-fg)',
   whiteSpace: 'pre-wrap',
 };
 
@@ -136,7 +136,7 @@ export const sessionWrapStyle: React.CSSProperties = {
   flex: 1,
   minHeight: 0,
   minWidth: 0,
-  borderTop: '1px solid #1f2933',
+  borderTop: '1px solid var(--color-border)',
 };
 
 export const hintStyle: React.CSSProperties = {
@@ -145,6 +145,6 @@ export const hintStyle: React.CSSProperties = {
   padding: '1rem',
   fontSize: '0.82rem',
   lineHeight: 1.5,
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   textAlign: 'center',
 };

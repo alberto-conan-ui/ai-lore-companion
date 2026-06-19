@@ -80,8 +80,8 @@ const railStyle: React.CSSProperties = {
   alignItems: 'center',
   paddingTop: 6,
   gap: 4,
-  background: '#0a0f17',
-  borderRight: '1px solid #1a2230',
+  background: 'var(--color-shell)',
+  borderRight: '1px solid var(--color-border-rail)',
 };
 
 const railIconStyle: React.CSSProperties = {
@@ -93,7 +93,7 @@ const railIconStyle: React.CSSProperties = {
   background: 'transparent',
   border: '1px solid transparent',
   borderRadius: 5,
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   fontSize: '0.95rem',
   cursor: 'pointer',
   padding: 0,
@@ -101,7 +101,7 @@ const railIconStyle: React.CSSProperties = {
 
 const railIconActiveStyle: React.CSSProperties = {
   ...railIconStyle,
-  background: '#16202c',
-  border: '1px solid #28384a',
-  color: '#cfd8e0',
+  background: 'var(--color-rail-active)',
+  border: '1px solid var(--color-rail-border)',
+  color: 'var(--color-text-2)',
 };

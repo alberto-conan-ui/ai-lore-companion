@@ -17,10 +17,10 @@ import {
  */
 
 const KIND_STYLE: Record<ActivityKind, { glyph: string; color: string }> = {
-  turn: { glyph: '→', color: '#9fd0e8' },
-  status: { glyph: '·', color: '#6b7785' },
-  answer: { glyph: '←', color: '#86d9a0' },
-  error: { glyph: '✕', color: '#e08a6a' },
+  turn: { glyph: '→', color: 'var(--color-info)' },
+  status: { glyph: '·', color: 'var(--color-text-muted)' },
+  answer: { glyph: '←', color: 'var(--color-success-text)' },
+  error: { glyph: '✕', color: 'var(--color-orange)' },
 };
 
 function copy(text: string): void {
@@ -72,7 +72,7 @@ export function ActivityConsole({ variant = 'dock' }: { variant?: 'dock' | 'full
         <span style={headLabelStyle}>Activity</span>
         {errors > 0 ? <span style={errBadgeStyle}>{errors}</span> : null}
         {full ? null : (
-          <span style={{ ...summaryStyle, color: last ? KIND_STYLE[last.kind].color : '#6b7785' }}>
+          <span style={{ ...summaryStyle, color: last ? KIND_STYLE[last.kind].color : 'var(--color-text-muted)' }}>
             {summary}
           </span>
         )}
@@ -113,7 +113,7 @@ function Row({ e }: { e: ActivityEntry }): JSX.Element {
       <span style={timeStyle}>{e.at}</span>
       <span style={{ ...glyphStyle, color: k.color }}>{k.glyph}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ ...rowTextStyle, color: e.kind === 'error' ? k.color : '#cdd6df' }}>
+        <div style={{ ...rowTextStyle, color: e.kind === 'error' ? k.color : 'var(--color-text-2)' }}>
           {e.text}
           {e.detail ? (
             <>
@@ -140,8 +140,8 @@ function Row({ e }: { e: ActivityEntry }): JSX.Element {
 
 const wrapStyle: React.CSSProperties = {
   flexShrink: 0,
-  borderTop: '1px solid #161e29',
-  background: '#0c121b',
+  borderTop: '1px solid var(--color-border-faint)',
+  background: 'var(--color-panel)',
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
 };
 const fullWrapStyle: React.CSSProperties = {
@@ -149,7 +149,7 @@ const fullWrapStyle: React.CSSProperties = {
   minHeight: 0,
   display: 'flex',
   flexDirection: 'column',
-  background: '#0c121b',
+  background: 'var(--color-panel)',
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
 };
 const fullBodyStyle: React.CSSProperties = {
@@ -157,7 +157,7 @@ const fullBodyStyle: React.CSSProperties = {
   minHeight: 0,
   overflowY: 'auto',
   padding: '4px 0 10px',
-  borderTop: '1px solid #141c27',
+  borderTop: '1px solid var(--color-border-faint)',
 };
 const headStyle: React.CSSProperties = {
   width: '100%',
@@ -171,7 +171,7 @@ const headStyle: React.CSSProperties = {
   textAlign: 'left',
 };
 const chevStyle: React.CSSProperties = {
-  color: '#6b7785',
+  color: 'var(--color-text-muted)',
   fontSize: '0.9rem',
   transition: 'transform .2s',
 };
@@ -179,12 +179,12 @@ const headLabelStyle: React.CSSProperties = {
   fontSize: '0.62rem',
   letterSpacing: '0.12em',
   textTransform: 'uppercase',
-  color: '#8b96a2',
+  color: 'var(--color-text-dim)',
 };
 const errBadgeStyle: React.CSSProperties = {
   fontSize: '0.6rem',
-  color: '#1a0f0c',
-  background: '#e08a6a',
+  color: 'var(--color-ink-inverse)',
+  background: 'var(--color-orange)',
   borderRadius: 999,
   padding: '1px 6px',
   fontWeight: 700,
@@ -197,17 +197,17 @@ const summaryStyle: React.CSSProperties = {
   overflow: 'hidden',
   textOverflow: 'ellipsis',
 };
-const clearStyle: React.CSSProperties = { fontSize: '0.6rem', color: '#5a6571' };
+const clearStyle: React.CSSProperties = { fontSize: '0.6rem', color: 'var(--color-text-faint)' };
 const bodyStyle: React.CSSProperties = {
   maxHeight: 200,
   overflowY: 'auto',
   padding: '4px 0 8px',
-  borderTop: '1px solid #141c27',
+  borderTop: '1px solid var(--color-border-faint)',
 };
 const emptyStyle: React.CSSProperties = {
   padding: '10px 14px',
   fontSize: '0.64rem',
-  color: '#5a6571',
+  color: 'var(--color-text-faint)',
 };
 const rowStyle: React.CSSProperties = {
   display: 'flex',
@@ -216,7 +216,7 @@ const rowStyle: React.CSSProperties = {
   padding: '3px 12px',
 };
 const timeStyle: React.CSSProperties = {
-  color: '#4a5562',
+  color: 'var(--color-text-faint)',
   fontSize: '0.6rem',
   paddingTop: 1,
   flexShrink: 0,
@@ -228,10 +228,10 @@ const rowTextStyle: React.CSSProperties = {
   wordBreak: 'break-word',
 };
 const miniBtnStyle: React.CSSProperties = {
-  background: '#16202d',
-  border: '1px solid #233040',
+  background: 'var(--color-rail-active)',
+  border: '1px solid var(--color-border-2)',
   borderRadius: 4,
-  color: '#9fb2c4',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.56rem',
   padding: '0 5px',
   marginLeft: 4,
@@ -240,10 +240,10 @@ const miniBtnStyle: React.CSSProperties = {
 const preStyle: React.CSSProperties = {
   margin: '5px 0 2px',
   padding: '8px 10px',
-  background: '#070b11',
-  border: '1px solid #1a2430',
+  background: 'var(--color-shell-deep)',
+  border: '1px solid var(--color-border-rail)',
   borderRadius: 6,
-  color: '#aeb9c4',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.62rem',
   lineHeight: 1.5,
   whiteSpace: 'pre-wrap',

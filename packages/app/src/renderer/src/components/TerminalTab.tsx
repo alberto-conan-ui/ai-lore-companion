@@ -125,7 +125,7 @@ const wrapStyle: React.CSSProperties = {
   flex: 1,
   minHeight: 0,
   minWidth: 0,
-  background: '#0a0f17',
+  background: 'var(--color-shell)',
   padding: '4px 6px',
 };
 
@@ -158,13 +158,13 @@ const rowStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontSize: '0.82rem',
   fontWeight: 600,
-  color: '#dde3ea',
+  color: 'var(--color-text)',
 };
 
 const commandStyle: React.CSSProperties = {
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.72rem',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',

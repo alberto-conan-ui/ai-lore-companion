@@ -20,25 +20,25 @@ export const FONT_SIZE = `${FONT_SIZE_PX}px`;
 /** Cockpit palette — the recurring surfaces, borders, and text tones. */
 export const PALETTE = {
   /** Window shell — the darkest ground. */
-  shell: '#0a0f17',
+  shell: 'var(--color-shell)',
   /** Tree / list column ground. */
-  panel: '#0c121a',
+  panel: 'var(--color-panel)',
   /** Header / chrome ground. */
-  header: '#0f1620',
+  header: 'var(--color-header)',
   /** Raised chrome (grid edges, pills). */
-  raised: '#121a24',
+  raised: 'var(--color-raised)',
   /** Hairline borders + grid lines. */
-  border: '#1f2933',
+  border: 'var(--color-border)',
   /** Control borders (buttons, inputs). */
-  borderStrong: '#2f3a45',
+  borderStrong: 'var(--color-border-strong)',
   /** Primary text. */
-  text: '#dde3ea',
+  text: 'var(--color-text)',
   /** Bright text (headers, selection). */
-  textBright: '#e6edf3',
+  textBright: 'var(--color-text-bright)',
   /** Muted text. */
-  textMuted: '#6c7783',
+  textMuted: 'var(--color-text-muted)',
   /** Dim affordance text (reveal, kebab at rest). */
-  textDim: '#8a96a2',
+  textDim: 'var(--color-text-dim)',
   /** Selection / focus accent. */
-  accent: '#5a9bd4',
+  accent: 'var(--color-accent)',
 } as const;

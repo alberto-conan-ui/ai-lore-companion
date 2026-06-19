@@ -209,15 +209,15 @@ const triggerStyle: React.CSSProperties = {
   maxWidth: '22rem',
   height: '1.7rem',
   padding: '0 0.55rem',
-  background: '#0c121a',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-panel)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.72rem',
   cursor: 'pointer',
 };
 
-const triggerIconStyle: React.CSSProperties = { color: '#e0b048', flex: 'none' };
+const triggerIconStyle: React.CSSProperties = { color: 'var(--color-amber)', flex: 'none' };
 
 const triggerLabelStyle: React.CSSProperties = {
   overflow: 'hidden',
@@ -228,14 +228,14 @@ const triggerLabelStyle: React.CSSProperties = {
 
 const triggerShaStyle: React.CSSProperties = {
   flex: 'none',
-  color: '#7c8893',
+  color: 'var(--color-text-soft)',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontSize: '0.66rem',
 };
 
-const triggerDateStyle: React.CSSProperties = { color: '#6c7783', flex: 'none' };
+const triggerDateStyle: React.CSSProperties = { color: 'var(--color-text-muted)', flex: 'none' };
 
-const caretStyle: React.CSSProperties = { color: '#6c7783', flex: 'none', fontSize: '0.65rem' };
+const caretStyle: React.CSSProperties = { color: 'var(--color-text-muted)', flex: 'none', fontSize: '0.65rem' };
 
 const popoverStyle: React.CSSProperties = {
   position: 'absolute',
@@ -247,8 +247,8 @@ const popoverStyle: React.CSSProperties = {
   maxHeight: '60vh',
   display: 'flex',
   flexDirection: 'column',
-  background: '#121a24',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-raised)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '6px',
   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.5)',
   overflow: 'hidden',
@@ -259,14 +259,14 @@ const ackToggleStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.4rem',
   padding: '0.5rem 0.7rem',
-  borderBottom: '1px solid #1f2933',
-  color: '#9fb1bd',
+  borderBottom: '1px solid var(--color-border)',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.72rem',
   cursor: 'pointer',
 };
 
 const ackToggleHintStyle: React.CSSProperties = {
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontStyle: 'italic',
 };
 
@@ -278,7 +278,7 @@ const listStyle: React.CSSProperties = {
 
 const emptyStyle: React.CSSProperties = {
   padding: '0.7rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.74rem',
   fontStyle: 'italic',
 };
@@ -295,14 +295,14 @@ const boundLabelStyle: React.CSSProperties = {
 
 const boundShaStyle: React.CSSProperties = {
   flex: 'none',
-  color: '#7c8893',
+  color: 'var(--color-text-soft)',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontSize: '0.66rem',
 };
 
 const boundDateStyle: React.CSSProperties = {
   flex: 'none',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.68rem',
 };
 
@@ -312,10 +312,10 @@ const boundAckStyle: React.CSSProperties = {
   alignItems: 'baseline',
   gap: '0.35rem',
   paddingLeft: '0.2rem',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.7rem',
 };
 
-const boundArrowStyle: React.CSSProperties = { flex: 'none', color: '#4a5762' };
+const boundArrowStyle: React.CSSProperties = { flex: 'none', color: 'var(--color-text-faint)' };
 
-const boundDotStyle: React.CSSProperties = { flex: 'none', color: '#7fa8c9' };
+const boundDotStyle: React.CSSProperties = { flex: 'none', color: 'var(--color-accent-soft)' };

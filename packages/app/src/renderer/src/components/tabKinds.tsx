@@ -205,8 +205,8 @@ function StatusDot({ status }: { status: TerminalForegroundStatus }): JSX.Elemen
     <span
       style={{
         ...statusDotStyle,
-        background: running ? '#4cd07d' : '#3a4654',
-        boxShadow: running ? '0 0 4px #4cd07d' : 'none',
+        background: running ? 'var(--color-running)' : 'var(--color-dot-idle)',
+        boxShadow: running ? '0 0 4px var(--color-running)' : 'none',
       }}
       aria-label={running ? 'running' : 'idle'}
     />
@@ -432,7 +432,7 @@ const dormantWrapStyle: CSSProperties = {
   flex: 1,
   minHeight: 0,
   minWidth: 0,
-  background: '#0a0f17',
+  background: 'var(--color-shell)',
 };
 
 const dormantBodyStyle: CSSProperties = {
@@ -461,6 +461,6 @@ const aiBadgeStyle: CSSProperties = {
   fontSize: '0.95rem',
   fontWeight: 700,
   lineHeight: 1,
-  color: '#c7b3ff',
+  color: 'var(--color-purple)',
   textShadow: '0 0 6px rgba(199, 179, 255, 0.35)',
 };

@@ -104,8 +104,8 @@ const barStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.25rem',
   padding: '0.25rem 0.4rem',
-  background: '#0f1620',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-header)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '6px',
   boxShadow: '0 6px 18px rgba(0, 0, 0, 0.5)',
 };
@@ -114,17 +114,17 @@ const inputStyle: React.CSSProperties = {
   width: '11rem',
   height: '1.5rem',
   padding: '0 0.4rem',
-  background: '#0c121a',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-panel)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.78rem',
 };
 
 const countStyle: React.CSSProperties = {
   minWidth: '3.5rem',
   textAlign: 'center',
-  color: '#9aa7b4',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.7rem',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
 };
@@ -138,7 +138,7 @@ const btnStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
   borderRadius: '4px',
-  color: '#9aa7b4',
+  color: 'var(--color-text-secondary)',
   cursor: 'pointer',
   fontSize: '0.9rem',
   lineHeight: 1,

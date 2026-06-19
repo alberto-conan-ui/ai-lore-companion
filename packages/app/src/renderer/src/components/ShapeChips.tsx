@@ -63,9 +63,9 @@ const chipStyle: React.CSSProperties = {
   gap: '0.35rem',
   height: '1.55rem',
   padding: '0 0.55rem',
-  background: '#1f2933',
-  color: '#cbd5dd',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-border)',
+  color: 'var(--color-text-2)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
   fontSize: '0.72rem',
   fontWeight: 600,
@@ -74,19 +74,19 @@ const chipStyle: React.CSSProperties = {
 };
 
 const labelStyle: React.CSSProperties = {
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
   fontSize: '0.62rem',
 };
 
 const valueStyle: React.CSSProperties = {
-  color: '#cbd5dd',
+  color: 'var(--color-text-2)',
 };
 
 const publishingChipStyle: React.CSSProperties = {
   // Subtle accent so the shape chip stands out when present — Publishing
   // is the news, the absence of the chip is the no-news state.
-  borderColor: '#3a6da4',
-  color: '#a7c3e1',
+  borderColor: 'var(--color-accent-border)',
+  color: 'var(--color-accent-tint)',
 };

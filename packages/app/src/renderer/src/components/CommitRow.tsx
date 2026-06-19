@@ -87,13 +87,13 @@ const rowStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
   borderRadius: '4px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.74rem',
   textAlign: 'left',
   cursor: 'pointer',
 };
 
-const rowActiveStyle: React.CSSProperties = { background: '#1d4e6b' };
+const rowActiveStyle: React.CSSProperties = { background: 'var(--color-row-active)' };
 
 /** A non-clickable reference label (a save-point that didn't touch this file). */
 const rowDisabledStyle: React.CSSProperties = { opacity: 0.5, cursor: 'default' };
@@ -102,7 +102,7 @@ function badgeStyle(kind: CommitKind): React.CSSProperties {
   return {
     flex: 'none',
     lineHeight: '1.3rem',
-    color: kind === 'save-point' ? '#e0b048' : '#7fa8c9',
+    color: kind === 'save-point' ? 'var(--color-amber)' : 'var(--color-accent-soft)',
   };
 }
 
@@ -130,13 +130,13 @@ const rowLabelStyle: React.CSSProperties = {
 
 const rowShaStyle: React.CSSProperties = {
   flex: 'none',
-  color: '#7c8893',
+  color: 'var(--color-text-soft)',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontSize: '0.66rem',
 };
 
 const rowDateStyle: React.CSSProperties = {
   flex: 'none',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.68rem',
 };

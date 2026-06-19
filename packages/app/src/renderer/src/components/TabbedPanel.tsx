@@ -109,10 +109,10 @@ type Props = {
 
 /** Drift badge on a pinned tab — count plus the four-level colour scale. */
 const TAB_DRIFT_COLOR: Record<DriftLevel, { bg: string; fg: string }> = {
-  idle: { bg: '#1f2933', fg: '#7c8893' },
-  live: { bg: '#2c5b3f', fg: '#bcefcd' },
-  warn: { bg: '#7a5a14', fg: '#ffdf91' },
-  alert: { bg: '#7a1f1f', fg: '#ffc2c2' },
+  idle: { bg: 'var(--color-border)', fg: 'var(--color-text-soft)' },
+  live: { bg: 'var(--color-success-bg)', fg: 'var(--color-success-fg)' },
+  warn: { bg: 'var(--color-warn-bg)', fg: 'var(--color-warn-fg)' },
+  alert: { bg: 'var(--color-danger-bg)', fg: 'var(--color-danger-fg-light)' },
 };
 
 function DriftBadge({ count }: { count: number }): JSX.Element {
@@ -258,7 +258,7 @@ export function TabbedPanel({
                   type="button"
                   style={{
                     ...tabLabelBtn,
-                    color: active ? '#e6edf3' : '#8a96a2',
+                    color: active ? 'var(--color-text-bright)' : 'var(--color-text-dim)',
                     // Pinned panes don't carry the drag-cursor hint other tabs do.
                     cursor: TAB_KINDS[tab.kind].draggable ? 'grab' : 'pointer',
                   }}
@@ -447,8 +447,8 @@ const contentSlot: React.CSSProperties = {
 const stripStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'stretch',
-  background: '#0c121a',
-  borderBottom: '1px solid #1f2933',
+  background: 'var(--color-panel)',
+  borderBottom: '1px solid var(--color-border)',
   padding: '0 0.3rem',
   minHeight: '30px',
   flexShrink: 0,
@@ -460,13 +460,13 @@ const tabStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   background: 'transparent',
-  borderRight: '1px solid #1a2230',
+  borderRight: '1px solid var(--color-border-rail)',
   position: 'relative',
 };
 
 const activeTabStyle: React.CSSProperties = {
-  background: '#0a0f17',
-  boxShadow: 'inset 0 2px 0 #5a9bd4',
+  background: 'var(--color-shell)',
+  boxShadow: 'inset 0 2px 0 var(--color-accent)',
 };
 
 const tabLabelBtn: React.CSSProperties = {
@@ -495,10 +495,10 @@ const tabEditInput: React.CSSProperties = {
   margin: '0.2rem 0.45rem',
   width: '8rem',
   padding: '0.15rem 0.3rem',
-  background: '#0a0f17',
-  border: '1px solid #5a9bd4',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-accent)',
   borderRadius: '3px',
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
   font: 'inherit',
   fontSize: '0.78rem',
   fontWeight: 600,
@@ -522,7 +522,7 @@ const closeBtn: React.CSSProperties = {
   padding: '0 0.4rem 0 0',
   background: 'transparent',
   border: 'none',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.9rem',
   lineHeight: 1,
   cursor: 'pointer',
@@ -533,7 +533,7 @@ const stripDividerStyle: React.CSSProperties = {
   width: '1px',
   alignSelf: 'center',
   height: '18px',
-  background: '#243044',
+  background: 'var(--color-border-2)',
   margin: '0 0.5rem',
 };
 
@@ -552,8 +552,8 @@ const popoverStyle: React.CSSProperties = {
   maxWidth: '20rem',
   maxHeight: '60vh',
   overflowY: 'auto',
-  background: '#0f1620',
-  border: '1px solid #243044',
+  background: 'var(--color-header)',
+  border: '1px solid var(--color-border-2)',
   borderRadius: '6px',
   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
   padding: '0.25rem',
@@ -562,7 +562,7 @@ const popoverStyle: React.CSSProperties = {
 
 const menuEmptyStyle: React.CSSProperties = {
   padding: '0.4rem 0.6rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.74rem',
 };
 
@@ -593,11 +593,11 @@ const menuLabelStyle: React.CSSProperties = {
   gap: '0.35rem',
   fontSize: '0.8rem',
   fontWeight: 600,
-  color: '#dde3ea',
+  color: 'var(--color-text)',
 };
 
 const menuGlyphStyle: React.CSSProperties = {
-  color: '#7f8c98',
+  color: 'var(--color-text-dim)',
   fontSize: '0.78rem',
 };
 
@@ -608,7 +608,7 @@ const menuDetailStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.7rem',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
 };
 
 const menuExternalStyle: React.CSSProperties = {

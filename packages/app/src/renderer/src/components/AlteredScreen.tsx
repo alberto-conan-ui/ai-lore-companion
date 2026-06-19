@@ -50,7 +50,7 @@ function NotAiLoreMessage({ folder }: { folder: string }): JSX.Element {
   return (
     <>
       <div>
-        <strong style={{ color: '#ffcf8a' }}>Not an AI-Lore project.</strong>{' '}
+        <strong style={{ color: 'var(--color-warn-fg)' }}>Not an AI-Lore project.</strong>{' '}
         <span style={folderStyle}>{folder}</span>
       </div>
       <div style={hintStyle}>
@@ -82,7 +82,7 @@ function VersionTooOldMessage({
   return (
     <>
       <div>
-        <strong style={{ color: '#ffcf8a' }}>
+        <strong style={{ color: 'var(--color-warn-fg)' }}>
           AI-Lore {versionLabel} — upgrade required.
         </strong>{' '}
         <span style={folderStyle}>{folder}</span>
@@ -110,8 +110,8 @@ const layoutStyle: React.CSSProperties = {
   height: '100vh',
   width: '100vw',
   margin: 0,
-  background: '#0a0f17',
-  color: '#dde3ea',
+  background: 'var(--color-shell)',
+  color: 'var(--color-text)',
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
 };
 
@@ -121,8 +121,8 @@ const bannerStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: '1rem',
   padding: '0.7rem 1rem',
-  background: '#2a2418',
-  borderBottom: '1px solid #4a3f23',
+  background: 'var(--color-warn-banner-bg)',
+  borderBottom: '1px solid var(--color-warn-banner-border)',
 };
 
 const messageStyle: React.CSSProperties = {
@@ -134,13 +134,13 @@ const messageStyle: React.CSSProperties = {
 };
 
 const folderStyle: React.CSSProperties = {
-  color: '#9aa6b2',
+  color: 'var(--color-text-secondary)',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontSize: '0.8rem',
 };
 
 const hintStyle: React.CSSProperties = {
-  color: '#9aa6b2',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.8rem',
 };
 
@@ -148,7 +148,7 @@ const linkStyle: React.CSSProperties = {
   padding: 0,
   background: 'transparent',
   border: 'none',
-  color: '#5a9bd4',
+  color: 'var(--color-accent)',
   fontSize: '0.8rem',
   textDecoration: 'underline',
   cursor: 'pointer',
@@ -159,9 +159,9 @@ const reloadStyle: React.CSSProperties = {
   padding: '0.4rem 1rem',
   fontSize: '0.85rem',
   fontWeight: 600,
-  color: '#e6edf3',
-  background: '#1c2c3e',
-  border: '1px solid #2f4860',
+  color: 'var(--color-text-bright)',
+  background: 'var(--color-surface-blue)',
+  border: '1px solid var(--color-surface-blue-border)',
   borderRadius: '5px',
   cursor: 'pointer',
 };

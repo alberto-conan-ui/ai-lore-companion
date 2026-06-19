@@ -629,12 +629,12 @@ const panelStyle: React.CSSProperties = {
   maxHeight: '85vh',
   display: 'flex',
   flexDirection: 'column',
-  background: '#121a24',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-raised)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '8px',
   boxShadow: '0 16px 48px rgba(0, 0, 0, 0.6)',
   overflow: 'hidden',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
 };
 
@@ -643,13 +643,13 @@ const headerStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '1rem',
   padding: '0.7rem 0.9rem',
-  borderBottom: '1px solid #1f2933',
+  borderBottom: '1px solid var(--color-border)',
 };
 
 const titleStyle: React.CSSProperties = {
   fontWeight: 700,
   fontSize: '0.92rem',
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
 };
 
 const scopeSwitchStyle: React.CSSProperties = {
@@ -657,8 +657,8 @@ const scopeSwitchStyle: React.CSSProperties = {
   gap: '0.2rem',
   marginLeft: 'auto',
   padding: '0.15rem',
-  background: '#0a0f17',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
 };
 
@@ -667,7 +667,7 @@ const scopeTabStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
   borderRadius: '4px',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.74rem',
   fontWeight: 600,
   cursor: 'pointer',
@@ -675,8 +675,8 @@ const scopeTabStyle: React.CSSProperties = {
 
 const scopeTabActiveStyle: React.CSSProperties = {
   ...scopeTabStyle,
-  background: '#3a78c2',
-  color: '#ffffff',
+  background: 'var(--color-accent-strong)',
+  color: 'var(--color-on-accent)',
 };
 
 const closeStyle: React.CSSProperties = {
@@ -684,7 +684,7 @@ const closeStyle: React.CSSProperties = {
   height: '1.7rem',
   background: 'transparent',
   border: 'none',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.85rem',
   cursor: 'pointer',
 };
@@ -699,7 +699,7 @@ const railStyle: React.CSSProperties = {
   width: '170px',
   flexShrink: 0,
   padding: '0.5rem',
-  borderRight: '1px solid #1f2933',
+  borderRight: '1px solid var(--color-border)',
   display: 'flex',
   flexDirection: 'column',
   gap: '0.15rem',
@@ -711,15 +711,15 @@ const railItemStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
   borderRadius: '4px',
-  color: '#cbd5dd',
+  color: 'var(--color-text-2)',
   fontSize: '0.78rem',
   cursor: 'pointer',
 };
 
 const railItemActiveStyle: React.CSSProperties = {
   ...railItemStyle,
-  background: '#1f2933',
-  color: '#e6edf3',
+  background: 'var(--color-border)',
+  color: 'var(--color-text-bright)',
   fontWeight: 600,
 };
 
@@ -734,7 +734,7 @@ const contentStyle: React.CSSProperties = {
 };
 
 const hintStyle: React.CSSProperties = {
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.8rem',
 };
 
@@ -744,14 +744,14 @@ const settingRowStyle: React.CSSProperties = {
   justifyContent: 'space-between',
   gap: '1rem',
   padding: '0.5rem 0.6rem',
-  background: '#0f1620',
-  border: '1px solid #1f2933',
+  background: 'var(--color-header)',
+  border: '1px solid var(--color-border)',
   borderRadius: '5px',
 };
 
 const settingLabelStyle: React.CSSProperties = {
   fontSize: '0.8rem',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
 };
 
 const checkboxStyle: React.CSSProperties = {
@@ -763,16 +763,16 @@ const checkboxStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   padding: '0.25rem 0.45rem',
-  background: '#0a0f17',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
   fontSize: '0.78rem',
 };
 
 const ignoreBlurbStyle: React.CSSProperties = {
   margin: 0,
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.76rem',
   lineHeight: 1.5,
 };
@@ -788,7 +788,7 @@ const ignoreGroupLabelStyle: React.CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
-  color: '#8a96a2',
+  color: 'var(--color-text-dim)',
 };
 
 const ignoreRowStyle: React.CSSProperties = {
@@ -796,8 +796,8 @@ const ignoreRowStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.5rem',
   padding: '0.3rem 0.5rem',
-  background: '#0f1620',
-  border: '1px solid #1f2933',
+  background: 'var(--color-header)',
+  border: '1px solid var(--color-border)',
   borderRadius: '4px',
 };
 
@@ -806,7 +806,7 @@ const ignorePatternStyle: React.CSSProperties = {
   minWidth: 0,
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontSize: '0.76rem',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -814,7 +814,7 @@ const ignorePatternStyle: React.CSSProperties = {
 
 const ignoreInheritedLevelStyle: React.CSSProperties = {
   fontSize: '0.72rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
 };
 
 const ignoreLevelSelectStyle: React.CSSProperties = {
@@ -828,7 +828,7 @@ const ignoreRemoveStyle: React.CSSProperties = {
   height: '1.4rem',
   background: 'transparent',
   border: 'none',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.74rem',
   cursor: 'pointer',
 };
@@ -849,10 +849,10 @@ const ignoreAddInputStyle: React.CSSProperties = {
 const ignoreAddBtnStyle: React.CSSProperties = {
   flexShrink: 0,
   padding: '0.3rem 0.8rem',
-  background: '#3a78c2',
+  background: 'var(--color-accent-strong)',
   border: 'none',
   borderRadius: '4px',
-  color: '#ffffff',
+  color: 'var(--color-on-accent)',
   fontSize: '0.76rem',
   fontWeight: 600,
   cursor: 'pointer',
@@ -863,8 +863,8 @@ const formStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: '0.5rem',
   padding: '0.4rem 0.5rem',
-  background: '#0f1620',
-  border: '1px solid #1f2933',
+  background: 'var(--color-header)',
+  border: '1px solid var(--color-border)',
   borderRadius: '5px',
 };
 
@@ -872,17 +872,17 @@ const radioLabelStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: '0.25rem',
-  color: '#cbd5dd',
+  color: 'var(--color-text-2)',
   fontSize: '0.76rem',
   cursor: 'pointer',
 };
 
 const textInputStyle: React.CSSProperties = {
   padding: '0.3rem 0.5rem',
-  background: '#0a0f17',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
   fontSize: '0.76rem',
 };
 
@@ -897,31 +897,31 @@ const fieldLabelStyle: React.CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
-  color: '#8a96a2',
+  color: 'var(--color-text-dim)',
 };
 
 const chooseAppStyle: React.CSSProperties = {
   padding: '0.3rem 0.6rem',
-  background: '#1c2c3e',
-  border: '1px solid #2f4860',
+  background: 'var(--color-surface-blue)',
+  border: '1px solid var(--color-surface-blue-border)',
   borderRadius: '4px',
-  color: '#cbd5dd',
+  color: 'var(--color-text-2)',
   fontSize: '0.74rem',
   cursor: 'pointer',
 };
 
 const appNameStyle: React.CSSProperties = {
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
   fontSize: '0.78rem',
   fontWeight: 600,
 };
 
 const saveBtnStyle: React.CSSProperties = {
   padding: '0.3rem 0.8rem',
-  background: '#3a78c2',
+  background: 'var(--color-accent-strong)',
   border: 'none',
   borderRadius: '4px',
-  color: '#ffffff',
+  color: 'var(--color-on-accent)',
   fontSize: '0.76rem',
   fontWeight: 600,
   cursor: 'pointer',
@@ -929,17 +929,17 @@ const saveBtnStyle: React.CSSProperties = {
 
 const saveDisabledStyle: React.CSSProperties = {
   ...saveBtnStyle,
-  background: '#2a323a',
-  color: '#7a8590',
+  background: 'var(--color-chip-disabled)',
+  color: 'var(--color-text-soft)',
   cursor: 'default',
 };
 
 const cancelBtnStyle: React.CSSProperties = {
   padding: '0.3rem 0.8rem',
-  background: '#2a323a',
+  background: 'var(--color-chip-disabled)',
   border: 'none',
   borderRadius: '4px',
-  color: '#cbd5dd',
+  color: 'var(--color-text-2)',
   fontSize: '0.76rem',
   cursor: 'pointer',
 };
@@ -948,9 +948,9 @@ const shortcutAddBtnStyle: React.CSSProperties = {
   alignSelf: 'flex-start',
   padding: '0.35rem 0.7rem',
   background: 'transparent',
-  border: '1px dashed #3a78c2',
+  border: '1px dashed var(--color-accent-strong)',
   borderRadius: '4px',
-  color: '#5a9bd4',
+  color: 'var(--color-accent)',
   fontSize: '0.76rem',
   fontWeight: 600,
   cursor: 'pointer',
@@ -1045,13 +1045,13 @@ const appsCatalogStyle: React.CSSProperties = {
 
 const appsHintStyle: React.CSSProperties = {
   fontSize: '0.78rem',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   lineHeight: 1.45,
 };
 
 const appsEmptyStyle: React.CSSProperties = {
   fontSize: '0.82rem',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   fontStyle: 'italic',
 };
 
@@ -1069,8 +1069,8 @@ const appRowStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.6rem',
   padding: '0.45rem 0.6rem',
-  background: '#0c121a',
-  border: '1px solid #1f2933',
+  background: 'var(--color-panel)',
+  border: '1px solid var(--color-border)',
   borderRadius: '5px',
 };
 
@@ -1084,8 +1084,8 @@ const appIconPlaceholder: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  color: '#9fb1bd',
-  background: '#1f2933',
+  color: 'var(--color-text-secondary)',
+  background: 'var(--color-border)',
   borderRadius: '4px',
   fontSize: '0.78rem',
 };
@@ -1100,13 +1100,13 @@ const appLabelColumnStyle: React.CSSProperties = {
 
 const appLabelStyle: React.CSSProperties = {
   fontSize: '0.85rem',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontWeight: 600,
 };
 
 const appMetaStyle: React.CSSProperties = {
   fontSize: '0.72rem',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -1115,9 +1115,9 @@ const appMetaStyle: React.CSSProperties = {
 
 const appRemoveStyle: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid #2f3a45',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.74rem',
   padding: '0.2rem 0.55rem',
   cursor: 'pointer',
@@ -1269,16 +1269,16 @@ const engineDraftStyle: React.CSSProperties = {
   flexDirection: 'column',
   gap: '0.45rem',
   padding: '0.55rem',
-  background: '#0c121a',
-  border: '1px solid #243044',
+  background: 'var(--color-panel)',
+  border: '1px solid var(--color-border-2)',
   borderRadius: '5px',
 };
 
 const engineInputStyle: React.CSSProperties = {
-  background: '#0a0f17',
-  border: '1px solid #1f2933',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-border)',
   borderRadius: '4px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   font: 'inherit',
   fontSize: '0.82rem',
   padding: '0.35rem 0.55rem',

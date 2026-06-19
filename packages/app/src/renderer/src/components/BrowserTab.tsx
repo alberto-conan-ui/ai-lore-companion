@@ -257,8 +257,8 @@ const toolbarStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.3rem',
   padding: '0.4rem 0.5rem',
-  background: '#0f1620',
-  borderBottom: '1px solid #1f2933',
+  background: 'var(--color-header)',
+  borderBottom: '1px solid var(--color-border)',
 };
 
 function navBtn(disabled: boolean): React.CSSProperties {
@@ -270,9 +270,9 @@ function navBtn(disabled: boolean): React.CSSProperties {
     alignItems: 'center',
     justifyContent: 'center',
     background: 'transparent',
-    border: '1px solid #2f3a45',
+    border: '1px solid var(--color-border-strong)',
     borderRadius: '4px',
-    color: disabled ? '#4a5762' : '#cbd5dd',
+    color: disabled ? 'var(--color-text-faint)' : 'var(--color-text-2)',
     fontSize: '0.9rem',
     cursor: disabled ? 'default' : 'pointer',
     padding: 0,
@@ -284,10 +284,10 @@ const urlStyle: React.CSSProperties = {
   minWidth: 0,
   height: '1.6rem',
   padding: '0 0.5rem',
-  background: '#0a0f17',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
   fontSize: '0.76rem',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
 };
@@ -295,10 +295,10 @@ const urlStyle: React.CSSProperties = {
 const profileStyle: React.CSSProperties = {
   flexShrink: 0,
   height: '1.6rem',
-  background: '#0a0f17',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#cbd5dd',
+  color: 'var(--color-text-2)',
   fontSize: '0.74rem',
   cursor: 'pointer',
 };
@@ -306,7 +306,7 @@ const profileStyle: React.CSSProperties = {
 const pageStyle: React.CSSProperties = {
   flex: 1,
   minHeight: 0,
-  background: '#1a1f27',
+  background: 'var(--color-surface-2)',
 };
 
 const listStyle: React.CSSProperties = {
@@ -339,13 +339,13 @@ const rowStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = {
   fontSize: '0.82rem',
   fontWeight: 600,
-  color: '#dde3ea',
+  color: 'var(--color-text)',
 };
 
 const urlSubStyle: React.CSSProperties = {
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.72rem',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -357,7 +357,7 @@ const externalBtnStyle: React.CSSProperties = {
   width: 28,
   background: 'transparent',
   border: 'none',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   fontSize: '0.85rem',
   cursor: 'pointer',
   padding: '0 0.3rem',

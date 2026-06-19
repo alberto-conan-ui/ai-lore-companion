@@ -3,10 +3,10 @@ import type { DriftLevel } from '../store.js';
 import { ACTION_BUTTON_HEIGHT } from './ActionButton.js';
 
 const STYLES: Record<DriftLevel, { background: string; color: string; label: string }> = {
-  idle: { background: '#2d3a44', color: '#9fb1bd', label: 'idle' },
-  live: { background: '#2c5b3f', color: '#bcefcd', label: 'live' },
-  warn: { background: '#7a5a14', color: '#ffdf91', label: 'warn' },
-  alert: { background: '#7a1f1f', color: '#ffc2c2', label: 'alert' },
+  idle: { background: 'var(--color-neutral-pill)', color: 'var(--color-text-secondary)', label: 'idle' },
+  live: { background: 'var(--color-success-bg)', color: 'var(--color-success-fg)', label: 'live' },
+  warn: { background: 'var(--color-warn-bg)', color: 'var(--color-warn-fg)', label: 'warn' },
+  alert: { background: 'var(--color-danger-bg)', color: 'var(--color-danger-fg-light)', label: 'alert' },
 };
 
 export function DriftPill({ level, count }: { level: DriftLevel; count: number }): JSX.Element {

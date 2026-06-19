@@ -518,8 +518,8 @@ const wrapStyle: React.CSSProperties = {
   minWidth: 0,
   alignItems: 'center',
   justifyContent: 'center',
-  background: '#0a0f17',
-  color: '#dde3ea',
+  background: 'var(--color-shell)',
+  color: 'var(--color-text)',
   padding: '1rem',
 };
 
@@ -535,7 +535,7 @@ const cardStyle: React.CSSProperties = {
 const glyphStyle: React.CSSProperties = {
   fontSize: '2rem',
   lineHeight: 1,
-  color: '#c7b3ff',
+  color: 'var(--color-purple)',
 };
 
 const titleStyle: React.CSSProperties = {
@@ -545,7 +545,7 @@ const titleStyle: React.CSSProperties = {
 
 const hintStyle: React.CSSProperties = {
   fontSize: '0.8rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   lineHeight: 1.5,
 };
 
@@ -558,10 +558,10 @@ const launchRowStyle: React.CSSProperties = {
 
 const startBtnStyle: React.CSSProperties = {
   padding: '0.55rem 1.1rem',
-  background: '#5a3ec2',
-  border: '1px solid #7757d8',
+  background: 'var(--color-purple-strong)',
+  border: '1px solid var(--color-purple-border)',
   borderRadius: '5px',
-  color: '#f3eeff',
+  color: 'var(--color-purple-fg)',
   fontSize: '0.88rem',
   fontWeight: 600,
   cursor: 'pointer',
@@ -569,10 +569,10 @@ const startBtnStyle: React.CSSProperties = {
 
 const enginePickerStyle: React.CSSProperties = {
   padding: '0.4rem 0.65rem',
-  background: '#101822',
-  border: '1px solid #243044',
+  background: 'var(--color-inset)',
+  border: '1px solid var(--color-border-2)',
   borderRadius: '5px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.85rem',
   fontWeight: 500,
   cursor: 'pointer',
@@ -594,7 +594,7 @@ const promptGroupHeader: React.CSSProperties = {
   padding: '0.35rem 0.85rem 0.15rem',
   fontSize: '0.68rem',
   fontWeight: 700,
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
 };
@@ -617,12 +617,12 @@ const promptSlashStyle: React.CSSProperties = {
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.78rem',
   fontWeight: 600,
-  color: '#c7b3ff',
+  color: 'var(--color-purple)',
 };
 
 const promptDescStyle: React.CSSProperties = {
   fontSize: '0.72rem',
-  color: '#8a96a2',
+  color: 'var(--color-text-dim)',
   lineHeight: 1.35,
   // Keep descriptions to a single line — the row title attribute carries
   // the full text on hover.
@@ -638,7 +638,7 @@ const advancedToggleStyle: React.CSSProperties = {
   padding: '0.35rem 0.85rem',
   background: 'transparent',
   border: 'none',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   fontSize: '0.7rem',
   fontWeight: 600,
   textAlign: 'left',
@@ -649,7 +649,7 @@ const advancedToggleStyle: React.CSSProperties = {
 const promptsEmptyStyle: React.CSSProperties = {
   padding: '0.85rem 0.85rem',
   fontSize: '0.78rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   lineHeight: 1.5,
 };
 
@@ -658,7 +658,7 @@ const runningWrapStyle: React.CSSProperties = {
   flex: 1,
   minHeight: 0,
   minWidth: 0,
-  background: '#0a0f17',
+  background: 'var(--color-shell)',
   padding: '4px 6px',
 };
 

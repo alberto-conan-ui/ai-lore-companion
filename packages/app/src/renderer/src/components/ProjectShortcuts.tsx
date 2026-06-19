@@ -164,7 +164,7 @@ export function ProjectShortcuts({
 const sectionStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  borderTop: '1px solid #1a2230',
+  borderTop: '1px solid var(--color-border-rail)',
   marginTop: '0.4rem',
   paddingTop: '0.3rem',
 };
@@ -174,7 +174,7 @@ const headerStyle: React.CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   padding: '0.25rem 0.85rem',
 };
 
@@ -195,12 +195,12 @@ const rowStyle: React.CSSProperties = {
   font: 'inherit',
 };
 
-const labelStyle: React.CSSProperties = { fontSize: '0.82rem', fontWeight: 600, color: '#dde3ea' };
+const labelStyle: React.CSSProperties = { fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text)' };
 
 const valueStyle: React.CSSProperties = {
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',
   fontSize: '0.72rem',
-  color: '#7a8590',
+  color: 'var(--color-text-soft)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
@@ -212,7 +212,7 @@ const iconBtnStyle: React.CSSProperties = {
   width: 24,
   background: 'transparent',
   border: 'none',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.85rem',
   cursor: 'pointer',
   padding: 0,
@@ -222,7 +222,7 @@ const addRowStyle: React.CSSProperties = {
   textAlign: 'left',
   background: 'transparent',
   border: 'none',
-  color: '#8a96a2',
+  color: 'var(--color-text-dim)',
   fontSize: '0.76rem',
   cursor: 'pointer',
   padding: '0.35rem 0.85rem',
@@ -239,20 +239,20 @@ const formStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = {
   height: '1.5rem',
   padding: '0 0.4rem',
-  background: '#0a0f17',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
   fontSize: '0.75rem',
 };
 
 const formButtonsStyle: React.CSSProperties = { display: 'flex', gap: '0.3rem' };
 
 const addBtnStyle: React.CSSProperties = {
-  background: '#27496d',
+  background: 'var(--color-shortcut-active)',
   border: 'none',
   borderRadius: '4px',
-  color: '#fff',
+  color: 'var(--color-on-accent)',
   fontSize: '0.74rem',
   cursor: 'pointer',
   padding: '0.2rem 0.6rem',
@@ -260,9 +260,9 @@ const addBtnStyle: React.CSSProperties = {
 
 const cancelBtnStyle: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid #2f3a45',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#9aa6b2',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.74rem',
   cursor: 'pointer',
   padding: '0.2rem 0.6rem',

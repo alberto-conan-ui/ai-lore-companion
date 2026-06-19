@@ -692,16 +692,16 @@ const panelStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   minHeight: 0,
-  background: '#0a0f17',
-  borderRight: '1px solid #1f2933',
+  background: 'var(--color-shell)',
+  borderRight: '1px solid var(--color-border)',
 };
 
 const stripStyle: React.CSSProperties = {
   display: 'flex',
   flexShrink: 0,
   overflowX: 'auto',
-  background: '#0f1620',
-  borderBottom: '1px solid #1f2933',
+  background: 'var(--color-header)',
+  borderBottom: '1px solid var(--color-border)',
 };
 
 const tabStyle: React.CSSProperties = {
@@ -709,20 +709,20 @@ const tabStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.2rem',
   padding: '0 0.3rem 0 0.7rem',
-  borderRight: '1px solid #1f2933',
+  borderRight: '1px solid var(--color-border)',
   background: 'transparent',
   whiteSpace: 'nowrap',
 };
 
 const tabActiveStyle: React.CSSProperties = {
-  background: '#0a0f17',
-  boxShadow: 'inset 0 -2px 0 #5a9bd4',
+  background: 'var(--color-shell)',
+  boxShadow: 'inset 0 -2px 0 var(--color-accent)',
 };
 
 const tabNameStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.78rem',
   padding: '0.45rem 0',
   cursor: 'pointer',
@@ -731,7 +731,7 @@ const tabNameStyle: React.CSSProperties = {
 const tabCloseStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.95rem',
   lineHeight: 1,
   padding: '0.1rem 0.25rem',
@@ -745,13 +745,13 @@ const toolbarStyle: React.CSSProperties = {
   gap: '0.5rem',
   padding: '0.35rem 0.6rem',
   flexShrink: 0,
-  background: '#0c121a',
-  borderBottom: '1px solid #1f2933',
+  background: 'var(--color-panel)',
+  borderBottom: '1px solid var(--color-border)',
 };
 
 const segmentStyle: React.CSSProperties = {
   display: 'inline-flex',
-  border: '1px solid #2f3a45',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
   overflow: 'hidden',
 };
@@ -759,7 +759,7 @@ const segmentStyle: React.CSSProperties = {
 const segStyle: React.CSSProperties = {
   background: 'transparent',
   border: 'none',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.74rem',
   fontWeight: 600,
   padding: '0.2rem 0.7rem',
@@ -768,17 +768,17 @@ const segStyle: React.CSSProperties = {
 
 const segOnStyle: React.CSSProperties = {
   ...segStyle,
-  background: '#1d4e74',
-  color: '#e6f2ff',
+  background: 'var(--color-tab-active)',
+  color: 'var(--color-tab-active-fg)',
 };
 
 const toolbarSpacerStyle: React.CSSProperties = { flex: 1 };
 
 const externalBtnStyle: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid #2f3a45',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.74rem',
   fontWeight: 600,
   padding: '0.2rem 0.6rem',
@@ -800,7 +800,7 @@ const historyColStyle: React.CSSProperties = {
   // The column itself doesn't scroll — the timeline list does, so the details
   // panel can pin to the bottom.
   overflow: 'hidden',
-  background: '#0c121a',
+  background: 'var(--color-panel)',
 };
 
 /** The scrolling timeline list — sits between the (fixed) toggles and the
@@ -817,17 +817,17 @@ const historyHeadStyle: React.CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
-  color: '#6c7783',
-  borderBottom: '1px solid #1f2933',
+  color: 'var(--color-text-muted)',
+  borderBottom: '1px solid var(--color-border)',
   position: 'sticky',
   top: 0,
-  background: '#0c121a',
+  background: 'var(--color-panel)',
 };
 
 const historyMsgStyle: React.CSSProperties = {
   padding: '0.6rem 0.7rem',
   fontSize: '0.74rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
 };
 
 const historyListStyle: React.CSSProperties = {
@@ -839,10 +839,10 @@ const historyToggleRowStyle: React.CSSProperties = {
   display: 'flex',
   gap: '2px',
   padding: '0.3rem 0.4rem',
-  borderBottom: '1px solid #1f2933',
+  borderBottom: '1px solid var(--color-border)',
   position: 'sticky',
   top: '1.55rem',
-  background: '#0c121a',
+  background: 'var(--color-panel)',
   zIndex: 1,
 };
 
@@ -850,9 +850,9 @@ const historyToggleStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   background: 'transparent',
-  border: '1px solid #2f3a45',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.66rem',
   fontWeight: 600,
   padding: '0.15rem 0',
@@ -864,9 +864,9 @@ const historyToggleStyle: React.CSSProperties = {
 
 const historyToggleOnStyle: React.CSSProperties = {
   ...historyToggleStyle,
-  background: '#1d4e74',
-  borderColor: '#1d4e74',
-  color: '#e6f2ff',
+  background: 'var(--color-tab-active)',
+  borderColor: 'var(--color-tab-active)',
+  color: 'var(--color-tab-active-fg)',
 };
 
 /** The draggable divider between the history column and the diff. */
@@ -874,8 +874,8 @@ const historyResizeStyle: React.CSSProperties = {
   width: '6px',
   flexShrink: 0,
   cursor: 'col-resize',
-  background: '#0c121a',
-  borderRight: '1px solid #1f2933',
+  background: 'var(--color-panel)',
+  borderRight: '1px solid var(--color-border)',
 };
 
 const docBodyStyle: React.CSSProperties = {
@@ -901,9 +901,9 @@ const overlayStyle: React.CSSProperties = {
   justifyContent: 'center',
   padding: '1rem',
   textAlign: 'center',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.82rem',
-  background: '#0a0f17',
+  background: 'var(--color-shell)',
   pointerEvents: 'none',
 };
 
@@ -913,8 +913,8 @@ const detailsStyle: React.CSSProperties = {
   maxHeight: '45%',
   display: 'flex',
   flexDirection: 'column',
-  borderTop: '1px solid #1f2933',
-  background: '#0a0f17',
+  borderTop: '1px solid var(--color-border)',
+  background: 'var(--color-shell)',
 };
 
 const detailsHeadRowStyle: React.CSSProperties = {
@@ -930,14 +930,14 @@ const detailsHeadStyle: React.CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
 };
 
 const detailsCopyStyle: React.CSSProperties = {
   background: 'transparent',
-  border: '1px solid #2f3a45',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '4px',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.66rem',
   fontWeight: 600,
   padding: '0.1rem 0.5rem',
@@ -950,7 +950,7 @@ const detailsBodyStyle: React.CSSProperties = {
 };
 
 const detailsSubjectStyle: React.CSSProperties = {
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.78rem',
   fontWeight: 600,
   marginBottom: '0.4rem',
@@ -970,13 +970,13 @@ const detailsKeyStyle: React.CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.04em',
   textTransform: 'uppercase',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
 };
 
 const detailsValStyle: React.CSSProperties = {
   margin: 0,
   fontSize: '0.72rem',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   wordBreak: 'break-word',
 };
 
@@ -984,7 +984,7 @@ const detailsShaStyle: React.CSSProperties = {
   ...detailsValStyle,
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontSize: '0.68rem',
-  color: '#7fa9cc',
+  color: 'var(--color-accent-soft)',
 };
 
 const detailsBodyTextStyle: React.CSSProperties = {
@@ -992,7 +992,7 @@ const detailsBodyTextStyle: React.CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   fontSize: '0.7rem',
   lineHeight: 1.5,
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   whiteSpace: 'pre-wrap',
   wordBreak: 'break-word',
 };

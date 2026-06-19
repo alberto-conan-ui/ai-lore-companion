@@ -271,8 +271,8 @@ const panelStyle: React.CSSProperties = {
   maxHeight: '78vh',
   display: 'flex',
   flexDirection: 'column',
-  background: '#121a24',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-raised)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '8px',
   boxShadow: '0 16px 48px rgba(0, 0, 0, 0.6)',
   overflow: 'hidden',
@@ -284,20 +284,20 @@ const headerStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.5rem',
   padding: '0.7rem 0.8rem',
-  borderBottom: '1px solid #1f2933',
+  borderBottom: '1px solid var(--color-border)',
 };
 
-const iconStyle: React.CSSProperties = { color: '#6c7783', fontSize: '1.05rem', lineHeight: 1 };
+const iconStyle: React.CSSProperties = { color: 'var(--color-text-muted)', fontSize: '1.05rem', lineHeight: 1 };
 
 const inputStyle: React.CSSProperties = {
   flex: 1,
   minWidth: 0,
   height: '2.1rem',
   padding: '0 0.6rem',
-  background: '#0c121a',
-  border: '1px solid #2f3a45',
+  background: 'var(--color-panel)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.9rem',
 };
 
@@ -307,7 +307,7 @@ const closeBtnStyle: React.CSSProperties = {
   height: '1.8rem',
   background: 'transparent',
   border: 'none',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '1.2rem',
   lineHeight: 1,
   cursor: 'pointer',
@@ -319,14 +319,14 @@ const controlsRowStyle: React.CSSProperties = {
   flexWrap: 'wrap',
   gap: '0.25rem 0.8rem',
   padding: '0.5rem 0.8rem',
-  borderBottom: '1px solid #1f2933',
+  borderBottom: '1px solid var(--color-border)',
 };
 
 const chipStyle: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   gap: '0.35rem',
-  color: '#9fb1bd',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.74rem',
   cursor: 'pointer',
   whiteSpace: 'nowrap',
@@ -335,7 +335,7 @@ const chipStyle: React.CSSProperties = {
 const dividerStyle: React.CSSProperties = {
   width: '1px',
   height: '1rem',
-  background: '#2f3a45',
+  background: 'var(--color-border-strong)',
 };
 
 const resultsStyle: React.CSSProperties = {
@@ -346,7 +346,7 @@ const resultsStyle: React.CSSProperties = {
 
 const emptyStyle: React.CSSProperties = {
   padding: '1rem 0.9rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.8rem',
   fontStyle: 'italic',
 };
@@ -356,7 +356,7 @@ const groupHeaderStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: '0.4rem',
   padding: '0.45rem 0.9rem 0.2rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.64rem',
   fontWeight: 700,
   letterSpacing: '0.06em',
@@ -364,8 +364,8 @@ const groupHeaderStyle: React.CSSProperties = {
 };
 
 const groupCountStyle: React.CSSProperties = {
-  color: '#9fb1bd',
-  background: '#1f2933',
+  color: 'var(--color-text-secondary)',
+  background: 'var(--color-border)',
   borderRadius: '999px',
   padding: '0 0.35rem',
   fontSize: '0.62rem',
@@ -383,7 +383,7 @@ const rowStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
-const rowActiveStyle: React.CSSProperties = { background: '#1d4e6b' };
+const rowActiveStyle: React.CSSProperties = { background: 'var(--color-row-active)' };
 
 const kindBadgeBase: React.CSSProperties = {
   flex: 'none',
@@ -397,13 +397,13 @@ const kindBadgeBase: React.CSSProperties = {
 };
 const kindNameStyle: React.CSSProperties = {
   ...kindBadgeBase,
-  background: '#1f3a4d',
-  color: '#86c5ff',
+  background: 'var(--color-match-bg)',
+  color: 'var(--color-accent-bright)',
 };
 const kindTextStyle: React.CSSProperties = {
   ...kindBadgeBase,
-  background: '#3a2f1f',
-  color: '#e0b048',
+  background: 'var(--color-amber-tag-bg)',
+  color: 'var(--color-amber)',
 };
 
 const rowMainStyle: React.CSSProperties = {
@@ -421,7 +421,7 @@ const rowTopStyle: React.CSSProperties = {
 };
 
 const nameStyle: React.CSSProperties = {
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
   fontSize: '0.8rem',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
@@ -429,21 +429,21 @@ const nameStyle: React.CSSProperties = {
 };
 
 const lineStyle: React.CSSProperties = {
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
 };
 
 const ignoredBadgeStyle: React.CSSProperties = {
   flex: 'none',
   fontSize: '0.6rem',
-  color: '#c9a06a',
-  border: '1px solid #5a4a2c',
+  color: 'var(--color-amber-tag-fg)',
+  border: '1px solid var(--color-amber-tag-border)',
   borderRadius: '3px',
   padding: '0 0.3rem',
 };
 
 const pathStyle: React.CSSProperties = {
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.68rem',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   whiteSpace: 'nowrap',
@@ -452,7 +452,7 @@ const pathStyle: React.CSSProperties = {
 };
 
 const snippetStyle: React.CSSProperties = {
-  color: '#9aa7b4',
+  color: 'var(--color-text-secondary)',
   fontSize: '0.7rem',
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   whiteSpace: 'nowrap',
@@ -462,6 +462,6 @@ const snippetStyle: React.CSSProperties = {
 
 const hintStyle: React.CSSProperties = {
   padding: '0.6rem 0.9rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.74rem',
 };

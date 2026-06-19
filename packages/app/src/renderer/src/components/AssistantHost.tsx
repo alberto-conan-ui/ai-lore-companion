@@ -150,6 +150,6 @@ const hostErrorStyle: React.CSSProperties = {
   margin: '0 0.7rem 0.4rem',
   fontSize: '0.8rem',
   lineHeight: 1.5,
-  color: '#ff8a8a',
+  color: 'var(--color-danger-fg)',
   whiteSpace: 'pre-wrap',
 };

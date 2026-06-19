@@ -79,8 +79,8 @@ const screenStyle: React.CSSProperties = {
   height: '100vh',
   width: '100vw',
   margin: 0,
-  background: '#0a0f17',
-  color: '#dde3ea',
+  background: 'var(--color-shell)',
+  color: 'var(--color-text)',
   fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
 };
 
@@ -95,12 +95,12 @@ const titleStyle: React.CSSProperties = {
   fontSize: '2rem',
   fontWeight: 600,
   letterSpacing: '0.02em',
-  color: '#e6edf3',
+  color: 'var(--color-text-bright)',
 };
 
 const subtitleStyle: React.CSSProperties = {
   margin: '0.4rem 0 1.4rem',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.9rem',
 };
 
@@ -108,9 +108,9 @@ const openButtonStyle: React.CSSProperties = {
   padding: '0.6rem 1.4rem',
   fontSize: '0.95rem',
   fontWeight: 600,
-  color: '#e6edf3',
-  background: '#1c2c3e',
-  border: '1px solid #2f4860',
+  color: 'var(--color-text-bright)',
+  background: 'var(--color-surface-blue)',
+  border: '1px solid var(--color-surface-blue-border)',
   borderRadius: '6px',
   cursor: 'pointer',
 };
@@ -126,7 +126,7 @@ const recentsHeadingStyle: React.CSSProperties = {
   fontWeight: 600,
   textTransform: 'uppercase',
   letterSpacing: '0.08em',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
 };
 
 const recentsListStyle: React.CSSProperties = {
@@ -163,7 +163,7 @@ const recentRemoveStyle: React.CSSProperties = {
   alignSelf: 'center',
   background: 'transparent',
   border: 'none',
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '1rem',
   lineHeight: 1,
   cursor: 'pointer',
@@ -172,13 +172,13 @@ const recentRemoveStyle: React.CSSProperties = {
 };
 
 const recentNameStyle: React.CSSProperties = {
-  color: '#dde3ea',
+  color: 'var(--color-text)',
   fontSize: '0.9rem',
   fontWeight: 500,
 };
 
 const recentPathStyle: React.CSSProperties = {
-  color: '#6c7783',
+  color: 'var(--color-text-muted)',
   fontSize: '0.75rem',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
