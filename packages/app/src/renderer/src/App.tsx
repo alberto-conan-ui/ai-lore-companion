@@ -202,6 +202,9 @@ export function App(): JSX.Element {
   const [leftRailBottomHeight, setLeftRailBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
   const [centreBottomHeight, setCentreBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
   const [rightBottomHeight, setRightBottomHeight] = useState(DEFAULT_BOTTOM_HEIGHT);
+  // Per-pane Changes-panel split heights, keyed by pane id — persisted in the
+  // layout snapshot so a resized Changes panel restores on reopen.
+  const [changesHeightByPane, setChangesHeightByPane] = useState<Record<string, number>>({});
   // Per-tab one-shot commands a terminal shortcut seeded. Consumed by
   // `TerminalTab` on mount; written to the PTY once the shell is up.
   const [terminalInitialCommands, setTerminalInitialCommands] = useState<Record<string, string>>(
@@ -892,28 +895,54 @@ export function App(): JSX.Element {
     [engineName],
   );
 
-  /** Snapshot the current layout — asks main for each browser tab's URL. */
-  const captureLayout = useCallback(async (): Promise<WorkspaceLayout> => {
-    const lastBy: Record<string, TabLastSession | undefined> = {};
-    for (const panelId of PANEL_IDS) {
-      for (const tab of panels[panelId].tabs) {
-        lastBy[tab.id] = await lastSessionFor(tab);
-      }
-    }
-    const toLayout = (p: Panel): LayoutPanel => ({
-      tabs: p.tabs.map((t) => tabToLayout(t, lastBy[t.id])),
-      activeId: p.activeId,
-    });
-    return {
-      schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
-      panels: {
-        leftRail: toLayout(panels.leftRail),
-        centre: toLayout(panels.centre),
-        right: toLayout(panels.right),
-        leftRailBottom: toLayout(panels.leftRailBottom),
-        centreBottom: toLayout(panels.centreBottom),
-        rightBottom: toLayout(panels.rightBottom),
-      },
+  /** Assemble the layout snapshot from the current state and a per-tab
+   *  `lastSession` map. Pure + synchronous — the only async input (a browser
+   *  tab's live URL) is resolved by the caller and passed in. */
+  const buildLayout = useCallback(
+    (lastBy: Record<string, TabLastSession | undefined>): WorkspaceLayout => {
+      const toLayout = (p: Panel): LayoutPanel => ({
+        tabs: p.tabs.map((t) => tabToLayout(t, lastBy[t.id])),
+        activeId: p.activeId,
+      });
+      return {
+        schemaVersion: WORKSPACE_LAYOUT_SCHEMA_VERSION,
+        panels: {
+          leftRail: toLayout(panels.leftRail),
+          centre: toLayout(panels.centre),
+          right: toLayout(panels.right),
+          leftRailBottom: toLayout(panels.leftRailBottom),
+          centreBottom: toLayout(panels.centreBottom),
+          rightBottom: toLayout(panels.rightBottom),
+        },
+        rightOpen,
+        leftRailBottomOpen,
+        centreBottomOpen,
+        rightBottomOpen,
+        leftRailWidth,
+        rightWidth,
+        leftRailBottomHeight,
+        centreBottomHeight,
+        rightBottomHeight,
+        editorWidth,
+        editor: {
+          docs: editorDocs.map((d) => {
+            const ld: LayoutEditorDoc = {
+              path: d.path,
+              scope: d.scope,
+              name: d.name,
+              mode: d.mode,
+            };
+            if (d.oldPath !== undefined) ld.oldPath = d.oldPath;
+            if (d.diffBaseline !== undefined) ld.diffBaseline = d.diffBaseline;
+            return ld;
+          }),
+          activePath: activeDocPath,
+        },
+        changesHeightByPane,
+      };
+    },
+    [
+      panels,
       rightOpen,
       leftRailBottomOpen,
       centreBottomOpen,
@@ -924,37 +953,38 @@ export function App(): JSX.Element {
       centreBottomHeight,
       rightBottomHeight,
       editorWidth,
-      editor: {
-        docs: editorDocs.map((d) => {
-          const ld: LayoutEditorDoc = {
-            path: d.path,
-            scope: d.scope,
-            name: d.name,
-            mode: d.mode,
-          };
-          if (d.oldPath !== undefined) ld.oldPath = d.oldPath;
-          if (d.diffBaseline !== undefined) ld.diffBaseline = d.diffBaseline;
-          return ld;
-        }),
-        activePath: activeDocPath,
-      },
-    };
-  }, [
-    panels,
-    lastSessionFor,
-    rightOpen,
-    leftRailBottomOpen,
-    centreBottomOpen,
-    rightBottomOpen,
-    leftRailWidth,
-    rightWidth,
-    leftRailBottomHeight,
-    centreBottomHeight,
-    rightBottomHeight,
-    editorWidth,
-    editorDocs,
-    activeDocPath,
-  ]);
+      editorDocs,
+      activeDocPath,
+      changesHeightByPane,
+    ],
+  );
+
+  /** Snapshot the current layout — asks main for each browser tab's live URL.
+   *  Used by the in-session debounced capture, where the window stays alive to
+   *  await the enrichment. */
+  const captureLayout = useCallback(async (): Promise<WorkspaceLayout> => {
+    const lastBy: Record<string, TabLastSession | undefined> = {};
+    for (const panelId of PANEL_IDS) {
+      for (const tab of panels[panelId].tabs) {
+        lastBy[tab.id] = await lastSessionFor(tab);
+      }
+    }
+    return buildLayout(lastBy);
+  }, [panels, lastSessionFor, buildLayout]);
+
+  /** Synchronous snapshot for the close / focus-loss flush. Skips the async
+   *  per-tab URL enrichment (falls back to each tab's stored `lastSession`) so
+   *  the IPC write is *dispatched within the `beforeunload` frame*, before the
+   *  renderer tears down. Open editor docs and pane sizes are synchronous state,
+   *  so a just-opened file reliably persists even on an immediate quit — the
+   *  async version lost that race. */
+  const captureLayoutSync = useCallback((): WorkspaceLayout => {
+    const lastBy: Record<string, TabLastSession | undefined> = {};
+    for (const panelId of PANEL_IDS) {
+      for (const tab of panels[panelId].tabs) lastBy[tab.id] = tab.lastSession;
+    }
+    return buildLayout(lastBy);
+  }, [panels, buildLayout]);
 
   /** Rebuild the workspace from a stored snapshot — the five free panels as
    *  dormant tabs, the column/dock sizes, and leftRail's active pane (its
@@ -1011,6 +1041,7 @@ export function App(): JSX.Element {
       });
       useCockpitStore.getState().restoreDocs(docs, layout.editor.activePath);
     }
+    if (layout.changesHeightByPane) setChangesHeightByPane(layout.changesHeightByPane);
   }, []);
 
   // Restore once, when the window first enters cockpit mode. Reads the project
@@ -1107,19 +1138,19 @@ export function App(): JSX.Element {
     wasFocused.current = hasFocus;
     if (!lostFocus) return;
     if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain) || !captureReady.current) return;
-    void captureLayout().then((layout) => window.cockpit.settingsSetLayout({ layout }));
-  }, [hasFocus, mode, chain, captureLayout]);
+    void window.cockpit.settingsSetLayout({ layout: captureLayoutSync() });
+  }, [hasFocus, mode, chain, captureLayoutSync]);
 
   // Final flush on window close — fire-and-forget; main records what reaches it.
   useEffect(() => {
     if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
     const onUnload = (): void => {
       if (!captureReady.current) return;
-      void captureLayout().then((layout) => window.cockpit.settingsSetLayout({ layout }));
+      void window.cockpit.settingsSetLayout({ layout: captureLayoutSync() });
     };
     window.addEventListener('beforeunload', onUnload);
     return () => window.removeEventListener('beforeunload', onUnload);
-  }, [mode, chain, captureLayout]);
+  }, [mode, chain, captureLayoutSync]);
 
   const selectTab = (panelId: PanelId, tabId: string): void => {
     setPanels((p) => ({ ...p, [panelId]: { ...p[panelId], activeId: tabId } }));
@@ -1394,6 +1425,9 @@ export function App(): JSX.Element {
     setAiTabEngine,
     setAiTabRunning,
     clearLastSession,
+    changesHeightByPane,
+    onPaneChangesHeight: (paneId, height) =>
+      setChangesHeightByPane((m) => ({ ...m, [paneId]: height })),
   };
   const contentPortals = tabPlacements.map(({ tab, visible }) => {
     const host = getOrCreateTabHost(tab.id);

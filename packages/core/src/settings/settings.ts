@@ -216,7 +216,20 @@ function parseWorkspaceLayout(value: unknown): WorkspaceLayout | null {
   }
   const editor = parseWorkspaceEditor(o.editor);
   if (editor) layout.editor = editor;
+  const changesHeights = parseChangesHeights(o.changesHeightByPane);
+  if (changesHeights) layout.changesHeightByPane = changesHeights;
   return layout;
+}
+
+/** Parse the per-pane Changes-panel heights — a record of finite numbers.
+ *  Malformed entries are dropped; an empty/absent map yields `undefined`. */
+function parseChangesHeights(value: unknown): Record<string, number> | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 /** Whether `value` is a primitive the store can persist. */

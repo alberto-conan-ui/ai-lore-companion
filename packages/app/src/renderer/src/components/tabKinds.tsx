@@ -45,6 +45,10 @@ export type TabRenderContext = {
   /** Clear a restored tab's dormant `lastSession` — resumes it (mounts the
    *  live surface) or dismisses the banner. Wired to the banner's action / ✕. */
   clearLastSession: (tabId: string) => void;
+  /** Persisted Changes-panel heights by pane id (from the layout snapshot). */
+  changesHeightByPane: Record<string, number>;
+  /** Report a pane's new Changes-panel height (drag-end) for persistence. */
+  onPaneChangesHeight: (paneId: string, height: number) => void;
 };
 
 /** Context the strip's `+ <kind>` creator buttons act through. */
@@ -257,6 +261,8 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
           projectRoot={ctx.projectRoot}
           displayPath={ctx.displayPath}
           revealRequest={ctx.revealTarget?.paneId === spec.id ? ctx.revealTarget : undefined}
+          initialQueueHeight={ctx.changesHeightByPane[spec.id]}
+          onQueueHeightChange={(h) => ctx.onPaneChangesHeight(spec.id, h)}
         />
       );
     },

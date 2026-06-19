@@ -153,4 +153,7 @@ export type WorkspaceLayout = {
   /** Open editor docs + the active one, so the editor reopens where it was left
    *  ("start always opened"). Optional for the same backward-compat reason. */
   editor?: WorkspaceEditor;
+  /** Per-pane Changes-panel split height, keyed by pane id. Optional — absent
+   *  on older snapshots; a pane then falls back to its default. */
+  changesHeightByPane?: Record<string, number>;
 };

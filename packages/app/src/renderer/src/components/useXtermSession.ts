@@ -153,6 +153,11 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
   const fitRef = useRef<FitAddon | null>(null);
   const searchRef = useRef<SearchAddon | null>(null);
   const idRef = useRef<string | null>(null);
+  // Last size pushed to the PTY — so a fit that doesn't change cols/rows sends
+  // no `resizeTerminal` (no SIGWINCH), and the trailing-edge debounce timer for
+  // resize-driven fits (a drag fires many; we want one at the end).
+  const lastSizeRef = useRef<{ cols: number; rows: number }>({ cols: 0, rows: 0 });
+  const fitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Hold the latest callbacks without re-running the mount effect when the
   // caller passes a fresh closure.
   const onStatusRef = useRef(onStatus);
@@ -184,10 +189,26 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
     // measure zero. The active-effect re-fits when the tab is shown again.
     if (!host || !term || !fit || host.offsetParent === null) return;
     fit.fit();
-    if (idRef.current) {
-      window.cockpit.resizeTerminal({ id: idRef.current, cols: term.cols, rows: term.rows });
+    const { cols, rows } = term;
+    const last = lastSizeRef.current;
+    // Only push a PTY resize when the grid actually changed — a no-op fit must
+    // not fire SIGWINCH (which makes width-adaptive prompts reprint).
+    if (idRef.current && (cols !== last.cols || rows !== last.rows)) {
+      lastSizeRef.current = { cols, rows };
+      window.cockpit.resizeTerminal({ id: idRef.current, cols, rows });
     }
   }, []);
+
+  // Resize-driven fits (window resize, host ResizeObserver) coalesce on the
+  // trailing edge: a drag fires one fit at the end, not one per pixel — which
+  // is what stacked stale prompt redraws in the buffer.
+  const doFitDebounced = useCallback(() => {
+    if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
+    fitTimerRef.current = setTimeout(() => {
+      fitTimerRef.current = null;
+      doFit();
+    }, 80);
+  }, [doFit]);
 
   const focus = useCallback((): void => {
     termRef.current?.focus();
@@ -360,15 +381,16 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
       });
     }
 
-    const onResize = (): void => doFit();
+    const onResize = (): void => doFitDebounced();
     window.addEventListener('resize', onResize);
     // Refit when the host's own box changes — a dock resize or a tab moved to
     // a differently sized panel, neither of which fires a window resize.
-    const resizeObserver = new ResizeObserver(() => doFit());
+    const resizeObserver = new ResizeObserver(() => doFitDebounced());
     resizeObserver.observe(host);
 
     return () => {
       disposed = true;
+      if (fitTimerRef.current) clearTimeout(fitTimerRef.current);
       window.removeEventListener('resize', onResize);
       resizeObserver.disconnect();
       offData();
@@ -386,7 +408,7 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
     // PTY. Visibility re-fit/focus lives in the separate effect below. For the
     // Shell tab `ptyId`/`spawn` are stable so this runs once at mount; for the
     // AI tab `ptyId` changes when a new engine PTY is bound, re-running here.
-  }, [ptyId, spawn, killOnUnmount, exitMessage, initialCommand, doFit, readOnly]);
+  }, [ptyId, spawn, killOnUnmount, exitMessage, initialCommand, doFitDebounced, readOnly]);
 
   // Re-fit and focus when this tab becomes the visible one (it cannot lay out
   // while `display: none`).

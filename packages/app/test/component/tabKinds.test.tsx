@@ -74,6 +74,8 @@ function renderCtx(over: Partial<TabRenderContext> = {}): TabRenderContext {
     setAiTabEngine: vi.fn(),
     setAiTabRunning: vi.fn(),
     clearLastSession: vi.fn(),
+    changesHeightByPane: {},
+    onPaneChangesHeight: vi.fn(),
     ...over,
   };
 }

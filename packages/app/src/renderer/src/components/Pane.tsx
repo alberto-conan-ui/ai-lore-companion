@@ -92,6 +92,11 @@ type Props = {
   displayPath: (absPath: string) => string;
   /** Set by a global-search pick: reveal this file. A new token re-triggers. */
   revealRequest?: { path: string; token: number };
+  /** Persisted Changes-panel height for this pane (from the layout snapshot);
+   *  the pane seeds its split from this and falls back to its default. */
+  initialQueueHeight?: number;
+  /** Reports a new Changes-panel height (on drag-end) so it can be persisted. */
+  onQueueHeightChange?: (height: number) => void;
 };
 
 /**
@@ -107,6 +112,8 @@ export function Pane({
   subRoot,
   projectRoot,
   revealRequest,
+  initialQueueHeight,
+  onQueueHeightChange,
 }: Props): JSX.Element {
   const index = useCockpitStore((s) => s.treeIndex[scope]);
   const rawChangesForScope = useCockpitStore((s) => s.changes[scope]);
@@ -204,7 +211,7 @@ export function Pane({
   const [selectedPath, setSelectedPath] = useState<string>(rootId);
   // Seed the root expanded so its children show under the new root row.
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([rootId]));
-  const [queueHeight, setQueueHeight] = useState(220);
+  const [queueHeight, setQueueHeight] = useState(initialQueueHeight ?? 220);
   // The tree's right-click ignore menu: the node and where to draw it.
   const [treeMenu, setTreeMenu] = useState<{ node: TreeNode; x: number; y: number } | null>(null);
 
@@ -356,17 +363,22 @@ export function Pane({
       e.preventDefault();
       const startY = e.clientY;
       const startH = queueHeight;
+      let lastH = startH;
       const onMove = (ev: MouseEvent): void => {
-        setQueueHeight(Math.max(120, startH + (startY - ev.clientY)));
+        lastH = Math.max(120, startH + (startY - ev.clientY));
+        setQueueHeight(lastH);
       };
       const onUp = (): void => {
         window.removeEventListener('mousemove', onMove);
         window.removeEventListener('mouseup', onUp);
+        // Persist on drag-end only — App writes the layout, so we avoid a
+        // setState-per-pixel round-trip through the parent during the drag.
+        onQueueHeightChange?.(lastH);
       };
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
     },
-    [queueHeight],
+    [queueHeight, onQueueHeightChange],
   );
 
   /**
