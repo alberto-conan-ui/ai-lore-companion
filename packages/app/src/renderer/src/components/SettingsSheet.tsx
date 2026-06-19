@@ -1167,8 +1167,8 @@ function EnginesSection(): JSX.Element {
     <div style={appsCatalogStyle} data-testid="settings-engines-section">
       <div style={appsHintStyle}>
         AI engines appear in every panel&apos;s <strong>+ AI ▾</strong> opener. Each entry is a
-        binary the cockpit spawns in the tab&apos;s shell — bare names resolve on your login
-        PATH. Defaults are seeded automatically when <code>claude</code> or <code>gemini</code>
+        binary the cockpit spawns in the tab&apos;s shell — bare names resolve on your login PATH.
+        Defaults are seeded automatically when <code>claude</code> or <code>gemini</code>
         are on PATH.
       </div>
       {engines.length === 0 ? (

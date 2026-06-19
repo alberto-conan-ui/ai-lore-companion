@@ -59,37 +59,41 @@ export function ActivityConsole({ variant = 'dock' }: { variant?: 'dock' | 'full
 
   return (
     <div style={full ? fullWrapStyle : wrapStyle} data-testid="activity-console">
-      <button
-        type="button"
-        style={headStyle}
-        onClick={() => !full && setOpen((o) => !o)}
-        aria-expanded={showBody}
-        data-testid="activity-toggle"
-      >
-        {full ? null : (
-          <span style={{ ...chevStyle, transform: open ? 'rotate(90deg)' : 'none' }}>›</span>
-        )}
-        <span style={headLabelStyle}>Activity</span>
-        {errors > 0 ? <span style={errBadgeStyle}>{errors}</span> : null}
-        {full ? null : (
-          <span style={{ ...summaryStyle, color: last ? KIND_STYLE[last.kind].color : 'var(--color-text-muted)' }}>
-            {summary}
-          </span>
-        )}
-        {full ? <span style={{ flex: 1 }} /> : null}
+      <div style={headStyle}>
+        <button
+          type="button"
+          style={headBtnStyle}
+          onClick={() => !full && setOpen((o) => !o)}
+          aria-expanded={showBody}
+          data-testid="activity-toggle"
+        >
+          {full ? null : (
+            <span style={{ ...chevStyle, transform: open ? 'rotate(90deg)' : 'none' }}>›</span>
+          )}
+          <span style={headLabelStyle}>Activity</span>
+          {errors > 0 ? <span style={errBadgeStyle}>{errors}</span> : null}
+          {full ? null : (
+            <span
+              style={{
+                ...summaryStyle,
+                color: last ? KIND_STYLE[last.kind].color : 'var(--color-text-muted)',
+              }}
+            >
+              {summary}
+            </span>
+          )}
+        </button>
         {entries.length > 0 ? (
-          <span
-            style={clearStyle}
-            onClick={(e) => {
-              e.stopPropagation();
-              clearActivity();
-            }}
+          <button
+            type="button"
+            style={clearBtnStyle}
+            onClick={clearActivity}
             data-testid="activity-clear"
           >
             clear
-          </span>
+          </button>
         ) : null}
-      </button>
+      </div>
       {showBody ? (
         <div style={full ? fullBodyStyle : bodyStyle} data-testid="activity-body" ref={bodyRef}>
           {entries.length === 0 ? (
@@ -113,7 +117,9 @@ function Row({ e }: { e: ActivityEntry }): JSX.Element {
       <span style={timeStyle}>{e.at}</span>
       <span style={{ ...glyphStyle, color: k.color }}>{k.glyph}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ ...rowTextStyle, color: e.kind === 'error' ? k.color : 'var(--color-text-2)' }}>
+        <div
+          style={{ ...rowTextStyle, color: e.kind === 'error' ? k.color : 'var(--color-text-2)' }}
+        >
           {e.text}
           {e.detail ? (
             <>
@@ -165,10 +171,22 @@ const headStyle: React.CSSProperties = {
   alignItems: 'center',
   gap: 8,
   padding: '6px 12px',
+};
+// The toggle fills the row (the summary's flex:1 lives inside it); "clear" sits
+// after it as its own button, so neither is nested inside the other.
+const headBtnStyle: React.CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: 0,
   background: 'none',
   border: 0,
   cursor: 'pointer',
   textAlign: 'left',
+  font: 'inherit',
+  color: 'inherit',
 };
 const chevStyle: React.CSSProperties = {
   color: 'var(--color-text-muted)',
@@ -197,7 +215,15 @@ const summaryStyle: React.CSSProperties = {
   overflow: 'hidden',
   textOverflow: 'ellipsis',
 };
-const clearStyle: React.CSSProperties = { fontSize: '0.6rem', color: 'var(--color-text-faint)' };
+const clearBtnStyle: React.CSSProperties = {
+  fontSize: '0.6rem',
+  color: 'var(--color-text-faint)',
+  background: 'none',
+  border: 0,
+  padding: 0,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
 const bodyStyle: React.CSSProperties = {
   maxHeight: 200,
   overflowY: 'auto',

@@ -1880,7 +1880,10 @@ const refreshStatusStyle: React.CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-const refreshErrStyle: React.CSSProperties = { ...refreshStatusStyle, color: 'var(--color-orange)' };
+const refreshErrStyle: React.CSSProperties = {
+  ...refreshStatusStyle,
+  color: 'var(--color-orange)',
+};
 
 const refreshBtnStyle: React.CSSProperties = {
   appearance: 'none',

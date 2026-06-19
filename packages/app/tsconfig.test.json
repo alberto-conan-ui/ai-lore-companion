@@ -12,5 +12,10 @@
     "declaration": false,
     "sourceMap": true
   },
-  "include": ["src/main/**/*.ts", "src/shared/**/*.ts", "test/headless/**/*.ts", "test/bench/**/*.ts"]
+  "include": [
+    "src/main/**/*.ts",
+    "src/shared/**/*.ts",
+    "test/headless/**/*.ts",
+    "test/bench/**/*.ts"
+  ]
 }

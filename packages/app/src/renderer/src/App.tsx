@@ -1268,10 +1268,16 @@ export function App(): JSX.Element {
     return (
       <main style={fullCenter} data-testid="loading">
         <div style={{ textAlign: 'center' }}>
-          <h1 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-text)', fontWeight: 600 }}>
+          <h1
+            style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-text)', fontWeight: 600 }}
+          >
             AI-Lore
           </h1>
-          <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>Starting…</p>
+          <p
+            style={{ margin: '0.4rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}
+          >
+            Starting…
+          </p>
         </div>
       </main>
     );
@@ -1294,10 +1300,14 @@ export function App(): JSX.Element {
     return (
       <main style={fullCenter} data-testid="loading">
         <div style={{ textAlign: 'center' }}>
-          <h1 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-text)', fontWeight: 600 }}>
+          <h1
+            style={{ margin: 0, fontSize: '1.1rem', color: 'var(--color-text)', fontWeight: 600 }}
+          >
             AI-Lore
           </h1>
-          <p style={{ margin: '0.4rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+          <p
+            style={{ margin: '0.4rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}
+          >
             Reading tracker chain…
           </p>
         </div>
@@ -1309,9 +1319,13 @@ export function App(): JSX.Element {
     return (
       <main style={fullCenter} data-testid="chain-error">
         <div style={errorCard}>
-          <h2 style={{ margin: '0 0 0.5rem', color: 'var(--color-danger-fg)' }}>Cannot read tracker chain</h2>
+          <h2 style={{ margin: '0 0 0.5rem', color: 'var(--color-danger-fg)' }}>
+            Cannot read tracker chain
+          </h2>
           <p style={{ margin: 0, color: 'var(--color-text)' }}>{chain.error}</p>
-          <p style={{ margin: '0.8rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
+          <p
+            style={{ margin: '0.8rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.85rem' }}
+          >
             Run with <code>--root &lt;path&gt;</code> or launch from a project that contains a{' '}
             <code>.ai-lore-&lt;name&gt;/</code> folder.
           </p>
@@ -1482,13 +1496,13 @@ function RailSash({
   onResize: (size: number) => void;
   accent: string;
 }): JSX.Element {
+  const clamp = (next: number): number => Math.max(200, Math.min(window.innerWidth * 0.6, next));
   const onMouseDown = (e: React.MouseEvent): void => {
     e.preventDefault();
     const startX = e.clientX;
     const startSize = size;
     const onMove = (ev: MouseEvent): void => {
-      const next = startSize + (ev.clientX - startX);
-      onResize(Math.max(200, Math.min(window.innerWidth * 0.6, next)));
+      onResize(clamp(startSize + (ev.clientX - startX)));
     };
     const onUp = (): void => {
       window.removeEventListener('mousemove', onMove);
@@ -1497,13 +1511,21 @@ function RailSash({
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
+  // Arrow keys nudge the width when the splitter is focused (16px steps).
+  const onKeyDown = (e: React.KeyboardEvent): void => {
+    if (e.key === 'ArrowLeft') onResize(clamp(size - 16));
+    else if (e.key === 'ArrowRight') onResize(clamp(size + 16));
+  };
   return (
     <div
       style={{ ...railSashHit }}
+      // biome-ignore lint/a11y/useSemanticElements: an interactive window splitter — no semantic element fits.
       role="separator"
+      tabIndex={0}
       aria-orientation="vertical"
       aria-label="Resize left rail"
       onMouseDown={onMouseDown}
+      onKeyDown={onKeyDown}
       data-testid="left-rail-sash"
     >
       <div style={{ ...railDivider, background: accent }} />

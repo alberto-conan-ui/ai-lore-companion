@@ -3,9 +3,7 @@
     "SessionStart": [
       {
         "matcher": "*",
-        "hooks": [
-          { "type": "command", "command": "echo 'Invoke the ai-lore-orient skill now.'" }
-        ]
+        "hooks": [{ "type": "command", "command": "echo 'Invoke the ai-lore-orient skill now.'" }]
       }
     ],
     "SessionEnd": [

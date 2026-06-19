@@ -145,9 +145,9 @@ export function appsForNode(apps: readonly AppEntry[], nodeKind: 'file' | 'folde
 export function cleanAppLabel(label: string): string {
   const trimmed = label.trim();
   const inMatch = trimmed.match(/^Open (?:the )?.+? in (.+)$/i);
-  if (inMatch && inMatch[1]) return inMatch[1].trim();
+  if (inMatch?.[1]) return inMatch[1].trim();
   const openMatch = trimmed.match(/^Open (.+)$/i);
-  if (openMatch && openMatch[1]) return openMatch[1].trim();
+  if (openMatch?.[1]) return openMatch[1].trim();
   return trimmed;
 }
 

@@ -161,8 +161,7 @@ test('watcher fires both onFileChange and onDirEvent on an add (host can listen 
     writeFileSync(target, '# memory\n');
     await waitFor(
       () =>
-        fileEvents.some((e) => e.absPath === target) &&
-        dirEvents.some((e) => e.absPath === target),
+        fileEvents.some((e) => e.absPath === target) && dirEvents.some((e) => e.absPath === target),
       2000,
     );
 

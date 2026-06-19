@@ -235,7 +235,11 @@ const triggerShaStyle: React.CSSProperties = {
 
 const triggerDateStyle: React.CSSProperties = { color: 'var(--color-text-muted)', flex: 'none' };
 
-const caretStyle: React.CSSProperties = { color: 'var(--color-text-muted)', flex: 'none', fontSize: '0.65rem' };
+const caretStyle: React.CSSProperties = {
+  color: 'var(--color-text-muted)',
+  flex: 'none',
+  fontSize: '0.65rem',
+};
 
 const popoverStyle: React.CSSProperties = {
   position: 'absolute',

@@ -67,9 +67,6 @@ test('dedupEngines collapses identical entries, preserving order', () => {
 });
 
 test('dedupEngines keeps entries that differ in any identity field', () => {
-  const list = dedupEngines([
-    claude,
-    { ...claude, binary: '/usr/local/bin/claude' },
-  ]);
+  const list = dedupEngines([claude, { ...claude, binary: '/usr/local/bin/claude' }]);
   assert.equal(list.length, 2);
 });

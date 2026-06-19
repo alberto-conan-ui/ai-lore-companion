@@ -11,8 +11,8 @@ export const FONT_UI = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 /** The one monospace font — paths, code, the editor. */
 export const FONT_MONO = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
-/** The one file-row text size — px number for the ag-grid theme param,
- *  string for inline CSS. The navigator tree and the file/changes grids both
+/** The one file-row text size — px number where a numeric size is needed,
+ *  string for inline CSS. The navigator tree and the changes panel both
  *  read from this so a row reads the same on either side (P4 facelift). */
 export const FONT_SIZE_PX = 12.5;
 export const FONT_SIZE = `${FONT_SIZE_PX}px`;

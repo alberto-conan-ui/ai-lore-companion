@@ -31,13 +31,7 @@ focus_type: build
   );
 }
 
-function writePhase(
-  dir: string,
-  focus: string,
-  name: string,
-  status: string,
-  title = name,
-): void {
+function writePhase(dir: string, focus: string, name: string, status: string, title = name): void {
   mkdirSync(join(dir, 'memory/action-tree', focus), { recursive: true });
   writeFileSync(
     join(dir, 'memory/action-tree', focus, `${name}.phase.md`),
@@ -149,10 +143,7 @@ focus_type: build
 test('readTrackerReview tolerates files with missing frontmatter', () => {
   const { dir, cleanup } = makeLore();
   try {
-    writeFileSync(
-      join(dir, 'memory/status/focus', 'bare.focus.md'),
-      '# Just a body\n\nno yaml\n',
-    );
+    writeFileSync(join(dir, 'memory/status/focus', 'bare.focus.md'), '# Just a body\n\nno yaml\n');
     writeFocus(dir, 'good', 'Review');
     const entries = readTrackerReview(dir);
     assert.equal(entries.length, 1);

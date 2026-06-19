@@ -260,10 +260,7 @@ test('attachChangesTracker seeds both snapshots on attach (HEAD baseline)', () =
       const snap = tracker.snapshot();
       assert.equal(snap.payload.length, 1);
       assert.equal(snap.lore.length, 1);
-      assert.deepEqual(
-        events.map((e) => e.scope).sort(),
-        ['lore', 'payload'],
-      );
+      assert.deepEqual(events.map((e) => e.scope).sort(), ['lore', 'payload']);
     } finally {
       tracker.close();
     }
@@ -375,8 +372,7 @@ test('setBaseline triggers an immediate re-read against the new baseline', () =>
       payloadRoot: payload.dir,
       loreRoot: lore.dir,
       debounceMs: 5,
-      onChange: (scope, entries) =>
-        events.push({ scope, codes: entries.map((e) => e.code) }),
+      onChange: (scope, entries) => events.push({ scope, codes: entries.map((e) => e.code) }),
     });
     try {
       // Seed: HEAD baseline against committed file → no changes.

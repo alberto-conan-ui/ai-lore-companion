@@ -63,8 +63,8 @@ describe('FileTree virtualization', () => {
         onContextMenu={noop}
       />,
     );
-    // Row buttons carry `.row-kebab-host`; the nested ↗ / kebab buttons do not.
-    const rows = container.querySelectorAll('button.row-kebab-host');
+    // Row elements carry `.row-kebab-host`; the nested ↗ / kebab buttons do not.
+    const rows = container.querySelectorAll('.row-kebab-host');
     // 2000+ visible nodes, but only the windowed slice (~viewport + overscan)
     // is in the DOM — the whole point of the virtualization.
     expect(rows.length).toBeLessThan(60);
@@ -99,12 +99,12 @@ describe('FileTree virtualization', () => {
         driftKindFor={() => undefined}
       />,
     );
-    const fileRow = container.querySelector<HTMLButtonElement>('[title="/r/a.ts"]');
+    const fileRow = container.querySelector<HTMLElement>('[title="/r/a.ts"]');
     expect(fileRow).not.toBeNull();
     // Single click selects (no open); double-click opens in the editor.
-    fireEvent.click(fileRow as HTMLButtonElement);
+    fireEvent.click(fileRow as HTMLElement);
     expect(onActivateFile).not.toHaveBeenCalled();
-    fireEvent.doubleClick(fileRow as HTMLButtonElement);
+    fireEvent.doubleClick(fileRow as HTMLElement);
     expect(onActivateFile).toHaveBeenCalledTimes(1);
     expect(onActivateFile.mock.calls[0]?.[0]?.path).toBe('/r/a.ts');
   });

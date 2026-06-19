@@ -7,8 +7,8 @@ import type { JSX } from 'react';
  * the global stylesheet in `index.html` (`.row-kebab` rules).
  *
  * The kebab is a presentation primitive — it knows nothing about the menu.
- * The caller decides how the menu opens (set state on a Pane, call AG-Grid's
- * `api.showContextMenu`, etc.) by handling `onActivate`.
+ * The caller decides how the menu opens (set state on a Pane, position a
+ * popover, etc.) by handling `onActivate`.
  *
  * Phase B task 6 of [Companion v0.6](../../../../.ai-lore-ai-lore-companion/memory/action-tree/companion-v0.6/B-drift-is-git.phase.md).
  */

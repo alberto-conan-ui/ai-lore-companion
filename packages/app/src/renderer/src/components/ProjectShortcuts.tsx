@@ -195,7 +195,11 @@ const rowStyle: React.CSSProperties = {
   font: 'inherit',
 };
 
-const labelStyle: React.CSSProperties = { fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text)' };
+const labelStyle: React.CSSProperties = {
+  fontSize: '0.82rem',
+  fontWeight: 600,
+  color: 'var(--color-text)',
+};
 
 const valueStyle: React.CSSProperties = {
   fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace',

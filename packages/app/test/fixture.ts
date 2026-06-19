@@ -135,17 +135,7 @@ export function seedLoreChanges(root: string): void {
     execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
   };
   git('init', '-q', '-b', 'main');
-  git(
-    '-c',
-    'user.email=t@t',
-    '-c',
-    'user.name=T',
-    'commit',
-    '--allow-empty',
-    '-q',
-    '-m',
-    'seed',
-  );
+  git('-c', 'user.email=t@t', '-c', 'user.name=T', 'commit', '--allow-empty', '-q', '-m', 'seed');
   writeFileSync(join(contracts, 'example.md'), '# example contract\n');
   writeFileSync(join(contracts, 'contracts.index.md'), '# contracts index\n');
 }
@@ -203,7 +193,11 @@ export function seedVerbs(root: string): void {
   const verbs = join(lore, 'process', 'verbs');
   mkdirSync(verbs, { recursive: true });
   const rows: { name: string; kind: 'verb' | 'bookend'; desc: string }[] = [
-    { name: 'orient', kind: 'bookend', desc: 'Session open — load the methodology, walk the focus chain' },
+    {
+      name: 'orient',
+      kind: 'bookend',
+      desc: 'Session open — load the methodology, walk the focus chain',
+    },
     { name: 'chat', kind: 'verb', desc: 'Set posture to Chat — converse only, touch nothing' },
     { name: 'redial', kind: 'verb', desc: 'Set the dials — the conversational register' },
     { name: 'plan', kind: 'verb', desc: 'Set posture to Planning' },
@@ -212,7 +206,11 @@ export function seedVerbs(root: string): void {
     { name: 'write-lore', kind: 'verb', desc: 'Write or update Memory' },
     { name: 'ack', kind: 'verb', desc: 'Commit both repos with a focused message' },
     { name: 'save-point', kind: 'verb', desc: 'Formal milestone — commit + ledger entry' },
-    { name: 'close-session', kind: 'bookend', desc: 'Session close — write the journal, surface drift' },
+    {
+      name: 'close-session',
+      kind: 'bookend',
+      desc: 'Session close — write the journal, surface drift',
+    },
     { name: 'install', kind: 'verb', desc: 'Bind AI-Lore into a specific AI engine' },
   ];
   for (const r of rows) {
@@ -261,7 +259,11 @@ export function seedEngines(
  * forever so the PTY stays alive long enough for the test to assert. The
  * returned absolute path is what to set as the engine's `binary`.
  */
-export function makeFakeEngineBinary(marker: string): { dir: string; binary: string; cleanup: () => void } {
+export function makeFakeEngineBinary(marker: string): {
+  dir: string;
+  binary: string;
+  cleanup: () => void;
+} {
   const dir = mkdtempSync(join(tmpdir(), 'cockpit-e2e-engine-'));
   const binary = join(dir, 'fake-engine.sh');
   // `tail -f /dev/null` keeps the PTY open without burning CPU; the echo

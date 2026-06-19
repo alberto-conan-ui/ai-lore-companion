@@ -287,7 +287,11 @@ const headerStyle: React.CSSProperties = {
   borderBottom: '1px solid var(--color-border)',
 };
 
-const iconStyle: React.CSSProperties = { color: 'var(--color-text-muted)', fontSize: '1.05rem', lineHeight: 1 };
+const iconStyle: React.CSSProperties = {
+  color: 'var(--color-text-muted)',
+  fontSize: '1.05rem',
+  lineHeight: 1,
+};
 
 const inputStyle: React.CSSProperties = {
   flex: 1,

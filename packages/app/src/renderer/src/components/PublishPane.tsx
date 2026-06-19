@@ -1,7 +1,7 @@
 import type { AppEntry, TreeNode } from '@ai-lore-companion/core';
 import { type JSX, useCallback, useMemo, useRef, useState } from 'react';
-import { FileTree } from './FileTree.js';
 import { useCockpitStore } from '../store.js';
+import { FileTree } from './FileTree.js';
 
 /**
  * The Publish pane (v0.8 Phase B) — view-only browser of `<project>/publish/`.
@@ -103,8 +103,8 @@ export function PublishPane(): JSX.Element {
     return (
       <div style={emptyWrapStyle} data-testid="pane-publish">
         <div style={emptyMessageStyle}>
-          Publish folder is not loaded yet — make sure the project declares a{' '}
-          <code>publish:</code> block in <code>workspace.yaml</code>.
+          Publish folder is not loaded yet — make sure the project declares a <code>publish:</code>{' '}
+          block in <code>workspace.yaml</code>.
         </div>
       </div>
     );

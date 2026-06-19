@@ -38,10 +38,7 @@ export function ShapeChips({
         </span>
       ) : null}
       {shape === 'publishing' ? (
-        <span
-          style={{ ...chipStyle, ...publishingChipStyle }}
-          data-testid="chip-shape"
-        >
+        <span style={{ ...chipStyle, ...publishingChipStyle }} data-testid="chip-shape">
           <span style={labelStyle}>Shape</span>
           <span style={valueStyle}>Publishing</span>
         </span>

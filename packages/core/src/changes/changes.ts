@@ -31,9 +31,7 @@ export type ChangesResult =
   | { kind: 'failed'; message: string };
 
 /** Result of a diff-text read — `ok` carries the unified-diff text. */
-export type DiffTextResult =
-  | { kind: 'ok'; text: string }
-  | { kind: 'failed'; message: string };
+export type DiffTextResult = { kind: 'ok'; text: string } | { kind: 'failed'; message: string };
 
 /** Result of a commit-list read — `ok` carries the recent commits. */
 export type CommitListResult =
@@ -131,11 +129,10 @@ function readAsDeletedFile(
   baseline: string,
   relPath: string,
 ): DiffTextResult {
-  const show = spawnSync(
-    'git',
-    ['-C', workingTreeRoot, 'show', `${baseline}:${relPath}`],
-    { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
-  );
+  const show = spawnSync('git', ['-C', workingTreeRoot, 'show', `${baseline}:${relPath}`], {
+    encoding: 'utf8',
+    maxBuffer: 8 * 1024 * 1024,
+  });
   // `git show` exits non-zero when the path doesn't exist at the baseline —
   // empty diff + no working-tree file + no baseline file means unchanged
   // (file never existed at this baseline). Return empty so the preview clears.
@@ -197,11 +194,9 @@ export function readCommitList(workingTreeRoot: string, limit: number): CommitLi
  * granularity matches the rest of the cockpit.
  */
 function readPorcelainStatus(workingTreeRoot: string): ChangesResult {
-  const result = spawnSync(
-    'git',
-    ['-C', workingTreeRoot, 'status', '--porcelain', '-z', '-uall'],
-    { encoding: 'utf8' },
-  );
+  const result = spawnSync('git', ['-C', workingTreeRoot, 'status', '--porcelain', '-z', '-uall'], {
+    encoding: 'utf8',
+  });
   if (result.error) {
     return { kind: 'failed', message: `git status error: ${result.error.message}` };
   }
@@ -221,11 +216,9 @@ function readPorcelainStatus(workingTreeRoot: string): ChangesResult {
  * definition — untracked files are unknown to either baseline or HEAD).
  */
 function readDiffNameStatus(workingTreeRoot: string, baseline: string): ChangesResult {
-  const diff = spawnSync(
-    'git',
-    ['-C', workingTreeRoot, 'diff', '--name-status', '-z', baseline],
-    { encoding: 'utf8' },
-  );
+  const diff = spawnSync('git', ['-C', workingTreeRoot, 'diff', '--name-status', '-z', baseline], {
+    encoding: 'utf8',
+  });
   if (diff.error) {
     return { kind: 'failed', message: `git diff error: ${diff.error.message}` };
   }

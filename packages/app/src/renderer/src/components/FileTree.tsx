@@ -183,8 +183,8 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     setFocusedPath(cur ? cur.path : root.path);
   }, [indexByPath, focusedPath, root]);
 
-  const rowRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
-  const setRowRef = useCallback((path: string, el: HTMLButtonElement | null) => {
+  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const setRowRef = useCallback((path: string, el: HTMLDivElement | null) => {
     if (el) rowRefs.current.set(path, el);
     else rowRefs.current.delete(path);
   }, []);
@@ -343,6 +343,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
       onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
     >
       <ul
+        role="tree"
         style={{ ...listReset, position: 'relative', height: `${total}px` }}
         onKeyDown={handleKeyDown}
       >
@@ -397,7 +398,7 @@ type RowProps = {
   driftLevelFor: (folderPath: string) => DriftLevel;
   driftKindFor?: (filePath: string) => DriftKind | undefined;
   onContextMenu?: (node: TreeNode, x: number, y: number) => void;
-  setRowRef: (path: string, el: HTMLButtonElement | null) => void;
+  setRowRef: (path: string, el: HTMLDivElement | null) => void;
 };
 
 function Row({
@@ -435,9 +436,12 @@ function Row({
   };
 
   return (
-    <li style={{ ...rowItem, top: `${top}px` }}>
-      <button
-        type="button"
+    <li style={{ ...rowItem, top: `${top}px` }} role="presentation">
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: keyboard activation is the tree's roving-tabindex model — handleKeyDown on the parent <ul>. */}
+      <div
+        role="treeitem"
+        aria-selected={isSelected}
+        aria-expanded={isDir ? open : undefined}
         ref={(el) => setRowRef(node.path, el)}
         tabIndex={isFocused ? 0 : -1}
         className={`row-kebab-host file-tree-row${isSelected ? ' is-selected' : ''}`}
@@ -463,7 +467,9 @@ function Row({
         title={synthetic ? node.name : node.path}
         data-testid={isRoot ? 'tree-root' : undefined}
       >
-        <span style={{ ...twistyStyle, color: 'var(--color-text-secondary)' }}>{isDir ? (open ? '▾' : '▸') : ''}</span>
+        <span style={{ ...twistyStyle, color: 'var(--color-text-secondary)' }}>
+          {isDir ? (open ? '▾' : '▸') : ''}
+        </span>
         <span style={glyphStyle}>
           <FileIcon name={node.name} isDir={isDir} />
         </span>
@@ -501,7 +507,7 @@ function Row({
             }}
           />
         )}
-      </button>
+      </div>
     </li>
   );
 }
