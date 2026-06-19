@@ -67,14 +67,21 @@ export function resolveTheme(setting: unknown): 'dark' | 'light' {
  * and the terminal can't drift apart.
  */
 export function onEffectiveTheme(cb: (theme: 'dark' | 'light') => void): () => void {
+  // Defensive: in non-app contexts (e.g. component tests with a partial cockpit
+  // mock) the settings API may be absent — emit the resolved default and no-op.
+  const cockpit = window.cockpit;
+  if (!cockpit?.settingsGet || !cockpit.onSettingsChanged) {
+    cb(resolveTheme(undefined));
+    return () => {};
+  }
   let setting: unknown;
   const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
   const emit = (): void => cb(resolveTheme(setting));
-  void window.cockpit.settingsGet().then((snap) => {
+  void cockpit.settingsGet().then((snap) => {
     setting = snap.resolved['appearance.theme'];
     emit();
   });
-  const offSettings = window.cockpit.onSettingsChanged((snap) => {
+  const offSettings = cockpit.onSettingsChanged((snap) => {
     setting = snap.resolved['appearance.theme'];
     emit();
   });

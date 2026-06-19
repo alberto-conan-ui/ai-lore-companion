@@ -1,6 +1,7 @@
 import { type JSX, useEffect, useRef, useState } from 'react';
 import type { FileHistoryEntry, SavePointInfo } from '../../shared/ipc.js';
 import { type EditorDoc, useCockpitStore } from '../store.js';
+import { onEffectiveTheme } from '../theme.js';
 import { CommitRow } from './CommitRow.js';
 import { MarkdownPreview } from './editor/MarkdownPreview.js';
 import {
@@ -159,6 +160,10 @@ export function EditorPanel(): JSX.Element | null {
  *  live against both the selected save-point and the file on disk. */
 function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
+  // Effective theme drives the CodeMirror palette; a change rebuilds the view
+  // (it's in the build effect's deps) so the editor re-themes on toggle.
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  useEffect(() => onEffectiveTheme(setTheme), []);
   const globalBaseline = useCockpitStore((s) => s.baselineByScope[doc.scope]);
   const setDocDiffBaseline = useCockpitStore((s) => s.setDocDiffBaseline);
   // The history column's width, dragged via the divider beside it. Local to the
@@ -273,7 +278,7 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
         return;
       }
       if (doc.mode === 'code') {
-        view = makeCodeView(el, doc.name, current.text);
+        view = makeCodeView(el, doc.name, current.text, theme);
         setStatus('ready');
         return;
       }
@@ -304,12 +309,13 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
           // no content diff), so fall back to the plain noted triple there.
           view =
             parentNote != null || commitNote != null
-              ? makeTripleView(el, doc.name, [before, commitPane, currentPane])
+              ? makeTripleView(el, doc.name, [before, commitPane, currentPane], theme)
               : makeTripleDiffView(
                   el,
                   doc.name,
                   { before, commit: commitPane, current: currentPane },
                   all3Boundary,
+                  theme,
                 );
         } else {
           // "Change": what the picked commit changed — its predecessor vs itself.
@@ -317,7 +323,7 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
           view =
             parentText === commitText
               ? makeNoticeView(el, changeIdenticalNote)
-              : makeDiffView(el, doc.name, parentText, commitText);
+              : makeDiffView(el, doc.name, parentText, commitText, theme);
         }
         setStatus('ready');
         return;
@@ -332,7 +338,7 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
         view =
           commitText === current.text
             ? makeNoticeView(el, currentIdenticalNote)
-            : makeDiffView(el, doc.name, commitText, current.text);
+            : makeDiffView(el, doc.name, commitText, current.text, theme);
         setStatus('ready');
         return;
       }
@@ -353,7 +359,7 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
       view =
         baseText === current.text
           ? makeNoticeView(el, baselineIdenticalNote)
-          : makeDiffView(el, doc.name, baseText, current.text);
+          : makeDiffView(el, doc.name, baseText, current.text, theme);
       setStatus('ready');
     })();
     return () => {
@@ -381,6 +387,7 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
     currentIdenticalNote,
     baselineIdenticalNote,
     diskSignal,
+    theme,
   ]);
 
   const body = (

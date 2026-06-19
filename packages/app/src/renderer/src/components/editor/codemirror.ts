@@ -49,12 +49,17 @@ const fitTheme = EditorView.theme({
   '.cm-scroller': { overflow: 'auto' },
 });
 
+/** The editor theme. Dark rides `oneDark`; light uses CodeMirror's built-in
+ *  light styling (basicSetup's default highlight) so the editor matches the
+ *  app's light palette. Threaded from the caller's effective theme. */
+export type EditorTheme = 'dark' | 'light';
+
 /** Shared read-only extension set for one document. */
-function readOnlyExtensions(name: string): Extension[] {
+function readOnlyExtensions(name: string, theme: EditorTheme = 'dark'): Extension[] {
   return [
     basicSetup,
     ...languageFor(name),
-    oneDark,
+    ...(theme === 'light' ? [] : [oneDark]),
     fitTheme,
     EditorState.readOnly.of(true),
     EditorView.editable.of(false),
@@ -62,10 +67,15 @@ function readOnlyExtensions(name: string): Extension[] {
 }
 
 /** Build a read-only single-document view of `text` into `parent`. */
-export function makeCodeView(parent: HTMLElement, name: string, text: string): EditorView {
+export function makeCodeView(
+  parent: HTMLElement,
+  name: string,
+  text: string,
+  theme: EditorTheme = 'dark',
+): EditorView {
   return new EditorView({
     parent,
-    state: EditorState.create({ doc: text, extensions: readOnlyExtensions(name) }),
+    state: EditorState.create({ doc: text, extensions: readOnlyExtensions(name, theme) }),
   });
 }
 
@@ -92,6 +102,7 @@ export function makeTripleView(
   parent: HTMLElement,
   name: string,
   panes: TriplePane[],
+  theme: EditorTheme = 'dark',
 ): { destroy: () => void } {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex:1;min-width:0;min-height:0;height:100%;';
@@ -124,7 +135,7 @@ export function makeTripleView(
       msg.textContent = pane.note;
       host.appendChild(msg);
     } else {
-      views.push(makeCodeView(host, name, pane.text ?? ''));
+      views.push(makeCodeView(host, name, pane.text ?? '', theme));
     }
   }
   return {
@@ -160,11 +171,12 @@ export function makeDiffView(
   name: string,
   baselineText: string,
   currentText: string,
+  theme: EditorTheme = 'dark',
 ): MergeView {
   return new MergeView({
     parent,
-    a: { doc: baselineText, extensions: readOnlyExtensions(name) },
-    b: { doc: currentText, extensions: readOnlyExtensions(name) },
+    a: { doc: baselineText, extensions: readOnlyExtensions(name, theme) },
+    b: { doc: currentText, extensions: readOnlyExtensions(name, theme) },
     collapseUnchanged: { margin: 3, minSize: 4 },
     highlightChanges: true,
     gutter: true,
@@ -191,6 +203,7 @@ export function makeTripleDiffView(
   name: string,
   panes: { before: TriplePane; commit: TriplePane; current: TriplePane },
   boundary: 'before' | 'current',
+  theme: EditorTheme = 'dark',
 ): { destroy: () => void } {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'display:flex;flex:1;min-width:0;min-height:0;height:100%;';
@@ -210,7 +223,7 @@ export function makeTripleDiffView(
     } else {
       const text = p.text ?? '';
       builders.push(() => {
-        const v = makeCodeView(host, name, text);
+        const v = makeCodeView(host, name, text, theme);
         return { destroy: () => v.destroy() };
       });
     }
@@ -247,7 +260,7 @@ export function makeTripleDiffView(
     host.style.cssText = 'flex:1;min-width:0;min-height:0;overflow:hidden;';
     group.append(heads, host);
     builders.push(() => {
-      const mv = makeDiffView(host, name, a.text ?? '', b.text ?? '');
+      const mv = makeDiffView(host, name, a.text ?? '', b.text ?? '', theme);
       return { destroy: () => mv.destroy() };
     });
     return group;
