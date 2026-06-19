@@ -6,7 +6,9 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'" />
     <title>AI-Lore</title>
     <style>
-      html, body, #root { margin: 0; padding: 0; height: 100%; background: #0a0f17; }
+      /* Base ground falls back to the dark shell before theme.css loads (avoids
+         a white flash); once loaded it tracks the active theme's token. */
+      html, body, #root { margin: 0; padding: 0; height: 100%; background: var(--color-shell, #0a0f17); }
       *, *::before, *::after { box-sizing: border-box; }
       /* Nerd Font — supplies powerline / glyph symbols missing from the system
          monospace; used as a fallback in the terminal font stack. */
@@ -17,11 +19,11 @@
       }
       /* RowKebab — hover/focus-visible inline affordance per row.
          Opacity stays 0 by default so dense rows aren't cluttered; comes up
-         on row hover (AG-Grid + custom .row-kebab-host) or kebab focus. */
+         on row hover (.row-kebab-host) or kebab focus. */
       .row-kebab {
         background: transparent;
         border: none;
-        color: #9fb1bd;
+        color: var(--color-text-secondary);
         font-size: 1rem;
         font-weight: 700;
         cursor: pointer;
@@ -30,44 +32,30 @@
         transition: opacity 0.1s;
         line-height: 1;
       }
-      /* ag-grid syncs row hover across its pinned/centre containers via the
-         .ag-row-hover class (the native :hover only covers the cell fragment
-         under the cursor — so a pinned-right affordance would stay hidden unless
-         you aimed straight at it). Key off the class so the reveal ↗ + kebab
-         come up whenever the row is hovered anywhere. */
-      .ag-row-hover .row-kebab,
-      .ag-row:hover .row-kebab,
-      .ag-row.ag-row-focus .row-kebab,
       .row-kebab-host:hover .row-kebab,
       .row-kebab-host:focus-within .row-kebab,
       .row-kebab:hover,
       .row-kebab:focus-visible {
         opacity: 1;
       }
-      /* One font across every ag-grid column — headers, native value cells, and
-         custom React cell renderers (the Name cell) — instead of ag-grid's own
-         default leaking into the columns this app doesn't render itself. */
-      .ag-root-wrapper {
-        font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-      }
       .row-kebab:hover,
       .row-kebab:focus-visible {
-        color: #dde3ea;
+        color: var(--color-text);
       }
       /* File-tree rows — Finder/ForkLift-style cues. Selection is an
          unmistakable filled bar with an accent left edge and bright text;
          hover is a subtle wash; the keyboard focus ring is a distinct outline
          so "focused" never reads the same as "selected". Backgrounds live here
          (not inline) so :hover can win over the row's resting state. */
-      .file-tree-row { background: transparent; color: #cfd8e0; }
-      .file-tree-row:hover { background: rgba(255, 255, 255, 0.06); }
+      .file-tree-row { background: transparent; color: var(--color-text-2); }
+      .file-tree-row:hover { background: var(--color-hover); }
       .file-tree-row.is-selected {
-        background: #294c6b;
-        color: #ffffff;
-        box-shadow: inset 3px 0 0 #5aa2ff;
+        background: var(--color-selection);
+        color: var(--color-selection-fg);
+        box-shadow: inset 3px 0 0 var(--color-focus-ring);
       }
       .file-tree-row:focus-visible {
-        outline: 2px solid #5aa2ff;
+        outline: 2px solid var(--color-focus-ring);
         outline-offset: -2px;
       }
       /* Strip tab creators (+ shell / + web / + AI). The label and the dropdown
@@ -78,7 +66,7 @@
       .strip-creator-main, .strip-creator-caret {
         background: transparent;
         border: none;
-        color: #7f8c98;
+        color: var(--color-text-dim);
         cursor: pointer;
         font-weight: 600;
         white-space: nowrap;
@@ -86,28 +74,28 @@
       .strip-creator-main { padding: 0.25rem 0.5rem; font-size: 0.72rem; border-radius: 3px 0 0 3px; }
       .strip-creator-caret { padding: 0.25rem 0.34rem; font-size: 0.6rem; border-radius: 0 3px 3px 0; }
       .strip-creator-main:hover, .strip-creator-caret:hover {
-        background: rgba(255, 255, 255, 0.08);
-        color: #cfd8e0;
+        background: var(--color-hover-strong);
+        color: var(--color-text-2);
       }
-      .strip-creator-main:disabled { color: #4a5762; cursor: default; }
-      .strip-creator-main:disabled:hover { background: transparent; color: #4a5762; }
-      .strip-creator-divider { width: 1px; height: 13px; background: #2a3645; flex-shrink: 0; }
+      .strip-creator-main:disabled { color: var(--color-text-faint); cursor: default; }
+      .strip-creator-main:disabled:hover { background: transparent; color: var(--color-text-faint); }
+      .strip-creator-divider { width: 1px; height: 13px; background: var(--color-border-strong); flex-shrink: 0; }
       /* Start-with-shortcut dropdown rows. A web row has two click zones — the
          body (▣ open in a new tab) and the ↗ (open in your browser) — split by
          a divider, each with its own hover so the two actions read as distinct.
          Backgrounds live here so :hover can win over the resting state. */
       .creator-menu-row { background: transparent; }
-      .creator-menu-row:hover { background: rgba(255, 255, 255, 0.06); }
-      .creator-menu-ext { background: transparent; color: #7a8590; }
-      .creator-menu-ext:hover { background: rgba(255, 255, 255, 0.11); color: #dde7f0; }
-      .creator-menu-rowdiv { width: 1px; align-self: center; height: 62%; background: #243044; flex-shrink: 0; }
+      .creator-menu-row:hover { background: var(--color-hover); }
+      .creator-menu-ext { background: transparent; color: var(--color-text-soft); }
+      .creator-menu-ext:hover { background: var(--color-hover-strong); color: var(--color-text); }
+      .creator-menu-rowdiv { width: 1px; align-self: center; height: 62%; background: var(--color-border-2); flex-shrink: 0; }
       /* Welcome-screen recents — the per-row remove (×) stays hidden until the
          row is hovered or the × itself is focused, so the list stays clean. */
-      .welcome-recent:hover { background: rgba(255, 255, 255, 0.04); border-radius: 4px; }
+      .welcome-recent:hover { background: var(--color-hover); border-radius: 4px; }
       .welcome-recent-remove { opacity: 0; transition: opacity 0.1s; }
       .welcome-recent:hover .welcome-recent-remove,
       .welcome-recent-remove:focus-visible { opacity: 1; }
-      .welcome-recent-remove:hover { background: rgba(255, 255, 255, 0.08); color: #dde3ea; }
+      .welcome-recent-remove:hover { background: var(--color-hover-strong); color: var(--color-text); }
     </style>
   </head>
   <body>

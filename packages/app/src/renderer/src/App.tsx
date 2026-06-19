@@ -42,8 +42,9 @@ import { WelcomeScreen } from './components/WelcomeScreen.js';
 import { type PaneSpec, TAB_KINDS, type TabRenderContext } from './components/tabKinds.js';
 import { TERMINAL_FIND_EVENT } from './components/useXtermSession.js';
 import { reflowEditorThirds, scaleForResize } from './layout.js';
-import { accentColor, accentTint, hueFor, projectName } from './projectAccent.js';
+import { accentColor, accentTint, accentTintLight, hueFor, projectName } from './projectAccent.js';
 import { type EditorDoc, useCockpitStore } from './store.js';
+import { onEffectiveTheme } from './theme.js';
 
 type Panel = { tabs: WorkspaceTab[]; activeId: string };
 
@@ -422,6 +423,22 @@ export function App(): JSX.Element {
       }
     });
   }, []);
+
+  // The light/dark theme is a global setting; apply it to the document root so
+  // the whole window re-themes live. `[data-theme="light"]` overrides the dark
+  // token defaults in theme.css; dark is the bare `:root` (no attribute).
+  // Effective theme (resolves `system` against the OS) → the document attribute
+  // that flips the token layer, plus local state for the project-hue tint.
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  useEffect(
+    () =>
+      onEffectiveTheme((t) => {
+        setTheme(t);
+        if (t === 'light') document.documentElement.dataset.theme = 'light';
+        else delete document.documentElement.dataset.theme;
+      }),
+    [],
+  );
 
   useEffect(() => {
     const offChain = window.cockpit.onChain(setChain);
@@ -1385,7 +1402,7 @@ export function App(): JSX.Element {
   });
 
   const accent = accentColor(projectHue);
-  const tint = accentTint(projectHue);
+  const tint = theme === 'light' ? accentTintLight(projectHue) : accentTint(projectHue);
   return (
     <div style={cockpitShell}>
       <TrackerStrip />

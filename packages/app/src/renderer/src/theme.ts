@@ -42,3 +42,45 @@ export const PALETTE = {
   /** Selection / focus accent. */
   accent: 'var(--color-accent)',
 } as const;
+
+/** The stored `appearance.theme` values: explicit, or follow the OS. */
+export type ThemeSetting = 'dark' | 'light' | 'system';
+
+/** Whether the OS currently prefers a dark colour scheme. */
+export function systemPrefersDark(): boolean {
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true;
+}
+
+/** Resolve a stored theme setting to the concrete theme to render. `system`
+ *  (and any unknown value) follows the OS preference. */
+export function resolveTheme(setting: unknown): 'dark' | 'light' {
+  if (setting === 'light') return 'light';
+  if (setting === 'dark') return 'dark';
+  return systemPrefersDark() ? 'dark' : 'light';
+}
+
+/**
+ * Subscribe to the *effective* theme — the concrete dark/light to render —
+ * tracking both the `appearance.theme` setting and, while it is `system`, the
+ * OS preference. Fires once on subscribe and on every change; returns an
+ * unsubscribe. One source of truth so the document attribute, the header tint,
+ * and the terminal can't drift apart.
+ */
+export function onEffectiveTheme(cb: (theme: 'dark' | 'light') => void): () => void {
+  let setting: unknown;
+  const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
+  const emit = (): void => cb(resolveTheme(setting));
+  void window.cockpit.settingsGet().then((snap) => {
+    setting = snap.resolved['appearance.theme'];
+    emit();
+  });
+  const offSettings = window.cockpit.onSettingsChanged((snap) => {
+    setting = snap.resolved['appearance.theme'];
+    emit();
+  });
+  mq?.addEventListener('change', emit);
+  return () => {
+    offSettings();
+    mq?.removeEventListener('change', emit);
+  };
+}

@@ -1,7 +1,8 @@
 import { type JSX, type ReactNode, useEffect, useState } from 'react';
 import { type SettingsSnapshot, isChainErrorPayload } from '../../../shared/ipc.js';
-import { accentColor, accentTint, hueFor, projectName } from '../projectAccent.js';
+import { accentColor, accentTint, accentTintLight, hueFor, projectName } from '../projectAccent.js';
 import { useCockpitStore } from '../store.js';
+import { type ThemeSetting, onEffectiveTheme } from '../theme.js';
 import { FocusView } from './FocusView.js';
 import { RegisterChips } from './RegisterChips.js';
 import { SettingsSheetModal, type SettingsSheetSection } from './SettingsSheet.js';
@@ -20,6 +21,9 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
     void window.cockpit.settingsGet().then(apply);
     return window.cockpit.onSettingsChanged(apply);
   }, []);
+  // The effective theme drives the project-hue header tint (light vs dark).
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  useEffect(() => onEffectiveTheme(setTheme), []);
 
   // The Settings sheet is opened from the macOS App menu's `Settings…` item
   // (or `⌘,`) via the `settings:open` push IPC. `initialSection` stays in the
@@ -68,8 +72,9 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
   const name = projectName(chain.root);
   const hue = hueFor(name);
   const accent = accentColor(hue);
+  const tint = theme === 'light' ? accentTintLight(hue) : accentTint(hue);
   const accentHeaderStyle: React.CSSProperties = showAccent
-    ? { ...stripStyle, background: accentTint(hue), borderTop: `4px solid ${accent}` }
+    ? { ...stripStyle, background: tint, borderTop: `4px solid ${accent}` }
     : stripStyle;
 
   const statusPath = `${chain.lorePath}/memory/status/status.index.md`;
@@ -125,6 +130,7 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
             ▾
           </button>
         ) : null}
+        <ThemeToggle />
       </div>
       {search ? (
         <div style={searchRowStyle} data-testid="header-search">
@@ -151,6 +157,50 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
 
 function Sep(): JSX.Element {
   return <span style={{ color: 'var(--color-text-faint)' }}>›</span>;
+}
+
+/**
+ * The top-right theme switch — a three-state segmented control: ☾ dark ·
+ * ◐ system (follow the OS) · ☀ light. Reflects the global `appearance.theme`
+ * setting live and writes it on click; App resolves it (including `system`) and
+ * applies `data-theme` to the document root, so the whole window re-themes.
+ */
+function ThemeToggle(): JSX.Element {
+  const [setting, setSetting] = useState<ThemeSetting>('system');
+  useEffect(() => {
+    const apply = (snap: SettingsSnapshot): void => {
+      const v = snap.resolved['appearance.theme'];
+      setSetting(v === 'dark' || v === 'light' ? v : 'system');
+    };
+    void window.cockpit.settingsGet().then(apply);
+    return window.cockpit.onSettingsChanged(apply);
+  }, []);
+  const choose = (value: ThemeSetting): void => {
+    void window.cockpit.settingsSet({ tier: 'global', key: 'appearance.theme', value });
+  };
+  const seg = (value: ThemeSetting, glyph: string, label: string, first: boolean): JSX.Element => (
+    <button
+      type="button"
+      data-testid={`theme-${value}`}
+      title={label}
+      aria-label={label}
+      aria-pressed={setting === value}
+      onClick={() => choose(value)}
+      style={{
+        ...(setting === value ? themeSegActiveStyle : themeSegStyle),
+        ...(first ? null : { borderLeft: '1px solid var(--color-border-strong)' }),
+      }}
+    >
+      {glyph}
+    </button>
+  );
+  return (
+    <div style={themeToggleGroupStyle}>
+      {seg('dark', '☾', 'Dark theme', true)}
+      {seg('system', '◐', 'Match system theme', false)}
+      {seg('light', '☀', 'Light theme', false)}
+    </div>
+  );
 }
 
 /**
@@ -255,6 +305,33 @@ const activeChild: React.CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
+const themeToggleGroupStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  marginLeft: 'auto',
+  border: '1px solid var(--color-border-strong)',
+  borderRadius: '5px',
+  overflow: 'hidden',
+};
+const themeSegStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '1.5rem',
+  height: '1.35rem',
+  padding: 0,
+  background: 'transparent',
+  color: 'var(--color-text-dim)',
+  border: 'none',
+  cursor: 'pointer',
+  fontSize: '0.8rem',
+  lineHeight: 1,
+};
+const themeSegActiveStyle: React.CSSProperties = {
+  ...themeSegStyle,
+  background: 'var(--color-selection)',
+  color: 'var(--color-selection-fg)',
+};
 const focusViewToggleStyle: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',

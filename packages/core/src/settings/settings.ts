@@ -39,6 +39,15 @@ export const WORKSPACE_LAYOUT_SCHEMA_VERSION = 1;
  */
 export const SETTINGS_REGISTRY: readonly SettingDef[] = [
   {
+    key: 'appearance.theme',
+    label: 'Theme',
+    section: 'Appearance',
+    type: 'enum',
+    tier: 'global',
+    default: 'system',
+    options: ['dark', 'system', 'light'],
+  },
+  {
     key: 'appearance.showProjectAccent',
     label: 'Tint the header with the project colour',
     section: 'Appearance',

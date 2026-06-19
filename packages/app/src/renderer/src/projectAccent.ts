@@ -22,7 +22,13 @@ export function accentColor(hue: number): string {
   return `hsl(${hue}, 70%, 58%)`;
 }
 
-/** The dark, low-saturation background tint at a project hue. */
+/** The dark, low-saturation background tint at a project hue (dark theme). */
 export function accentTint(hue: number): string {
   return `hsl(${hue}, 32%, 12%)`;
+}
+
+/** The light background tint at a project hue (light theme) — the same hue, at
+ *  high lightness so the header/dock read as a soft wash rather than near-black. */
+export function accentTintLight(hue: number): string {
+  return `hsl(${hue}, 52%, 91%)`;
 }

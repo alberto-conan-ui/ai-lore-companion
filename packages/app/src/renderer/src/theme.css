@@ -89,9 +89,110 @@
   --color-purple: #c7b3ff;
   --color-purple-border: #7757d8;
   --color-purple-fg: #f3eeff;
+  /* interaction — hover washes, row selection, focus ring (used by the global
+     stylesheet in index.html). Hover is a translucent wash so it layers over
+     whatever resting background sits beneath it. */
+  --color-hover: rgba(255, 255, 255, 0.06);
+  --color-hover-strong: rgba(255, 255, 255, 0.1);
+  --color-selection: #294c6b;
+  --color-selection-fg: #ffffff;
+  --color-focus-ring: #5aa2ff;
 }
 
-/* Light palette — filled in P3. Overrides only the tokens that change. */
+/* Light palette (P3, first cut) — a cool, low-glare light theme, not an
+   inversion. Elevation still reads lighter (raised → white); text darkens with
+   prominence; accents/status keep their hue but deepen for contrast on light
+   grounds. Mirrors the :root token order. */
 [data-theme="light"] {
   color-scheme: light;
+  /* surfaces / grounds */
+  --color-shell: #eceff4;
+  --color-shell-deep: #e2e7ee;
+  --color-panel: #f1f4f8;
+  --color-header: #f4f6fa;
+  --color-raised: #ffffff;
+  --color-code-bg: #eef1f6;
+  --color-inset: #e7ebf1;
+  --color-surface-2: #ffffff;
+  --color-rail-active: #d8e4f3;
+  --color-surface-blue: #e3eefb;
+  --color-bubble: #eaf1fc;
+  --color-row-active: #d2e3f6;
+  --color-tab-active: #d2e3f6;
+  --color-match-bg: #cfe4ff;
+  --color-shortcut-active: #d2e3f6;
+  --color-chip-disabled: #e2e7ec;
+  --color-neutral-pill: #dde3ea;
+  --color-success-bg: #d6efdd;
+  --color-warn-bg: #f6ecc9;
+  --color-danger-bg: #f8dada;
+  --color-info-bg: #e2ecfb;
+  --color-info-banner-bg: #d9e8fb;
+  --color-danger-banner-bg: #f8dada;
+  --color-warn-banner-bg: #f6edd2;
+  --color-amber-tag-bg: #f6edd2;
+  --color-purple-strong: #6a4fd0;
+  --color-danger-box-bg: #fae4e4;
+  /* borders */
+  --color-border: #d7dde5;
+  --color-border-strong: #c0c9d4;
+  --color-border-faint: #e6eaef;
+  --color-border-rail: #dce2e9;
+  --color-border-2: #ccd5df;
+  --color-rail-border: #c3d1e1;
+  --color-surface-blue-border: #b8d1ef;
+  --color-bubble-border: #c3d7ef;
+  --color-accent-border: #8fb6e4;
+  --color-warn-banner-border: #e6d29a;
+  --color-amber-tag-border: #d8c187;
+  --color-danger-box-border: #e6b3b3;
+  --color-info-border: #bcd4f2;
+  /* text — darkens with prominence */
+  --color-text: #1c2730;
+  --color-text-bright: #0c141c;
+  --color-text-2: #2f3b48;
+  --color-text-secondary: #45525f;
+  --color-text-muted: #5e6b78;
+  --color-text-dim: #79838f;
+  --color-text-soft: #6b7783;
+  --color-text-faint: #99a3ad;
+  --color-on-accent: #ffffff;
+  --color-ink-inverse: #2a1a10;
+  /* accent / links — deepened for contrast on light */
+  --color-accent: #2f6fb3;
+  --color-accent-strong: #2f76c8;
+  --color-accent-soft: #3f7cb3;
+  --color-accent-tint: #2f6fb3;
+  --color-accent-bright: #1f6fd0;
+  --color-link: #1a66c2;
+  --color-tab-active-fg: #0d3a66;
+  /* status */
+  --color-success: #2f9e57;
+  --color-success-text: #1f8a48;
+  --color-success-fg: #1c6e3a;
+  --color-warn: #c8881f;
+  --color-warn-fg: #8a5e10;
+  --color-amber: #b07d18;
+  --color-amber-tag-fg: #8a6420;
+  --color-orange: #c2693f;
+  --color-danger: #cf3b35;
+  --color-danger-fg: #b3322d;
+  --color-danger-fg-light: #8a2420;
+  --color-running: #2f9e57;
+  --color-dot-idle: #aab4be;
+  /* info / register accents / purple */
+  --color-info: #2f7da8;
+  --color-info-banner-fg: #1a5a8a;
+  --color-reg-posture: #2f6fb3;
+  --color-reg-dial: #3f8a3f;
+  --color-reg-focus: #a8761a;
+  --color-purple: #6a4fd0;
+  --color-purple-border: #6a4fd0;
+  --color-purple-fg: #ffffff;
+  /* interaction — dark washes on a light ground, light-blue selection */
+  --color-hover: rgba(15, 23, 32, 0.06);
+  --color-hover-strong: rgba(15, 23, 32, 0.1);
+  --color-selection: #cfe0f4;
+  --color-selection-fg: #0d3a66;
+  --color-focus-ring: #2f76c8;
 }

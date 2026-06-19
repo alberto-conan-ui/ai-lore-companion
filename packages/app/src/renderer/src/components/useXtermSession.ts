@@ -11,6 +11,7 @@ import {
   PTY_FLOW_RESUME,
   type TerminalForegroundStatus,
 } from '../../../shared/ipc.js';
+import { onEffectiveTheme } from '../theme.js';
 
 /** Backpressure thresholds (chars of un-parsed PTY output). Pause the child when
  *  xterm falls this far behind; resume once it has caught up. */
@@ -53,6 +54,36 @@ export const TERMINAL_THEME = {
   foreground: '#dde3ea',
   cursor: '#5a9bd4',
   selectionBackground: '#1d2c3d',
+} as const;
+
+/**
+ * Light-mode terminal theme. xterm renders to a canvas/WebGL surface and can't
+ * read the CSS token layer, so the theme is set on the instance and swapped
+ * when `appearance.theme` changes. A full ANSI palette is specified (not just
+ * bg/fg) — colour-heavy TUIs lean on the 16 ANSI slots, and xterm's defaults
+ * are tuned for a dark ground (bright yellow/green wash out on white).
+ */
+export const TERMINAL_THEME_LIGHT = {
+  background: '#f4f6f9',
+  foreground: '#1c2730',
+  cursor: '#2f6fb3',
+  selectionBackground: '#cfe0f4',
+  black: '#1c2730',
+  red: '#c0392b',
+  green: '#1f8a48',
+  yellow: '#9a6a12',
+  blue: '#2f6fb3',
+  magenta: '#8a3fb0',
+  cyan: '#1f7a8c',
+  white: '#5e6b78',
+  brightBlack: '#79838f',
+  brightRed: '#cf3b35',
+  brightGreen: '#2f9e57',
+  brightYellow: '#b07d18',
+  brightBlue: '#2f76c8',
+  brightMagenta: '#a04fc0',
+  brightCyan: '#2f93a8',
+  brightWhite: '#1c2730',
 } as const;
 
 const TERMINAL_FONT_FAMILY =
@@ -168,6 +199,19 @@ export function useXtermSession(config: XtermSessionConfig): XtermSessionHandle 
     }
     termRef.current?.focus();
   }, []);
+
+  // Keep the terminal's theme in step with the app's light/dark setting. xterm
+  // renders to canvas and can't read CSS vars, so swap the instance theme when
+  // `appearance.theme` changes.
+  useEffect(
+    () =>
+      onEffectiveTheme((t) => {
+        if (termRef.current) {
+          termRef.current.options.theme = t === 'light' ? TERMINAL_THEME_LIGHT : TERMINAL_THEME;
+        }
+      }),
+    [],
+  );
 
   useEffect(() => {
     const host = hostRef.current;
