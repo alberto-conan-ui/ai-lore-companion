@@ -1,6 +1,6 @@
 import type { TreeNode } from '@ai-lore-companion/core';
-import { cleanup, render } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { cleanup, fireEvent, render } from '@testing-library/react';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { FileTree } from '../../src/renderer/src/components/FileTree.js';
 
 // jsdom has neither ResizeObserver nor real layout. Give the tree a no-op
@@ -71,6 +71,42 @@ describe('FileTree virtualization', () => {
     // The spacer still reserves full scroll height, so the scrollbar is honest.
     const spacer = container.querySelector('ul');
     expect(spacer?.style.height).toBe(`${(2000 + 1) * 22}px`);
+  });
+
+  it('renders files as leaf rows and opens one on double-click (unified tree)', () => {
+    // A root with one folder and one file — the unified navigator tree (P2)
+    // shows both; the old folder-only tree dropped the file.
+    const root: TreeNode = {
+      name: 'r',
+      path: '/r',
+      isDir: true,
+      children: [
+        { name: 'sub', path: '/r/sub', isDir: true, children: [] },
+        { name: 'a.ts', path: '/r/a.ts', isDir: false },
+      ],
+    };
+    const onActivateFile = vi.fn();
+    const { container } = render(
+      <FileTree
+        root={root}
+        selectedPath={null}
+        onSelectFolder={noop}
+        onSelectFile={noop}
+        onActivateFile={onActivateFile}
+        expandedPaths={new Set([root.path])}
+        onToggleExpand={noop}
+        driftLevelFor={() => 'idle'}
+        driftKindFor={() => undefined}
+      />,
+    );
+    const fileRow = container.querySelector<HTMLButtonElement>('[title="/r/a.ts"]');
+    expect(fileRow).not.toBeNull();
+    // Single click selects (no open); double-click opens in the editor.
+    fireEvent.click(fileRow as HTMLButtonElement);
+    expect(onActivateFile).not.toHaveBeenCalled();
+    fireEvent.doubleClick(fileRow as HTMLButtonElement);
+    expect(onActivateFile).toHaveBeenCalledTimes(1);
+    expect(onActivateFile.mock.calls[0]?.[0]?.path).toBe('/r/a.ts');
   });
 
   it('does not mount rows far below the viewport', () => {

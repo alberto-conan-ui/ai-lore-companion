@@ -7,20 +7,22 @@ import type {
 } from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  type DriftKind,
   type DriftLevel,
+  categoriseDriftCode,
   driftLevel,
   findTreeNode,
   useCockpitStore,
 } from '../store.js';
 import { AppPickerModal } from './AppPickerModal.js';
-import { DriftPill } from './DriftPill.js';
-import { FileGrid, type FileGridHandle } from './FileGrid.js';
-import { FileTree, type FileTreeHandle } from './FileTree.js';
 import { ChangesPanel, type ChangesPanelHandle, type DriftRow } from './ChangesPanel.js';
+import { DriftPill } from './DriftPill.js';
+import { FileTree, type FileTreeHandle } from './FileTree.js';
 
-/** Which of the three regions inside a Pane currently owns the keyboard.
- *  Drives Tab cycling between them and the visible focus accent. */
-type ActiveRegion = 'tree' | 'grid' | 'queue';
+/** Which of the two regions inside a Pane currently owns the keyboard.
+ *  Drives Tab cycling between them and the visible focus accent. The unified
+ *  navigator tree (Read-only IDE P2) retired the separate file grid. */
+type ActiveRegion = 'tree' | 'queue';
 
 /**
  * What a pane is rooted at, within its scope's tree.
@@ -91,8 +93,8 @@ type Props = {
 };
 
 /**
- * One pane of the cockpit: a folder tree, a file grid for the selected folder,
- * and the queue of unread drift for this side. The pane is rooted at a
+ * One pane of the cockpit: the unified navigator tree (files + folders, Read-only
+ * IDE P2) and the queue of unread drift for this side. The pane is rooted at a
  * `SubRoot` — a slice of its `scope`'s tree — and its drift is filtered to
  * that slice. Drift is per-`scope` throughout; the sub-root narrows it further.
  */
@@ -118,7 +120,9 @@ export function Pane({
   // Changes panel header.
   const changesForScope = useMemo(
     () =>
-      showIndexFiles ? rawChangesForScope : rawChangesForScope.filter((e) => !e.path.endsWith('.index.md')),
+      showIndexFiles
+        ? rawChangesForScope
+        : rawChangesForScope.filter((e) => !e.path.endsWith('.index.md')),
     [rawChangesForScope, showIndexFiles],
   );
   const hasSavePoint = useCockpitStore((s) =>
@@ -157,7 +161,7 @@ export function Pane({
     [openDoc, loreMemoryPath],
   );
 
-  // Context-menu actions shared across tree, grid, and (eventually) queue.
+  // Context-menu actions shared across the navigator tree and the queue.
   const handleRevealInFinder = useCallback((node: TreeNode) => {
     window.cockpit.revealInFinder(node.path);
   }, []);
@@ -195,12 +199,13 @@ export function Pane({
     [changesForScope, subRoot, projectRoot],
   );
 
-  const [selectedFolder, setSelectedFolder] = useState<string>(rootId);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  // Seed the root expanded so its child folders show under the new root row.
+  // The highlighted row in the unified tree — a folder or a file. Folder
+  // selection also lazy-loads children; file selection just highlights (a
+  // double-click opens it in the editor).
+  const [selectedPath, setSelectedPath] = useState<string>(rootId);
+  // Seed the root expanded so its children show under the new root row.
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => new Set([rootId]));
   const [queueHeight, setQueueHeight] = useState(220);
-  const [treeWidth, setTreeWidth] = useState(240);
   // Per-pane Changes-panel view mode — List (default, grouped by location) or
   // Tree (file-explorer hierarchy). User asked for this on the Payload pane
   // specifically; making it per-pane keeps each panel's preference independent.
@@ -213,18 +218,15 @@ export function Pane({
   // when no region inside this Pane owns the keyboard.
   const [activeRegion, setActiveRegion] = useState<ActiveRegion | null>(null);
   const treeColumnRef = useRef<HTMLDivElement>(null);
-  const gridColumnRef = useRef<HTMLDivElement>(null);
   const queueRowRef = useRef<HTMLDivElement>(null);
   const treeHandle = useRef<FileTreeHandle>(null);
-  const gridHandle = useRef<FileGridHandle>(null);
   const queueHandle = useRef<ChangesPanelHandle>(null);
   const paneRef = useRef<HTMLElement>(null);
 
-  // Resolve which of the three regions the given node lives in, if any.
+  // Resolve which of the two regions the given node lives in, if any.
   const regionOf = useCallback((node: Node | null): ActiveRegion | null => {
     if (!node) return null;
     if (treeColumnRef.current?.contains(node)) return 'tree';
-    if (gridColumnRef.current?.contains(node)) return 'grid';
     if (queueRowRef.current?.contains(node)) return 'queue';
     return null;
   }, []);
@@ -246,18 +248,17 @@ export function Pane({
   // Route a region handle's `focusMe` call by name.
   const focusRegion = useCallback((region: ActiveRegion) => {
     if (region === 'tree') treeHandle.current?.focusMe();
-    else if (region === 'grid') gridHandle.current?.focusMe();
     else queueHandle.current?.focusMe();
   }, []);
 
-  // Tab / Shift+Tab inside the Pane cycles tree → grid → queue → tree.
+  // Tab / Shift+Tab inside the Pane cycles tree → queue → tree.
   const onPaneKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLElement>) => {
       if (e.key !== 'Tab') return;
       const here = regionOf(document.activeElement);
       if (!here) return;
       e.preventDefault();
-      const order: ActiveRegion[] = ['tree', 'grid', 'queue'];
+      const order: ActiveRegion[] = ['tree', 'queue'];
       const idx = order.indexOf(here);
       const step = e.shiftKey ? -1 : 1;
       const next = order[(idx + step + order.length) % order.length];
@@ -285,9 +286,14 @@ export function Pane({
     [entryAbsPaths],
   );
 
-  const gridRows = useMemo(
-    () => findTreeNode(renderedRoot, selectedFolder)?.children ?? [],
-    [renderedRoot, selectedFolder],
+  /** A file's own change kind for its tree-row drift dot, or `undefined` when
+   *  the file is unchanged against the baseline. */
+  const driftKindFor = useCallback(
+    (filePath: string): DriftKind | undefined => {
+      const row = driftByPath.get(filePath);
+      return row ? categoriseDriftCode(row.code) : undefined;
+    },
+    [driftByPath],
   );
 
   // A `path` sub-root deeper than the scope tree's root arrives with its
@@ -304,7 +310,7 @@ export function Pane({
 
   const handleSelectFolder = useCallback(
     (path: string) => {
-      setSelectedFolder(path);
+      setSelectedPath(path);
       const node = findTreeNode(renderedRoot, path);
       if (node?.isDir && node.children === undefined) {
         void window.cockpit.treeExpand({ scope, path }).then((children) => {
@@ -315,14 +321,16 @@ export function Pane({
     [renderedRoot, scope, expandTree],
   );
 
-  /** Navigate the pane into a folder — select it, and reveal it in the tree. */
-  const handleOpenFolder = useCallback(
-    (folderAbs: string) => {
-      handleSelectFolder(folderAbs);
-      const parent = folderAbs.slice(0, folderAbs.lastIndexOf('/'));
-      setExpandedPaths((prev) => new Set(prev).add(parent).add(folderAbs));
+  /** Select a file row (highlight only). Opening is a double-click / Enter. */
+  const handleSelectFile = useCallback((path: string) => setSelectedPath(path), []);
+
+  /** Activate a file — open it in the in-app editor (binaries hand off to OS). */
+  const handleActivateFile = useCallback(
+    (node: TreeNode) => {
+      setSelectedPath(node.path);
+      void openInEditor(node.path, 'code');
     },
-    [handleSelectFolder],
+    [openInEditor],
   );
 
   const handleToggleExpand = useCallback((path: string) => {
@@ -366,25 +374,6 @@ export function Pane({
     [queueHeight],
   );
 
-  /** Drag the divider between the tree and the grid to resize the tree column. */
-  const onTreeResize = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      const startX = e.clientX;
-      const startW = treeWidth;
-      const onMove = (ev: MouseEvent): void => {
-        setTreeWidth(Math.max(140, Math.min(520, startW + (ev.clientX - startX))));
-      };
-      const onUp = (): void => {
-        window.removeEventListener('mousemove', onMove);
-        window.removeEventListener('mouseup', onUp);
-      };
-      window.addEventListener('mousemove', onMove);
-      window.addEventListener('mouseup', onUp);
-    },
-    [treeWidth],
-  );
-
   /**
    * Reveal a file: load every ancestor folder, expand the chain in the tree,
    * select the containing folder, and select the file so the grid scrolls to
@@ -416,8 +405,9 @@ export function Pane({
         for (const p of toLoad) next.add(p);
         return next;
       });
-      setSelectedFolder(folderAbs);
-      setSelectedFile(fileAbs);
+      // Highlight the revealed file in the unified tree; the tree scrolls it
+      // into view (its scroll-to-selected effect).
+      setSelectedPath(fileAbs);
     },
     [scope, bases, expandTree],
   );
@@ -524,7 +514,6 @@ export function Pane({
           ref={treeColumnRef}
           style={{
             ...treeColumnStyle,
-            width: treeWidth,
             ...(activeRegion === 'tree' ? activeRegionStyle : null),
           }}
         >
@@ -532,46 +521,19 @@ export function Pane({
             <FileTree
               ref={treeHandle}
               root={renderedRoot}
-              selectedPath={selectedFolder}
+              selectedPath={selectedPath}
               onSelectFolder={handleSelectFolder}
+              onSelectFile={handleSelectFile}
+              onActivateFile={handleActivateFile}
               expandedPaths={expandedPaths}
               onToggleExpand={handleToggleExpand}
               driftLevelFor={driftLevelFor}
+              driftKindFor={driftKindFor}
               onContextMenu={(node, x, y) => setTreeMenu({ node, x, y })}
             />
           ) : (
             <div style={treeLoadingStyle}>Reading tree…</div>
           )}
-        </div>
-        <div
-          style={treeResizeHandleStyle}
-          onMouseDown={onTreeResize}
-          title="Drag to resize the tree"
-          data-testid={`tree-resize-${testId}`}
-        />
-        <div
-          ref={gridColumnRef}
-          style={{
-            ...gridColumnStyle,
-            ...(activeRegion === 'grid' ? activeRegionStyle : null),
-          }}
-        >
-          <FileGrid
-            ref={gridHandle}
-            scope={scope}
-            rows={gridRows}
-            selectedPath={selectedFile}
-            onSelectPath={setSelectedFile}
-            onOpenFolder={handleOpenFolder}
-            onOpenFile={(node) => void openInEditor(node.path, 'code')}
-            driftByPath={driftByPath}
-            onIgnore={(node) => void ignorePath(node)}
-            onDiff={(node) => void handleDiff(node)}
-            hasSavePoint={hasSavePoint}
-            apps={apps}
-            onOpenWith={(app, node) => void handleOpenWith(app, node)}
-            onRevealInFinder={handleRevealInFinder}
-          />
         </div>
       </div>
 
@@ -759,35 +721,21 @@ const paneBodyStyle: React.CSSProperties = {
 };
 
 const treeColumnStyle: React.CSSProperties = {
-  flexShrink: 0,
-  // The FileTree owns its own scroll viewport (virtualized) — the column just
-  // bounds it horizontally and lays it out as a full-height flex child.
+  // The unified navigator tree fills the pane body (the file grid was retired in
+  // Read-only IDE P2). The FileTree owns its own virtualized scroll viewport;
+  // the column lays it out as a full-height flex child.
+  flex: 1,
   display: 'flex',
   flexDirection: 'column',
+  minWidth: 0,
   overflow: 'hidden',
   background: '#0c121a',
-};
-
-/** The drag bar between the tree and the grid — resizes the tree horizontally. */
-const treeResizeHandleStyle: React.CSSProperties = {
-  width: '7px',
-  flexShrink: 0,
-  cursor: 'ew-resize',
-  background: '#0c121a',
-  borderLeft: '1px solid #1f2933',
 };
 
 const treeLoadingStyle: React.CSSProperties = {
   padding: '0.6rem 0.8rem',
   color: '#6c7783',
   fontSize: '0.76rem',
-};
-
-const gridColumnStyle: React.CSSProperties = {
-  flex: 1,
-  display: 'flex',
-  minWidth: 0,
-  minHeight: 0,
 };
 
 const queueRowStyle: React.CSSProperties = {
