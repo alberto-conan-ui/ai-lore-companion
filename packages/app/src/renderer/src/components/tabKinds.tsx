@@ -1,6 +1,7 @@
 import type { ChangeScope, EngineEntry, TabLastSession } from '@ai-lore-companion/core';
 import type { CSSProperties, JSX, ReactNode } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
+import { createContributions } from '../shell/contributions.js';
 import { AiTab } from './AiTab.js';
 import { AssistantHost } from './AssistantHost.js';
 import { Banner } from './Banner.js';
@@ -236,7 +237,15 @@ export function defaultEngineId(
   return engines[0]?.id ?? '';
 }
 
-export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
+/**
+ * The companion's tab-kind descriptors. Two are **generic** by the boundary
+ * test and could live in the shell unchanged — `shell` (a plain PTY) and
+ * `browser` (a web view); two are **AI-Lore** and belong to the companion —
+ * `pane` (Status / Payload / Memory / Publish / assistant) and `ai` (the AI
+ * Helper session). All four are *registered by the companion* below; physically
+ * moving the generic two into a shell module is a later-phase extraction.
+ */
+const COMPANION_TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
   pane: {
     draggable: false,
     closable: false,
@@ -414,6 +423,27 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
     },
   },
 };
+
+/**
+ * The companion's contributions into the shell. At module load the companion
+ * registers its tab kinds into the shell's generic registry; the other
+ * contribution points (side panels, commands, title-bar slots) stay empty until
+ * later phases populate them. This `register → read` flow is the contribution
+ * API the shell/companion boundary hangs on — see
+ * [shell/contributions.ts](../shell/contributions.ts).
+ */
+export const companionContributions = createContributions<TabKindDescriptor>();
+for (const [kind, descriptor] of Object.entries(COMPANION_TAB_KINDS)) {
+  companionContributions.tabKinds.register(kind, descriptor);
+}
+
+/** Tab-kind dispatch table, indexed by `tab.kind`. Derived from the shell
+ *  registry the companion just populated — registration is the contract; this
+ *  record is the read view consumers (App, TabbedPanel) index. */
+export const TAB_KINDS = companionContributions.tabKinds.asRecord() as Record<
+  TabKind,
+  TabKindDescriptor
+>;
 
 /** The strip's creator buttons, in display order (`+ AI`, `+ shell`, `+ web`).
  *  Derived from the registry so a new creatable kind needs only its descriptor. */

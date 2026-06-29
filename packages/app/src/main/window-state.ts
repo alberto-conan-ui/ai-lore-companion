@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { Rectangle } from 'electron';
-import { projectDataDir } from './db-path.js';
+import { projectDataDir } from './project-data.js';
 
 /**
  * Per-project window bounds — the OS window's size and position, so reopening a

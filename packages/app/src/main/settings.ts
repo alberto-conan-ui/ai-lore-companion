@@ -14,7 +14,7 @@ import {
   withLayout,
   withSetting,
 } from '@ai-lore-companion/core';
-import { projectDataDir } from './db-path.js';
+import { projectDataDir } from './project-data.js';
 
 /**
  * Disk binding for the two-tier settings store. Global settings live in one

@@ -25,7 +25,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { type EngineEntry, dedupEngines, parseEngineEntries } from '@ai-lore-companion/core';
 import { type CatalogStoreSpec, loadCatalog, saveCatalog } from './catalog-store.js';
-import { projectDataDir } from './db-path.js';
+import { projectDataDir } from './project-data.js';
 
 /** Default engines back-filled when their binary resolves on PATH. Ids are
  *  stable so removal is idempotent across sessions. */
@@ -91,9 +91,9 @@ export function saveEngines(userDataDir: string, list: readonly EngineEntry[]): 
 // --- Per-project AI-tab state ----------------------------------------------
 
 /**
- * Per-project state for AI tabs — survives across launches. Sidecar to
- * `cockpit.sqlite`, lives next to the project's data folder. Both fields are
- * optional so missing values fall through to the caller's defaults.
+ * Per-project state for AI tabs — survives across launches. A flat-JSON
+ * sidecar in the project's data folder. Both fields are optional so missing
+ * values fall through to the caller's defaults.
  */
 type AiStateFile = {
   /** The engine id last picked in this project (Phase B). */

@@ -129,6 +129,8 @@ export {
 } from './diff/index.js';
 
 export {
+  type AncestorResult,
+  type BranchResult,
   type ChangeEntry,
   type ChangesResult,
   type ChangeScope,
@@ -139,6 +141,8 @@ export {
   type CommitListResult,
   type DiffTextResult,
   attachChangesTracker,
+  currentBranch,
+  isAncestor,
   isAdded,
   isDeleted,
   isRenamed,

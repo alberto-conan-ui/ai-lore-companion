@@ -21,3 +21,9 @@ export {
   isRenamed,
   parsePorcelainZ,
 } from './porcelain.js';
+export {
+  type AncestorResult,
+  type BranchResult,
+  currentBranch,
+  isAncestor,
+} from './git-info.js';

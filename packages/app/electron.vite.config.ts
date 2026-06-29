@@ -4,7 +4,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 
 // Bundle @ai-lore-companion/core into main/preload so Electron's CJS loader
 // does not have to require an ESM workspace package. Native modules stay
-// external (better-sqlite3, chokidar) — Electron loads them at runtime.
+// external (node-pty, chokidar) — Electron loads them at runtime.
 const externalize = externalizeDepsPlugin({ exclude: ['@ai-lore-companion/core'] });
 
 export default defineConfig({

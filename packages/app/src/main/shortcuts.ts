@@ -4,7 +4,7 @@ import { basename, join } from 'node:path';
 import { nativeImage } from 'electron';
 import type { Shortcut } from '../shared/ipc.js';
 import { type CatalogStoreSpec, loadCatalog, saveCatalog } from './catalog-store.js';
-import { projectDataDir } from './db-path.js';
+import { projectDataDir } from './project-data.js';
 
 /**
  * App-launch shortcuts — a user-configured list, persisted as a JSON file

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
-import { projectDataDir } from '../../src/main/db-path.js';
+import { projectDataDir } from '../../src/main/project-data.js';
 import { loadWindowBounds, saveWindowBounds } from '../../src/main/window-state.js';
 
 let userDataDir: string;
