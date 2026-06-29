@@ -43,6 +43,7 @@
     "@xterm/xterm": "^6.0.0",
     "chokidar": "^3.6.0",
     "codemirror": "^6.0.2",
+    "dockview": "^4.13.1",
     "markdown-it": "^14.2.0",
     "node-pty": "^1.1.0",
     "react": "^18.3.1",

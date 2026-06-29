@@ -1,0 +1,54 @@
+/* ============================================================
+   Dockview theme — maps the cockpit's `--color-*` tokens onto Dockview's
+   `--dv-*` variables (v2 P2). One class themes both light and dark, because
+   the `--color-*` tokens already flip under [data-theme="light"] — so the
+   docking surface follows the app's theme switch with no second definition.
+
+   Shell-layer file: it names no AI-Lore concept; it only bridges two generic
+   token vocabularies.
+   ============================================================ */
+.dockview-theme-ailore {
+  /* Surfaces */
+  --dv-group-view-background-color: var(--color-shell);
+  --dv-tabs-and-actions-container-background-color: var(--color-panel);
+  --dv-tabs-container-scrollbar-color: var(--color-border-strong);
+  --dv-scrollbar-background-color: var(--color-border);
+
+  /* Active group, visible (selected) tab */
+  --dv-activegroup-visiblepanel-tab-background-color: var(--color-shell);
+  --dv-activegroup-visiblepanel-tab-color: var(--color-text-bright);
+  /* Active group, hidden (unselected) tabs */
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--color-panel);
+  --dv-activegroup-hiddenpanel-tab-color: var(--color-text-dim);
+  /* Inactive group, visible tab */
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--color-shell);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--color-text);
+  /* Inactive group, hidden tabs */
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--color-panel);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--color-text-muted);
+
+  /* Dividers / separators */
+  --dv-tab-divider-color: var(--color-border-rail);
+  --dv-separator-border: var(--color-border);
+  --dv-paneview-header-border-color: var(--color-border);
+
+  /* Splitters (sash) — invisible at rest, accent while dragging */
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: var(--color-accent);
+  --dv-paneview-active-outline-color: var(--color-accent);
+
+  /* Drag-and-drop overlay */
+  --dv-drag-over-background-color: var(--color-accent-tint);
+  --dv-drag-over-border-color: var(--color-accent);
+
+  /* Affordances */
+  --dv-icon-hover-background-color: var(--color-hover);
+  --dv-tab-font-size: 0.78rem;
+  --dv-tabs-and-actions-container-height: 30px;
+}
+
+/* The active tab's top accent stripe — matches the cockpit's own active-tab
+   `box-shadow: inset 0 2px 0 var(--color-accent)` from TabbedPanel. */
+.dockview-theme-ailore .dv-tab.dv-active-tab {
+  box-shadow: inset 0 2px 0 var(--color-accent);
+}
