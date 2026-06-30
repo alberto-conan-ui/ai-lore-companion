@@ -23,6 +23,7 @@ import { AlteredScreen } from './components/AlteredScreen.js';
 import { AssistantDashboard } from './components/AssistantDashboard.js';
 import { BaselinePicker } from './components/BaselinePicker.js';
 import { DockPanel } from './components/DockPanel.js';
+import { DockWorkspace } from './components/DockWorkspace.js';
 import { EditorPanel } from './components/EditorPanel.js';
 import {
   LEFT_RAIL_WIDTH,
@@ -103,6 +104,11 @@ const DEFAULT_EDITOR_WIDTH = 560;
  *  `panesForShape`, never restored — and an unknown kind from an older
  *  snapshot is dropped. */
 const RESTORABLE_KINDS = new Set<TabKind>(['shell', 'ai', 'browser']);
+
+/** v2 P2 (stage S-A): render the workspace through Dockview instead of the v1.0
+ *  hand-rolled CSS-grid `panelsRow`. OFF by default — flipped on to validate the
+ *  docking swap live, then on for real once the staged swap (S-A…S-E) lands. */
+const USE_DOCKVIEW = false;
 
 /** Persist a runtime tab as a layout tab — structure plus the captured
  *  `lastSession`, dropping all live state (PTY ids, status, etc.). */
@@ -1429,11 +1435,16 @@ export function App(): JSX.Element {
     onPaneChangesHeight: (paneId, height) =>
       setChangesHeightByPane((m) => ({ ...m, [paneId]: height })),
   };
-  const contentPortals = tabPlacements.map(({ tab, visible }) => {
-    const host = getOrCreateTabHost(tab.id);
-    const body = TAB_KINDS[tab.kind].renderBody(tab, visible, renderCtx);
-    return createPortal(body, host, tab.id);
-  });
+  // In Dockview mode DockWorkspace owns the content seam (its own hosts +
+  // portals), so App builds none — otherwise each tab body would mount twice
+  // (a second live PTY per shell tab).
+  const contentPortals = USE_DOCKVIEW
+    ? []
+    : tabPlacements.map(({ tab, visible }) => {
+        const host = getOrCreateTabHost(tab.id);
+        const body = TAB_KINDS[tab.kind].renderBody(tab, visible, renderCtx);
+        return createPortal(body, host, tab.id);
+      });
 
   const accent = accentColor(projectHue);
   const tint = theme === 'light' ? accentTintLight(projectHue) : accentTint(projectHue);
@@ -1448,88 +1459,105 @@ export function App(): JSX.Element {
           onClose={() => setSearchOpen(false)}
         />
       ) : null}
-      <div style={panelsRow}>
-        {/* The left region (CR9 Phase 3): an activity rail switching between the
-         *  Project panes and the Assistant feed. Both stay mounted — the hidden
-         *  one is display:none — so the feed keeps its history + Channel-C
-         *  subscription across switches. The fixed leftRailWidth covers rail +
-         *  panel; the RailSash resizes the whole region. */}
-        <div style={{ ...leftRegionStyle, width: leftRailWidth }} data-column-id="left-region">
-          <LeftActivityRail section={leftSection} onSelect={setLeftSection} />
-          <div style={leftSection === 'project' ? leftSectionShownStyle : leftSectionHiddenStyle}>
+      {USE_DOCKVIEW ? (
+        <DockWorkspace
+          panels={panels}
+          rightOpen={rightOpen}
+          leftRailBottomOpen={leftRailBottomOpen}
+          centreBottomOpen={centreBottomOpen}
+          rightBottomOpen={rightBottomOpen}
+          renderCtx={renderCtx}
+        />
+      ) : (
+        <>
+          <div style={panelsRow}>
+            {/* The left region (CR9 Phase 3): an activity rail switching between the
+             *  Project panes and the Assistant feed. Both stay mounted — the hidden
+             *  one is display:none — so the feed keeps its history + Channel-C
+             *  subscription across switches. The fixed leftRailWidth covers rail +
+             *  panel; the RailSash resizes the whole region. */}
+            <div style={{ ...leftRegionStyle, width: leftRailWidth }} data-column-id="left-region">
+              <LeftActivityRail section={leftSection} onSelect={setLeftSection} />
+              <div
+                style={leftSection === 'project' ? leftSectionShownStyle : leftSectionHiddenStyle}
+              >
+                <Column
+                  name="leftRail"
+                  flex
+                  top={panel('leftRail')}
+                  bottom={panel('leftRailBottom')}
+                  bottomOpen={leftRailBottomOpen}
+                  onBottomToggle={setLeftRailBottomOpen}
+                  bottomHeight={leftRailBottomHeight}
+                  onBottomResize={setLeftRailBottomHeight}
+                  accent={accent}
+                  tint={tint}
+                />
+              </div>
+              <div
+                style={leftSection === 'assistant' ? leftSectionShownStyle : leftSectionHiddenStyle}
+              >
+                <AssistantDashboard />
+              </div>
+            </div>
+            {/* Resizable accent-coloured divider between leftRail and centre.
+             *  Drag horizontally to adjust leftRail's width; the value persists
+             *  via the captureLayout effect. */}
+            <RailSash size={leftRailWidth} onResize={setLeftRailWidth} accent={accent} />
+            {/* The editor column (Read-only IDE P1): present only while a file is
+             *  open, so the left panel reads as nav | editor; the centre flexes to
+             *  fill what's left. A sash on its right edge resizes it. */}
+            {editorOpen ? (
+              <>
+                <div style={{ ...editorColumnStyle, width: editorWidth }} data-column-id="editor">
+                  <EditorPanel />
+                </div>
+                <RailSash size={editorWidth} onResize={setEditorWidth} accent={accent} />
+              </>
+            ) : null}
             <Column
-              name="leftRail"
+              name="centre"
               flex
-              top={panel('leftRail')}
-              bottom={panel('leftRailBottom')}
-              bottomOpen={leftRailBottomOpen}
-              onBottomToggle={setLeftRailBottomOpen}
-              bottomHeight={leftRailBottomHeight}
-              onBottomResize={setLeftRailBottomHeight}
+              top={panel('centre')}
+              bottom={panel('centreBottom')}
+              bottomOpen={centreBottomOpen}
+              onBottomToggle={setCentreBottomOpen}
+              bottomHeight={centreBottomHeight}
+              onBottomResize={setCentreBottomHeight}
               accent={accent}
               tint={tint}
             />
-          </div>
-          <div style={leftSection === 'assistant' ? leftSectionShownStyle : leftSectionHiddenStyle}>
-            <AssistantDashboard />
-          </div>
-        </div>
-        {/* Resizable accent-coloured divider between leftRail and centre.
-         *  Drag horizontally to adjust leftRail's width; the value persists
-         *  via the captureLayout effect. */}
-        <RailSash size={leftRailWidth} onResize={setLeftRailWidth} accent={accent} />
-        {/* The editor column (Read-only IDE P1): present only while a file is
-         *  open, so the left panel reads as nav | editor; the centre flexes to
-         *  fill what's left. A sash on its right edge resizes it. */}
-        {editorOpen ? (
-          <>
-            <div style={{ ...editorColumnStyle, width: editorWidth }} data-column-id="editor">
-              <EditorPanel />
-            </div>
-            <RailSash size={editorWidth} onResize={setEditorWidth} accent={accent} />
-          </>
-        ) : null}
-        <Column
-          name="centre"
-          flex
-          top={panel('centre')}
-          bottom={panel('centreBottom')}
-          bottomOpen={centreBottomOpen}
-          onBottomToggle={setCentreBottomOpen}
-          bottomHeight={centreBottomHeight}
-          onBottomResize={setCentreBottomHeight}
-          accent={accent}
-          tint={tint}
-        />
-        {/*
+            {/*
           The toggleable third column (`right`) lives inside a DockPanel
           side="right" so its chevron handle behaves exactly like the existing
           right/bottom docks — click to toggle, drag to resize. Closed by
           default; the chevron sits at the window's right edge until opened.
          */}
-        <DockPanel
-          side="right"
-          open={rightOpen}
-          onToggle={setRightOpen}
-          size={rightWidth}
-          onResize={setRightWidth}
-          accent={accent}
-          tint={tint}
-        >
-          <Column
-            name="right"
-            flex
-            top={panel('right')}
-            bottom={panel('rightBottom')}
-            bottomOpen={rightBottomOpen}
-            onBottomToggle={setRightBottomOpen}
-            bottomHeight={rightBottomHeight}
-            onBottomResize={setRightBottomHeight}
-            accent={accent}
-            tint={tint}
-          />
-        </DockPanel>
-      </div>
+            <DockPanel
+              side="right"
+              open={rightOpen}
+              onToggle={setRightOpen}
+              size={rightWidth}
+              onResize={setRightWidth}
+              accent={accent}
+              tint={tint}
+            >
+              <Column
+                name="right"
+                flex
+                top={panel('right')}
+                bottom={panel('rightBottom')}
+                bottomOpen={rightBottomOpen}
+                onBottomToggle={setRightBottomOpen}
+                bottomHeight={rightBottomHeight}
+                onBottomResize={setRightBottomHeight}
+                accent={accent}
+                tint={tint}
+              />
+            </DockPanel>
+          </div>
+        </>
+      )}
       {contentPortals}
     </div>
   );
