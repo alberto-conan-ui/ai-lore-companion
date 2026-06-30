@@ -1,100 +1,131 @@
 /**
- * The companion's Dockview workspace (v2 P2, stage S-A). It hosts the cockpit's
- * panels — the pinned panes (Status / Payload / Memory / Publish / Assistant) and
- * the user's shell / AI / browser tabs — through the shell's [DockHost](../shell/DockHost.tsx),
- * dispatching each tab's body through the `companionContributions.tabKinds`
- * registry via the shared content seam.
+ * The companion's Dockview workspace (v2 P2). It hosts the **centre + right**
+ * columns of the cockpit (the Assistant host pane plus the user's shell / AI /
+ * browser tabs) through the shell's [DockHost](../shell/DockHost.tsx); the
+ * leftmost pane (Status / Payload / Memory) and the editor stay rail-driven v1.0
+ * chrome in App. Each tab's body dispatches through `companionContributions.tabKinds`
+ * via the shared content seam, so a live PTY / web view survives a tab switch or
+ * a drag between groups.
  *
- * It wires the three shell building blocks:
- *   - `DockHost` renders Dockview with our theme + `renderer:'always'`;
- *   - `DockSlotRegistry` + `makeDockSlotPanel` make each Dockview panel a *slot*;
- *   - `useHostSeam` owns the stable per-tab host `<div>`s and portals each tab's
- *     `renderBody(...)` in, parking the host into its slot — so a live PTY / web
- *     view survives a tab switch or a move between groups.
+ * It wires the three shell building blocks — `DockHost` (themed Dockview,
+ * `renderer:'always'`), `DockSlotRegistry` + `makeDockSlotPanel` (each Dockview
+ * panel is a *slot*), and `useHostSeam` (stable per-tab hosts portaled in).
  *
- * Behind App's `USE_DOCKVIEW` switch (OFF by default) — this is the staged,
- * supervised replacement for the v1.0 CSS-grid `panelsRow`. Stage S-A seeds the
- * layout from the panel model and renders content live; later stages add the
- * creators/rename/badges (S-B), Dockview-owned DnD + state inversion (S-C), and
- * `toJSON`/`fromJSON` persistence (S-D).
+ * State model. App owns tab **existence + metadata** (the `panels` model, keyed
+ * by id); Dockview owns **layout** (which group, what order — drag is native).
+ * The two are kept in sync by a reconcile effect: tabs present in the model but
+ * not in Dockview are added; panels in Dockview but gone from the model are
+ * removed. Closing a tab routes App-first (the tab's close button overrides
+ * Dockview's, calling App's `closeTab`), so existence has a single owner and the
+ * sync never loops.
  */
 import {
   type DockviewApi,
   DockviewDefaultTab,
   type DockviewReadyEvent,
+  type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
 } from 'dockview';
-import { type JSX, useCallback, useMemo, useRef, useState } from 'react';
+import { type FC, type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DockHost } from '../shell/DockHost.js';
 import { type DockSlotParams, DockSlotRegistry, makeDockSlotPanel } from '../shell/dockSlots.js';
 import { type HostSeamItem, useHostSeam } from '../shell/hostSeam.js';
 import type { PanelId, WorkspaceTab } from './TabbedPanel.js';
-import { TAB_KINDS, type TabRenderContext } from './tabKinds.js';
+import {
+  NEW_TAB_BUTTONS,
+  type NewTabContext,
+  TAB_KINDS,
+  type TabRenderContext,
+} from './tabKinds.js';
 
 /** The panel model slice DockWorkspace reads — structurally App's `Panel`. */
 type WorkspacePanel = { tabs: WorkspaceTab[]; activeId: string };
 
 type Props = {
   panels: Record<PanelId, WorkspacePanel>;
-  rightOpen: boolean;
-  centreBottomOpen: boolean;
-  rightBottomOpen: boolean;
   /** Everything a tab body needs to render — threaded to `renderBody`. */
   renderCtx: TabRenderContext;
+  /** Creator handlers (+ AI / + shell / + web) — already targeted at the dock. */
+  newTabCtx: NewTabContext;
+  /** Close a dock tab by id (runs App's close guard + removes it from the model). */
+  onCloseTab: (tabId: string) => void;
 };
 
 /**
- * Dockview hosts only the **centre + right** columns (and their bottom docks).
- * The leftmost pane (Status / Payload / Memory) stays rail-driven v1.0 chrome in
- * App — the activity rail swaps *only* it against the Assistant feed — and the
- * editor column stays fixed chrome too. So the dock owns these four panels:
+ * Dockview hosts only the **centre + right** columns (and their bottom docks);
+ * the leftmost pane + editor stay v1.0 chrome in App. New tabs land in the
+ * centre bucket and the user drags to split into groups.
  */
 const DOCK_PANELS: PanelId[] = ['centre', 'centreBottom', 'right', 'rightBottom'];
 
-/** The seed order: each column's top group, then its bottom group below it; the
- *  two columns laid left→right. Bottoms only seed when open with content. */
-const COLUMN_TOPS: PanelId[] = ['centre', 'right'];
-const BOTTOM_OF: Partial<Record<PanelId, PanelId>> = {
-  centre: 'centreBottom',
-  right: 'rightBottom',
-};
-
-/** Pinned-pane tab: the cockpit's panes (Status / Payload / Memory / Publish /
- *  Assistant) are not closable. Re-uses Dockview's default tab with the close
- *  affordance hidden. */
+/** Pinned-pane tab (Assistant host): not closable. */
 function PaneTab(props: IDockviewPanelHeaderProps): JSX.Element {
   return <DockviewDefaultTab hideClose {...props} />;
 }
 
-export function DockWorkspace({
-  panels,
-  rightOpen,
-  centreBottomOpen,
-  rightBottomOpen,
-  renderCtx,
-}: Props): JSX.Element {
-  // The slot registry is created once and lives for the component's life. A
-  // version counter bumps whenever a slot panel mounts/unmounts so the seam
-  // re-parks hosts as Dockview (re)builds panels.
+/** Header creators (+ AI / + shell / + web) for a group, reading the latest ctx
+ *  through a ref so the component identity stays stable for Dockview. */
+function makeCreators(ctxRef: { current: NewTabContext }): FC<IDockviewHeaderActionsProps> {
+  return function Creators(): JSX.Element {
+    const ctx = ctxRef.current;
+    return (
+      <div style={creatorRow}>
+        {NEW_TAB_BUTTONS.map((btn) => (
+          <button
+            key={btn.testId}
+            type="button"
+            data-testid={btn.testId}
+            className="dock-creator"
+            style={creatorBtn}
+            title={btn.title(ctx)}
+            disabled={btn.disabled?.(ctx) ?? false}
+            onClick={() => btn.onClick(ctx)}
+          >
+            {btn.label}
+          </button>
+        ))}
+      </div>
+    );
+  };
+}
+
+export function DockWorkspace({ panels, renderCtx, newTabCtx, onCloseTab }: Props): JSX.Element {
+  // The slot registry lives for the component's life; a version counter bumps
+  // when a slot panel mounts/unmounts so the seam re-parks as Dockview rebuilds.
   const registryRef = useRef<DockSlotRegistry>();
   if (!registryRef.current) registryRef.current = new DockSlotRegistry();
   const registry = registryRef.current;
   const [slotsVersion, setSlotsVersion] = useState(0);
 
-  // Which seeded panels Dockview currently shows (the active tab of each group).
-  // Drives the seam's per-host visibility.
+  // Which dock panels Dockview currently shows (active tab of each group).
   const [visibleIds, setVisibleIds] = useState<Set<string>>(new Set());
 
-  // The `slot` panel renderer + the pinned-pane tab renderer, stable for the
-  // component's life. Subscribe the version bump here so a mounted slot triggers
-  // a re-park.
+  // Latest handlers, read by the stable-identity tab/header components via refs.
+  const closeRef = useRef(onCloseTab);
+  closeRef.current = onCloseTab;
+  const ctxRef = useRef(newTabCtx);
+  ctxRef.current = newTabCtx;
+
   const components = useMemo(() => {
     registry.subscribe(() => setSlotsVersion((v) => v + 1));
     return { slot: makeDockSlotPanel(registry) };
   }, [registry]);
-  const tabComponents = useMemo(() => ({ pane: PaneTab }), []);
+  // The pinned pane gets a no-close tab; everything else a default tab whose
+  // close routes through App (existence is App-owned), then reconcile removes the
+  // Dockview panel. A vetoed close (running task) leaves the tab in the model and
+  // reconcile re-adds the panel — one owner, no sync loop.
+  const tabComponents = useMemo(
+    () => ({
+      pane: PaneTab,
+      closable: (props: IDockviewPanelHeaderProps): JSX.Element => (
+        <DockviewDefaultTab {...props} closeActionOverride={() => closeRef.current(props.api.id)} />
+      ),
+    }),
+    [],
+  );
+  const headerActions = useMemo(() => makeCreators(ctxRef), []);
 
-  // A flat id→tab map across the dock-owned panels, for content dispatch.
+  // A flat id→tab map across the dock-owned panels, for content dispatch + sync.
   const tabsById = useMemo(() => {
     const m = new Map<string, WorkspaceTab>();
     for (const id of DOCK_PANELS) {
@@ -103,12 +134,10 @@ export function DockWorkspace({
     return m;
   }, [panels]);
 
-  // The seam items: every tab, visible if Dockview is showing its panel.
   const items = useMemo<HostSeamItem[]>(
     () => [...tabsById.keys()].map((id) => ({ id, visible: visibleIds.has(id) })),
     [tabsById, visibleIds],
   );
-
   const resolveSlot = useCallback((id: string) => registry.get(id), [registry]);
   const renderBody = useCallback(
     (id: string) => {
@@ -118,72 +147,13 @@ export function DockWorkspace({
     },
     [tabsById, visibleIds, renderCtx],
   );
-
   const portals = useHostSeam(items, resolveSlot, renderBody, slotsVersion);
 
-  // Seed the layout once Dockview is ready. Reads the panel model at mount;
-  // Dockview owns layout thereafter (live re-seed on model change is S-B/S-C).
   const apiRef = useRef<DockviewApi | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: onReady seeds from the panel model at mount only; Dockview owns layout thereafter, so a model change must NOT re-run seeding (live re-seed is a later stage).
+  const [ready, setReady] = useState(0);
   const onReady = useCallback((event: DockviewReadyEvent) => {
     const api = event.api;
     apiRef.current = api;
-
-    const firstOf: Partial<Record<PanelId, string>> = {};
-    const addPanelFor = (
-      panelId: PanelId,
-      tab: WorkspaceTab,
-      isFirst: boolean,
-      groupSeed: { reference: string; direction: 'right' | 'below' } | null,
-    ): void => {
-      const position = isFirst
-        ? groupSeed
-          ? { referencePanel: groupSeed.reference, direction: groupSeed.direction }
-          : undefined
-        : { referencePanel: firstOf[panelId] as string, direction: 'within' as const };
-      api.addPanel<DockSlotParams>({
-        id: tab.id,
-        component: 'slot',
-        tabComponent: tab.kind === 'pane' ? 'pane' : undefined,
-        params: { slotId: tab.id },
-        title: tab.title,
-        inactive: tab.id !== panels[panelId].activeId,
-        ...(position ? { position } : {}),
-      });
-      if (isFirst) firstOf[panelId] = tab.id;
-    };
-
-    const seedGroup = (
-      panelId: PanelId,
-      groupSeed: { reference: string; direction: 'right' | 'below' } | null,
-    ): void => {
-      const tabs = panels[panelId].tabs;
-      if (tabs.length === 0) return;
-      tabs.forEach((tab, i) => addPanelFor(panelId, tab, i === 0, groupSeed));
-    };
-
-    const openOf: Partial<Record<PanelId, boolean>> = {
-      centre: true,
-      right: rightOpen,
-      centreBottom: centreBottomOpen,
-      rightBottom: rightBottomOpen,
-    };
-
-    let prevTop: PanelId | null = null;
-    for (const top of COLUMN_TOPS) {
-      if (!openOf[top] || panels[top].tabs.length === 0) continue;
-      const seed =
-        prevTop === null
-          ? null
-          : { reference: firstOf[prevTop] as string, direction: 'right' as const };
-      seedGroup(top, seed);
-      prevTop = top;
-      const bottom = BOTTOM_OF[top];
-      if (bottom && openOf[bottom] && panels[bottom].tabs.length > 0) {
-        seedGroup(bottom, { reference: firstOf[top] as string, direction: 'below' });
-      }
-    }
-
     const recomputeVisible = (): void => {
       const vis = new Set<string>();
       for (const p of api.panels) if (p.api.isVisible) vis.add(p.id);
@@ -192,11 +162,44 @@ export function DockWorkspace({
     recomputeVisible();
     api.onDidLayoutChange(recomputeVisible);
     api.onDidActivePanelChange(recomputeVisible);
+    setReady((r) => r + 1);
   }, []);
+
+  // Reconcile Dockview to the model: add new tabs (active, in the active group),
+  // update titles, remove panels whose tab is gone. Dockview keeps ownership of
+  // where each panel sits (the user's drags). The leftmost-pane chrome is not
+  // here. New tabs use the `closable` tab; the Assistant pane uses `pane`.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `ready` is a deliberate re-run trigger — it isn't read in the body, but the reconcile must (re)run once `apiRef` is populated by onReady.
+  useEffect(() => {
+    const api = apiRef.current;
+    if (!api) return;
+    for (const [id, tab] of tabsById) {
+      const existing = api.getPanel(id);
+      if (!existing) {
+        api.addPanel<DockSlotParams>({
+          id,
+          component: 'slot',
+          tabComponent: tab.kind === 'pane' ? 'pane' : 'closable',
+          params: { slotId: id },
+          title: tab.title,
+        });
+      } else if (existing.title !== tab.title) {
+        existing.api.setTitle(tab.title);
+      }
+    }
+    for (const p of [...api.panels]) {
+      if (!tabsById.has(p.id)) api.removePanel(p);
+    }
+  }, [tabsById, ready]);
 
   return (
     <div style={hostWrap} data-testid="dock-workspace">
-      <DockHost components={components} tabComponents={tabComponents} onReady={onReady} />
+      <DockHost
+        components={components}
+        tabComponents={tabComponents}
+        rightHeaderActionsComponent={headerActions}
+        onReady={onReady}
+      />
       {portals}
     </div>
   );
@@ -208,4 +211,23 @@ const hostWrap: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
   position: 'relative',
+};
+
+const creatorRow: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.15rem',
+  padding: '0 0.3rem',
+};
+
+const creatorBtn: React.CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  color: 'var(--color-text-dim)',
+  font: 'inherit',
+  fontSize: '0.72rem',
+  fontWeight: 600,
+  padding: '0.1rem 0.35rem',
+  cursor: 'pointer',
+  whiteSpace: 'nowrap',
 };

@@ -40,7 +40,12 @@ import {
 } from './components/TabbedPanel.js';
 import { TrackerStrip } from './components/TrackerStrip.js';
 import { WelcomeScreen } from './components/WelcomeScreen.js';
-import { type PaneSpec, TAB_KINDS, type TabRenderContext } from './components/tabKinds.js';
+import {
+  type NewTabContext,
+  type PaneSpec,
+  TAB_KINDS,
+  type TabRenderContext,
+} from './components/tabKinds.js';
 import { TERMINAL_FIND_EVENT } from './components/useXtermSession.js';
 import { reflowEditorThirds, scaleForResize } from './layout.js';
 import { accentColor, accentTint, accentTintLight, hueFor, projectName } from './projectAccent.js';
@@ -1214,6 +1219,18 @@ export function App(): JSX.Element {
     if (panelId !== 'leftRail' && panel.tabs.length === 1) setDockOpen(panelId, false);
   };
 
+  /** Close a dock tab by id (Dockview mode). Dockview owns layout, so a tab can
+   *  sit in any dock bucket (creators add to `centre`, but the layout snapshot
+   *  restores into the others). Find its actual bucket, then close it there. */
+  const closeDockTab = (tabId: string): void => {
+    for (const pid of ['centre', 'centreBottom', 'right', 'rightBottom'] as PanelId[]) {
+      if (panels[pid].tabs.some((t) => t.id === tabId)) {
+        closeTab(pid, tabId);
+        return;
+      }
+    }
+  };
+
   /** Move a tab between panels (or reorder within one). Pinned panes stay put. */
   const moveTab = (fromPanel: PanelId, tabId: string, toPanel: PanelId, index: number): void => {
     if (panels[fromPanel].tabs.find((t) => t.id === tabId)?.kind === 'pane') return;
@@ -1435,6 +1452,19 @@ export function App(): JSX.Element {
     onPaneChangesHeight: (paneId, height) =>
       setChangesHeightByPane((m) => ({ ...m, [paneId]: height })),
   };
+  // Dockview creators target the centre bucket — the single home for dock user
+  // tabs (Dockview owns where they then sit; the user drags to split groups).
+  const dockNewTabCtx: NewTabContext = {
+    engines,
+    lastEngineId,
+    onNewShell: () => addTab('centre', 'shell'),
+    onNewAi: (engineId) => addAiTab('centre', engineId),
+    onNewBrowser: () => addTab('centre', 'browser'),
+    shortcuts: [...projectShortcuts, ...tabShortcuts],
+    onNewShellWithCommand: (command, label) => createTerminalShortcutTab('centre', command, label),
+    onNewBrowserWithUrl: (url, label) => createBrowserShortcutTab('centre', url, label),
+    onLaunchUrlExternal: (url) => window.cockpit.urlOpenExternal(url),
+  };
   // In Dockview mode DockWorkspace owns the content seam for the dock-hosted
   // columns (centre / right + bottoms); App keeps rendering only the leftmost
   // pane's columns (leftRail / leftRailBottom), which stay v1.0 chrome. Rendering
@@ -1501,10 +1531,9 @@ export function App(): JSX.Element {
           ) : null}
           <DockWorkspace
             panels={panels}
-            rightOpen={rightOpen}
-            centreBottomOpen={centreBottomOpen}
-            rightBottomOpen={rightBottomOpen}
             renderCtx={renderCtx}
+            newTabCtx={dockNewTabCtx}
+            onCloseTab={closeDockTab}
           />
         </div>
       ) : (

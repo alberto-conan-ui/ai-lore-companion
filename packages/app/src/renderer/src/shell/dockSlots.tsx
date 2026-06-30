@@ -64,8 +64,12 @@ export class DockSlotRegistry {
 export type DockSlotParams = { slotId: string };
 
 const slotStyle: React.CSSProperties = {
+  // Fill the Dockview panel content box explicitly: its container is not a flex
+  // parent, so a `flex:1` slot would collapse. `display:flex` makes the parked
+  // host stretch to the full slot (cross-axis stretch) and fill width (flex:1).
   display: 'flex',
-  flex: 1,
+  width: '100%',
+  height: '100%',
   minWidth: 0,
   minHeight: 0,
 };
