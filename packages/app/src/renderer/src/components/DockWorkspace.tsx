@@ -27,7 +27,17 @@ import {
   type IDockviewPanelHeaderProps,
   type SerializedDockview,
 } from 'dockview';
-import { type FC, type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type FC,
+  type JSX,
+  type MutableRefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from 'react';
 import { DockHost } from '../shell/DockHost.js';
 import { type DockSlotParams, DockSlotRegistry, makeDockSlotPanel } from '../shell/dockSlots.js';
 import { type HostSeamItem, useHostSeam } from '../shell/hostSeam.js';
@@ -81,44 +91,68 @@ type Props = {
  */
 const DOCK_PANELS: PanelId[] = ['centre', 'centreBottom', 'right', 'rightBottom'];
 
+type TabsByIdRef = MutableRefObject<Map<string, WorkspaceTab>>;
+
+/** Re-render a tab component whenever its panel's title changes. A tab's
+ *  display-state (a shell's running dot, an AI tab's `engine · status`) moves in
+ *  lockstep with its title, so the title-change event is the re-read signal that
+ *  keeps the live-tab read below current without polling. */
+function useTabRevision(api: IDockviewPanelHeaderProps['api']): void {
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    const d = api.onDidTitleChange(() => bump());
+    return () => d.dispose();
+  }, [api]);
+}
+
 /**
  * Pinned-pane tab (Assistant host): not closable **and** not draggable. Dockview
  * 4.13.1 gates drag on a global `disableDnd` option, not per-panel, and `locked`
  * groups only block *drops* — neither pins a single tab in a shared group. So we
  * pin from the DOM: clear the host `.dv-tab`'s `draggable` flag on mount (the
  * browser then fires no `dragstart`, and Dockview's drag handler never engages).
- * The wrapper is `display:contents` so it adds no layout box.
+ * Carries `tab-<id>` for the e2e the way v1.0's strip did for a pinned pane.
  */
-function PaneTab(props: IDockviewPanelHeaderProps): JSX.Element {
-  const ref = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    const tabEl = ref.current?.closest('.dv-tab');
-    if (tabEl instanceof HTMLElement) tabEl.draggable = false;
-  }, []);
-  return (
-    <span ref={ref} style={paneTabWrap}>
-      <DockviewDefaultTab hideClose {...props} />
-    </span>
-  );
+function makePaneTab(tabsByIdRef: TabsByIdRef): FC<IDockviewPanelHeaderProps> {
+  return function PaneTab(props: IDockviewPanelHeaderProps): JSX.Element {
+    const ref = useRef<HTMLSpanElement>(null);
+    useEffect(() => {
+      const tabEl = ref.current?.closest('.dv-tab');
+      if (tabEl instanceof HTMLElement) tabEl.draggable = false;
+    }, []);
+    const tab = tabsByIdRef.current.get(props.api.id);
+    return (
+      <span ref={ref} data-testid={tab ? `tab-${tab.id}` : undefined} style={tabWrap}>
+        <DockviewDefaultTab hideClose {...props} />
+      </span>
+    );
+  };
 }
 
 /**
- * A user tab (shell / AI / web): closable and **inline-renamable**. Dockview's
- * default tab has no rename, so double-click swaps the title for an input
- * (restoring v1.0's gesture); Enter / blur commits, Escape cancels. While editing
- * the host `.dv-tab` is freed from drag so mouse text-selection in the input
- * isn't hijacked into a tab drag. Close + rename read the latest handlers through
- * refs so the component identity stays stable for Dockview.
+ * A user tab (shell / AI / web): closable, **inline-renamable**, and carrying the
+ * v1.0 strip surfaces — the `tab-<kind>` test id and the kind's strip adornment
+ * (a shell's running dot, an AI badge). Dockview's default tab has neither, so we
+ * wrap it: the adornment + test id live on the wrapper, the title + close stay
+ * the default tab's. Double-click swaps the title for an input (v1.0's rename
+ * gesture); Enter / blur commits, Escape cancels. While editing the host
+ * `.dv-tab` is freed from drag so mouse text-selection isn't hijacked into a tab
+ * drag. Close + rename read the latest handlers through refs so the component
+ * identity stays stable for Dockview; the live tab is read from a ref kept current
+ * by the host, re-read on each title change.
  */
 function makeRenamableTab(
   closeRef: { current: (tabId: string) => void },
   renameRef: { current: (tabId: string, name: string) => void },
+  tabsByIdRef: TabsByIdRef,
 ): FC<IDockviewPanelHeaderProps> {
   return function RenamableTab(props: IDockviewPanelHeaderProps): JSX.Element {
+    useTabRevision(props.api);
     const [editing, setEditing] = useState(false);
     const [draft, setDraft] = useState('');
     const ref = useRef<HTMLElement | null>(null);
     const title = props.api.title ?? '';
+    const tab = tabsByIdRef.current.get(props.api.id);
     useEffect(() => {
       const tabEl = ref.current?.closest('.dv-tab');
       if (tabEl instanceof HTMLElement) tabEl.draggable = !editing;
@@ -148,12 +182,14 @@ function makeRenamableTab(
     return (
       <span
         ref={ref}
-        style={paneTabWrap}
+        data-testid={tab ? `tab-${tab.kind}` : undefined}
+        style={tabWrap}
         onDoubleClick={() => {
           setDraft(title);
           setEditing(true);
         }}
       >
+        {tab ? TAB_KINDS[tab.kind].stripAdornment?.(tab) : null}
         <DockviewDefaultTab {...props} closeActionOverride={() => closeRef.current(props.api.id)} />
       </span>
     );
@@ -213,6 +249,12 @@ export function DockWorkspace({
   renameRef.current = onRenameTab;
   const ctxRef = useRef(newTabCtx);
   ctxRef.current = newTabCtx;
+  // The stable-identity tab components (created once below) read the live tab
+  // through this ref, kept current every render (assigned once `tabsById` is
+  // built) — so a status flip or rename shows without re-creating the component,
+  // which Dockview keys on identity. Declared up here so the `tabComponents`
+  // memo can close over it.
+  const tabsByIdRef = useRef<Map<string, WorkspaceTab>>(new Map());
 
   const components = useMemo(() => {
     registry.subscribe(() => setSlotsVersion((v) => v + 1));
@@ -224,8 +266,8 @@ export function DockWorkspace({
   // reconcile re-adds the panel — one owner, no sync loop.
   const tabComponents = useMemo(
     () => ({
-      pane: PaneTab,
-      closable: makeRenamableTab(closeRef, renameRef),
+      pane: makePaneTab(tabsByIdRef),
+      closable: makeRenamableTab(closeRef, renameRef, tabsByIdRef),
     }),
     [],
   );
@@ -239,6 +281,7 @@ export function DockWorkspace({
     }
     return m;
   }, [panels]);
+  tabsByIdRef.current = tabsById;
 
   const items = useMemo<HostSeamItem[]>(
     () => [...tabsById.keys()].map((id) => ({ id, visible: visibleIds.has(id) })),
@@ -289,6 +332,9 @@ export function DockWorkspace({
       api.onDidLayoutChange(onLayout);
       api.onDidActivePanelChange(onLayout);
       onApi?.(api);
+      // e2e only: publish the API so the drag-invariant spec can drive a real
+      // group move (Playwright can't synthesize Dockview's native DnD).
+      if (window.cockpitE2E) window.__dockApi = api;
       setReady((r) => r + 1);
     },
     [initialDockLayout, onApi, onLayoutChange],
@@ -342,7 +388,15 @@ const hostWrap: React.CSSProperties = {
   position: 'relative',
 };
 
-const paneTabWrap: React.CSSProperties = { display: 'contents' };
+// A real (non-`display:contents`) inline box so the test id resolves to a
+// hit-testable element for Playwright (`.dblclick()` / `toBeVisible()`), and the
+// strip adornment sits left of Dockview's default tab content.
+const tabWrap: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: '0.3rem',
+  minWidth: 0,
+};
 
 const renameInput: React.CSSProperties = {
   margin: '0.2rem 0.45rem',

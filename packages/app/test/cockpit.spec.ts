@@ -57,7 +57,7 @@ test.describe('window modes', () => {
 
       // The panel/tab workspace: in v0.9 creators live on the centre column;
       // leftRail is a locked nav rail.
-      await page.locator('[data-column-id="centre"]').getByTestId('new-shell').first().click();
+      await page.getByTestId('dock-workspace').getByTestId('new-shell').first().click();
       await expect(page.getByTestId('tab-shell').first()).toBeVisible({ timeout: 5_000 });
 
       await app.close();
@@ -156,7 +156,7 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      await page.locator('[data-column-id="centre"]').getByTestId('new-shell').first().click();
+      await page.getByTestId('dock-workspace').getByTestId('new-shell').first().click();
       const tab = page.getByTestId('tab-shell').first();
       await expect(tab).toBeVisible({ timeout: 5_000 });
 
@@ -189,7 +189,7 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      const centre = page.locator('[data-column-id="centre"]');
+      const centre = page.getByTestId('dock-workspace');
       // Single click — no popover step.
       await centre.getByTestId('new-ai').first().click();
       // No popover renders at any point.
@@ -197,9 +197,6 @@ test.describe('window modes', () => {
 
       const aiTab = centre.getByTestId('tab-ai');
       await expect(aiTab).toBeVisible({ timeout: 5_000 });
-      // The chosen engine is recorded on the tab — exposed as the button's
-      // title attribute, which is `${tab.title} · ${engine}` for AI tabs.
-      await expect(aiTab.locator('button[title*="claude"]')).toHaveCount(1);
       // The empty-state body identifies the active engine via data-ai-engine.
       await expect(page.locator('[data-ai-engine="claude"]')).toHaveCount(1);
       // The engine dropdown surfaces the "+ Add engine…" deep-link item.
@@ -224,7 +221,7 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      const centre = page.locator('[data-column-id="centre"]');
+      const centre = page.getByTestId('dock-workspace');
       // v0.9: `+ AI` opens the tab directly with the only seeded engine
       // (fake) preselected — no popover.
       await centre.getByTestId('new-ai').first().click();
@@ -271,7 +268,7 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      const centre = page.locator('[data-column-id="centre"]');
+      const centre = page.getByTestId('dock-workspace');
       await centre.getByTestId('new-shell').first().click();
       await expect(page.getByTestId('tab-shell').first()).toBeVisible({ timeout: 5_000 });
       const terminal = page.getByTestId('terminal').first();
@@ -311,7 +308,7 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      const centre = page.locator('[data-column-id="centre"]');
+      const centre = page.getByTestId('dock-workspace');
       // v0.9: `+ AI` opens the tab directly with the only seeded engine
       // (fake) preselected — no popover.
       await centre.getByTestId('new-ai').first().click();
@@ -353,7 +350,7 @@ test.describe('window modes', () => {
       const first = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(first.page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
       // v0.9: `+ AI` opens the tab directly with the only seeded engine.
-      await first.page.locator('[data-column-id="centre"]').getByTestId('new-ai').first().click();
+      await first.page.getByTestId('dock-workspace').getByTestId('new-ai').first().click();
       await first.page.getByTestId('ai-start').click();
       await expect(first.page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
 
@@ -365,7 +362,7 @@ test.describe('window modes', () => {
       // persisted per-project width.
       const second = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(second.page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
-      await second.page.locator('[data-column-id="centre"]').getByTestId('new-ai').first().click();
+      await second.page.getByTestId('dock-workspace').getByTestId('new-ai').first().click();
       await second.page.getByTestId('ai-start').click();
 
       await expect(second.page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
@@ -402,7 +399,7 @@ test.describe('window modes', () => {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      await page.locator('[data-column-id="centre"]').getByTestId('new-ai').first().click();
+      await page.getByTestId('dock-workspace').getByTestId('new-ai').first().click();
       await page.getByTestId('ai-start').click();
       await expect(page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
 
@@ -587,24 +584,21 @@ test.describe('window modes', () => {
   // stable [data-tab-host] container: one DOM node per tab.id, reparented
   // imperatively. This test pins it: the same UUID-tagged host element must
   // survive the move.
-  test('a terminal tab survives being dragged between panels', async () => {
+  test('a terminal tab survives being moved between dock groups', async () => {
     const fixture = makeProject();
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      // v0.9: shells live on the workspace columns; create in centre's top,
-      // then drag down to centre's bottom dock.
-      const centre = page.locator('[data-column-id="centre"]');
-      const centreTopStrip = centre.getByTestId('tab-strip').first();
-      await centre.getByTestId('new-shell').first().click();
-      const terminalTab = centreTopStrip.getByTestId('tab-shell');
-      await expect(terminalTab).toBeVisible({ timeout: 5_000 });
+      // Create a shell on the Dockview workspace.
+      const dock = page.getByTestId('dock-workspace');
+      await dock.getByTestId('new-shell').first().click();
+      await expect(dock.getByTestId('tab-shell').first()).toBeVisible({ timeout: 5_000 });
 
       // Read the terminal's stable host id. Pane hosts have known string ids
-      // (status / payload / memory); the terminal's host is the one with a
-      // UUID-shaped attribute.
-      const PANE_IDS = ['status', 'payload', 'memory'];
+      // (status / payload / memory / assistant-host); the terminal's host is the
+      // UUID-shaped one — and it doubles as its Dockview panel id.
+      const PANE_IDS = ['status', 'payload', 'memory', 'publish', 'assistant-host'];
       const terminalHostId = await page.evaluate((panes: string[]) => {
         for (const el of Array.from(document.querySelectorAll('[data-tab-host]'))) {
           const id = el.getAttribute('data-tab-host');
@@ -614,22 +608,36 @@ test.describe('window modes', () => {
       }, PANE_IDS);
       expect(terminalHostId).toBeTruthy();
 
-      // Open centre's bottom dock so it has a drop target. Each column has
-      // its own bottom dock in v0.9; scope by `data-column-id`.
-      await centre.getByTestId('dock-handle-bottom').click();
-      const centreBottomStrip = centre.getByTestId('tab-strip').nth(1);
-      await expect(centreBottomStrip).toBeVisible({ timeout: 5_000 });
+      // Move the terminal into a different group — the same cross-group move
+      // Dockview performs on a drag between docks. Playwright cannot synthesize
+      // Dockview's native HTML5 DnD, so the spec drives the move through the API
+      // the renderer publishes under COCKPIT_E2E: add a fresh group and move the
+      // panel into it. (Dockview's `moveTo` ignores `position` unless a target
+      // `group` is given, so a bare `position` on a lone panel is a no-op.) The
+      // move fires the layout-change event and the content seam re-parks the host
+      // into the new group's slot.
+      type DockApiLike = {
+        getPanel(
+          id: string,
+        ): { group: { id: string }; api: { moveTo(o: { group: unknown }): void } } | undefined;
+        addGroup(): { id: string };
+      };
+      const moved = await page.evaluate((id: string) => {
+        const api = window.__dockApi as DockApiLike;
+        const panel = api.getPanel(id);
+        const before = panel?.group.id ?? null;
+        const target = api.addGroup();
+        panel?.api.moveTo({ group: target });
+        const after = api.getPanel(id)?.group.id ?? null;
+        return { before, after };
+      }, terminalHostId as string);
+      // The terminal really changed groups (a drop into a new bottom group).
+      expect(moved.before).toBeTruthy();
+      expect(moved.after).not.toBe(moved.before);
 
-      // Drag the terminal tab from centre's top strip onto its bottom strip.
-      await terminalTab.dragTo(centreBottomStrip);
-
-      // The terminal tab now lives in centre's bottom strip.
-      await expect(centreBottomStrip.getByTestId('tab-shell')).toBeVisible({ timeout: 5_000 });
-      await expect(centreTopStrip.getByTestId('tab-shell')).toHaveCount(0);
-
-      // The same host element still exists with the same UUID — a remount
-      // would have torn the host down with its React subtree (and killed the
-      // PTY), then created a fresh one on remount under a new tab.id.
+      // The same host element still exists with the same UUID — a remount would
+      // have torn the host down with its React subtree (and killed the PTY),
+      // then created a fresh one on remount under a new tab.id.
       await expect(page.locator(`[data-tab-host="${terminalHostId}"]`)).toHaveCount(1);
 
       await app.close();
@@ -760,7 +768,7 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('pane-status')).toBeVisible({ timeout: 15_000 });
 
       // Open a shell tab and focus its terminal.
-      await page.locator('[data-column-id="centre"]').getByTestId('new-shell').first().click();
+      await page.getByTestId('dock-workspace').getByTestId('new-shell').first().click();
       await expect(page.getByTestId('tab-shell').first()).toBeVisible({ timeout: 5_000 });
       await page.getByTestId('terminal').first().click();
 

@@ -33,3 +33,6 @@ const api = Object.fromEntries(
 ) as unknown as CockpitApi;
 
 contextBridge.exposeInMainWorld('cockpit', api);
+// Bridge the e2e flag so the renderer can expose test-only affordances (e.g. the
+// Dockview API for the drag-invariant spec). Off for real users.
+contextBridge.exposeInMainWorld('cockpitE2E', process.env.COCKPIT_E2E === '1');

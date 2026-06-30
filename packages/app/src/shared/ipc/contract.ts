@@ -334,5 +334,13 @@ export const CHANNELS = Object.fromEntries(
 declare global {
   interface Window {
     cockpit: CockpitApi;
+    /** True only under `COCKPIT_E2E=1` — bridged by the preload so the renderer
+     *  can expose test-only affordances (see `__dockApi`). Undefined in prod. */
+    cockpitE2E?: boolean;
+    /** The live Dockview API, published by `DockWorkspace` only when `cockpitE2E`
+     *  is set, so an e2e can drive a real group move (the gesture Playwright
+     *  cannot synthesize for Dockview's native DnD). `unknown` to keep Dockview
+     *  types out of the shared/main surface; the test casts it. */
+    __dockApi?: unknown;
   }
 }
