@@ -1339,6 +1339,17 @@ export function App(): JSX.Element {
     }
   };
 
+  /** Rename a dock tab by id — Dockview owns placement, so the tab's home panel
+   *  is found by id (mirrors `closeDockTab`) before delegating to `renameTab`. */
+  const renameDockTab = (tabId: string, name: string): void => {
+    for (const pid of ['centre', 'centreBottom', 'right', 'rightBottom'] as PanelId[]) {
+      if (panels[pid].tabs.some((t) => t.id === tabId)) {
+        renameTab(pid, tabId, name);
+        return;
+      }
+    }
+  };
+
   /** Move a tab between panels (or reorder within one). Pinned panes stay put. */
   const moveTab = (fromPanel: PanelId, tabId: string, toPanel: PanelId, index: number): void => {
     if (panels[fromPanel].tabs.find((t) => t.id === tabId)?.kind === 'pane') return;
@@ -1647,6 +1658,7 @@ export function App(): JSX.Element {
               renderCtx={renderCtx}
               newTabCtx={dockNewTabCtx}
               onCloseTab={closeDockTab}
+              onRenameTab={renameDockTab}
               initialDockLayout={initialDockLayout}
               onApi={handleDockApi}
               onLayoutChange={handleDockLayoutChange}

@@ -50,6 +50,9 @@ type Props = {
   newTabCtx: NewTabContext;
   /** Close a dock tab by id (runs App's close guard + removes it from the model). */
   onCloseTab: (tabId: string) => void;
+  /** Rename a dock tab by id (double-click a tab → inline edit). An empty name
+   *  reverts to the auto-managed default, mirroring v1.0's `renameTab`. */
+  onRenameTab: (tabId: string, name: string) => void;
   /**
    * A previously-captured Dockview serialization (`api.toJSON()`, persisted via
    * `WorkspaceLayout.dock.serialized`). When present it is applied once in
@@ -78,9 +81,83 @@ type Props = {
  */
 const DOCK_PANELS: PanelId[] = ['centre', 'centreBottom', 'right', 'rightBottom'];
 
-/** Pinned-pane tab (Assistant host): not closable. */
+/**
+ * Pinned-pane tab (Assistant host): not closable **and** not draggable. Dockview
+ * 4.13.1 gates drag on a global `disableDnd` option, not per-panel, and `locked`
+ * groups only block *drops* — neither pins a single tab in a shared group. So we
+ * pin from the DOM: clear the host `.dv-tab`'s `draggable` flag on mount (the
+ * browser then fires no `dragstart`, and Dockview's drag handler never engages).
+ * The wrapper is `display:contents` so it adds no layout box.
+ */
 function PaneTab(props: IDockviewPanelHeaderProps): JSX.Element {
-  return <DockviewDefaultTab hideClose {...props} />;
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const tabEl = ref.current?.closest('.dv-tab');
+    if (tabEl instanceof HTMLElement) tabEl.draggable = false;
+  }, []);
+  return (
+    <span ref={ref} style={paneTabWrap}>
+      <DockviewDefaultTab hideClose {...props} />
+    </span>
+  );
+}
+
+/**
+ * A user tab (shell / AI / web): closable and **inline-renamable**. Dockview's
+ * default tab has no rename, so double-click swaps the title for an input
+ * (restoring v1.0's gesture); Enter / blur commits, Escape cancels. While editing
+ * the host `.dv-tab` is freed from drag so mouse text-selection in the input
+ * isn't hijacked into a tab drag. Close + rename read the latest handlers through
+ * refs so the component identity stays stable for Dockview.
+ */
+function makeRenamableTab(
+  closeRef: { current: (tabId: string) => void },
+  renameRef: { current: (tabId: string, name: string) => void },
+): FC<IDockviewPanelHeaderProps> {
+  return function RenamableTab(props: IDockviewPanelHeaderProps): JSX.Element {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState('');
+    const ref = useRef<HTMLElement | null>(null);
+    const title = props.api.title ?? '';
+    useEffect(() => {
+      const tabEl = ref.current?.closest('.dv-tab');
+      if (tabEl instanceof HTMLElement) tabEl.draggable = !editing;
+      if (editing && ref.current instanceof HTMLInputElement) ref.current.select();
+    }, [editing]);
+    const commit = (): void => {
+      renameRef.current(props.api.id, draft);
+      setEditing(false);
+    };
+    if (editing) {
+      return (
+        <input
+          ref={ref}
+          style={renameInput}
+          value={draft}
+          spellCheck={false}
+          aria-label="Rename tab"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commit();
+            else if (e.key === 'Escape') setEditing(false);
+          }}
+        />
+      );
+    }
+    return (
+      <span
+        ref={ref}
+        style={paneTabWrap}
+        onDoubleClick={() => {
+          setDraft(title);
+          setEditing(true);
+        }}
+      >
+        <DockviewDefaultTab {...props} closeActionOverride={() => closeRef.current(props.api.id)} />
+      </span>
+    );
+  };
 }
 
 /** Header creators (+ AI / + shell / + web) for a group, reading the latest ctx
@@ -114,6 +191,7 @@ export function DockWorkspace({
   renderCtx,
   newTabCtx,
   onCloseTab,
+  onRenameTab,
   initialDockLayout,
   onApi,
   onLayoutChange,
@@ -131,6 +209,8 @@ export function DockWorkspace({
   // Latest handlers, read by the stable-identity tab/header components via refs.
   const closeRef = useRef(onCloseTab);
   closeRef.current = onCloseTab;
+  const renameRef = useRef(onRenameTab);
+  renameRef.current = onRenameTab;
   const ctxRef = useRef(newTabCtx);
   ctxRef.current = newTabCtx;
 
@@ -145,9 +225,7 @@ export function DockWorkspace({
   const tabComponents = useMemo(
     () => ({
       pane: PaneTab,
-      closable: (props: IDockviewPanelHeaderProps): JSX.Element => (
-        <DockviewDefaultTab {...props} closeActionOverride={() => closeRef.current(props.api.id)} />
-      ),
+      closable: makeRenamableTab(closeRef, renameRef),
     }),
     [],
   );
@@ -262,6 +340,21 @@ const hostWrap: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
   position: 'relative',
+};
+
+const paneTabWrap: React.CSSProperties = { display: 'contents' };
+
+const renameInput: React.CSSProperties = {
+  margin: '0.2rem 0.45rem',
+  width: '8rem',
+  padding: '0.15rem 0.3rem',
+  background: 'var(--color-shell)',
+  border: '1px solid var(--color-accent)',
+  borderRadius: '3px',
+  color: 'var(--color-text-bright)',
+  font: 'inherit',
+  fontSize: '0.78rem',
+  fontWeight: 600,
 };
 
 const creatorRow: React.CSSProperties = {
