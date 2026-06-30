@@ -108,7 +108,7 @@ const RESTORABLE_KINDS = new Set<TabKind>(['shell', 'ai', 'browser']);
 /** v2 P2 (stage S-A): render the workspace through Dockview instead of the v1.0
  *  hand-rolled CSS-grid `panelsRow`. OFF by default — flipped on to validate the
  *  docking swap live, then on for real once the staged swap (S-A…S-E) lands. */
-const USE_DOCKVIEW = false;
+const USE_DOCKVIEW = true;
 
 /** Persist a runtime tab as a layout tab — structure plus the captured
  *  `lastSession`, dropping all live state (PTY ids, status, etc.). */
@@ -1435,16 +1435,19 @@ export function App(): JSX.Element {
     onPaneChangesHeight: (paneId, height) =>
       setChangesHeightByPane((m) => ({ ...m, [paneId]: height })),
   };
-  // In Dockview mode DockWorkspace owns the content seam (its own hosts +
-  // portals), so App builds none — otherwise each tab body would mount twice
-  // (a second live PTY per shell tab).
-  const contentPortals = USE_DOCKVIEW
-    ? []
-    : tabPlacements.map(({ tab, visible }) => {
-        const host = getOrCreateTabHost(tab.id);
-        const body = TAB_KINDS[tab.kind].renderBody(tab, visible, renderCtx);
-        return createPortal(body, host, tab.id);
-      });
+  // In Dockview mode DockWorkspace owns the content seam for the dock-hosted
+  // columns (centre / right + bottoms); App keeps rendering only the leftmost
+  // pane's columns (leftRail / leftRailBottom), which stay v1.0 chrome. Rendering
+  // a dock-owned tab here too would mount its body twice (a second live PTY).
+  const contentPortals = tabPlacements
+    .filter(
+      ({ panelId }) => !USE_DOCKVIEW || panelId === 'leftRail' || panelId === 'leftRailBottom',
+    )
+    .map(({ tab, visible }) => {
+      const host = getOrCreateTabHost(tab.id);
+      const body = TAB_KINDS[tab.kind].renderBody(tab, visible, renderCtx);
+      return createPortal(body, host, tab.id);
+    });
 
   const accent = accentColor(projectHue);
   const tint = theme === 'light' ? accentTintLight(projectHue) : accentTint(projectHue);
@@ -1460,14 +1463,50 @@ export function App(): JSX.Element {
         />
       ) : null}
       {USE_DOCKVIEW ? (
-        <DockWorkspace
-          panels={panels}
-          rightOpen={rightOpen}
-          leftRailBottomOpen={leftRailBottomOpen}
-          centreBottomOpen={centreBottomOpen}
-          rightBottomOpen={rightBottomOpen}
-          renderCtx={renderCtx}
-        />
+        <div style={panelsRow}>
+          {/* Left region + editor are UNCHANGED v1.0 chrome: the activity rail
+           *  drives ONLY the leftmost pane (Status / Payload / Memory ↔ the
+           *  Assistant feed); the editor opens in place beside it. Dockview hosts
+           *  only the centre + right columns (the DockWorkspace below). */}
+          <div style={{ ...leftRegionStyle, width: leftRailWidth }} data-column-id="left-region">
+            <LeftActivityRail section={leftSection} onSelect={setLeftSection} />
+            <div style={leftSection === 'project' ? leftSectionShownStyle : leftSectionHiddenStyle}>
+              <Column
+                name="leftRail"
+                flex
+                top={panel('leftRail')}
+                bottom={panel('leftRailBottom')}
+                bottomOpen={leftRailBottomOpen}
+                onBottomToggle={setLeftRailBottomOpen}
+                bottomHeight={leftRailBottomHeight}
+                onBottomResize={setLeftRailBottomHeight}
+                accent={accent}
+                tint={tint}
+              />
+            </div>
+            <div
+              style={leftSection === 'assistant' ? leftSectionShownStyle : leftSectionHiddenStyle}
+            >
+              <AssistantDashboard />
+            </div>
+          </div>
+          <RailSash size={leftRailWidth} onResize={setLeftRailWidth} accent={accent} />
+          {editorOpen ? (
+            <>
+              <div style={{ ...editorColumnStyle, width: editorWidth }} data-column-id="editor">
+                <EditorPanel />
+              </div>
+              <RailSash size={editorWidth} onResize={setEditorWidth} accent={accent} />
+            </>
+          ) : null}
+          <DockWorkspace
+            panels={panels}
+            rightOpen={rightOpen}
+            centreBottomOpen={centreBottomOpen}
+            rightBottomOpen={rightBottomOpen}
+            renderCtx={renderCtx}
+          />
+        </div>
       ) : (
         <>
           <div style={panelsRow}>

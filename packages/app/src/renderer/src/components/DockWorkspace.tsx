@@ -37,18 +37,24 @@ type WorkspacePanel = { tabs: WorkspaceTab[]; activeId: string };
 type Props = {
   panels: Record<PanelId, WorkspacePanel>;
   rightOpen: boolean;
-  leftRailBottomOpen: boolean;
   centreBottomOpen: boolean;
   rightBottomOpen: boolean;
   /** Everything a tab body needs to render — threaded to `renderBody`. */
   renderCtx: TabRenderContext;
 };
 
+/**
+ * Dockview hosts only the **centre + right** columns (and their bottom docks).
+ * The leftmost pane (Status / Payload / Memory) stays rail-driven v1.0 chrome in
+ * App — the activity rail swaps *only* it against the Assistant feed — and the
+ * editor column stays fixed chrome too. So the dock owns these four panels:
+ */
+const DOCK_PANELS: PanelId[] = ['centre', 'centreBottom', 'right', 'rightBottom'];
+
 /** The seed order: each column's top group, then its bottom group below it; the
- *  three columns laid left→right. Bottoms only seed when open with content. */
-const COLUMN_TOPS: PanelId[] = ['leftRail', 'centre', 'right'];
+ *  two columns laid left→right. Bottoms only seed when open with content. */
+const COLUMN_TOPS: PanelId[] = ['centre', 'right'];
 const BOTTOM_OF: Partial<Record<PanelId, PanelId>> = {
-  leftRail: 'leftRailBottom',
   centre: 'centreBottom',
   right: 'rightBottom',
 };
@@ -63,7 +69,6 @@ function PaneTab(props: IDockviewPanelHeaderProps): JSX.Element {
 export function DockWorkspace({
   panels,
   rightOpen,
-  leftRailBottomOpen,
   centreBottomOpen,
   rightBottomOpen,
   renderCtx,
@@ -89,10 +94,10 @@ export function DockWorkspace({
   }, [registry]);
   const tabComponents = useMemo(() => ({ pane: PaneTab }), []);
 
-  // A flat id→tab map across all panels, for content dispatch.
+  // A flat id→tab map across the dock-owned panels, for content dispatch.
   const tabsById = useMemo(() => {
     const m = new Map<string, WorkspaceTab>();
-    for (const id of Object.keys(panels) as PanelId[]) {
+    for (const id of DOCK_PANELS) {
       for (const tab of panels[id].tabs) m.set(tab.id, tab);
     }
     return m;
@@ -157,11 +162,9 @@ export function DockWorkspace({
       tabs.forEach((tab, i) => addPanelFor(panelId, tab, i === 0, groupSeed));
     };
 
-    const openOf: Record<PanelId, boolean> = {
-      leftRail: true,
+    const openOf: Partial<Record<PanelId, boolean>> = {
       centre: true,
       right: rightOpen,
-      leftRailBottom: leftRailBottomOpen,
       centreBottom: centreBottomOpen,
       rightBottom: rightBottomOpen,
     };
@@ -179,13 +182,6 @@ export function DockWorkspace({
       if (bottom && openOf[bottom] && panels[bottom].tabs.length > 0) {
         seedGroup(bottom, { reference: firstOf[top] as string, direction: 'below' });
       }
-    }
-
-    // Lock the pinned-pane group (leftRail) so its panes can't be dragged out.
-    const leftRailFirst = firstOf.leftRail;
-    if (leftRailFirst) {
-      const grp = api.getPanel(leftRailFirst)?.group;
-      if (grp) grp.locked = true;
     }
 
     const recomputeVisible = (): void => {
