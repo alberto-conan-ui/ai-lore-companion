@@ -123,11 +123,6 @@ const DEFAULT_EDITOR_WIDTH = 560;
  *  snapshot is dropped. */
 const RESTORABLE_KINDS = new Set<TabKind>(['shell', 'ai', 'browser']);
 
-/** v2 P2 (stage S-A): render the workspace through Dockview instead of the v1.0
- *  hand-rolled CSS-grid `panelsRow`. OFF by default — flipped on to validate the
- *  docking swap live, then on for real once the staged swap (S-A…S-E) lands. */
-const USE_DOCKVIEW = true;
-
 /** Persist a runtime tab as a layout tab — structure plus the captured
  *  `lastSession`, dropping all live state (PTY ids, status, etc.). */
 function tabToLayout(tab: WorkspaceTab, lastSession: TabLastSession | undefined): LayoutTab {
@@ -1010,7 +1005,7 @@ export function App(): JSX.Element {
    *  plain, structured-clone-safe object for the IPC write. */
   const buildDock = useCallback(
     (lastBy: Record<string, TabLastSession | undefined>): DockWorkspaceSnapshot | null => {
-      if (!USE_DOCKVIEW || !dockApiRef.current) return null;
+      if (!dockApiRef.current) return null;
       const tabs: LayoutTab[] = [];
       for (const panelId of DOCK_PANEL_IDS) {
         for (const t of panels[panelId].tabs) {
@@ -1085,7 +1080,7 @@ export function App(): JSX.Element {
       // bucket; Dockview's serialization — applied via `initialDockLayout` —
       // decides actual placement). The other dock buckets start empty. Without a
       // dock snapshot (pre-S-D / v1.0 grid) fall back to the per-bucket restore.
-      const useDock = USE_DOCKVIEW && !!dock;
+      const useDock = !!dock;
       const dockTabs = dock
         ? dock.tabs.map(tabFromLayout).filter((t): t is WorkspaceTab => t !== null)
         : [];
@@ -1229,11 +1224,11 @@ export function App(): JSX.Element {
     // S-D: in Dockview mode, hold off until the dock API is live — capturing
     // before it would write a dock-less snapshot and lose the saved placement.
     // It comes online within a frame of mount; the next state change re-runs this.
-    if (USE_DOCKVIEW && !dockApiRef.current) return;
+    if (!dockApiRef.current) return;
     const handle = window.setTimeout(() => {
       void captureLayout().then(({ layout, dock }) => {
         window.cockpit.settingsSetLayout({ layout });
-        if (USE_DOCKVIEW) window.cockpit.dockLayoutSet({ snapshot: dock });
+        window.cockpit.dockLayoutSet({ snapshot: dock });
       });
     }, 300);
     return () => window.clearTimeout(handle);
@@ -1251,10 +1246,10 @@ export function App(): JSX.Element {
     wasFocused.current = hasFocus;
     if (!lostFocus) return;
     if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain) || !captureReady.current) return;
-    if (USE_DOCKVIEW && !dockApiRef.current) return;
+    if (!dockApiRef.current) return;
     const { layout, dock } = captureLayoutSync();
     void window.cockpit.settingsSetLayout({ layout });
-    if (USE_DOCKVIEW) void window.cockpit.dockLayoutSet({ snapshot: dock });
+    void window.cockpit.dockLayoutSet({ snapshot: dock });
   }, [hasFocus, mode, chain, captureLayoutSync]);
 
   // Final flush on window close — fire-and-forget; main records what reaches it.
@@ -1262,10 +1257,10 @@ export function App(): JSX.Element {
     if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
     const onUnload = (): void => {
       if (!captureReady.current) return;
-      if (USE_DOCKVIEW && !dockApiRef.current) return;
+      if (!dockApiRef.current) return;
       const { layout, dock } = captureLayoutSync();
       void window.cockpit.settingsSetLayout({ layout });
-      if (USE_DOCKVIEW) void window.cockpit.dockLayoutSet({ snapshot: dock });
+      void window.cockpit.dockLayoutSet({ snapshot: dock });
     };
     window.addEventListener('beforeunload', onUnload);
     return () => window.removeEventListener('beforeunload', onUnload);
@@ -1584,14 +1579,12 @@ export function App(): JSX.Element {
     onNewBrowserWithUrl: (url, label) => createBrowserShortcutTab('centre', url, label),
     onLaunchUrlExternal: (url) => window.cockpit.urlOpenExternal(url),
   };
-  // In Dockview mode DockWorkspace owns the content seam for the dock-hosted
-  // columns (centre / right + bottoms); App keeps rendering only the leftmost
-  // pane's columns (leftRail / leftRailBottom), which stay v1.0 chrome. Rendering
-  // a dock-owned tab here too would mount its body twice (a second live PTY).
+  // DockWorkspace owns the content seam for the dock-hosted columns (centre /
+  // right + bottoms); App keeps rendering only the leftmost pane's columns
+  // (leftRail / leftRailBottom), which stay v1.0 chrome. Rendering a dock-owned
+  // tab here too would mount its body twice (a second live PTY).
   const contentPortals = tabPlacements
-    .filter(
-      ({ panelId }) => !USE_DOCKVIEW || panelId === 'leftRail' || panelId === 'leftRailBottom',
-    )
+    .filter(({ panelId }) => panelId === 'leftRail' || panelId === 'leftRailBottom')
     .map(({ tab, visible }) => {
       const host = getOrCreateTabHost(tab.id);
       const body = TAB_KINDS[tab.kind].renderBody(tab, visible, renderCtx);
@@ -1611,152 +1604,59 @@ export function App(): JSX.Element {
           onClose={() => setSearchOpen(false)}
         />
       ) : null}
-      {USE_DOCKVIEW ? (
-        <div style={panelsRow}>
-          {/* Left region + editor are UNCHANGED v1.0 chrome: the activity rail
-           *  drives ONLY the leftmost pane (Status / Payload / Memory ↔ the
-           *  Assistant feed); the editor opens in place beside it. Dockview hosts
-           *  only the centre + right columns (the DockWorkspace below). */}
-          <div style={{ ...leftRegionStyle, width: leftRailWidth }} data-column-id="left-region">
-            <LeftActivityRail section={leftSection} onSelect={setLeftSection} />
-            <div style={leftSection === 'project' ? leftSectionShownStyle : leftSectionHiddenStyle}>
-              <Column
-                name="leftRail"
-                flex
-                top={panel('leftRail')}
-                bottom={panel('leftRailBottom')}
-                bottomOpen={leftRailBottomOpen}
-                onBottomToggle={setLeftRailBottomOpen}
-                bottomHeight={leftRailBottomHeight}
-                onBottomResize={setLeftRailBottomHeight}
-                accent={accent}
-                tint={tint}
-              />
-            </div>
-            <div
-              style={leftSection === 'assistant' ? leftSectionShownStyle : leftSectionHiddenStyle}
-            >
-              <AssistantDashboard />
-            </div>
-          </div>
-          <RailSash size={leftRailWidth} onResize={setLeftRailWidth} accent={accent} />
-          {editorOpen ? (
-            <>
-              <div style={{ ...editorColumnStyle, width: editorWidth }} data-column-id="editor">
-                <EditorPanel />
-              </div>
-              <RailSash size={editorWidth} onResize={setEditorWidth} accent={accent} />
-            </>
-          ) : null}
-          {/* Mount the dock only once the restore read has settled, so its
-           *  saved Dockview placement (`initialDockLayout`) is known at first
-           *  `onReady` — that is what removes the `fromJSON`↔reconcile race.
-           *  A flex placeholder holds the row's width meanwhile. */}
-          {restoreSettled ? (
-            <DockWorkspace
-              panels={panels}
-              renderCtx={renderCtx}
-              newTabCtx={dockNewTabCtx}
-              onCloseTab={closeDockTab}
-              onRenameTab={renameDockTab}
-              initialDockLayout={initialDockLayout}
-              onApi={handleDockApi}
-              onLayoutChange={handleDockLayoutChange}
-            />
-          ) : (
-            <div style={{ flex: 1, minWidth: 0, minHeight: 0 }} />
-          )}
-        </div>
-      ) : (
-        <>
-          <div style={panelsRow}>
-            {/* The left region (CR9 Phase 3): an activity rail switching between the
-             *  Project panes and the Assistant feed. Both stay mounted — the hidden
-             *  one is display:none — so the feed keeps its history + Channel-C
-             *  subscription across switches. The fixed leftRailWidth covers rail +
-             *  panel; the RailSash resizes the whole region. */}
-            <div style={{ ...leftRegionStyle, width: leftRailWidth }} data-column-id="left-region">
-              <LeftActivityRail section={leftSection} onSelect={setLeftSection} />
-              <div
-                style={leftSection === 'project' ? leftSectionShownStyle : leftSectionHiddenStyle}
-              >
-                <Column
-                  name="leftRail"
-                  flex
-                  top={panel('leftRail')}
-                  bottom={panel('leftRailBottom')}
-                  bottomOpen={leftRailBottomOpen}
-                  onBottomToggle={setLeftRailBottomOpen}
-                  bottomHeight={leftRailBottomHeight}
-                  onBottomResize={setLeftRailBottomHeight}
-                  accent={accent}
-                  tint={tint}
-                />
-              </div>
-              <div
-                style={leftSection === 'assistant' ? leftSectionShownStyle : leftSectionHiddenStyle}
-              >
-                <AssistantDashboard />
-              </div>
-            </div>
-            {/* Resizable accent-coloured divider between leftRail and centre.
-             *  Drag horizontally to adjust leftRail's width; the value persists
-             *  via the captureLayout effect. */}
-            <RailSash size={leftRailWidth} onResize={setLeftRailWidth} accent={accent} />
-            {/* The editor column (Read-only IDE P1): present only while a file is
-             *  open, so the left panel reads as nav | editor; the centre flexes to
-             *  fill what's left. A sash on its right edge resizes it. */}
-            {editorOpen ? (
-              <>
-                <div style={{ ...editorColumnStyle, width: editorWidth }} data-column-id="editor">
-                  <EditorPanel />
-                </div>
-                <RailSash size={editorWidth} onResize={setEditorWidth} accent={accent} />
-              </>
-            ) : null}
+      <div style={panelsRow}>
+        {/* Left region + editor are UNCHANGED v1.0 chrome: the activity rail
+         *  drives ONLY the leftmost pane (Status / Payload / Memory ↔ the
+         *  Assistant feed); the editor opens in place beside it. Dockview hosts
+         *  only the centre + right columns (the DockWorkspace below). */}
+        <div style={{ ...leftRegionStyle, width: leftRailWidth }} data-column-id="left-region">
+          <LeftActivityRail section={leftSection} onSelect={setLeftSection} />
+          <div style={leftSection === 'project' ? leftSectionShownStyle : leftSectionHiddenStyle}>
             <Column
-              name="centre"
+              name="leftRail"
               flex
-              top={panel('centre')}
-              bottom={panel('centreBottom')}
-              bottomOpen={centreBottomOpen}
-              onBottomToggle={setCentreBottomOpen}
-              bottomHeight={centreBottomHeight}
-              onBottomResize={setCentreBottomHeight}
+              top={panel('leftRail')}
+              bottom={panel('leftRailBottom')}
+              bottomOpen={leftRailBottomOpen}
+              onBottomToggle={setLeftRailBottomOpen}
+              bottomHeight={leftRailBottomHeight}
+              onBottomResize={setLeftRailBottomHeight}
               accent={accent}
               tint={tint}
             />
-            {/*
-          The toggleable third column (`right`) lives inside a DockPanel
-          side="right" so its chevron handle behaves exactly like the existing
-          right/bottom docks — click to toggle, drag to resize. Closed by
-          default; the chevron sits at the window's right edge until opened.
-         */}
-            <DockPanel
-              side="right"
-              open={rightOpen}
-              onToggle={setRightOpen}
-              size={rightWidth}
-              onResize={setRightWidth}
-              accent={accent}
-              tint={tint}
-            >
-              <Column
-                name="right"
-                flex
-                top={panel('right')}
-                bottom={panel('rightBottom')}
-                bottomOpen={rightBottomOpen}
-                onBottomToggle={setRightBottomOpen}
-                bottomHeight={rightBottomHeight}
-                onBottomResize={setRightBottomHeight}
-                accent={accent}
-                tint={tint}
-              />
-            </DockPanel>
           </div>
-        </>
-      )}
+          <div style={leftSection === 'assistant' ? leftSectionShownStyle : leftSectionHiddenStyle}>
+            <AssistantDashboard />
+          </div>
+        </div>
+        <RailSash size={leftRailWidth} onResize={setLeftRailWidth} accent={accent} />
+        {editorOpen ? (
+          <>
+            <div style={{ ...editorColumnStyle, width: editorWidth }} data-column-id="editor">
+              <EditorPanel />
+            </div>
+            <RailSash size={editorWidth} onResize={setEditorWidth} accent={accent} />
+          </>
+        ) : null}
+        {/* Mount the dock only once the restore read has settled, so its
+         *  saved Dockview placement (`initialDockLayout`) is known at first
+         *  `onReady` — that is what removes the `fromJSON`↔reconcile race.
+         *  A flex placeholder holds the row's width meanwhile. */}
+        {restoreSettled ? (
+          <DockWorkspace
+            panels={panels}
+            renderCtx={renderCtx}
+            newTabCtx={dockNewTabCtx}
+            onCloseTab={closeDockTab}
+            onRenameTab={renameDockTab}
+            initialDockLayout={initialDockLayout}
+            onApi={handleDockApi}
+            onLayoutChange={handleDockLayoutChange}
+          />
+        ) : (
+          <div style={{ flex: 1, minWidth: 0, minHeight: 0 }} />
+        )}
+      </div>
       {contentPortals}
     </div>
   );
