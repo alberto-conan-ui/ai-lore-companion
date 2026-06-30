@@ -15,7 +15,12 @@
  * the same positional args — no per-method object packing.
  */
 
-import type { AppEntry, EngineEntry, TreeNode } from '@ai-lore-companion/core';
+import type {
+  AppEntry,
+  DockWorkspaceSnapshot,
+  EngineEntry,
+  TreeNode,
+} from '@ai-lore-companion/core';
 import type {
   AppsInvokeArg,
   AppsInvokeResult,
@@ -30,6 +35,7 @@ import type {
   ContentSearchResult,
   DiffTextArg,
   DiffTextResult,
+  DockLayoutSetArg,
   FileHistoryArg,
   FileHistoryResult,
   FileSearchArg,
@@ -211,6 +217,13 @@ export const CONTRACT = {
   /** Replace the per-project workspace-layout snapshot — silently no-ops on a
    *  window with no AI-Lore project context. */
   settingsSetLayout: invoke<[arg: SettingsSetLayoutArg], void>('settings:set-layout'),
+  /** Read the per-project Dockview snapshot from its own sidecar
+   *  (`dock-layout.json`), or null when absent. Kept out of `settings.json` so a
+   *  concurrently-running older deployed build can't strip it. */
+  dockLayoutGet: invoke<[], DockWorkspaceSnapshot | null>('dock:get'),
+  /** Replace (or clear, with null) the per-project Dockview snapshot sidecar —
+   *  no-ops on a window with no AI-Lore project context. */
+  dockLayoutSet: invoke<[arg: DockLayoutSetArg], void>('dock:set'),
   onSettingsChanged: push<SettingsSnapshot>('settings:changed'),
   onSettingsOpen: push<void>('settings:open'),
   onSelectCockpitTab: push<number>('cockpit:select-tab'),

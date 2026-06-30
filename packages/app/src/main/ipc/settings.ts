@@ -10,6 +10,7 @@ import {
 } from '@ai-lore-companion/core';
 import { BrowserWindow } from 'electron';
 import type {
+  DockLayoutSetArg,
   FocusReadArg,
   FocusReadResult,
   SetRegisterArg,
@@ -17,6 +18,7 @@ import type {
   SettingsSetIgnoresArg,
   SettingsSetLayoutArg,
 } from '../../shared/ipc.js';
+import { loadDockLayout, saveDockLayout } from '../dock-layout.js';
 import {
   saveGlobalIgnores,
   saveGlobalSetting,
@@ -71,6 +73,23 @@ export const registerSettings: RegisterModule = (reg, deps) => {
     // the snapshot is the writing window's own state, with no other consumer.
     if (ctx && !isChainError(ctx.chain)) {
       saveProjectLayout(deps.getUserDataDir(), ctx.root, arg.layout);
+    }
+  });
+
+  // The Dockview workspace snapshot lives in its own per-project sidecar
+  // (`dock-layout.json`), not in `settings.json` — so a concurrently-running
+  // older deployed build's whole-file settings writes can't strip it. Both
+  // no-op without an AI-Lore project context.
+  reg.handle('dockLayoutGet', (event) => {
+    const ctx = deps.contextFor(event);
+    if (!ctx || isChainError(ctx.chain)) return null;
+    return loadDockLayout(deps.getUserDataDir(), ctx.root);
+  });
+
+  reg.handle('dockLayoutSet', (event, arg: DockLayoutSetArg) => {
+    const ctx = deps.contextFor(event);
+    if (ctx && !isChainError(ctx.chain)) {
+      saveDockLayout(deps.getUserDataDir(), ctx.root, arg.snapshot);
     }
   });
 

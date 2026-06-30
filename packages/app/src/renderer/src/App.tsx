@@ -1,4 +1,5 @@
 import type {
+  DockWorkspaceSnapshot,
   EngineEntry,
   LayoutEditorDoc,
   LayoutPanel,
@@ -6,6 +7,7 @@ import type {
   TabLastSession,
   WorkspaceLayout,
 } from '@ai-lore-companion/core';
+import type { DockviewApi, SerializedDockview } from 'dockview';
 import {
   type JSX,
   useCallback,
@@ -17,7 +19,11 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import type { RecentProject, Shortcut, TerminalForegroundStatus } from '../../shared/ipc.js';
-import { WORKSPACE_LAYOUT_SCHEMA_VERSION, isChainErrorPayload } from '../../shared/ipc.js';
+import {
+  DOCK_SNAPSHOT_VERSION,
+  WORKSPACE_LAYOUT_SCHEMA_VERSION,
+  isChainErrorPayload,
+} from '../../shared/ipc.js';
 import type { AlteredReason } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { AssistantDashboard } from './components/AssistantDashboard.js';
@@ -88,6 +94,13 @@ const PANEL_IDS = [
   'centreBottom',
   'rightBottom',
 ] as const;
+
+/** The panel buckets Dockview hosts (centre + right columns + their bottoms) —
+ *  the mirror of `DockWorkspace`'s `DOCK_PANELS`. In Dockview mode the tabs in
+ *  these buckets are captured into / restored from the `dock` snapshot; their
+ *  bucket assignment is no longer meaningful (Dockview owns placement). The
+ *  leftRail panes + leftRailBottom stay v1.0 chrome, persisted the old way. */
+const DOCK_PANEL_IDS: PanelId[] = ['centre', 'centreBottom', 'right', 'rightBottom'];
 
 /** The centre pane's pinned tab(s) (AI Helper, CR9). The Assistant **host** —
  *  where the read-only helper session lives — is a pinned, unclosable tab in the
@@ -234,6 +247,24 @@ export function App(): JSX.Element {
   // one before it is read back.
   const restoreStarted = useRef(false);
   const captureReady = useRef(false);
+  // v2 P2 / S-D. The dock mounts only once the restore read has settled, so its
+  // `initialDockLayout` (the saved Dockview placement) is known at first mount —
+  // which removes the `fromJSON`↔reconcile race. `dockApiRef` is the live
+  // Dockview API, handed up via `onApi`, read at capture time to `toJSON()`.
+  const [restoreSettled, setRestoreSettled] = useState(false);
+  const [initialDockLayout, setInitialDockLayout] = useState<SerializedDockview | undefined>(
+    undefined,
+  );
+  const dockApiRef = useRef<DockviewApi | null>(null);
+  const handleDockApi = useCallback((api: DockviewApi): void => {
+    dockApiRef.current = api;
+  }, []);
+  // Dockview owns layout; a drag / group-resize never touches the tab model, so
+  // it would never trigger the model-keyed capture effect. This nonce, bumped on
+  // every Dockview layout change, is a capture-effect dependency — so a pure
+  // rearrange persists too.
+  const [dockLayoutNonce, setDockLayoutNonce] = useState(0);
+  const handleDockLayoutChange = useCallback(() => setDockLayoutNonce((n) => n + 1), []);
   // Tracks the focus state so the capture can flush on the focus→blur edge.
   const wasFocused = useRef(false);
   // Auto-fit guard: the editor column is fitted to the window once per open
@@ -970,18 +1001,47 @@ export function App(): JSX.Element {
     ],
   );
 
-  /** Snapshot the current layout — asks main for each browser tab's live URL.
-   *  Used by the in-session debounced capture, where the window stays alive to
-   *  await the enrichment. */
-  const captureLayout = useCallback(async (): Promise<WorkspaceLayout> => {
+  /** Assemble the Dockview snapshot (v2 P2 / S-D) — Dockview's own placement
+   *  (`toJSON`) plus the dock tabs' dormant metadata, pinned panes excluded
+   *  (they're seeded). Returns null outside Dockview mode or before the dock API
+   *  is live — the caller then skips the sidecar write so a saved snapshot is
+   *  never clobbered. The serialization is JSON round-tripped: Dockview's
+   *  `toJSON()` is JSON by contract, so this is identity, but it guarantees a
+   *  plain, structured-clone-safe object for the IPC write. */
+  const buildDock = useCallback(
+    (lastBy: Record<string, TabLastSession | undefined>): DockWorkspaceSnapshot | null => {
+      if (!USE_DOCKVIEW || !dockApiRef.current) return null;
+      const tabs: LayoutTab[] = [];
+      for (const panelId of DOCK_PANEL_IDS) {
+        for (const t of panels[panelId].tabs) {
+          if (t.kind === 'pane') continue;
+          tabs.push(tabToLayout(t, lastBy[t.id]));
+        }
+      }
+      return {
+        version: DOCK_SNAPSHOT_VERSION,
+        serialized: JSON.parse(JSON.stringify(dockApiRef.current.toJSON())),
+        tabs,
+      };
+    },
+    [panels],
+  );
+
+  /** Snapshot the current layout + dock — asks main for each browser tab's live
+   *  URL. Used by the in-session debounced capture, where the window stays alive
+   *  to await the enrichment. */
+  const captureLayout = useCallback(async (): Promise<{
+    layout: WorkspaceLayout;
+    dock: DockWorkspaceSnapshot | null;
+  }> => {
     const lastBy: Record<string, TabLastSession | undefined> = {};
     for (const panelId of PANEL_IDS) {
       for (const tab of panels[panelId].tabs) {
         lastBy[tab.id] = await lastSessionFor(tab);
       }
     }
-    return buildLayout(lastBy);
-  }, [panels, lastSessionFor, buildLayout]);
+    return { layout: buildLayout(lastBy), dock: buildDock(lastBy) };
+  }, [panels, lastSessionFor, buildLayout, buildDock]);
 
   /** Synchronous snapshot for the close / focus-loss flush. Skips the async
    *  per-tab URL enrichment (falls back to each tab's stored `lastSession`) so
@@ -989,85 +1049,119 @@ export function App(): JSX.Element {
    *  renderer tears down. Open editor docs and pane sizes are synchronous state,
    *  so a just-opened file reliably persists even on an immediate quit — the
    *  async version lost that race. */
-  const captureLayoutSync = useCallback((): WorkspaceLayout => {
+  const captureLayoutSync = useCallback((): {
+    layout: WorkspaceLayout;
+    dock: DockWorkspaceSnapshot | null;
+  } => {
     const lastBy: Record<string, TabLastSession | undefined> = {};
     for (const panelId of PANEL_IDS) {
       for (const tab of panels[panelId].tabs) lastBy[tab.id] = tab.lastSession;
     }
-    return buildLayout(lastBy);
-  }, [panels, buildLayout]);
+    return { layout: buildLayout(lastBy), dock: buildDock(lastBy) };
+  }, [panels, buildLayout, buildDock]);
 
   /** Rebuild the workspace from a stored snapshot — the five free panels as
    *  dormant tabs, the column/dock sizes, and leftRail's active pane (its
-   *  pinned tabs stay owned by `panesForShape`). */
-  const applyLayout = useCallback((layout: WorkspaceLayout): void => {
-    const liftPanel = (p: LayoutPanel): Panel => {
-      const tabs = p.tabs.map(tabFromLayout).filter((t): t is WorkspaceTab => t !== null);
-      const activeId = tabs.some((t) => t.id === p.activeId) ? p.activeId : (tabs[0]?.id ?? '');
-      return { tabs, activeId };
-    };
-    // The centre's pinned Assistant host (CR9) is seeded, never restored — like
-    // the left-rail panes — so prepend it ahead of the restored user tabs and
-    // keep the snapshot's active tab if it still exists.
-    const liftCentre = (p: LayoutPanel): Panel => {
-      const restored = p.tabs.map(tabFromLayout).filter((t): t is WorkspaceTab => t !== null);
-      const tabs = [...CENTRE_PINNED, ...restored];
-      const activeId = tabs.some((t) => t.id === p.activeId) ? p.activeId : (tabs[0]?.id ?? '');
-      return { tabs, activeId };
-    };
-    setPanels((prev) => ({
-      ...prev,
-      centre: liftCentre(layout.panels.centre),
-      right: liftPanel(layout.panels.right),
-      leftRailBottom: liftPanel(layout.panels.leftRailBottom),
-      centreBottom: liftPanel(layout.panels.centreBottom),
-      rightBottom: liftPanel(layout.panels.rightBottom),
-      // leftRail's pinned panes are deterministic from the project shape — only
-      // restore which one was active, and only if it still exists.
-      leftRail: prev.leftRail.tabs.some((t) => t.id === layout.panels.leftRail.activeId)
-        ? { ...prev.leftRail, activeId: layout.panels.leftRail.activeId }
-        : prev.leftRail,
-    }));
-    setRightOpen(layout.rightOpen);
-    setLeftRailBottomOpen(layout.leftRailBottomOpen);
-    setCentreBottomOpen(layout.centreBottomOpen);
-    setRightBottomOpen(layout.rightBottomOpen);
-    setLeftRailWidth(layout.leftRailWidth);
-    setRightWidth(layout.rightWidth);
-    setLeftRailBottomHeight(layout.leftRailBottomHeight);
-    setCentreBottomHeight(layout.centreBottomHeight);
-    setRightBottomHeight(layout.rightBottomHeight);
-    // Editor column + open files (P2) — optional on older snapshots. A restored
-    // width is the user's own; suppress the first-open auto-fit so it stands.
-    if (typeof layout.editorWidth === 'number') {
-      setEditorWidth(layout.editorWidth);
-      editorFitted.current = true;
-    }
-    if (layout.editor) {
-      const docs: EditorDoc[] = layout.editor.docs.map((d) => {
-        const doc: EditorDoc = { path: d.path, scope: d.scope, name: d.name, mode: d.mode };
-        if (d.oldPath !== undefined) doc.oldPath = d.oldPath;
-        if (d.diffBaseline !== undefined) doc.diffBaseline = d.diffBaseline;
-        return doc;
-      });
-      useCockpitStore.getState().restoreDocs(docs, layout.editor.activePath);
-    }
-    if (layout.changesHeightByPane) setChangesHeightByPane(layout.changesHeightByPane);
-  }, []);
+   *  pinned tabs stay owned by `panesForShape`). The Dockview snapshot rides in
+   *  its own sidecar (`dock`, read separately), not in the layout. */
+  const applyLayout = useCallback(
+    (layout: WorkspaceLayout, dock: DockWorkspaceSnapshot | null): void => {
+      const liftPanel = (p: LayoutPanel): Panel => {
+        const tabs = p.tabs.map(tabFromLayout).filter((t): t is WorkspaceTab => t !== null);
+        const activeId = tabs.some((t) => t.id === p.activeId) ? p.activeId : (tabs[0]?.id ?? '');
+        return { tabs, activeId };
+      };
+      // The centre's pinned Assistant host (CR9) is seeded, never restored — like
+      // the left-rail panes — so prepend it ahead of the restored user tabs and
+      // keep the snapshot's active tab if it still exists.
+      const liftCentre = (p: LayoutPanel): Panel => {
+        const restored = p.tabs.map(tabFromLayout).filter((t): t is WorkspaceTab => t !== null);
+        const tabs = [...CENTRE_PINNED, ...restored];
+        const activeId = tabs.some((t) => t.id === p.activeId) ? p.activeId : (tabs[0]?.id ?? '');
+        return { tabs, activeId };
+      };
+      // S-D: when a dock snapshot is present, it owns the dock tabs. Lift them all
+      // into `centre` as dormant tabs (the model just needs them to exist in a dock
+      // bucket; Dockview's serialization — applied via `initialDockLayout` —
+      // decides actual placement). The other dock buckets start empty. Without a
+      // dock snapshot (pre-S-D / v1.0 grid) fall back to the per-bucket restore.
+      const useDock = USE_DOCKVIEW && !!dock;
+      const dockTabs = dock
+        ? dock.tabs.map(tabFromLayout).filter((t): t is WorkspaceTab => t !== null)
+        : [];
+      const dockCentre = (): Panel => {
+        const tabs = [...CENTRE_PINNED, ...dockTabs];
+        return { tabs, activeId: CENTRE_PINNED[0]?.id ?? '' };
+      };
+      const emptyPanel: Panel = { tabs: [], activeId: '' };
+      setPanels((prev) => ({
+        ...prev,
+        centre: useDock ? dockCentre() : liftCentre(layout.panels.centre),
+        right: useDock ? emptyPanel : liftPanel(layout.panels.right),
+        leftRailBottom: liftPanel(layout.panels.leftRailBottom),
+        centreBottom: useDock ? emptyPanel : liftPanel(layout.panels.centreBottom),
+        rightBottom: useDock ? emptyPanel : liftPanel(layout.panels.rightBottom),
+        // leftRail's pinned panes are deterministic from the project shape — only
+        // restore which one was active, and only if it still exists.
+        leftRail: prev.leftRail.tabs.some((t) => t.id === layout.panels.leftRail.activeId)
+          ? { ...prev.leftRail, activeId: layout.panels.leftRail.activeId }
+          : prev.leftRail,
+      }));
+      // Hand the saved Dockview placement to the dock; it is applied once in
+      // `onReady` (the mount is gated on this restore, so it is set before mount).
+      if (useDock && dock) {
+        setInitialDockLayout(dock.serialized as SerializedDockview);
+      }
+      setRightOpen(layout.rightOpen);
+      setLeftRailBottomOpen(layout.leftRailBottomOpen);
+      setCentreBottomOpen(layout.centreBottomOpen);
+      setRightBottomOpen(layout.rightBottomOpen);
+      setLeftRailWidth(layout.leftRailWidth);
+      setRightWidth(layout.rightWidth);
+      setLeftRailBottomHeight(layout.leftRailBottomHeight);
+      setCentreBottomHeight(layout.centreBottomHeight);
+      setRightBottomHeight(layout.rightBottomHeight);
+      // Editor column + open files (P2) — optional on older snapshots. A restored
+      // width is the user's own; suppress the first-open auto-fit so it stands.
+      if (typeof layout.editorWidth === 'number') {
+        setEditorWidth(layout.editorWidth);
+        editorFitted.current = true;
+      }
+      if (layout.editor) {
+        const docs: EditorDoc[] = layout.editor.docs.map((d) => {
+          const doc: EditorDoc = { path: d.path, scope: d.scope, name: d.name, mode: d.mode };
+          if (d.oldPath !== undefined) doc.oldPath = d.oldPath;
+          if (d.diffBaseline !== undefined) doc.diffBaseline = d.diffBaseline;
+          return doc;
+        });
+        useCockpitStore.getState().restoreDocs(docs, layout.editor.activePath);
+      }
+      if (layout.changesHeightByPane) setChangesHeightByPane(layout.changesHeightByPane);
+    },
+    [],
+  );
 
   // Restore once, when the window first enters cockpit mode. Reads the project
-  // settings snapshot; applies the stored layout when `restoreLayout` is on.
-  // Either way, opens the capture gate when it settles.
+  // settings snapshot AND the separate Dockview sidecar; applies them when
+  // `restoreLayout` is on. Either way, opens the capture gate when it settles.
   useEffect(() => {
     if (mode !== 'cockpit' || restoreStarted.current) return;
     restoreStarted.current = true;
     let cancelled = false;
-    void window.cockpit.settingsGet().then((snap) => {
-      if (cancelled) return;
-      const layout = snap.project?.layout;
-      if (snap.resolved['workspace.restoreLayout'] === true && layout) applyLayout(layout);
-      captureReady.current = true;
-    });
+    void Promise.all([window.cockpit.settingsGet(), window.cockpit.dockLayoutGet()]).then(
+      ([snap, dock]) => {
+        if (cancelled) return;
+        const layout = snap.project?.layout;
+        if (snap.resolved['workspace.restoreLayout'] === true && layout) {
+          applyLayout(layout, dock);
+        }
+        captureReady.current = true;
+        // S-D: with the restore read settled, the dock may mount — `initialDockLayout`
+        // (set by applyLayout above when a dock sidecar was found) is now final, so
+        // the dock's `onReady` `fromJSON` cannot race the model seed.
+        setRestoreSettled(true);
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -1128,14 +1222,22 @@ export function App(): JSX.Element {
   // Capture on layout changes, debounced, from the focused window only — but
   // not until restore has settled (so the default layout never overwrites a
   // stored one first).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `dockLayoutNonce` is a deliberate re-run trigger — a Dockview-owned change (drag between groups, group resize) never touches the model, so this is the only signal to re-capture; it isn't read in the body.
   useEffect(() => {
     if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
     if (!hasFocus || !captureReady.current) return;
+    // S-D: in Dockview mode, hold off until the dock API is live — capturing
+    // before it would write a dock-less snapshot and lose the saved placement.
+    // It comes online within a frame of mount; the next state change re-runs this.
+    if (USE_DOCKVIEW && !dockApiRef.current) return;
     const handle = window.setTimeout(() => {
-      void captureLayout().then((layout) => window.cockpit.settingsSetLayout({ layout }));
+      void captureLayout().then(({ layout, dock }) => {
+        window.cockpit.settingsSetLayout({ layout });
+        if (USE_DOCKVIEW) window.cockpit.dockLayoutSet({ snapshot: dock });
+      });
     }, 300);
     return () => window.clearTimeout(handle);
-  }, [mode, chain, hasFocus, captureLayout]);
+  }, [mode, chain, hasFocus, captureLayout, dockLayoutNonce]);
 
   // Flush the moment the window loses focus. The debounced capture above only
   // runs while focused and is cleared on blur, so a change made just before
@@ -1149,7 +1251,10 @@ export function App(): JSX.Element {
     wasFocused.current = hasFocus;
     if (!lostFocus) return;
     if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain) || !captureReady.current) return;
-    void window.cockpit.settingsSetLayout({ layout: captureLayoutSync() });
+    if (USE_DOCKVIEW && !dockApiRef.current) return;
+    const { layout, dock } = captureLayoutSync();
+    void window.cockpit.settingsSetLayout({ layout });
+    if (USE_DOCKVIEW) void window.cockpit.dockLayoutSet({ snapshot: dock });
   }, [hasFocus, mode, chain, captureLayoutSync]);
 
   // Final flush on window close — fire-and-forget; main records what reaches it.
@@ -1157,7 +1262,10 @@ export function App(): JSX.Element {
     if (mode !== 'cockpit' || !chain || isChainErrorPayload(chain)) return;
     const onUnload = (): void => {
       if (!captureReady.current) return;
-      void window.cockpit.settingsSetLayout({ layout: captureLayoutSync() });
+      if (USE_DOCKVIEW && !dockApiRef.current) return;
+      const { layout, dock } = captureLayoutSync();
+      void window.cockpit.settingsSetLayout({ layout });
+      if (USE_DOCKVIEW) void window.cockpit.dockLayoutSet({ snapshot: dock });
     };
     window.addEventListener('beforeunload', onUnload);
     return () => window.removeEventListener('beforeunload', onUnload);
@@ -1529,12 +1637,23 @@ export function App(): JSX.Element {
               <RailSash size={editorWidth} onResize={setEditorWidth} accent={accent} />
             </>
           ) : null}
-          <DockWorkspace
-            panels={panels}
-            renderCtx={renderCtx}
-            newTabCtx={dockNewTabCtx}
-            onCloseTab={closeDockTab}
-          />
+          {/* Mount the dock only once the restore read has settled, so its
+           *  saved Dockview placement (`initialDockLayout`) is known at first
+           *  `onReady` — that is what removes the `fromJSON`↔reconcile race.
+           *  A flex placeholder holds the row's width meanwhile. */}
+          {restoreSettled ? (
+            <DockWorkspace
+              panels={panels}
+              renderCtx={renderCtx}
+              newTabCtx={dockNewTabCtx}
+              onCloseTab={closeDockTab}
+              initialDockLayout={initialDockLayout}
+              onApi={handleDockApi}
+              onLayoutChange={handleDockLayoutChange}
+            />
+          ) : (
+            <div style={{ flex: 1, minWidth: 0, minHeight: 0 }} />
+          )}
         </div>
       ) : (
         <>

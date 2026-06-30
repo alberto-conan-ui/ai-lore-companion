@@ -25,6 +25,7 @@ import {
   type DockviewReadyEvent,
   type IDockviewHeaderActionsProps,
   type IDockviewPanelHeaderProps,
+  type SerializedDockview,
 } from 'dockview';
 import { type FC, type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DockHost } from '../shell/DockHost.js';
@@ -49,6 +50,25 @@ type Props = {
   newTabCtx: NewTabContext;
   /** Close a dock tab by id (runs App's close guard + removes it from the model). */
   onCloseTab: (tabId: string) => void;
+  /**
+   * A previously-captured Dockview serialization (`api.toJSON()`, persisted via
+   * `WorkspaceLayout.dock.serialized`). When present it is applied once in
+   * `onReady` (S-D restore) so the saved group placement comes back instead of
+   * every tab piling into one group. Opaque (`unknown`) so the component is the
+   * only place that knows Dockview's serialization shape. The host must already
+   * have seeded the model with the matching dormant tabs before mount — App
+   * gates the mount on the restore read for exactly that reason.
+   */
+  initialDockLayout?: unknown;
+  /** Hands the Dockview API up so the host can `toJSON()` at capture time. */
+  onApi?: (api: DockviewApi) => void;
+  /**
+   * Fired whenever Dockview's own layout changes (a drag between groups, a group
+   * resize, an active-panel change). These never touch App's tab model, so
+   * without this the host has no signal to re-capture — and a pure rearrange
+   * would never persist. App debounces a snapshot in response.
+   */
+  onLayoutChange?: () => void;
 };
 
 /**
@@ -89,7 +109,15 @@ function makeCreators(ctxRef: { current: NewTabContext }): FC<IDockviewHeaderAct
   };
 }
 
-export function DockWorkspace({ panels, renderCtx, newTabCtx, onCloseTab }: Props): JSX.Element {
+export function DockWorkspace({
+  panels,
+  renderCtx,
+  newTabCtx,
+  onCloseTab,
+  initialDockLayout,
+  onApi,
+  onLayoutChange,
+}: Props): JSX.Element {
   // The slot registry lives for the component's life; a version counter bumps
   // when a slot panel mounts/unmounts so the seam re-parks as Dockview rebuilds.
   const registryRef = useRef<DockSlotRegistry>();
@@ -151,19 +179,42 @@ export function DockWorkspace({ panels, renderCtx, newTabCtx, onCloseTab }: Prop
 
   const apiRef = useRef<DockviewApi | null>(null);
   const [ready, setReady] = useState(0);
-  const onReady = useCallback((event: DockviewReadyEvent) => {
-    const api = event.api;
-    apiRef.current = api;
-    const recomputeVisible = (): void => {
-      const vis = new Set<string>();
-      for (const p of api.panels) if (p.api.isVisible) vis.add(p.id);
-      setVisibleIds(vis);
-    };
-    recomputeVisible();
-    api.onDidLayoutChange(recomputeVisible);
-    api.onDidActivePanelChange(recomputeVisible);
-    setReady((r) => r + 1);
-  }, []);
+  // initialDockLayout / onApi are stable by the time the dock mounts — App gates
+  // the mount on the restore read — so the first-render closure carries the
+  // final values; onReady only fires once. Deps keep the lint honest.
+  const onReady = useCallback(
+    (event: DockviewReadyEvent) => {
+      const api = event.api;
+      apiRef.current = api;
+      // S-D restore: rebuild the saved group placement before anything else, so
+      // the reconcile effect below matches the restored panels by id (no
+      // re-add / remove) and visibility is computed against the real layout. A
+      // corrupt blob must not brick the workspace — fall back to the reconcile-
+      // built default.
+      if (initialDockLayout) {
+        try {
+          api.fromJSON(initialDockLayout as SerializedDockview);
+        } catch (err) {
+          console.error('[dock] fromJSON failed; opening with the default layout', err);
+        }
+      }
+      const recomputeVisible = (): void => {
+        const vis = new Set<string>();
+        for (const p of api.panels) if (p.api.isVisible) vis.add(p.id);
+        setVisibleIds(vis);
+      };
+      const onLayout = (): void => {
+        recomputeVisible();
+        onLayoutChange?.();
+      };
+      recomputeVisible();
+      api.onDidLayoutChange(onLayout);
+      api.onDidActivePanelChange(onLayout);
+      onApi?.(api);
+      setReady((r) => r + 1);
+    },
+    [initialDockLayout, onApi, onLayoutChange],
+  );
 
   // Reconcile Dockview to the model: add new tabs (active, in the active group),
   // update titles, remove panels whose tab is gone. Dockview keeps ownership of

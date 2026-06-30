@@ -68,11 +68,13 @@ export {
 export type { IgnoreLevel, IgnoreLists, IgnoreRule } from './ignore.js';
 
 export {
+  DOCK_SNAPSHOT_VERSION,
   SETTINGS_REGISTRY,
   SETTINGS_SCHEMA_VERSION,
   WORKSPACE_LAYOUT_SCHEMA_VERSION,
   emptySettingsFile,
   isValidValue,
+  parseDockSnapshot,
   parseSettingsFile,
   resolveAll,
   resolveSetting,
@@ -84,6 +86,7 @@ export {
   withSetting,
 } from './settings/settings.js';
 export type {
+  DockWorkspaceSnapshot,
   LayoutPanel,
   LayoutEditorDoc,
   LayoutTab,

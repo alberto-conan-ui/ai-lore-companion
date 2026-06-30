@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
   type AppEntry,
+  DOCK_SNAPSHOT_VERSION,
   SETTINGS_REGISTRY,
   SETTINGS_SCHEMA_VERSION,
   type SettingDef,
@@ -10,6 +11,7 @@ import {
   type WorkspaceLayout,
   emptySettingsFile,
   isValidValue,
+  parseDockSnapshot,
   parseSettingsFile,
   resolveAll,
   resolveSetting,
@@ -300,6 +302,56 @@ test('parseSettingsFile drops a layout missing a panel, and malformed tabs withi
   const f2 = parseSettingsFile(JSON.stringify(withLayout(emptySettingsFile(), withBadTab)));
   assert.equal(f2.layout?.panels.centre.tabs.length, 1);
   assert.equal(f2.layout?.panels.centre.tabs[0]?.id, 'tab-1');
+});
+
+test('parseDockSnapshot round-trips a valid snapshot through JSON', () => {
+  const snap = {
+    version: DOCK_SNAPSHOT_VERSION,
+    serialized: { grid: { root: { type: 'leaf' } }, panels: { 'tab-1': {} } },
+    tabs: [
+      {
+        id: 'tab-1',
+        kind: 'shell',
+        title: 'Shell 1',
+        lastSession: { kind: 'shell', detail: 'npm run dev' },
+      },
+    ],
+  };
+  assert.deepEqual(parseDockSnapshot(JSON.parse(JSON.stringify(snap))), snap);
+});
+
+test('parseDockSnapshot drops an unknown version, a non-object serialized blob, and junk', () => {
+  assert.equal(
+    parseDockSnapshot({ version: DOCK_SNAPSHOT_VERSION + 1, serialized: {}, tabs: [] }),
+    null,
+  );
+  assert.equal(
+    parseDockSnapshot({ version: DOCK_SNAPSHOT_VERSION, serialized: 'nope', tabs: [] }),
+    null,
+  );
+  assert.equal(parseDockSnapshot(null), null);
+  assert.equal(parseDockSnapshot('not an object'), null);
+});
+
+test('parseDockSnapshot drops malformed dock tabs individually', () => {
+  const parsed = parseDockSnapshot({
+    version: DOCK_SNAPSHOT_VERSION,
+    serialized: { panels: {} },
+    tabs: [
+      { id: 'ok', kind: 'shell', title: 'Shell' },
+      { kind: 'shell', title: 'no id' },
+    ],
+  });
+  assert.equal(parsed?.tabs.length, 1);
+  assert.equal(parsed?.tabs[0]?.id, 'ok');
+});
+
+test('parseSettingsFile no longer carries a dock field (it lives in its own sidecar)', () => {
+  const parsed = parseSettingsFile(
+    serializeSettingsFile(withLayout(emptySettingsFile(), sampleLayout())),
+  );
+  assert.ok(parsed.layout, 'the snapshot still parses');
+  assert.equal('dock' in parsed.layout, false);
 });
 
 test('parseSettingsFile round-trips the editor column (width + open docs)', () => {

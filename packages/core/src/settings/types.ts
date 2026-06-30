@@ -102,6 +102,38 @@ export type LayoutPanel = {
   activeId: string;
 };
 
+/**
+ * The Dockview workspace snapshot (v2 P2, stage S-D). In Dockview mode the
+ * centre + right columns are hosted by Dockview, which owns placement; this
+ * captures that placement alongside the dock tabs' dormant metadata so the
+ * arrangement (and dormant banners) survive a restart.
+ *
+ * It is persisted in its **own sidecar file** (`dock-layout.json` in the
+ * project's data dir), deliberately **not** inside `settings.json`. A second
+ * app instance — notably an older deployed build that predates Dockview —
+ * rewrites `settings.json` wholesale and would strip any field it doesn't know;
+ * keeping the dock snapshot in a separate file it never touches makes the dock
+ * survive that. The leftRail panes + editor stay v1.0 chrome in `WorkspaceLayout`;
+ * when a dock snapshot is present it owns the centre/right tabs' placement and
+ * the bucket `panels.centre/right/...` are ignored on restore.
+ */
+export type DockWorkspaceSnapshot = {
+  /** Bumped when this snapshot's shape changes; an unknown version is dropped. */
+  version: number;
+  /**
+   * Dockview's own serialization (`api.toJSON()`) — group structure, placement,
+   * sizes, and the active panel, keyed by tab id. Opaque to core (which never
+   * depends on Dockview); the renderer casts it back to `SerializedDockview`.
+   */
+  serialized: unknown;
+  /**
+   * The dock-hosted tabs' metadata (dormant `lastSession` captured), for
+   * rebuilding the renderer's tab model on restore. Pinned panes are excluded —
+   * they are seeded by the renderer, never restored.
+   */
+  tabs: LayoutTab[];
+};
+
 /** One file open in the read-only-IDE editor, as persisted in the layout —
  *  restored on next open so the editor reopens where it was left. */
 export type LayoutEditorDoc = {

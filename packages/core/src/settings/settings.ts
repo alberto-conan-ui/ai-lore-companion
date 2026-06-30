@@ -8,6 +8,7 @@
 import { type AppEntry, parseAppEntries } from '../apps/apps.js';
 import { type IgnoreRule, isIgnoreRule } from '../ignore.js';
 import type {
+  DockWorkspaceSnapshot,
   LayoutEditorDoc,
   LayoutPanel,
   LayoutTab,
@@ -31,6 +32,14 @@ export const SETTINGS_SCHEMA_VERSION = 1;
  * dropped on load, and the window opens with the default layout.
  */
 export const WORKSPACE_LAYOUT_SCHEMA_VERSION = 1;
+
+/**
+ * The version of the embedded Dockview workspace snapshot (`WorkspaceLayout.dock`).
+ * Independent of `WORKSPACE_LAYOUT_SCHEMA_VERSION`: bumping this drops only the
+ * dock placement (restore falls back to the bucket panels), not the whole
+ * snapshot. Bump when Dockview's serialization or our dock metadata shape moves.
+ */
+export const DOCK_SNAPSHOT_VERSION = 1;
 
 /**
  * Every setting the cockpit knows. The Settings UI renders from this list and
@@ -107,6 +116,18 @@ function isLayoutTab(value: unknown): value is LayoutTab {
   return true;
 }
 
+/** Coerce a raw value into a `LayoutTab`, or `null` if malformed. */
+function parseLayoutTab(raw: unknown): LayoutTab | null {
+  if (!isLayoutTab(raw)) return null;
+  const t: LayoutTab = { id: raw.id, kind: raw.kind, title: raw.title };
+  if (raw.baseTitle !== undefined) t.baseTitle = raw.baseTitle;
+  if (raw.manualTitle !== undefined) t.manualTitle = raw.manualTitle;
+  if (raw.engine !== undefined) t.engine = raw.engine;
+  const last = parseLastSession((raw as Record<string, unknown>).lastSession);
+  if (last) t.lastSession = last;
+  return t;
+}
+
 /** Coerce a parsed value into a `LayoutPanel`, dropping malformed tabs. */
 function parseLayoutPanel(value: unknown): LayoutPanel | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -114,16 +135,31 @@ function parseLayoutPanel(value: unknown): LayoutPanel | null {
   if (!Array.isArray(o.tabs) || typeof o.activeId !== 'string') return null;
   const tabs: LayoutTab[] = [];
   for (const raw of o.tabs) {
-    if (!isLayoutTab(raw)) continue;
-    const t: LayoutTab = { id: raw.id, kind: raw.kind, title: raw.title };
-    if (raw.baseTitle !== undefined) t.baseTitle = raw.baseTitle;
-    if (raw.manualTitle !== undefined) t.manualTitle = raw.manualTitle;
-    if (raw.engine !== undefined) t.engine = raw.engine;
-    const last = parseLastSession((raw as Record<string, unknown>).lastSession);
-    if (last) t.lastSession = last;
-    tabs.push(t);
+    const t = parseLayoutTab(raw);
+    if (t) tabs.push(t);
   }
   return { tabs, activeId: o.activeId };
+}
+
+/**
+ * Coerce a Dockview workspace snapshot (the `dock-layout.json` sidecar payload).
+ * Returns `null` for absent, malformed, or unknown-version snapshots; the caller
+ * then opens with no restored dock. `serialized` is kept opaque (Dockview's own
+ * JSON — core never inspects it); only its presence as an object is required.
+ * Malformed dock tabs drop individually.
+ */
+export function parseDockSnapshot(value: unknown): DockWorkspaceSnapshot | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const o = value as Record<string, unknown>;
+  if (o.version !== DOCK_SNAPSHOT_VERSION) return null;
+  if (typeof o.serialized !== 'object' || o.serialized === null) return null;
+  if (!Array.isArray(o.tabs)) return null;
+  const tabs: LayoutTab[] = [];
+  for (const raw of o.tabs) {
+    const t = parseLayoutTab(raw);
+    if (t) tabs.push(t);
+  }
+  return { version: DOCK_SNAPSHOT_VERSION, serialized: o.serialized, tabs };
 }
 
 const LAYOUT_PANEL_KEYS = [

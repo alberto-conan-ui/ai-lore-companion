@@ -6,6 +6,7 @@ import type {
   ChangeEntry,
   ChangeScope,
   Commitment,
+  DockWorkspaceSnapshot,
   EngineEntry,
   IgnoreRule,
   MemoryFrontmatter,
@@ -20,6 +21,7 @@ import type {
 } from '@ai-lore-companion/core';
 
 export type { ChangeScope };
+export type { DockWorkspaceSnapshot };
 
 /**
  * The channel + direction descriptors live in [`ipc/contract.ts`](./ipc/contract.ts)
@@ -253,6 +255,13 @@ export const PTY_FLOW_RESUME = '\x11';
  * `@ai-lore-companion/core`'s constant.**
  */
 export const WORKSPACE_LAYOUT_SCHEMA_VERSION = 1;
+/**
+ * Renderer-safe mirror of core's `DOCK_SNAPSHOT_VERSION` (v2 P2 / S-D). Stamped
+ * onto the Dockview placement snapshot the renderer captures. Mirrored here for
+ * the same reason as the constant above. **Keep in lockstep with
+ * `@ai-lore-companion/core`'s constant.**
+ */
+export const DOCK_SNAPSHOT_VERSION = 1;
 /** A terminal resize request, in character cells. */
 export type TerminalResizeArg = { id: string; cols: number; rows: number };
 /** Output bytes streamed from a terminal's PTY. */
@@ -347,6 +356,9 @@ export type SettingsSetIgnoresArg = { tier: WriteTier; rules: IgnoreRule[] };
 
 /** Replace the per-project workspace-layout snapshot — or clear it with `null`. */
 export type SettingsSetLayoutArg = { layout: WorkspaceLayout | null };
+
+/** Replace the per-project Dockview snapshot sidecar — or clear it with `null`. */
+export type DockLayoutSetArg = { snapshot: DockWorkspaceSnapshot | null };
 
 /**
  * One field of the AI-Lore conversational register. `posture` lives on
