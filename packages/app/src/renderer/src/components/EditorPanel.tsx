@@ -3,10 +3,10 @@ import type { FileHistoryEntry, SavePointInfo } from '../../shared/ipc.js';
 import { type EditorDoc, useCockpitStore } from '../store.js';
 import { onEffectiveTheme } from '../theme.js';
 import { CommitRow } from './CommitRow.js';
-import { MarkdownPreview } from './editor/MarkdownPreview.js';
 import {
-  makeCodeView,
+  type EditView,
   makeDiffView,
+  makeEditView,
   makeNoticeView,
   makeTripleDiffView,
   makeTripleView,
@@ -48,6 +48,27 @@ export function EditorPanel(): JSX.Element | null {
   useEffect(() => {
     activeTabRef.current?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   }, [activePath]);
+
+  // Close-guard (markdown authoring, P3): closing a doc with unsaved edits asks
+  // first, so a stray middle-click or × never silently drops work.
+  const requestClose = (doc: EditorDoc): void => {
+    if (doc.dirty && !window.confirm(`Discard unsaved changes to ${doc.name}?`)) return;
+    closeDoc(doc.path);
+  };
+
+  // Quit-guard: while any doc is dirty, warn before the window unloads (reload /
+  // quit). The native prompt is the most we can do from the renderer.
+  const anyDirty = docs.some((d) => d.dirty);
+  useEffect(() => {
+    if (!anyDirty) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent): void => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [anyDirty]);
+
   if (docs.length === 0) return null;
 
   return (
@@ -62,14 +83,18 @@ export function EditorPanel(): JSX.Element | null {
               style={{ ...tabStyle, ...(isActive ? tabActiveStyle : null) }}
               data-testid={`editor-tab-${doc.name}`}
               data-active={isActive}
+              data-dirty={doc.dirty ? true : undefined}
               // Middle-click closes the tab — the usual IDE/browser convention.
               onAuxClick={(e) => {
                 if (e.button === 1) {
                   e.preventDefault();
-                  closeDoc(doc.path);
+                  requestClose(doc);
                 }
               }}
             >
+              {doc.dirty ? (
+                <span style={dirtyDotStyle} aria-label="Unsaved changes" title="Unsaved changes" />
+              ) : null}
               <button
                 type="button"
                 style={tabNameStyle}
@@ -83,7 +108,7 @@ export function EditorPanel(): JSX.Element | null {
                 style={tabCloseStyle}
                 aria-label={`Close ${doc.name}`}
                 title="Close"
-                onClick={() => closeDoc(doc.path)}
+                onClick={() => requestClose(doc)}
               >
                 ×
               </button>
@@ -126,7 +151,7 @@ export function EditorPanel(): JSX.Element | null {
                   style={active.mode === 'preview' ? segOnStyle : segStyle}
                   aria-pressed={active.mode === 'preview'}
                   data-testid="editor-mode-preview"
-                  title="Rendered markdown preview"
+                  title="Editable markdown preview (WYSIWYG)"
                   onClick={() => setDocMode(active.path, 'preview')}
                 >
                   Preview
@@ -144,10 +169,17 @@ export function EditorPanel(): JSX.Element | null {
               Open externally ↗
             </button>
           </div>
-          {active.mode === 'preview' && isMarkdown(active.name) ? (
-            <MarkdownPreview doc={active} />
-          ) : (
+          {active.mode === 'diff' ? (
             <DocView doc={active} />
+          ) : (
+            // Code (raw source) and Preview (markdown live-preview) are one
+            // editable editor — same instance across the flip (keyed on path), the
+            // decoration layer just turns on for Preview.
+            <CodeEditor
+              key={active.path}
+              doc={active}
+              livePreview={active.mode === 'preview' && isMarkdown(active.name)}
+            />
           )}
         </>
       ) : null}
@@ -155,9 +187,123 @@ export function EditorPanel(): JSX.Element | null {
   );
 }
 
-/** The CodeMirror host for one doc. Rebuilds on doc / mode / baseline change and
- *  when the repo's changes snapshot ticks (an on-disk edit), so the view stays
- *  live against both the selected save-point and the file on disk. */
+/**
+ * The editable CodeMirror surface for a doc — **Code** mode (raw source) and
+ * **Preview** mode (markdown live-preview) are the same editor with the
+ * decoration layer off/on (`livePreview`). Unlike {@link DocView}'s read-only
+ * diff views this is a live, savable editor: the view is built **once per doc**
+ * (keyed on path via the call site's `key`) and persists — theme *and* the
+ * live-preview toggle reconfigure in place (Compartments, not a rebuild), so
+ * flipping Code ⟷ Preview keeps the cursor, undo history, and unsaved buffer.
+ * Edits flow to the store's dirty/buffer model; `Cmd/Ctrl-S` writes the file to
+ * disk byte-clean. It deliberately does **not** re-read on the disk-tick signal
+ * — that would clobber an unsaved buffer.
+ */
+function CodeEditor({ doc, livePreview }: { doc: EditorDoc; livePreview: boolean }): JSX.Element {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<EditView | null>(null);
+  // The file's on-disk text, as last loaded or saved — the dirty comparison
+  // point. A buffer equal to this is clean, so an undo back to saved un-dirties.
+  const savedRef = useRef('');
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  useEffect(() => onEffectiveTheme(setTheme), []);
+  // Always-current theme + live-preview, so the initial build (keyed only on the
+  // doc, not on these) picks up their current values; later changes reconfigure
+  // in place via the effects below.
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
+  const livePreviewRef = useRef(livePreview);
+  livePreviewRef.current = livePreview;
+  const [status, setStatus] = useState<'loading' | 'ready' | 'unreadable'>('loading');
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Built once per doc (keyed on path via the call-site `key`), NOT per theme /
+  // mode: theme + live-preview ride Compartments reconfigured by the effects
+  // below, so neither a re-theme nor a Code⟷Preview flip rebuilds (which would
+  // drop the cursor / undo / unsaved buffer). Theme + store reads go through
+  // refs / getState, so there are no missing deps to suppress.
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el) return;
+    let cancelled = false;
+    setStatus('loading');
+    setSaveError(null);
+    void (async () => {
+      const res = await window.cockpit.readFile({ path: doc.path });
+      if (cancelled || !hostRef.current) return;
+      if (res.kind !== 'text') {
+        setStatus('unreadable');
+        return;
+      }
+      savedRef.current = res.text;
+      // Reopening a doc with unsaved edits → restore the buffer; else disk text.
+      const buffered = useCockpitStore.getState().editorBuffers[doc.path];
+      const edit = makeEditView({
+        parent: el,
+        name: doc.name,
+        text: buffered ?? res.text,
+        theme: themeRef.current,
+        livePreview: livePreviewRef.current,
+        onChange: (text) => {
+          const store = useCockpitStore.getState();
+          // Clean again once edits are undone back to the on-disk text.
+          if (text === savedRef.current) store.clearDocBuffer(doc.path);
+          else store.setDocBuffer(doc.path, text);
+        },
+        onSave: (text) => {
+          void window.cockpit.fileWrite({ path: doc.path, text }).then((r) => {
+            if (r.kind === 'ok') {
+              savedRef.current = text;
+              useCockpitStore.getState().clearDocBuffer(doc.path);
+              setSaveError(null);
+            } else {
+              setSaveError(r.message);
+            }
+          });
+        },
+      });
+      viewRef.current = edit;
+      setStatus('ready');
+    })();
+    return () => {
+      cancelled = true;
+      viewRef.current?.destroy();
+      viewRef.current = null;
+      if (el) el.replaceChildren();
+    };
+  }, [doc.path, doc.name]);
+
+  // Re-theme in place — never a rebuild (preserves cursor / undo / buffer).
+  useEffect(() => {
+    viewRef.current?.setTheme(theme);
+  }, [theme]);
+
+  // Flip live-preview (Code ⟷ Preview) in place — a Compartment, no rebuild.
+  useEffect(() => {
+    viewRef.current?.setLivePreview(livePreview);
+  }, [livePreview]);
+
+  return (
+    <div style={docBodyStyle}>
+      <div ref={hostRef} style={cmHostStyle} data-testid="editor-cm-host" />
+      {status !== 'ready' ? (
+        <div style={overlayStyle} data-testid={`editor-status-${status}`}>
+          {status === 'loading' ? 'Reading…' : 'This file can’t be shown in the editor.'}
+        </div>
+      ) : null}
+      {saveError ? (
+        <div style={saveErrorStyle} data-testid="editor-save-error" role="alert">
+          Couldn’t save: {saveError}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** The CodeMirror host for one doc's read-only diff/triple view. Rebuilds on doc
+ *  / mode / baseline change and when the repo's changes snapshot ticks (an
+ *  on-disk edit), so the view stays live against both the selected save-point and
+ *  the file on disk. (Code mode is the editable {@link CodeEditor} instead.) */
 function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null);
   // Effective theme drives the CodeMirror palette; a change rebuilds the view
@@ -275,11 +421,6 @@ function DocView({ doc }: { doc: EditorDoc }): JSX.Element {
       if (cancelled || !hostRef.current) return;
       if (current.kind !== 'text') {
         setStatus('unreadable');
-        return;
-      }
-      if (doc.mode === 'code') {
-        view = makeCodeView(el, doc.name, current.text, theme);
-        setStatus('ready');
         return;
       }
       // Parent-relative modes: the picked version vs the file's previous version,
@@ -733,6 +874,28 @@ const tabNameStyle: React.CSSProperties = {
   fontSize: '0.78rem',
   padding: '0.45rem 0',
   cursor: 'pointer',
+};
+
+/** The unsaved-changes dot, shown before a dirty doc's name in the tab strip. */
+const dirtyDotStyle: React.CSSProperties = {
+  width: '7px',
+  height: '7px',
+  borderRadius: '50%',
+  background: 'var(--color-accent)',
+  flexShrink: 0,
+};
+
+/** A transient notice when a save fails — pinned to the foot of the editor. */
+const saveErrorStyle: React.CSSProperties = {
+  position: 'absolute',
+  left: 0,
+  right: 0,
+  bottom: 0,
+  padding: '0.4rem 0.7rem',
+  fontSize: '0.74rem',
+  color: 'var(--color-danger-fg, #fff)',
+  background: 'var(--color-danger, #b3261e)',
+  textAlign: 'center',
 };
 
 const tabCloseStyle: React.CSSProperties = {

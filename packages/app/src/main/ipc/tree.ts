@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import {
   createIgnoreMatcher,
@@ -12,6 +12,8 @@ import type {
   ContentSearchResult,
   FileSearchArg,
   FileSearchHit,
+  FileWriteArg,
+  FileWriteResult,
   ReadFileArg,
   ReadFileResult,
   TreeExpandArg,
@@ -47,6 +49,25 @@ export const registerTree: RegisterModule = (reg, deps) => {
       // git uses. Cheap, and right for the source/markdown/JSON this app shows.
       if (buf.subarray(0, 8192).includes(0)) return { kind: 'binary' };
       return { kind: 'text', text: buf.toString('utf8') };
+    } catch (err) {
+      return { kind: 'failed', message: (err as Error).message };
+    }
+  });
+
+  // Write a file's text back to disk (markdown authoring, P3). The renderer owns
+  // the exact bytes — the CodeMirror document is the source of truth — so main
+  // writes them UTF-8 verbatim and a save with no edit round-trips byte-clean.
+  // Mirrors `readFile`'s posture: no path guard (the renderer only ever saves a
+  // doc it opened from the project tree); failures come back tagged, not thrown.
+  reg.handle('fileWrite', (event, arg: FileWriteArg): FileWriteResult => {
+    try {
+      writeFileSync(arg.path, arg.text, 'utf8');
+      // Reflect the save in the drift/Changes view immediately, rather than
+      // waiting on the filesystem watcher (which debounces via awaitWriteFinish,
+      // ~100ms, and can miss a self-write) — the app just wrote the file, so it
+      // knows its own drift changed. Best-effort: no wiring on a non-project window.
+      deps.contextFor(event)?.wiring?.changes.refreshNow();
+      return { kind: 'ok' };
     } catch (err) {
       return { kind: 'failed', message: (err as Error).message };
     }

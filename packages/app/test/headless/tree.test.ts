@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
+import type { ChangesTracker } from '@ai-lore-companion/core';
 import { registerTree } from '../../src/main/ipc/tree.js';
+import type { Wiring } from '../../src/main/ipc/types.js';
 import { clipboard, resetElectronStub, shell } from './electron-stub.js';
 import { type Harness, fakeContext, harnessFor } from './harness.js';
 
@@ -86,6 +88,47 @@ test('readFile fails for a missing path and for a directory', () => {
     (h.invoke('readFile', { path: join(root, 'sub') }) as { kind: string }).kind,
     'failed',
   );
+});
+
+test('fileWrite saves text to disk byte-for-byte and reports ok', () => {
+  const target = join(root, 'sub', 'beta.md');
+  const body = '# Heading\n\nA paragraph with **bold** and a trailing space. \nLine two\n';
+  assert.deepEqual(h.invoke('fileWrite', { path: target, text: body }), { kind: 'ok' });
+  // Read raw bytes back — main must write the renderer's exact string verbatim,
+  // adding no trailing newline / CRLF translation (the byte-clean round-trip).
+  assert.equal(readFileSync(target, 'utf8'), body);
+});
+
+test('fileWrite creates a not-yet-existing file', () => {
+  const fresh = join(root, 'new-note.md');
+  assert.deepEqual(h.invoke('fileWrite', { path: fresh, text: 'hi' }), { kind: 'ok' });
+  assert.equal(readFileSync(fresh, 'utf8'), 'hi');
+});
+
+test('fileWrite fails (tagged, not thrown) when the parent dir is missing', () => {
+  const r = h.invoke('fileWrite', { path: join(root, 'no-such-dir', 'x.md'), text: 'x' }) as {
+    kind: string;
+  };
+  assert.equal(r.kind, 'failed');
+});
+
+test('fileWrite refreshes the drift tracker so a save shows in the Changes view', () => {
+  // A successful save nudges the changes tracker immediately (not via the
+  // debounced watcher), so the file appears as drifted the moment it's written.
+  let refreshed = 0;
+  const wiring = {
+    changes: { refreshNow: () => refreshed++ } as unknown as ChangesTracker,
+    watcher: { close: async () => {} },
+    pushCommits: () => {},
+    pushSavePoints: () => {},
+  } as Wiring;
+  h.setCtx(fakeContext({ root, lorePath: join(root, '.ai-lore-proj'), wiring }));
+  h.invoke('fileWrite', { path: join(root, 'alpha.txt'), text: 'edited' });
+  assert.equal(refreshed, 1);
+
+  // A failed write does not refresh (nothing changed on disk).
+  h.invoke('fileWrite', { path: join(root, 'no-such-dir', 'x.md'), text: 'x' });
+  assert.equal(refreshed, 1);
 });
 
 // `searchFiles` is async — it awaits the search service (a `utilityProcess` in

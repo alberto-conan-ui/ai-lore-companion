@@ -40,6 +40,8 @@ import type {
   FileHistoryResult,
   FileSearchArg,
   FileSearchHit,
+  FileWriteArg,
+  FileWriteResult,
   FocusReadArg,
   FocusReadResult,
   HelperAction,
@@ -145,6 +147,9 @@ export const CONTRACT = {
   /** Read a file's text for the in-app read-only viewer (Read-only IDE P1).
    *  Main decides text-vs-binary + caps size; non-text routes back to `openPath`. */
   readFile: invoke<[arg: ReadFileArg], ReadFileResult>('cockpit:read-file'),
+  /** Write a file's text back to disk (markdown authoring, P3). The renderer
+   *  owns the exact bytes; main writes UTF-8 verbatim so a save is byte-clean. */
+  fileWrite: invoke<[arg: FileWriteArg], FileWriteResult>('cockpit:file-write'),
   /** Read a file's content at a baseline commit, for the in-app side-by-side
    *  diff (Read-only IDE P3). */
   readFileBaseline: invoke<[arg: ReadFileBaselineArg], ReadFileBaselineResult>(

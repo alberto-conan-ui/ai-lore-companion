@@ -1,10 +1,12 @@
 /**
- * CodeMirror 6 builders for the in-app read-only viewer + diff (Read-only IDE).
+ * CodeMirror 6 builders for the in-app editor.
  *
- * The app is **read-only** — every view here is built `readOnly` + non-editable,
- * so a file is *viewed*, never written back to disk. Two surfaces: a single
- * read-only document (`makeCodeView`) and a side-by-side diff against the
- * selected save-point/ack (`makeDiffView`, via `@codemirror/merge`).
+ * Two postures. The **diff** + **triple** surfaces are read-only views, built
+ * `readOnly` + non-editable, comparing a file against a save-point/ack (via
+ * `@codemirror/merge`). The **edit** surface (`makeEditView`, markdown authoring
+ * P3) is a live, editable document that saves back to disk and re-themes in
+ * place — it is **persistent** (theme rides a `Compartment`, not a rebuild) so a
+ * cursor / undo history / unsaved buffer survive a theme toggle.
  */
 
 import { javascript } from '@codemirror/lang-javascript';
@@ -12,10 +14,11 @@ import { json } from '@codemirror/lang-json';
 import { markdown } from '@codemirror/lang-markdown';
 import { yaml } from '@codemirror/lang-yaml';
 import { MergeView } from '@codemirror/merge';
-import { EditorState, type Extension } from '@codemirror/state';
+import { Compartment, EditorState, type Extension } from '@codemirror/state';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorView } from '@codemirror/view';
+import { EditorView, keymap } from '@codemirror/view';
 import { basicSetup } from 'codemirror';
+import { markdownLivePreview } from './livePreview.js';
 
 /** Language support for a filename, by extension. Falls back to plain text. */
 export function languageFor(name: string): Extension[] {
@@ -77,6 +80,84 @@ export function makeCodeView(
     parent,
     state: EditorState.create({ doc: text, extensions: readOnlyExtensions(name, theme) }),
   });
+}
+
+/** The dark-vs-light editor styling, as a single extension — `oneDark` when
+ *  dark, CodeMirror's built-in light highlighting (nothing extra) when light.
+ *  Held in a `Compartment` by the edit view so a theme toggle reconfigures in
+ *  place instead of rebuilding the editor. */
+function themeExtension(theme: EditorTheme): Extension {
+  return theme === 'light' ? [] : oneDark;
+}
+
+/** A live editable document, returned by {@link makeEditView}. The view persists
+ *  across theme + live-preview toggles — both reconfigure in place, so the
+ *  cursor / undo / unsaved buffer survive. */
+export type EditView = {
+  view: EditorView;
+  /** Reconfigure the palette without rebuilding (preserves cursor / undo). */
+  setTheme: (theme: EditorTheme) => void;
+  /** Turn the markdown live-preview on/off in place (markdown docs only). */
+  setLivePreview: (on: boolean) => void;
+  destroy: () => void;
+};
+
+/**
+ * Build a live, **editable** document of `text` into `parent` (markdown
+ * authoring, P3). Unlike {@link makeCodeView} this is not read-only: edits flow
+ * to `onChange` (the raw document string, for the dirty/buffer model) and
+ * `Cmd/Ctrl-S` calls `onSave` with the current text. The view is persistent —
+ * the theme rides a `Compartment`, so `setTheme` re-themes in place and the
+ * cursor, undo history, and unsaved buffer all survive. Long prose lines wrap.
+ */
+export function makeEditView(opts: {
+  parent: HTMLElement;
+  name: string;
+  text: string;
+  theme?: EditorTheme;
+  /** Start with markdown live-preview on (markdown docs only). */
+  livePreview?: boolean;
+  onChange: (text: string) => void;
+  onSave: (text: string) => void;
+}): EditView {
+  const themeComp = new Compartment();
+  const previewComp = new Compartment();
+  const view = new EditorView({
+    parent: opts.parent,
+    state: EditorState.create({
+      doc: opts.text,
+      extensions: [
+        // The save keymap sits above basicSetup so Cmd/Ctrl-S is ours, not the
+        // browser's; `preventDefault` stops Electron's native save dialog.
+        keymap.of([
+          {
+            key: 'Mod-s',
+            preventDefault: true,
+            run: (v) => {
+              opts.onSave(v.state.doc.toString());
+              return true;
+            },
+          },
+        ]),
+        basicSetup,
+        ...languageFor(opts.name),
+        EditorView.lineWrapping,
+        themeComp.of(themeExtension(opts.theme ?? 'dark')),
+        previewComp.of(opts.livePreview ? markdownLivePreview() : []),
+        fitTheme,
+        EditorView.updateListener.of((u) => {
+          if (u.docChanged) opts.onChange(u.state.doc.toString());
+        }),
+      ],
+    }),
+  });
+  return {
+    view,
+    setTheme: (theme) => view.dispatch({ effects: themeComp.reconfigure(themeExtension(theme)) }),
+    setLivePreview: (on) =>
+      view.dispatch({ effects: previewComp.reconfigure(on ? markdownLivePreview() : []) }),
+    destroy: () => view.destroy(),
+  };
 }
 
 /** One column of the "All 3" view: either a read-only code pane (`text`) or a

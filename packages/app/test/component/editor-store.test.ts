@@ -12,7 +12,7 @@ const doc = (path: string, mode: EditorDoc['mode'] = 'code'): EditorDoc => ({
 });
 
 beforeEach(() => {
-  useCockpitStore.setState({ editorDocs: [], activeDocPath: null });
+  useCockpitStore.setState({ editorDocs: [], activeDocPath: null, editorBuffers: {} });
 });
 
 test('openDoc adds a doc and focuses it', () => {
@@ -77,4 +77,45 @@ test('restoreDocs with an empty set clears the editor', () => {
   const s = useCockpitStore.getState();
   expect(s.editorDocs).toEqual([]);
   expect(s.activeDocPath).toBeNull();
+});
+
+// ── Dirty / buffer slice (markdown authoring, P3) ────────────────────────────
+
+test('setDocBuffer records the buffer and marks the doc dirty', () => {
+  const { openDoc, setDocBuffer } = useCockpitStore.getState();
+  openDoc(doc('/p/a.ts'));
+  setDocBuffer('/p/a.ts', 'edited text');
+  const s = useCockpitStore.getState();
+  expect(s.editorBuffers['/p/a.ts']).toBe('edited text');
+  expect(s.editorDocs.find((d) => d.path === '/p/a.ts')?.dirty).toBe(true);
+});
+
+test('clearDocBuffer drops the buffer and clears dirty (save, or undo-to-saved)', () => {
+  const { openDoc, setDocBuffer, clearDocBuffer } = useCockpitStore.getState();
+  openDoc(doc('/p/a.ts'));
+  setDocBuffer('/p/a.ts', 'edited');
+  clearDocBuffer('/p/a.ts');
+  const s = useCockpitStore.getState();
+  expect('/p/a.ts' in s.editorBuffers).toBe(false);
+  expect(s.editorDocs.find((d) => d.path === '/p/a.ts')?.dirty).toBeFalsy();
+});
+
+test('closeDoc drops the closed doc’s unsaved buffer', () => {
+  const { openDoc, setDocBuffer, closeDoc } = useCockpitStore.getState();
+  openDoc(doc('/p/a.ts'));
+  openDoc(doc('/p/b.ts'));
+  setDocBuffer('/p/a.ts', 'unsaved');
+  closeDoc('/p/a.ts');
+  expect('/p/a.ts' in useCockpitStore.getState().editorBuffers).toBe(false);
+});
+
+test('a buffer on one doc leaves its siblings clean', () => {
+  const { openDoc, setDocBuffer } = useCockpitStore.getState();
+  openDoc(doc('/p/a.ts'));
+  openDoc(doc('/p/b.ts'));
+  setDocBuffer('/p/b.ts', 'only b');
+  const s = useCockpitStore.getState();
+  expect(s.editorDocs.find((d) => d.path === '/p/a.ts')?.dirty).toBeFalsy();
+  expect(s.editorDocs.find((d) => d.path === '/p/b.ts')?.dirty).toBe(true);
+  expect('/p/a.ts' in s.editorBuffers).toBe(false);
 });

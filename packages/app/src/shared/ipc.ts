@@ -119,6 +119,13 @@ export type ReadFileResult =
   | { kind: 'too-large'; bytes: number }
   | { kind: 'failed'; message: string };
 
+/** Renderer → main: write a file's text back to disk (markdown authoring, P3).
+ *  The renderer owns the exact bytes — the CodeMirror document is the source of
+ *  truth — and main writes them UTF-8 verbatim, so an open→save with no edit
+ *  round-trips byte-identically (the property the live-preview relies on). */
+export type FileWriteArg = { path: string; text: string };
+export type FileWriteResult = { kind: 'ok' } | { kind: 'failed'; message: string };
+
 /** Renderer → main: the text of a file at a baseline commit, for the in-app
  *  side-by-side diff. Mirrors {@link OpenDiffArg}'s resolution but returns the
  *  baseline content instead of launching an external diff. */

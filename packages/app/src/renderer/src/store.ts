@@ -179,9 +179,10 @@ export type PaneScope = ChangeScope | 'publish';
 export type EditorMode = 'code' | 'diff' | 'preview';
 
 /**
- * One file open in the in-app editor (Read-only IDE). The app is read-only — a
- * doc is *viewed*, never edited to disk. Keyed by its absolute `path`; `scope`
- * resolves its baseline for the diff view.
+ * One file open in the in-app editor. In **code** mode the doc is editable and
+ * savable (markdown authoring, P3); **diff** and **preview** modes stay
+ * read-only views. Keyed by its absolute `path`; `scope` resolves its baseline
+ * for the diff view.
  */
 export type EditorDoc = {
   /** Absolute path — also the doc's stable id. */
@@ -199,6 +200,13 @@ export type EditorDoc = {
    * `undefined` follows the global baseline.
    */
   diffBaseline?: string;
+  /**
+   * The doc has unsaved edits (markdown authoring, P3) — the editor buffer
+   * differs from disk. Drives the tab's dirty dot and the close/quit guard; the
+   * live text lives in {@link State.editorBuffers}. Cleared on save, or when an
+   * undo returns the buffer to the on-disk text.
+   */
+  dirty?: boolean;
 };
 
 type State = {
@@ -250,6 +258,13 @@ type State = {
   editorDocs: EditorDoc[];
   /** The active editor doc's path, or `null` when none are open. */
   activeDocPath: string | null;
+  /**
+   * Unsaved editor buffers (markdown authoring, P3) — `path → current text` for
+   * every doc with edits not yet on disk. Held in the store (not just the live
+   * CodeMirror view) so an edit survives a tab switch that unmounts the view;
+   * an entry is present exactly while the matching doc is `dirty`.
+   */
+  editorBuffers: Record<string, string>;
   setChain: (chain: ChainPayload) => void;
   applyChanges: (payload: ChangesPayload) => void;
   setBaseline: (scope: ChangeScope, baseline: string) => void;
@@ -274,6 +289,12 @@ type State = {
   /** Pin an open doc's diff to a specific commit (from its history column), or
    *  `null` to follow the global baseline picker again. */
   setDocDiffBaseline: (path: string, baseline: string | null) => void;
+  /** Record an open doc's unsaved buffer (markdown authoring, P3) and mark it
+   *  dirty — called by the editor on each keystroke that diverges from disk. */
+  setDocBuffer: (path: string, text: string) => void;
+  /** Drop an open doc's unsaved buffer and clear its dirty flag — on a
+   *  successful save, or when an undo returns the buffer to the on-disk text. */
+  clearDocBuffer: (path: string) => void;
 };
 
 export const useCockpitStore = create<State>((set) => ({
@@ -288,6 +309,7 @@ export const useCockpitStore = create<State>((set) => ({
   showIndexFiles: false,
   editorDocs: [],
   activeDocPath: null,
+  editorBuffers: {},
   setApps: (apps) => set({ apps }),
   setShowIndexFiles: (value) => set({ showIndexFiles: value }),
   openDoc: (doc) =>
@@ -312,7 +334,14 @@ export const useCockpitStore = create<State>((set) => ({
         // Focus the previous tab, else the one that slid into this slot, else none.
         activeDocPath = (next[idx - 1] ?? next[idx])?.path ?? null;
       }
-      return { editorDocs: next, activeDocPath };
+      // Drop any unsaved buffer with the doc — the close-guard has already had
+      // its say by the time we get here.
+      let editorBuffers = state.editorBuffers;
+      if (path in editorBuffers) {
+        const { [path]: _dropped, ...rest } = editorBuffers;
+        editorBuffers = rest;
+      }
+      return { editorDocs: next, activeDocPath, editorBuffers };
     }),
   setActiveDoc: (path) => set({ activeDocPath: path }),
   restoreDocs: (docs, activePath) =>
@@ -332,6 +361,29 @@ export const useCockpitStore = create<State>((set) => ({
         d.path === path ? { ...d, diffBaseline: baseline ?? undefined } : d,
       ),
     })),
+  setDocBuffer: (path, text) =>
+    set((state) => ({
+      editorBuffers: { ...state.editorBuffers, [path]: text },
+      editorDocs: state.editorDocs.map((d) =>
+        d.path === path && !d.dirty ? { ...d, dirty: true } : d,
+      ),
+    })),
+  clearDocBuffer: (path) =>
+    set((state) => {
+      if (
+        !(path in state.editorBuffers) &&
+        !state.editorDocs.some((d) => d.path === path && d.dirty)
+      ) {
+        return {};
+      }
+      const { [path]: _dropped, ...editorBuffers } = state.editorBuffers;
+      return {
+        editorBuffers,
+        editorDocs: state.editorDocs.map((d) =>
+          d.path === path && d.dirty ? { ...d, dirty: false } : d,
+        ),
+      };
+    }),
   setChain: (chain) => set({ chain }),
   applyChanges: (payload) =>
     set((state) => ({
