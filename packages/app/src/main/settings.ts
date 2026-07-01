@@ -1,5 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import {
   type AppEntry,
   type IgnoreRule,
@@ -14,6 +13,7 @@ import {
   withLayout,
   withSetting,
 } from '@ai-lore-companion/core';
+import { readTextFile, writeTextFileAtomic } from './json-file.js';
 import { projectDataDir } from './project-data.js';
 
 /**
@@ -34,8 +34,10 @@ function projectSettingsPath(userDataDir: string, projectRoot: string): string {
 
 /** Read a settings file — an empty file when it is absent or corrupt. */
 function readSettingsFile(path: string): SettingsFile {
+  const text = readTextFile(path);
+  if (text === undefined) return emptySettingsFile();
   try {
-    return parseSettingsFile(readFileSync(path, 'utf8'));
+    return parseSettingsFile(text);
   } catch {
     return emptySettingsFile();
   }
@@ -43,8 +45,7 @@ function readSettingsFile(path: string): SettingsFile {
 
 /** Write a settings file, creating its directory if needed. */
 function writeSettingsFile(path: string, file: SettingsFile): void {
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, serializeSettingsFile(file));
+  writeTextFileAtomic(path, serializeSettingsFile(file));
 }
 
 /** The global settings file. */

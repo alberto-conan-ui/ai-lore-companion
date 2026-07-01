@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { Rectangle } from 'electron';
+import { z } from 'zod';
+import { readJsonFile, writeJsonFileAtomic } from './json-file.js';
 import { projectDataDir } from './project-data.js';
 
 /**
@@ -14,24 +15,18 @@ function windowStatePath(userDataDir: string, projectRoot: string): string {
   return join(projectDataDir(userDataDir, projectRoot), 'window-state.json');
 }
 
-/** Whether a raw value is a sane window rectangle — finite, positive extent. */
-function isBounds(value: unknown): value is Rectangle {
-  if (typeof value !== 'object' || value === null) return false;
-  const o = value as Record<string, unknown>;
-  for (const k of ['x', 'y', 'width', 'height'] as const) {
-    if (typeof o[k] !== 'number' || !Number.isFinite(o[k])) return false;
-  }
-  return (o.width as number) > 0 && (o.height as number) > 0;
-}
+/** A sane window rectangle — finite, positive extent. */
+const boundsSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+  width: z.number().finite().positive(),
+  height: z.number().finite().positive(),
+});
 
 /** The project's stored window bounds, or null when absent/corrupt. */
 export function loadWindowBounds(userDataDir: string, projectRoot: string): Rectangle | null {
-  try {
-    const raw = JSON.parse(readFileSync(windowStatePath(userDataDir, projectRoot), 'utf8'));
-    return isBounds(raw) ? raw : null;
-  } catch {
-    return null;
-  }
+  const parsed = boundsSchema.safeParse(readJsonFile(windowStatePath(userDataDir, projectRoot)));
+  return parsed.success ? parsed.data : null;
 }
 
 /** Persist the project's window bounds, creating the data dir if needed. */
@@ -40,7 +35,5 @@ export function saveWindowBounds(
   projectRoot: string,
   bounds: Rectangle,
 ): void {
-  const path = windowStatePath(userDataDir, projectRoot);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(bounds));
+  writeJsonFileAtomic(windowStatePath(userDataDir, projectRoot), bounds);
 }

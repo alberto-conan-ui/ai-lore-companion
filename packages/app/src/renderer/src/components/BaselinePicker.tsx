@@ -1,4 +1,4 @@
-import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type JSX, useCallback, useMemo, useState } from 'react';
 import {
   type BaselineModel,
   type Milestone,
@@ -8,6 +8,7 @@ import {
 } from '../../../shared/baseline.js';
 import { useCockpitStore } from '../store.js';
 import { CommitRow, formatStamp, shortSha } from './CommitRow.js';
+import { PopoverShell } from './overlay/PopoverShell.js';
 
 /**
  * The global baseline picker — one control beside the pinned tabs that drives
@@ -31,7 +32,6 @@ export function BaselinePicker(): JSX.Element {
   // and selects that ack. Off → acks un-roll into the timeline and a save-point
   // selects its own commit. Renaming/inverting the old "include acks" toggle.
   const [rollup, setRollup] = useState(true);
-  const rootRef = useRef<HTMLDivElement>(null);
 
   const model = useMemo<BaselineModel>(
     () => buildMilestones({ savePoints, payloadCommits, loreCommits }, rollup),
@@ -85,76 +85,55 @@ export function BaselinePicker(): JSX.Element {
     [storeSetBaseline],
   );
 
-  // Dismiss on outside click / Escape.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent): void => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('mousedown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
   const buttonLabel = active ? active.label : 'Working tree';
   const buttonDate = active ? formatStamp(active.timestamp) : '';
 
   return (
-    <div ref={rootRef} style={rootStyle}>
-      <button
-        type="button"
-        style={triggerStyle}
-        data-testid="baseline-picker"
-        title="Compare every pane against this milestone"
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <span style={triggerIconStyle} aria-hidden="true">
-          {active?.kind === 'ack' ? '•' : '★'}
-        </span>
-        <span style={triggerLabelStyle}>{buttonLabel}</span>
-        {active ? <span style={triggerShaStyle}>{shortSha(active.commitSha)}</span> : null}
-        {buttonDate ? <span style={triggerDateStyle}>{buttonDate}</span> : null}
-        <span style={caretStyle} aria-hidden="true">
-          ▾
-        </span>
-      </button>
-
-      {open ? (
-        <div style={popoverStyle} data-testid="baseline-picker-popover">
-          <label style={ackToggleStyle}>
-            <input
-              type="checkbox"
-              checked={rollup}
-              onChange={(e) => setRollup(e.target.checked)}
-              data-testid="baseline-rollup-acks"
-            />
-            Roll up ACKs
-            <span style={ackToggleHintStyle}>
-              {rollup ? 'save-points show their bound ack' : 'acks shown individually'}
+    <div style={rootStyle}>
+      <PopoverShell
+        open={open}
+        onOpenChange={setOpen}
+        label="Baseline picker"
+        testId="baseline-picker-popover"
+        contentStyle={popoverStyle}
+        trigger={
+          <button
+            type="button"
+            style={triggerStyle}
+            data-testid="baseline-picker"
+            title="Compare every pane against this milestone"
+          >
+            <span style={triggerIconStyle} aria-hidden="true">
+              {active?.kind === 'ack' ? '•' : '★'}
             </span>
-          </label>
-          <div style={listStyle}>
-            {rows.length === 0 ? <div style={emptyStyle}>No save-points or acks yet.</div> : null}
-            {rows.map((m) => (
-              <Row
-                key={m.id}
-                m={m}
-                active={m.id === activeId}
-                showBound={rollup}
-                onSelect={select}
-              />
-            ))}
-          </div>
+            <span style={triggerLabelStyle}>{buttonLabel}</span>
+            {active ? <span style={triggerShaStyle}>{shortSha(active.commitSha)}</span> : null}
+            {buttonDate ? <span style={triggerDateStyle}>{buttonDate}</span> : null}
+            <span style={caretStyle} aria-hidden="true">
+              ▾
+            </span>
+          </button>
+        }
+      >
+        <label style={ackToggleStyle}>
+          <input
+            type="checkbox"
+            checked={rollup}
+            onChange={(e) => setRollup(e.target.checked)}
+            data-testid="baseline-rollup-acks"
+          />
+          Roll up ACKs
+          <span style={ackToggleHintStyle}>
+            {rollup ? 'save-points show their bound ack' : 'acks shown individually'}
+          </span>
+        </label>
+        <div style={listStyle}>
+          {rows.length === 0 ? <div style={emptyStyle}>No save-points or acks yet.</div> : null}
+          {rows.map((m) => (
+            <Row key={m.id} m={m} active={m.id === activeId} showBound={rollup} onSelect={select} />
+          ))}
         </div>
-      ) : null}
+      </PopoverShell>
     </div>
   );
 }
@@ -242,10 +221,6 @@ const caretStyle: React.CSSProperties = {
 };
 
 const popoverStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: 'calc(100% + 4px)',
-  right: 0,
-  zIndex: 60,
   width: '44rem',
   maxWidth: '92vw',
   maxHeight: '60vh',

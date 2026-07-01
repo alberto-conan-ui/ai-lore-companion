@@ -21,10 +21,11 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { type EngineEntry, dedupEngines, parseEngineEntries } from '@ai-lore-companion/core';
+import { z } from 'zod';
 import { type CatalogStoreSpec, loadCatalog, saveCatalog } from './catalog-store.js';
+import { readJsonFile, writeJsonFileAtomic } from './json-file.js';
 import { projectDataDir } from './project-data.js';
 
 /** Default engines back-filled when their binary resolves on PATH. Ids are
@@ -95,48 +96,31 @@ export function saveEngines(userDataDir: string, list: readonly EngineEntry[]): 
  * sidecar in the project's data folder. Both fields are optional so missing
  * values fall through to the caller's defaults.
  */
-type AiStateFile = {
+const aiStateSchema = z.object({
   /** The engine id last picked in this project (Phase B). */
-  lastPicked?: string;
+  lastPicked: z.string().min(1).optional().catch(undefined),
   /** The prompts column's width in px in this project's running AI tabs (Phase C). */
-  promptsColumnWidth?: number;
+  promptsColumnWidth: z.number().finite().optional().catch(undefined),
   /** The engine id this project's read-only **assistant** uses (AI Helper, CR7)
    *  — chosen in the Assistant panel dropdown, separate from `lastPicked` (the
    *  user's own AI tab). Unset → the helper falls back to Claude. */
-  helperEngine?: string;
-};
+  helperEngine: z.string().min(1).optional().catch(undefined),
+});
+type AiStateFile = z.infer<typeof aiStateSchema>;
 
 function engineStatePath(userDataDir: string, projectRoot: string): string {
   return resolve(projectDataDir(userDataDir, projectRoot), 'engine-state.json');
 }
 
+/** Field-tolerant read: a malformed field falls back to unset (the per-field
+ *  `catch`), a malformed file reads as empty. */
 function readAiState(userDataDir: string, projectRoot: string): AiStateFile {
-  try {
-    const raw = readFileSync(engineStatePath(userDataDir, projectRoot), 'utf8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const out: AiStateFile = {};
-    if (typeof parsed.lastPicked === 'string' && parsed.lastPicked.length > 0) {
-      out.lastPicked = parsed.lastPicked;
-    }
-    if (
-      typeof parsed.promptsColumnWidth === 'number' &&
-      Number.isFinite(parsed.promptsColumnWidth)
-    ) {
-      out.promptsColumnWidth = parsed.promptsColumnWidth;
-    }
-    if (typeof parsed.helperEngine === 'string' && parsed.helperEngine.length > 0) {
-      out.helperEngine = parsed.helperEngine;
-    }
-    return out;
-  } catch {
-    return {};
-  }
+  const parsed = aiStateSchema.safeParse(readJsonFile(engineStatePath(userDataDir, projectRoot)));
+  return parsed.success ? parsed.data : {};
 }
 
 function writeAiState(userDataDir: string, projectRoot: string, next: AiStateFile): void {
-  const file = engineStatePath(userDataDir, projectRoot);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(next, null, 2));
+  writeJsonFileAtomic(engineStatePath(userDataDir, projectRoot), next, { pretty: true });
 }
 
 /** The id of the engine last picked in this project, or `null` if none. */

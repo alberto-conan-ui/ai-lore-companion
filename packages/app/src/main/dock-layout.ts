@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { type DockWorkspaceSnapshot, parseDockSnapshot } from '@ai-lore-companion/core';
+import { readJsonFile, writeJsonFileAtomic } from './json-file.js';
 import { projectDataDir } from './project-data.js';
 
 /**
@@ -25,12 +26,8 @@ export function loadDockLayout(
   userDataDir: string,
   projectRoot: string,
 ): DockWorkspaceSnapshot | null {
-  try {
-    const raw = JSON.parse(readFileSync(dockLayoutPath(userDataDir, projectRoot), 'utf8'));
-    return parseDockSnapshot(raw);
-  } catch {
-    return null;
-  }
+  const raw = readJsonFile(dockLayoutPath(userDataDir, projectRoot));
+  return raw === undefined ? null : parseDockSnapshot(raw);
 }
 
 /** Persist (or clear, with `null`) the project's dock snapshot. */
@@ -46,6 +43,5 @@ export function saveDockLayout(
     } catch {}
     return;
   }
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(snapshot));
+  writeJsonFileAtomic(path, snapshot);
 }

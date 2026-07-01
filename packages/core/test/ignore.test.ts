@@ -106,6 +106,20 @@ test('createIgnoreMatcher matches a normalised file glob against a basename', ()
   assert.equal(isIgnored('debug.txt'), false);
 });
 
+test('createIgnoreMatcher matches multi-segment defaults and absolute rg paths', () => {
+  const isIgnored = createIgnoreMatcher(['**/.ai-lore-*/process/**', '**/node_modules/**']);
+  assert.equal(isIgnored('proj/.ai-lore-proj/process/verbs/orient.md'), true);
+  assert.equal(isIgnored('/Users/x/proj/node_modules/pkg/index.js'), true);
+  assert.equal(isIgnored('proj/.ai-lore-proj/memory/status.md'), false);
+});
+
+test('createIgnoreMatcher treats a leading ! or # as literal, not gitignore syntax', () => {
+  const isIgnored = createIgnoreMatcher(['!important', '#tags']);
+  assert.equal(isIgnored('!important'), true);
+  assert.equal(isIgnored('a/#tags'), true);
+  assert.equal(isIgnored('important'), false);
+});
+
 test('createIgnoreMatcher with an empty pattern list ignores nothing', () => {
   const isIgnored = createIgnoreMatcher([]);
   assert.equal(isIgnored('node_modules'), false);

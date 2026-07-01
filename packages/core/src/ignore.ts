@@ -16,6 +16,8 @@
  * lists to the watcher, the file search, and the tree reader.
  */
 
+import ignore from 'ignore';
+
 /** How hard an ignore rule hides a path. The levels nest. */
 export type IgnoreLevel = 'no-drift' | 'no-search' | 'hidden';
 
@@ -123,49 +125,30 @@ export function isUntrackedFile(name: string): boolean {
  * predicate takes a path segment, or a path relative to a read root, and
  * returns true when any pattern matches it.
  *
- * Matching is not delegated to chokidar — that would pull a watcher
- * dependency into pure-Node consumers like the tree reader.
+ * Matching is delegated to the `ignore` package (gitignore semantics), not to
+ * chokidar — that would pull a watcher dependency into pure-Node consumers
+ * like the tree reader. The stored pattern language stays chokidar-globs (the
+ * watcher consumes the same derived lists directly); `toGitignoreLines` maps
+ * each pattern to its gitignore equivalent at this boundary.
  */
 export function createIgnoreMatcher(patterns: readonly string[]): (relPath: string) => boolean {
-  const matchers = patterns.map(compileGlob);
-  return (relPath) => matchers.some((m) => m(relPath));
+  const ig = ignore().add(patterns.flatMap(toGitignoreLines));
+  return (relPath) => {
+    // `ignore` insists on relative paths; consumers hand us basenames,
+    // read-root-relative paths, or absolute rg output — strip the root.
+    const p = relPath.startsWith('/') ? relPath.slice(1) : relPath;
+    return p !== '' && ig.ignores(p);
+  };
 }
 
-function compileGlob(pattern: string): (relPath: string) => boolean {
-  const mid = pattern.match(/^\*\*\/(.+?)\/\*\*$/);
-  if (mid) {
-    const name = mid[1] as string;
-    return (relPath) => relPath === name || relPath.split('/').includes(name);
-  }
-  const re = globToRegex(pattern);
-  return (relPath) => re.test(relPath);
-}
-
-function globToRegex(pattern: string): RegExp {
-  let body = '';
-  let i = 0;
-  while (i < pattern.length) {
-    const c = pattern[i] as string;
-    if (c === '*') {
-      if (pattern[i + 1] === '*') {
-        if (pattern[i + 2] === '/') {
-          body += '(?:.*/)?';
-          i += 3;
-        } else {
-          body += '.*';
-          i += 2;
-        }
-      } else {
-        body += '[^/]*';
-        i += 1;
-      }
-    } else if (/[.+?()[\]{}^$|\\]/.test(c)) {
-      body += `\\${c}`;
-      i += 1;
-    } else {
-      body += c;
-      i += 1;
-    }
-  }
-  return new RegExp(`^${body}$`);
+function toGitignoreLines(pattern: string): string[] {
+  if (pattern === '') return [];
+  // Our patterns are always literal; gitignore would read a leading `!` as
+  // negation and a leading `#` as a comment.
+  const literal = /^[!#]/.test(pattern) ? `\\${pattern}` : pattern;
+  // In gitignore, `**/name/**` matches only the folder's contents; the folder
+  // itself needs `**/name`. Emit both so a bare basename (`node_modules`)
+  // still matches, as it did before the swap.
+  const mid = literal.match(/^\*\*\/(.+)\/\*\*$/);
+  return mid ? [literal, `**/${mid[1]}`] : [literal];
 }

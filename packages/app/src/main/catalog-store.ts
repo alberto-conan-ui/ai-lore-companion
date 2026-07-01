@@ -16,8 +16,8 @@
  * the gate of the Composable Core's catalog contract.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { readJsonFile, writeJsonFileAtomic } from './json-file.js';
 
 /** The on-disk shape: the entry array under a named field, plus the ids of
  *  defaults the user has removed (so they don't respawn). */
@@ -59,35 +59,26 @@ function filePath<T>(spec: CatalogStoreSpec<T>, userDataDir: string): string {
 
 /** Read + parse the store file, tolerant of a missing/corrupt file. */
 function readStore<T>(spec: CatalogStoreSpec<T>, userDataDir: string): StoreFile<T> {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(filePath(spec, userDataDir), 'utf8'));
-    if (spec.legacyArray && Array.isArray(parsed)) {
-      return { entries: spec.parse(parsed), removedDefaults: [] };
-    }
-    if (typeof parsed !== 'object' || parsed === null) {
-      return { entries: [], removedDefaults: [] };
-    }
-    const obj = parsed as Record<string, unknown>;
-    const entries = spec.parse(obj[spec.field]);
-    const removedDefaults = Array.isArray(obj.removedDefaults)
-      ? obj.removedDefaults.filter((x): x is string => typeof x === 'string')
-      : [];
-    return { entries, removedDefaults };
-  } catch {
+  const parsed = readJsonFile(filePath(spec, userDataDir));
+  if (spec.legacyArray && Array.isArray(parsed)) {
+    return { entries: spec.parse(parsed), removedDefaults: [] };
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
     return { entries: [], removedDefaults: [] };
   }
+  const obj = parsed as Record<string, unknown>;
+  const entries = spec.parse(obj[spec.field]);
+  const removedDefaults = Array.isArray(obj.removedDefaults)
+    ? obj.removedDefaults.filter((x): x is string => typeof x === 'string')
+    : [];
+  return { entries, removedDefaults };
 }
 
 function writeStore<T>(spec: CatalogStoreSpec<T>, userDataDir: string, store: StoreFile<T>): void {
-  const file = filePath(spec, userDataDir);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(
-    file,
-    JSON.stringify(
-      { [spec.field]: store.entries, removedDefaults: store.removedDefaults },
-      null,
-      2,
-    ),
+  writeJsonFileAtomic(
+    filePath(spec, userDataDir),
+    { [spec.field]: store.entries, removedDefaults: store.removedDefaults },
+    { pretty: true },
   );
 }
 

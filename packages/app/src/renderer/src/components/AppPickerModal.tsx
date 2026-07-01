@@ -1,5 +1,6 @@
 import type { AppEntry } from '@ai-lore-companion/core';
 import { type JSX, useState } from 'react';
+import { ModalSheet } from './overlay/ModalSheet.js';
 
 /**
  * Modal for adding a new entry to the Apps catalog. Reusable across two
@@ -112,97 +113,97 @@ export function AppPickerModal({ initial = 'open-with', onSave, onClose }: Props
   };
 
   return (
-    <>
-      <div style={backdropStyle} onMouseDown={onClose} data-testid="app-picker-backdrop" />
-      <div style={modalStyle} data-testid="app-picker-modal">
-        <header style={headerStyle}>
-          <h2 style={titleStyle}>
-            {tab === 'diff' ? 'Pick a diff app' : 'Pick an app to open files & folders'}
-          </h2>
-          <button type="button" onClick={onClose} style={closeBtnStyle}>
-            ✕
-          </button>
-        </header>
+    <ModalSheet
+      label={tab === 'diff' ? 'Pick a diff app' : 'Pick an app to open files & folders'}
+      onClose={onClose}
+      testId="app-picker-modal"
+      backdropTestId="app-picker-backdrop"
+      backdropStyle={{ background: 'rgba(0, 0, 0, 0.45)' }}
+      panelStyle={modalStyle}
+    >
+      <header style={headerStyle}>
+        <h2 style={titleStyle}>
+          {tab === 'diff' ? 'Pick a diff app' : 'Pick an app to open files & folders'}
+        </h2>
+        <button type="button" onClick={onClose} style={closeBtnStyle}>
+          ✕
+        </button>
+      </header>
 
-        {initial !== 'custom' ? (
-          <div style={tabsStyle}>
-            <TabButton
-              label="Open with"
-              active={tab === 'open-with'}
-              onClick={() => {
-                setTab('open-with');
-                setShowCustom(false);
-              }}
-            />
-            <TabButton
-              label="Diff"
-              active={tab === 'diff'}
-              onClick={() => {
-                setTab('diff');
-                setShowCustom(false);
-              }}
-            />
-          </div>
-        ) : null}
-
-        {!showCustom ? (
-          <>
-            <div style={presetListStyle} data-testid="app-picker-presets">
-              {presetList.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  style={presetButtonStyle}
-                  onClick={() => onPresetClick(preset)}
-                  data-testid={`app-picker-preset-${slug(preset.label)}`}
-                >
-                  <div style={presetLabelStyle}>{preset.label}</div>
-                  {preset.hint ? <div style={presetHintStyle}>{preset.hint}</div> : null}
-                </button>
-              ))}
-            </div>
-            <div style={separatorStyle} />
-            <button
-              type="button"
-              style={customToggleStyle}
-              onClick={() => {
-                setShowCustom(true);
-                setDraft(emptyDraft(tab));
-              }}
-              data-testid="app-picker-custom-toggle"
-            >
-              + Custom…
-            </button>
-          </>
-        ) : (
-          <CustomForm
-            draft={draft}
-            onChange={setDraft}
-            role={tab === 'diff' ? 'diff' : undefined}
+      {initial !== 'custom' ? (
+        <div style={tabsStyle}>
+          <TabButton
+            label="Open with"
+            active={tab === 'open-with'}
+            onClick={() => {
+              setTab('open-with');
+              setShowCustom(false);
+            }}
           />
-        )}
+          <TabButton
+            label="Diff"
+            active={tab === 'diff'}
+            onClick={() => {
+              setTab('diff');
+              setShowCustom(false);
+            }}
+          />
+        </div>
+      ) : null}
 
-        {showCustom ? (
-          <footer style={footerStyle}>
-            <button type="button" onClick={() => setShowCustom(false)} style={cancelBtnStyle}>
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={onCustomSave}
-              disabled={!isDraftComplete(draft)}
-              style={{
-                ...confirmBtnStyle,
-                ...(isDraftComplete(draft) ? null : confirmBtnDisabledStyle),
-              }}
-              data-testid="app-picker-save"
-            >
-              Save
-            </button>
-          </footer>
-        ) : null}
-      </div>
-    </>
+      {!showCustom ? (
+        <>
+          <div style={presetListStyle} data-testid="app-picker-presets">
+            {presetList.map((preset) => (
+              <button
+                key={preset.label}
+                type="button"
+                style={presetButtonStyle}
+                onClick={() => onPresetClick(preset)}
+                data-testid={`app-picker-preset-${slug(preset.label)}`}
+              >
+                <div style={presetLabelStyle}>{preset.label}</div>
+                {preset.hint ? <div style={presetHintStyle}>{preset.hint}</div> : null}
+              </button>
+            ))}
+          </div>
+          <div style={separatorStyle} />
+          <button
+            type="button"
+            style={customToggleStyle}
+            onClick={() => {
+              setShowCustom(true);
+              setDraft(emptyDraft(tab));
+            }}
+            data-testid="app-picker-custom-toggle"
+          >
+            + Custom…
+          </button>
+        </>
+      ) : (
+        <CustomForm draft={draft} onChange={setDraft} role={tab === 'diff' ? 'diff' : undefined} />
+      )}
+
+      {showCustom ? (
+        <footer style={footerStyle}>
+          <button type="button" onClick={() => setShowCustom(false)} style={cancelBtnStyle}>
+            Back
+          </button>
+          <button
+            type="button"
+            onClick={onCustomSave}
+            disabled={!isDraftComplete(draft)}
+            style={{
+              ...confirmBtnStyle,
+              ...(isDraftComplete(draft) ? null : confirmBtnDisabledStyle),
+            }}
+            data-testid="app-picker-save"
+          >
+            Save
+          </button>
+        </footer>
+      ) : null}
+    </ModalSheet>
   );
 }
 
@@ -350,15 +351,7 @@ function slug(label: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-const backdropStyle: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  background: 'rgba(0, 0, 0, 0.45)',
-  zIndex: 50,
-};
-
 const modalStyle: React.CSSProperties = {
-  position: 'fixed',
   top: '50%',
   left: '50%',
   transform: 'translate(-50%, -50%)',
@@ -369,7 +362,6 @@ const modalStyle: React.CSSProperties = {
   border: '1px solid var(--color-border-strong)',
   borderRadius: '8px',
   padding: '1.2rem',
-  zIndex: 51,
   display: 'flex',
   flexDirection: 'column',
   gap: '0.8rem',

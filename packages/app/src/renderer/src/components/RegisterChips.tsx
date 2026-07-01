@@ -1,5 +1,6 @@
-import { type JSX, useEffect, useRef, useState } from 'react';
+import { type JSX, useState } from 'react';
 import type { SetRegisterArg } from '../../../shared/ipc.js';
+import { PopoverShell } from './overlay/PopoverShell.js';
 
 type Posture = 'chat' | 'plan' | 'reshape' | 'execute';
 type Altitude = 'low' | 'mid' | 'high';
@@ -96,57 +97,44 @@ function RegisterChip<T extends string>({
   onPick: (next: T) => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-
-  // Click outside or Escape closes the popover.
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e: MouseEvent): void => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('mousedown', onClick);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onClick);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
 
   const display = value ?? '—';
   return (
-    <div ref={wrapRef} style={chipWrapStyle}>
-      <button
-        type="button"
-        data-testid={testId}
-        title={`${label}: ${display}`}
-        onClick={() => setOpen((v) => !v)}
-        style={chipButtonStyle(accent)}
+    <div style={chipWrapStyle}>
+      <PopoverShell
+        open={open}
+        onOpenChange={setOpen}
+        align="start"
+        label={`${label} options`}
+        testId={`${testId}-popover`}
+        contentStyle={popoverStyle}
+        trigger={
+          <button
+            type="button"
+            data-testid={testId}
+            title={`${label}: ${display}`}
+            style={chipButtonStyle(accent)}
+          >
+            <span style={chipLabelStyle}>{label}</span>
+            <span style={chipValueStyle(accent)}>{display}</span>
+          </button>
+        }
       >
-        <span style={chipLabelStyle}>{label}</span>
-        <span style={chipValueStyle(accent)}>{display}</span>
-      </button>
-      {open ? (
-        <div role="menu" style={popoverStyle} data-testid={`${testId}-popover`}>
-          {options.map((option) => (
-            <button
-              key={option}
-              type="button"
-              role="menuitem"
-              data-testid={`${testId}-option-${option}`}
-              onClick={() => {
-                setOpen(false);
-                onPick(option);
-              }}
-              style={popoverItemStyle(option === value, accent)}
-            >
-              {option}
-            </button>
-          ))}
-        </div>
-      ) : null}
+        {options.map((option) => (
+          <button
+            key={option}
+            type="button"
+            data-testid={`${testId}-option-${option}`}
+            onClick={() => {
+              setOpen(false);
+              onPick(option);
+            }}
+            style={popoverItemStyle(option === value, accent)}
+          >
+            {option}
+          </button>
+        ))}
+      </PopoverShell>
     </div>
   );
 }
@@ -212,10 +200,6 @@ function chipValueStyle(accent: string): React.CSSProperties {
 }
 
 const popoverStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: 'calc(100% + 4px)',
-  left: 0,
-  zIndex: 30,
   display: 'flex',
   flexDirection: 'column',
   background: 'var(--color-header)',

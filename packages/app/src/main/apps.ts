@@ -18,8 +18,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import {
   type AppEntry,
   cleanAppLabel,
@@ -28,6 +27,7 @@ import {
   withApps,
   withSetting,
 } from '@ai-lore-companion/core';
+import { writeTextFileAtomic } from './json-file.js';
 import { loadGlobalSettings } from './settings.js';
 import { extractAppIcon, loadShortcuts } from './shortcuts.js';
 
@@ -125,9 +125,7 @@ function writeGlobalSettings(
   userDataDir: string,
   file: ReturnType<typeof loadGlobalSettings>,
 ): void {
-  const path = globalSettingsPath(userDataDir);
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, serializeSettingsFile(file));
+  writeTextFileAtomic(globalSettingsPath(userDataDir), serializeSettingsFile(file));
 }
 
 /** Decorate every app entry with its `iconUrl` when an `.app` icon exists. */

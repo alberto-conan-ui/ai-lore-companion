@@ -7,7 +7,6 @@ import type {
   SettingValue,
 } from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
 import type {
   SettingsSnapshot,
   Shortcut,
@@ -15,6 +14,7 @@ import type {
   ShortcutTarget,
 } from '../../../shared/ipc.js';
 import { AppPickerModal } from './AppPickerModal.js';
+import { ModalSheet } from './overlay/ModalSheet.js';
 
 /** Which tier the Settings sheet is editing. */
 type Scope = 'global' | 'project';
@@ -82,8 +82,9 @@ export function SettingsSheetModal({
 
 /**
  * The modal Settings sheet — a section rail, a Global / This-project scope
- * switch, registry-driven controls, and the ignore-rules editor. Rendered into
- * `document.body` so it overlays the whole window.
+ * switch, registry-driven controls, and the ignore-rules editor. Hosted in a
+ * `ModalSheet` (Radix Dialog), which portals it over the whole window and
+ * owns Escape / backdrop dismiss / focus trapping.
  */
 function SettingsSheet({
   onClose,
@@ -107,16 +108,11 @@ function SettingsSheet({
     const off = window.cockpit.onSettingsChanged(setSnap);
     // Native browser views render above the DOM — hide them under the modal.
     window.cockpit.browserSuppressAll(true);
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
     return () => {
       off();
-      document.removeEventListener('keydown', onKey);
       window.cockpit.browserSuppressAll(false);
     };
-  }, [onClose]);
+  }, []);
 
   // The sections present in the current scope. `Ignore rules` is always there;
   // `Apps` and `Shortcuts` are global-only (the stores are global lists); a
@@ -171,78 +167,81 @@ function SettingsSheet({
     setSection(null);
   };
 
-  return createPortal(
-    <div style={backdropStyle} onMouseDown={onClose}>
-      <div style={panelStyle} data-testid="settings-sheet" onMouseDown={(e) => e.stopPropagation()}>
-        <div style={headerStyle}>
-          <span style={titleStyle}>Settings</span>
-          <div style={scopeSwitchStyle}>
-            <button
-              type="button"
-              data-testid="settings-scope-global"
-              style={scope === 'global' ? scopeTabActiveStyle : scopeTabStyle}
-              onClick={() => pickScope('global')}
-            >
-              Global
-            </button>
-            <button
-              type="button"
-              data-testid="settings-scope-project"
-              style={scope === 'project' ? scopeTabActiveStyle : scopeTabStyle}
-              onClick={() => pickScope('project')}
-            >
-              This project
-            </button>
-          </div>
-          <button type="button" style={closeStyle} title="Close" onClick={onClose}>
-            ✕
+  return (
+    <ModalSheet
+      label="Settings"
+      onClose={onClose}
+      testId="settings-sheet"
+      backdropStyle={{ background: 'rgba(0, 0, 0, 0.55)' }}
+      panelStyle={panelStyle}
+    >
+      <div style={headerStyle}>
+        <span style={titleStyle}>Settings</span>
+        <div style={scopeSwitchStyle}>
+          <button
+            type="button"
+            data-testid="settings-scope-global"
+            style={scope === 'global' ? scopeTabActiveStyle : scopeTabStyle}
+            onClick={() => pickScope('global')}
+          >
+            Global
+          </button>
+          <button
+            type="button"
+            data-testid="settings-scope-project"
+            style={scope === 'project' ? scopeTabActiveStyle : scopeTabStyle}
+            onClick={() => pickScope('project')}
+          >
+            This project
           </button>
         </div>
-        <div style={bodyStyle}>
-          <div style={railStyle}>
-            {sections.map((s) => (
-              <button
-                key={s}
-                type="button"
-                style={s === activeSection ? railItemActiveStyle : railItemStyle}
-                onClick={() => setSection(s)}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-          <div style={contentStyle}>
-            {snap === null ? (
-              <div style={hintStyle}>Loading…</div>
-            ) : activeSection === IGNORE_SECTION ? (
-              <IgnoreRulesSection snapshot={snap} scope={scope} onWrite={writeIgnores} />
-            ) : activeSection === APPS_SECTION ? (
-              <AppsCatalogSection snapshot={snap} />
-            ) : activeSection === ENGINES_SECTION ? (
-              <EnginesSection />
-            ) : activeSection === SHORTCUTS_SECTION ? (
-              <ShortcutsSection />
-            ) : rows.length === 0 ? (
-              <div style={hintStyle}>
-                No {scope === 'project' ? 'project-level' : 'global'} settings yet.
+        <button type="button" style={closeStyle} title="Close" onClick={onClose}>
+          ✕
+        </button>
+      </div>
+      <div style={bodyStyle}>
+        <div style={railStyle}>
+          {sections.map((s) => (
+            <button
+              key={s}
+              type="button"
+              style={s === activeSection ? railItemActiveStyle : railItemStyle}
+              onClick={() => setSection(s)}
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+        <div style={contentStyle}>
+          {snap === null ? (
+            <div style={hintStyle}>Loading…</div>
+          ) : activeSection === IGNORE_SECTION ? (
+            <IgnoreRulesSection snapshot={snap} scope={scope} onWrite={writeIgnores} />
+          ) : activeSection === APPS_SECTION ? (
+            <AppsCatalogSection snapshot={snap} />
+          ) : activeSection === ENGINES_SECTION ? (
+            <EnginesSection />
+          ) : activeSection === SHORTCUTS_SECTION ? (
+            <ShortcutsSection />
+          ) : rows.length === 0 ? (
+            <div style={hintStyle}>
+              No {scope === 'project' ? 'project-level' : 'global'} settings yet.
+            </div>
+          ) : (
+            rows.map((def) => (
+              <div key={def.key} style={settingRowStyle}>
+                <span style={settingLabelStyle}>{def.label}</span>
+                <Control
+                  def={def}
+                  value={valueForScope(def, snap, scope)}
+                  onChange={(v) => write(def.key, v)}
+                />
               </div>
-            ) : (
-              rows.map((def) => (
-                <div key={def.key} style={settingRowStyle}>
-                  <span style={settingLabelStyle}>{def.label}</span>
-                  <Control
-                    def={def}
-                    value={valueForScope(def, snap, scope)}
-                    onChange={(v) => write(def.key, v)}
-                  />
-                </div>
-              ))
-            )}
-          </div>
+            ))
+          )}
         </div>
       </div>
-    </div>,
-    document.body,
+    </ModalSheet>
   );
 }
 
@@ -612,17 +611,10 @@ function ShortcutsSection(): JSX.Element {
   );
 }
 
-const backdropStyle: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 100,
-  background: 'rgba(0, 0, 0, 0.55)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
 const panelStyle: React.CSSProperties = {
+  top: '50%',
+  left: '50%',
+  transform: 'translate(-50%, -50%)',
   width: '660px',
   maxWidth: '90vw',
   height: '460px',

@@ -5,6 +5,7 @@ import {
   type MemorySections,
   isFocusReadError,
 } from '../../../shared/ipc.js';
+import { ModalSheet } from './overlay/ModalSheet.js';
 
 /**
  * The in-app view of a focus or AT-node Memory file.
@@ -29,55 +30,36 @@ export function FocusView({ path, onClose }: { path: string; onClose: () => void
     };
   }, [path]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
   return (
-    // biome-ignore lint/a11y/useSemanticElements: the backdrop sits outside the dialog box itself; the <div role=dialog> wraps the sheet.
-    <div
-      role="dialog"
-      aria-label="Focus view"
-      data-testid="focus-view"
-      style={backdropStyle}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div style={sheetStyle} data-testid="focus-view-sheet">
-        <div style={headerStyle}>
-          <span style={titleStyle} data-testid="focus-view-title">
-            {data && !isFocusReadError(data)
-              ? (data.frontmatter?.title ?? path.split('/').pop())
-              : 'Loading…'}
-          </span>
-          {data && !isFocusReadError(data) && data.frontmatter ? (
-            <FrontmatterChips fm={data.frontmatter} />
-          ) : null}
-          <button
-            type="button"
-            onClick={onClose}
-            style={closeButtonStyle}
-            data-testid="focus-view-close"
-          >
-            Close
-          </button>
-        </div>
-        <div style={bodyStyle}>
-          {data === null ? (
-            <p style={loadingStyle}>Loading…</p>
-          ) : isFocusReadError(data) ? (
-            <p style={errorStyle}>Cannot open: {data.error}</p>
-          ) : (
-            <FocusBody frontmatter={data.frontmatter} sections={data.sections} />
-          )}
-        </div>
+    <ModalSheet label="Focus view" onClose={onClose} testId="focus-view" panelStyle={sheetStyle}>
+      <div style={headerStyle}>
+        <span style={titleStyle} data-testid="focus-view-title">
+          {data && !isFocusReadError(data)
+            ? (data.frontmatter?.title ?? path.split('/').pop())
+            : 'Loading…'}
+        </span>
+        {data && !isFocusReadError(data) && data.frontmatter ? (
+          <FrontmatterChips fm={data.frontmatter} />
+        ) : null}
+        <button
+          type="button"
+          onClick={onClose}
+          style={closeButtonStyle}
+          data-testid="focus-view-close"
+        >
+          Close
+        </button>
       </div>
-    </div>
+      <div style={bodyStyle}>
+        {data === null ? (
+          <p style={loadingStyle}>Loading…</p>
+        ) : isFocusReadError(data) ? (
+          <p style={errorStyle}>Cannot open: {data.error}</p>
+        ) : (
+          <FocusBody frontmatter={data.frontmatter} sections={data.sections} />
+        )}
+      </div>
+    </ModalSheet>
   );
 }
 
@@ -221,24 +203,18 @@ function slug(label: string): string {
     .replace(/^-|-$/g, '');
 }
 
-const backdropStyle: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  background: 'rgba(0, 0, 0, 0.5)',
-  display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'center',
-  padding: '4rem 1rem 2rem',
-  zIndex: 100,
-};
-
+/** Top-aligned centred sheet — the placement the pre-Radix backdrop's flex
+ *  layout produced (4rem head-room, 2rem foot-room). */
 const sheetStyle: React.CSSProperties = {
+  top: '4rem',
+  left: '50%',
+  transform: 'translateX(-50%)',
   background: 'var(--color-header)',
   color: 'var(--color-text-bright)',
   border: '1px solid var(--color-border-strong)',
   borderRadius: '8px',
   width: 'min(880px, 96vw)',
-  maxHeight: '90vh',
+  maxHeight: 'calc(100vh - 6rem)',
   display: 'flex',
   flexDirection: 'column',
   boxShadow: '0 12px 36px rgba(0, 0, 0, 0.5)',

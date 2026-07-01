@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, sep } from 'node:path';
+import { z } from 'zod';
 import type { RecentProject } from '../shared/ipc.js';
+import { readJsonFile, writeJsonFileAtomic } from './json-file.js';
 
 /**
  * Recently-opened project folders, persisted as a small JSON file under
@@ -34,28 +35,21 @@ function recentsFile(userDataDir: string): string {
   return join(userDataDir, 'recents.json');
 }
 
-/** Read the recents list — an empty list when the file is absent or corrupt. */
+const recentSchema = z.object({ path: z.string(), openedAt: z.number() });
+
+/** Read the recents list — an empty list when the file is absent or corrupt;
+ *  malformed entries are dropped, well-formed ones kept. */
 export function loadRecents(userDataDir: string): RecentProject[] {
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(recentsFile(userDataDir), 'utf8'));
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (r): r is RecentProject =>
-        typeof r === 'object' &&
-        r !== null &&
-        typeof (r as RecentProject).path === 'string' &&
-        typeof (r as RecentProject).openedAt === 'number',
-    );
-  } catch {
-    // No recents file yet, or it is unreadable — start from empty.
-    return [];
-  }
+  const parsed = readJsonFile(recentsFile(userDataDir));
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((r): RecentProject[] => {
+    const entry = recentSchema.safeParse(r);
+    return entry.success ? [entry.data] : [];
+  });
 }
 
 function writeRecents(userDataDir: string, recents: RecentProject[]): void {
-  const file = recentsFile(userDataDir);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, JSON.stringify(recents, null, 2));
+  writeJsonFileAtomic(recentsFile(userDataDir), recents, { pretty: true });
 }
 
 /** Record `path` as the most recent project; returns the updated list. */
