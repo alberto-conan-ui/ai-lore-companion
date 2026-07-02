@@ -1,5 +1,7 @@
-import { type JSX, useEffect, useMemo, useRef, useState } from 'react';
+import { Command } from 'cmdk';
+import { type JSX, useEffect, useMemo, useState } from 'react';
 import type { ContentSearchHit, FileSearchHit } from '../../../shared/ipc.js';
+import { ModalSheet } from './overlay/ModalSheet.js';
 
 /** One searchable scope — a pinned tab and the directories it covers. */
 export type SearchScope = { id: string; label: string; dirs: string[] };
@@ -23,6 +25,11 @@ function dirname(p: string): string {
   return i === -1 ? '' : p.slice(0, i);
 }
 
+/** A row's cmdk item value — unique across kinds and content lines. */
+function rowValue(row: Row): string {
+  return `${row.kind}:${row.hit.path}${row.kind === 'content' ? `:${row.hit.line}` : ''}`;
+}
+
 /**
  * The project search dialog — a modal (VS Code-style) opened by ⌘F or the Edit
  * ▸ Find menu item, not a header bar. Search by file name (fuzzy, or a `*`/`?`
@@ -31,27 +38,28 @@ function dirname(p: string): string {
  * in-file) and flagged when it's a normally-ignored file. Scope checkboxes and
  * the include-ignored toggle narrow the search. Double-click (or Enter) opens a
  * result and closes; Esc / backdrop / × close without picking.
+ *
+ * Hosted in a `ModalSheet` (portal, backdrop, Escape, focus trap) with the
+ * list on **cmdk** (`shouldFilter={false}` — results are IPC-backed, the
+ * index/ripgrep already filtered): cmdk owns the roving selection, hover
+ * follow, wrap-around arrow nav, scroll-into-view, and combobox aria wiring
+ * the old dialog hand-rolled. Picking stays ours: Enter or double-click —
+ * a single click only selects, as before.
  */
 export function SearchDialog({ scopes, onPick, displayPath, onClose }: Props): JSX.Element {
   const [query, setQuery] = useState('');
   const [nameHits, setNameHits] = useState<FileSearchHit[]>([]);
   const [contentHits, setContentHits] = useState<ContentSearchHit[]>([]);
   const [ripgrepMissing, setRipgrepMissing] = useState(false);
-  const [highlight, setHighlight] = useState(0);
+  /** cmdk's controlled selection — the selected row's `rowValue` string. */
+  const [selected, setSelected] = useState('');
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [includeIgnored, setIncludeIgnored] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const rowRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   const dirs = useMemo(
     () => scopes.filter((s) => !excluded.has(s.id)).flatMap((s) => s.dirs),
     [scopes, excluded],
   );
-
-  // Autofocus the query on open.
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
 
   // Debounced search across the checked scopes.
   useEffect(() => {
@@ -70,7 +78,9 @@ export function SearchDialog({ scopes, onPick, displayPath, onClose }: Props): J
         setNameHits(names);
         setContentHits(content.hits);
         setRipgrepMissing(content.ripgrepMissing);
-        setHighlight(0);
+        // Reset the selection so cmdk re-selects the top row of the new
+        // result set (the old dialog reset its highlight to 0 here).
+        setSelected('');
       });
     }, 150);
     return () => clearTimeout(timer);
@@ -98,53 +108,33 @@ export function SearchDialog({ scopes, onPick, displayPath, onClose }: Props): J
     return out;
   }, [scopes, nameHits, contentHits]);
 
-  // Flatten for keyboard nav — the highlight indexes this ordered list.
   const flat = useMemo(() => groups.flatMap((g) => g.rows), [groups]);
-
-  useEffect(() => {
-    if (highlight >= flat.length) setHighlight(Math.max(0, flat.length - 1));
-  }, [flat.length, highlight]);
-  useEffect(() => {
-    rowRefs.current[highlight]?.scrollIntoView({ block: 'nearest' });
-  }, [highlight]);
+  const rowByValue = useMemo(() => new Map(flat.map((r) => [rowValue(r), r])), [flat]);
 
   const pick = (path: string): void => {
     onPick(path);
     onClose();
   };
 
+  // Enter picks the selected row. Arrows, hover follow, and scroll-into-view
+  // are cmdk's; Escape and backdrop are the ModalSheet's.
   const onKeyDown = (e: React.KeyboardEvent): void => {
-    if (e.key === 'Escape') {
+    if (e.key === 'Enter' && flat.length > 0) {
       e.preventDefault();
-      onClose();
-    } else if (e.key === 'ArrowDown' && flat.length > 0) {
-      e.preventDefault();
-      setHighlight((h) => (h + 1) % flat.length);
-    } else if (e.key === 'ArrowUp' && flat.length > 0) {
-      e.preventDefault();
-      setHighlight((h) => (h - 1 + flat.length) % flat.length);
-    } else if (e.key === 'Enter' && flat.length > 0) {
-      e.preventDefault();
-      const row = flat[highlight] ?? flat[0];
+      const row = rowByValue.get(selected) ?? flat[0];
       if (row) pick(row.hit.path);
     }
   };
 
-  // Render one row; `index` is its position in the flat list (for highlight).
-  const renderRow = (row: Row, index: number): JSX.Element => {
+  const renderRow = (row: Row): JSX.Element => {
     const { hit } = row;
-    const active = index === highlight;
     return (
-      <button
-        key={`${row.kind}:${hit.path}${row.kind === 'content' ? `:${hit.line}` : ''}`}
-        ref={(el) => {
-          rowRefs.current[index] = el;
-        }}
-        type="button"
-        style={{ ...rowStyle, ...(active ? rowActiveStyle : null) }}
+      <Command.Item
+        key={rowValue(row)}
+        value={rowValue(row)}
+        className="search-row"
+        style={rowStyle}
         data-testid={row.kind === 'name' ? 'search-result' : 'content-result'}
-        onMouseEnter={() => setHighlight(index)}
-        onClick={() => setHighlight(index)}
         onDoubleClick={() => pick(hit.path)}
       >
         <span style={row.kind === 'name' ? kindNameStyle : kindTextStyle}>
@@ -161,30 +151,35 @@ export function SearchDialog({ scopes, onPick, displayPath, onClose }: Props): J
           <span style={pathStyle}>{dirname(displayPath(hit.path)) || displayPath(hit.path)}</span>
           {row.kind === 'content' ? <span style={snippetStyle}>{hit.snippet}</span> : null}
         </span>
-      </button>
+      </Command.Item>
     );
   };
 
-  let running = -1; // running index across groups, to line up with `flat`.
-
   return (
-    <div style={backdropStyle} onMouseDown={onClose} data-testid="search-dialog-backdrop">
-      <div
-        style={panelStyle}
-        onMouseDown={(e) => e.stopPropagation()}
+    <ModalSheet
+      label="Search the project"
+      onClose={onClose}
+      testId="search-dialog"
+      backdropTestId="search-dialog-backdrop"
+      backdropStyle={{ background: 'rgba(0, 0, 0, 0.45)' }}
+      panelStyle={panelStyle}
+    >
+      <Command
+        label="Search the project"
+        shouldFilter={false}
+        loop
+        value={selected}
+        onValueChange={setSelected}
         onKeyDown={onKeyDown}
-        aria-label="Search the project"
-        data-testid="search-dialog"
+        style={commandStyle}
       >
         <div style={headerStyle}>
           <span aria-hidden style={iconStyle}>
             ⌕
           </span>
-          <input
-            ref={inputRef}
-            type="search"
+          <Command.Input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onValueChange={setQuery}
             placeholder="Search files and contents…  (try *.ts)"
             style={inputStyle}
             data-testid="search-dialog-input"
@@ -228,7 +223,7 @@ export function SearchDialog({ scopes, onPick, displayPath, onClose }: Props): J
           </label>
         </div>
 
-        <div style={resultsStyle}>
+        <Command.List style={resultsStyle}>
           {flat.length === 0 && query.trim() !== '' ? (
             <div style={emptyStyle}>No matches.</div>
           ) : null}
@@ -238,10 +233,7 @@ export function SearchDialog({ scopes, onPick, displayPath, onClose }: Props): J
                 {g.label}
                 <span style={groupCountStyle}>{g.rows.length}</span>
               </div>
-              {g.rows.map((row) => {
-                running += 1;
-                return renderRow(row, running);
-              })}
+              {g.rows.map(renderRow)}
             </div>
           ))}
           {ripgrepMissing ? (
@@ -249,24 +241,18 @@ export function SearchDialog({ scopes, onPick, displayPath, onClose }: Props): J
               Install ripgrep (`rg`) on your PATH to search inside files.
             </div>
           ) : null}
-        </div>
-      </div>
-    </div>
+        </Command.List>
+      </Command>
+    </ModalSheet>
   );
 }
 
-const backdropStyle: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 200,
-  background: 'rgba(0, 0, 0, 0.45)',
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'flex-start',
-  paddingTop: '8vh',
-};
-
+/** Panel placement and skin — the backdrop/portal/Escape are the ModalSheet's.
+ *  Mirrors the old flex-centred panel: top 8vh, horizontally centred. */
 const panelStyle: React.CSSProperties = {
+  top: '8vh',
+  left: '50%',
+  transform: 'translateX(-50%)',
   width: 'min(56rem, 92vw)',
   maxHeight: '78vh',
   display: 'flex',
@@ -276,6 +262,14 @@ const panelStyle: React.CSSProperties = {
   borderRadius: '8px',
   boxShadow: '0 16px 48px rgba(0, 0, 0, 0.6)',
   overflow: 'hidden',
+};
+
+/** The cmdk root fills the panel; the list below it owns the scroll. */
+const commandStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 0,
+  outline: 'none',
 };
 
 const headerStyle: React.CSSProperties = {
@@ -375,19 +369,17 @@ const groupCountStyle: React.CSSProperties = {
   fontSize: '0.62rem',
 };
 
+/** Row layout only — the selected background rides the `.search-row`
+ *  `[data-selected]` rule in the global CSS (cmdk marks the selected item). */
 const rowStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'flex-start',
   gap: '0.5rem',
   width: '100%',
   padding: '0.35rem 0.9rem',
-  background: 'transparent',
-  border: 'none',
   textAlign: 'left',
   cursor: 'pointer',
 };
-
-const rowActiveStyle: React.CSSProperties = { background: 'var(--color-row-active)' };
 
 const kindBadgeBase: React.CSSProperties = {
   flex: 'none',

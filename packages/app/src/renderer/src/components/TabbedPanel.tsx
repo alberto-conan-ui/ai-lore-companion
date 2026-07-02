@@ -2,6 +2,7 @@ import type { EngineEntry, TabLastSession } from '@ai-lore-companion/core';
 import { type JSX, useEffect, useState } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { type DriftLevel, driftLevel } from '../store.js';
+import { PopoverShell } from './overlay/PopoverShell.js';
 import { NEW_TAB_BUTTONS, type NewTabButton, type NewTabContext, TAB_KINDS } from './tabKinds.js';
 
 /** A tab's kind selects which surface it renders. `pane` tabs are the
@@ -314,8 +315,10 @@ export function TabbedPanel({
 /**
  * A strip creator (`+ shell` / `+ web` / `+ AI`). The label button does the
  * plain create; a kind that declares a `dropdown` also gets a `▾` caret that
- * opens a start-with-shortcut popover. Web rows carry the two-icon `▣` open-in-
- * tab / `↗` open-external pair; shell rows just open in a tab on click.
+ * opens a start-with-shortcut popover — a `PopoverShell`, so outside-click,
+ * Escape, portal, and `aria-expanded` are Radix's. Web rows carry the two-icon
+ * `▣` open-in-tab / `↗` open-external pair; shell rows just open in a tab on
+ * click.
  */
 function StripCreator({ btn, ctx }: { btn: NewTabButton; ctx: NewTabContext }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -348,36 +351,26 @@ function StripCreator({ btn, ctx }: { btn: NewTabButton; ctx: NewTabContext }): 
         <>
           {/* Divider + caret read as the button's second click target. */}
           <span className="strip-creator-divider" aria-hidden="true" />
-          <button
-            type="button"
-            className="strip-creator-caret"
-            title={`Start a ${kindWord} with a shortcut`}
-            aria-label={`Start a ${kindWord} with a shortcut`}
-            aria-expanded={open}
-            data-testid={`${btn.testId}-dropdown`}
-            onClick={() => setOpen((v) => !v)}
+          <PopoverShell
+            open={open}
+            onOpenChange={setOpen}
+            align="start"
+            sideOffset={2}
+            label={`Start a ${kindWord} with a shortcut`}
+            testId={`${btn.testId}-menu`}
+            contentStyle={menuPanelStyle}
+            trigger={
+              <button
+                type="button"
+                className="strip-creator-caret"
+                title={`Start a ${kindWord} with a shortcut`}
+                aria-label={`Start a ${kindWord} with a shortcut`}
+                data-testid={`${btn.testId}-dropdown`}
+              >
+                ▾
+              </button>
+            }
           >
-            ▾
-          </button>
-        </>
-      ) : null}
-      {open ? (
-        <>
-          {/* Click-away backdrop — closes the popover on any outside click.
-           *  Escape also closes it via the keydown below; the overlay itself is
-           *  a presentational catch, so the keyboard handler lives on it too. */}
-          <div
-            style={backdropStyle}
-            role="button"
-            tabIndex={-1}
-            aria-label="Close menu"
-            onClick={() => setOpen(false)}
-            onContextMenu={() => setOpen(false)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') setOpen(false);
-            }}
-          />
-          <div style={popoverStyle} role="menu" data-testid={`${btn.testId}-menu`}>
             {items.length === 0 ? (
               <div style={menuEmptyStyle}>No shortcuts yet</div>
             ) : (
@@ -422,7 +415,7 @@ function StripCreator({ btn, ctx }: { btn: NewTabButton; ctx: NewTabContext }): 
                 </div>
               ))
             )}
-          </div>
+          </PopoverShell>
         </>
       ) : null}
     </span>
@@ -537,17 +530,8 @@ const stripDividerStyle: React.CSSProperties = {
   margin: '0 0.5rem',
 };
 
-const backdropStyle: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 40,
-};
-
-const popoverStyle: React.CSSProperties = {
-  position: 'absolute',
-  top: '100%',
-  left: 0,
-  marginTop: '2px',
+/** Panel skin only — positioning, dismissal, and portal are PopoverShell's. */
+const menuPanelStyle: React.CSSProperties = {
   minWidth: '12rem',
   maxWidth: '20rem',
   maxHeight: '60vh',
@@ -557,7 +541,6 @@ const popoverStyle: React.CSSProperties = {
   borderRadius: '6px',
   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
   padding: '0.25rem',
-  zIndex: 41,
 };
 
 const menuEmptyStyle: React.CSSProperties = {

@@ -89,6 +89,10 @@
       .creator-menu-ext { background: transparent; color: var(--color-text-soft); }
       .creator-menu-ext:hover { background: var(--color-hover-strong); color: var(--color-text); }
       .creator-menu-rowdiv { width: 1px; align-self: center; height: 62%; background: var(--color-border-2); flex-shrink: 0; }
+      /* Search-dialog result rows — cmdk marks the roving selection with
+         data-selected; an attribute rule is how the style reaches it. */
+      .search-row { background: transparent; }
+      .search-row[data-selected='true'] { background: var(--color-row-active); }
       /* Welcome-screen recents — the per-row remove (×) stays hidden until the
          row is hovered or the × itself is focused, so the list stays clean. */
       .welcome-recent:hover { background: var(--color-hover); border-radius: 4px; }

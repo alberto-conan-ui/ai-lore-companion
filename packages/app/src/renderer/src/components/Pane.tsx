@@ -18,6 +18,7 @@ import { AppPickerModal } from './AppPickerModal.js';
 import { ChangesPanel, type ChangesPanelHandle, type DriftRow } from './ChangesPanel.js';
 import { DriftPill } from './DriftPill.js';
 import { FileTree, type FileTreeHandle } from './FileTree.js';
+import { ContextMenuShell } from './overlay/ContextMenuShell.js';
 
 /** Which of the two regions inside a Pane currently owns the keyboard.
  *  Drives Tab cycling between them and the visible focus accent. The unified
@@ -585,68 +586,71 @@ export function Pane({
       ) : null}
 
       {treeMenu ? (
-        <>
-          <div style={menuBackdropStyle} onMouseDown={() => setTreeMenu(null)} />
-          <div style={{ ...treeMenuStyle, left: treeMenu.x, top: treeMenu.y }}>
-            <button
-              type="button"
-              style={treeMenuItemStyle}
-              onClick={() => {
-                handleRevealInFinder(treeMenu.node);
-                setTreeMenu(null);
-              }}
-            >
-              Open in Finder
-            </button>
-            {(treeMenu.node.isDir
-              ? apps.filter((a) => a.target === 'folder' || a.target === 'both')
-              : apps.filter((a) => a.target === 'file' || a.target === 'both')
-            )
-              .filter((a) => a.role !== 'diff')
-              .map((app) => (
-                <button
-                  key={app.id}
-                  type="button"
-                  style={treeMenuItemStyle}
-                  onClick={() => {
-                    void handleOpenWith(app, treeMenu.node);
-                    setTreeMenu(null);
-                  }}
-                >
-                  Open with {app.label}
-                </button>
-              ))}
-            {!treeMenu.node.isDir ? (
+        <ContextMenuShell
+          x={treeMenu.x}
+          y={treeMenu.y}
+          onClose={() => setTreeMenu(null)}
+          label={`Actions for ${treeMenu.node.name}`}
+          contentStyle={treeMenuStyle}
+        >
+          <button
+            type="button"
+            style={treeMenuItemStyle}
+            onClick={() => {
+              handleRevealInFinder(treeMenu.node);
+              setTreeMenu(null);
+            }}
+          >
+            Open in Finder
+          </button>
+          {(treeMenu.node.isDir
+            ? apps.filter((a) => a.target === 'folder' || a.target === 'both')
+            : apps.filter((a) => a.target === 'file' || a.target === 'both')
+          )
+            .filter((a) => a.role !== 'diff')
+            .map((app) => (
               <button
+                key={app.id}
                 type="button"
                 style={treeMenuItemStyle}
-                disabled={!hasSavePoint}
                 onClick={() => {
-                  if (hasSavePoint) {
-                    void handleDiff(treeMenu.node);
-                    setTreeMenu(null);
-                  }
+                  void handleOpenWith(app, treeMenu.node);
+                  setTreeMenu(null);
                 }}
-                title={
-                  hasSavePoint ? undefined : 'No save-point recorded — diff baseline unavailable'
-                }
               >
-                {hasSavePoint ? 'Diff against latest save-point' : 'Diff (no save-point recorded)'}
+                Open with {app.label}
               </button>
-            ) : null}
-            <div style={treeMenuSeparatorStyle} />
+            ))}
+          {!treeMenu.node.isDir ? (
             <button
               type="button"
               style={treeMenuItemStyle}
+              disabled={!hasSavePoint}
               onClick={() => {
-                void ignorePath(treeMenu.node);
-                setTreeMenu(null);
+                if (hasSavePoint) {
+                  void handleDiff(treeMenu.node);
+                  setTreeMenu(null);
+                }
               }}
+              title={
+                hasSavePoint ? undefined : 'No save-point recorded — diff baseline unavailable'
+              }
             >
-              {treeMenu.node.isDir ? 'Ignore this folder' : 'Ignore this file'}
+              {hasSavePoint ? 'Diff against latest save-point' : 'Diff (no save-point recorded)'}
             </button>
-          </div>
-        </>
+          ) : null}
+          <div style={treeMenuSeparatorStyle} />
+          <button
+            type="button"
+            style={treeMenuItemStyle}
+            onClick={() => {
+              void ignorePath(treeMenu.node);
+              setTreeMenu(null);
+            }}
+          >
+            {treeMenu.node.isDir ? 'Ignore this folder' : 'Ignore this file'}
+          </button>
+        </ContextMenuShell>
       ) : null}
     </section>
   );
@@ -760,16 +764,9 @@ const queueResizeHandleStyle: React.CSSProperties = {
   borderTop: '1px solid var(--color-border)',
 };
 
-/** Full-window catcher that dismisses the tree's right-click ignore menu. */
-const menuBackdropStyle: React.CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 50,
-};
-
+/** The right-click menu's panel skin — positioning, dismissal, and portal are
+ *  the ContextMenuShell's. */
 const treeMenuStyle: React.CSSProperties = {
-  position: 'fixed',
-  zIndex: 51,
   background: 'var(--color-raised)',
   border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
