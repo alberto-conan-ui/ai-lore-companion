@@ -1,17 +1,15 @@
 import type {
-  Altitude,
   AppEntry,
+  BranchResult,
   ChainError,
   ChainResult,
   ChangeEntry,
   ChangeScope,
-  Commitment,
   DockWorkspaceSnapshot,
   EngineEntry,
   IgnoreRule,
   MemoryFrontmatter,
   MemorySections,
-  Posture,
   SettingDef,
   SettingValue,
   SettingsFile,
@@ -51,6 +49,14 @@ export function isChainErrorPayload(chain: ChainResult): chain is ChainError {
 }
 
 export type ChainPayload = ChainResult;
+
+/**
+ * Both repos' current branch state, pushed from main (P5 chrome). Each side is
+ * core's `BranchResult` — `detached` and `failed` are explicit states the
+ * header renders honestly, never collapsed to a fake branch name. Re-pushed on
+ * `.git/logs/HEAD` changes (a checkout appends there) and on window focus.
+ */
+export type BranchesPayload = { payload: BranchResult; lore: BranchResult };
 /** Per-scope drift snapshot pushed from main. */
 export type ChangesPayload = {
   scope: ChangeScope;
@@ -366,16 +372,6 @@ export type SettingsSetLayoutArg = { layout: WorkspaceLayout | null };
 
 /** Replace the per-project Dockview snapshot sidecar — or clear it with `null`. */
 export type DockLayoutSetArg = { snapshot: DockWorkspaceSnapshot | null };
-
-/**
- * One field of the AI-Lore conversational register. `posture` lives on
- * `status.index.md` at the top level; `altitude` and `commitment` live
- * nested under `dials:`.
- */
-export type SetRegisterArg =
-  | { field: 'posture'; value: Posture }
-  | { field: 'altitude'; value: Altitude }
-  | { field: 'commitment'; value: Commitment };
 
 /**
  * The renderer's request for a Memory file's parsed contents. The absolute

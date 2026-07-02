@@ -18,6 +18,8 @@ export type Wiring = {
   pushCommits: (scope: ChangeScope) => void;
   /** Re-read the save-point ledger and push it (the global picker's mask). */
   pushSavePoints: () => void;
+  /** Re-read both repos' current branch and push it (the header's indicators). */
+  pushBranches: () => void;
 };
 
 /**

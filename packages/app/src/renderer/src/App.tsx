@@ -27,7 +27,6 @@ import {
 import type { AlteredReason } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
 import { AssistantDashboard } from './components/AssistantDashboard.js';
-import { BaselinePicker } from './components/BaselinePicker.js';
 import { DockPanel } from './components/DockPanel.js';
 import { DockWorkspace } from './components/DockWorkspace.js';
 import { EditorPanel } from './components/EditorPanel.js';
@@ -159,6 +158,7 @@ export function App(): JSX.Element {
   const applyChanges = useCockpitStore((s) => s.applyChanges);
   const applyCommitList = useCockpitStore((s) => s.applyCommitList);
   const applySavePoints = useCockpitStore((s) => s.applySavePoints);
+  const applyBranches = useCockpitStore((s) => s.applyBranches);
   const setTrees = useCockpitStore((s) => s.setTrees);
   const applyTreeUpdate = useCockpitStore((s) => s.applyTreeUpdate);
   const setApps = useCockpitStore((s) => s.setApps);
@@ -485,6 +485,7 @@ export function App(): JSX.Element {
     const offChanges = window.cockpit.onChanges(applyChanges);
     const offCommitList = window.cockpit.onCommitList(applyCommitList);
     const offSavePoints = window.cockpit.onSavePoints(applySavePoints);
+    const offBranches = window.cockpit.onBranches(applyBranches);
     const offTreeInit = window.cockpit.onTreeInit(setTrees);
     const offTreeUpdate = window.cockpit.onTreeUpdate(applyTreeUpdate);
     // Hydrate the Apps catalog from the global settings tier — context menus
@@ -496,6 +497,7 @@ export function App(): JSX.Element {
       offChanges();
       offCommitList();
       offSavePoints();
+      offBranches();
       offTreeInit();
       offTreeUpdate();
       offSettings();
@@ -505,6 +507,7 @@ export function App(): JSX.Element {
     applyChanges,
     applyCommitList,
     applySavePoints,
+    applyBranches,
     setTrees,
     applyTreeUpdate,
     setApps,
@@ -1543,7 +1546,6 @@ export function App(): JSX.Element {
       slotRef={slotRefs[panelId]}
       tabDrift={panelId === 'leftRail' ? tabDrift : undefined}
       locked={panelId === 'leftRail'}
-      trailing={panelId === 'leftRail' ? <BaselinePicker /> : undefined}
     />
   );
 

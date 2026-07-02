@@ -121,6 +121,7 @@ test('fileWrite refreshes the drift tracker so a save shows in the Changes view'
     watcher: { close: async () => {} },
     pushCommits: () => {},
     pushSavePoints: () => {},
+    pushBranches: () => {},
   } as Wiring;
   h.setCtx(fakeContext({ root, lorePath: join(root, '.ai-lore-proj'), wiring }));
   h.invoke('fileWrite', { path: join(root, 'alpha.txt'), text: 'edited' });

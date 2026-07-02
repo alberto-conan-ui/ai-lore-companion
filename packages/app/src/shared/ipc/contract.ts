@@ -24,6 +24,7 @@ import type {
 import type {
   AppsInvokeArg,
   AppsInvokeResult,
+  BranchesPayload,
   BrowserBounds,
   BrowserFocusUrlPayload,
   BrowserProfile,
@@ -59,7 +60,6 @@ import type {
   RecentProject,
   SavePointsPayload,
   SetBaselineArg,
-  SetRegisterArg,
   SettingsSetArg,
   SettingsSetIgnoresArg,
   SettingsSetLayoutArg,
@@ -119,6 +119,10 @@ export const CONTRACT = {
   // ── Window lifecycle + chain ──────────────────────────────────────────────
   onWindowInit: push<WindowInitPayload>('cockpit:window-init'),
   onChain: push<ChainPayload>('cockpit:chain'),
+  /** Both repos' current branch, for the header's branch indicators (P5).
+   *  Pushed on seed, on `.git/logs/HEAD` changes (commit *and* checkout), and
+   *  on the window-focus reconcile. */
+  onBranches: push<BranchesPayload>('cockpit:branches'),
 
   // ── Changes panel (drift vs a baseline) ───────────────────────────────────
   // `Changes` keeps its v0.5-era channel string for stored-layout compatibility.
@@ -233,7 +237,6 @@ export const CONTRACT = {
   onSettingsOpen: push<void>('settings:open'),
   onSelectCockpitTab: push<number>('cockpit:select-tab'),
   onFocusGlobalSearch: push<void>('cockpit:focus-search'),
-  setRegister: invoke<[arg: SetRegisterArg], void>('cockpit:set-register'),
   focusRead: invoke<[arg: FocusReadArg], FocusReadResult>('cockpit:focus-read'),
 
   // ── Apps catalog ──────────────────────────────────────────────────────────

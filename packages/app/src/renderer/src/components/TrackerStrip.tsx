@@ -3,8 +3,9 @@ import { type SettingsSnapshot, isChainErrorPayload } from '../../../shared/ipc.
 import { accentColor, accentTint, accentTintLight, hueFor, projectName } from '../projectAccent.js';
 import { useCockpitStore } from '../store.js';
 import { type ThemeSetting, onEffectiveTheme } from '../theme.js';
+import { BaselinePicker } from './BaselinePicker.js';
+import { BranchIndicators } from './BranchIndicators.js';
 import { FocusView } from './FocusView.js';
-import { RegisterChips } from './RegisterChips.js';
 import { SettingsSheetModal, type SettingsSheetSection } from './SettingsSheet.js';
 import { ShapeChips } from './ShapeChips.js';
 
@@ -97,12 +98,11 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
         >
           ▾
         </button>
-        <RegisterChips
-          posture={chain.posture}
-          altitude={chain.dials?.altitude ?? null}
-          commitment={chain.dials?.commitment ?? null}
-          focusType={chain.focusType}
-        />
+        {/* P5 chrome reshape: the posture/altitude/commitment/focus register
+            chips were dropped — posture and dials are the verbs' to change,
+            and FocusView still shows them read-only. The header now carries
+            shell git state: both repos' branches. */}
+        <BranchIndicators />
         <ShapeChips coreVersion={chain.coreVersion} shape={chain.shape} />
         {chain.focus ? (
           <ChainLink path={chain.focus.path} style={focusTitle} testId="focus-link">
@@ -130,6 +130,10 @@ export function TrackerStrip({ search }: { search?: ReactNode }): JSX.Element {
             ▾
           </button>
         ) : null}
+        {/* The save-point dropdown — the companion contribution the P5 chrome
+            decision puts in the title bar (moved from the leftRail tab-strip).
+            Its own marginLeft:auto pushes this right-side cluster over. */}
+        <BaselinePicker />
         <ThemeToggle />
       </div>
       {search ? (
@@ -305,13 +309,15 @@ const activeChild: React.CSSProperties = {
   textOverflow: 'ellipsis',
 };
 
+// No auto margin — the BaselinePicker before it owns the push-right; the row's
+// gap separates the two.
 const themeToggleGroupStyle: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
-  marginLeft: 'auto',
   border: '1px solid var(--color-border-strong)',
   borderRadius: '5px',
   overflow: 'hidden',
+  flexShrink: 0,
 };
 const themeSegStyle: React.CSSProperties = {
   display: 'inline-flex',

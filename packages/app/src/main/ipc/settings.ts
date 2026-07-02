@@ -1,4 +1,4 @@
-import { isAbsolute, join, relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve } from 'node:path';
 import {
   SETTINGS_REGISTRY,
   isChainError,
@@ -6,14 +6,12 @@ import {
   isValidValue,
   parseMemoryFileSync,
   parseMemorySections,
-  updateFrontmatterFieldInFile,
 } from '@ai-lore-companion/core';
 import { BrowserWindow } from 'electron';
 import type {
   DockLayoutSetArg,
   FocusReadArg,
   FocusReadResult,
-  SetRegisterArg,
   SettingsSetArg,
   SettingsSetIgnoresArg,
   SettingsSetLayoutArg,
@@ -91,18 +89,6 @@ export const registerSettings: RegisterModule = (reg, deps) => {
     if (ctx && !isChainError(ctx.chain)) {
       saveDockLayout(deps.getUserDataDir(), ctx.root, arg.snapshot);
     }
-  });
-
-  reg.handle('setRegister', (event, arg: SetRegisterArg) => {
-    const ctx = deps.contextFor(event);
-    if (!ctx || isChainError(ctx.chain)) return;
-    const statusPath = join(ctx.chain.lorePath, 'memory/status/status.index.md');
-    const dotPath = arg.field === 'posture' ? 'posture' : `dials.${arg.field}`;
-    const written = updateFrontmatterFieldInFile(statusPath, dotPath, arg.value);
-    if (!written) return;
-    // Push the new chain immediately — the 5s poll's `lastSent` would
-    // catch up eventually, but the chip should reflect the click now.
-    ctx.refreshChain?.();
   });
 
   reg.handle('focusRead', (event, arg: FocusReadArg): FocusReadResult => {

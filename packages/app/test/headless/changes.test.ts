@@ -15,6 +15,7 @@ function fakeWiring(): Wiring {
     changes: { setBaseline } as unknown as Wiring['changes'],
     pushCommits: () => {},
     pushSavePoints: () => {},
+    pushBranches: () => {},
   };
 }
 

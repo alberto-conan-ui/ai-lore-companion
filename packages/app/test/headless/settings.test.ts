@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, test } from 'node:test';
@@ -101,20 +101,9 @@ test('settingsSetLayout is a no-op with no project context', () => {
   // Nothing to assert against a project dir; the call simply must not throw.
 });
 
-test('setRegister writes the posture to the status frontmatter', () => {
-  const statusPath = join(lorePath, 'memory', 'status', 'status.index.md');
-  writeFileSync(
-    statusPath,
-    ['---', 'posture: execute', 'dials:', '  altitude: high', '---', '', '# Status', ''].join('\n'),
-  );
-  h.invoke('setRegister', { field: 'posture', value: 'chat' });
-  assert.match(readFileSync(statusPath, 'utf8'), /posture: chat/);
-});
-
-test('setRegister is a no-op with no project context', () => {
-  h.setCtx(undefined);
-  assert.equal(h.invoke('setRegister', { field: 'posture', value: 'chat' }), undefined);
-});
+// The `setRegister` channel and its tests were removed in the P5 chrome
+// reshape — posture/dials writes returned to the verbs; the chain fields
+// remain read-only surfaces (FocusView, helper prompts).
 
 test('focusRead refuses a path that escapes the project', () => {
   assert.deepEqual(h.invoke('focusRead', { path: '../../etc/passwd' }), {

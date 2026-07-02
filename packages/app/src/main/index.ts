@@ -45,6 +45,7 @@ import {
 } from '../shared/ipc.js';
 import { appsWithIcons, runAppsMigrations } from './apps.js';
 import { resolveProjectRoot } from './args.js';
+import { readBranches } from './branches.js';
 import * as browser from './browser.js';
 import { disposeAllHelpers, disposeHelperForWindow, startMcpHost } from './helper/index.js';
 import { type Deps, type ProjectContext, type Wiring, registerCockpitIpc } from './ipc/index.js';
@@ -394,6 +395,7 @@ function createWindow(): BrowserWindow {
     ctx.refreshChain?.();
     ctx.wiring.changes.refreshNow();
     reconcileSavePoints(win);
+    ctx.wiring.pushBranches();
   });
 
   // Close guard: a window with a running terminal task confirms before closing.
@@ -481,6 +483,12 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
         savePoints: listSavePoints(savePointsDir).map(toSavePointInfo),
       });
     };
+    // The header's branch indicators — both repos, re-read and pushed on the
+    // same triggers that already cover a checkout (`.git/logs/HEAD` watcher +
+    // the window-focus reconcile).
+    const pushBranches = (): void => {
+      sendToWin(win, CHANNELS.onBranches, readBranches(root, loreWorkingTree));
+    };
     // The default baseline is the latest save-point, *resolved to the latest
     // ack in its run* — the mask mechanic. So both panes start at "what changed
     // since the last acknowledged state." HEAD-equivalent (`undefined`) is the
@@ -534,9 +542,11 @@ function createProjectContext(win: BrowserWindow, root: string): ProjectContext 
       watchGitRefs([root, loreWorkingTree], () => {
         changes.refreshNow();
         reconcileSavePoints(win);
+        // `.git/logs/HEAD` also moves on a checkout — the branch may have changed.
+        pushBranches();
       }),
     );
-    wiring = { watcher, changes, pushCommits, pushSavePoints };
+    wiring = { watcher, changes, pushCommits, pushSavePoints, pushBranches };
   }
 
   const ptyService = createPtyService({
@@ -650,6 +660,7 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
       ctx.wiring.pushCommits('payload');
       ctx.wiring.pushCommits('lore');
       ctx.wiring.pushSavePoints();
+      ctx.wiring.pushBranches();
     }
     sendToWin(win, CHANNELS.onTreeInit, buildTreeInitPayload(chain, ctx.ignoreLists.hidden));
   });
@@ -659,8 +670,8 @@ function attachProjectContext(win: BrowserWindow, root: string): void {
   // watcher calls this (debounced) on a lore write — no polling. The chain is
   // small (status + focus + active-child paths and titles) and cheap to walk;
   // we compare via JSON to skip the IPC send when nothing changed. Exposed on
-  // the context as `refreshChain` so the watcher trigger and mutations (e.g.
-  // setRegister) both push the new state to the renderer immediately.
+  // the context as `refreshChain` so the watcher trigger and main-side
+  // mutations both push the new state to the renderer immediately.
   if (!isChainError(ctx.chain)) {
     let lastSent = JSON.stringify(ctx.chain);
     const refreshChain = (): void => {

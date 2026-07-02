@@ -1,6 +1,7 @@
 import type { AppEntry, ChangeEntry, ChangeScope, TreeNode } from '@ai-lore-companion/core';
 import { create } from 'zustand';
 import type {
+  BranchesPayload,
   ChainPayload,
   ChangesPayload,
   CommitListEntry,
@@ -235,6 +236,12 @@ type State = {
    * `commitListByScope`. Pushed by main via `onSavePoints`. Newest first.
    */
   savePoints: SavePointInfo[];
+  /**
+   * Both repos' current branch state, for the header's branch indicators (P5).
+   * Pushed by main via `onBranches` — on seed, on `.git/logs/HEAD` changes,
+   * and on window focus. Null until the first push lands.
+   */
+  branches: BranchesPayload | null;
   trees: Trees;
   /** O(1) path → node lookup per scope, kept in sync with `trees` (Focus 5). */
   treeIndex: TreeIndex;
@@ -270,6 +277,7 @@ type State = {
   setBaseline: (scope: ChangeScope, baseline: string) => void;
   applyCommitList: (payload: CommitListPayload) => void;
   applySavePoints: (payload: SavePointsPayload) => void;
+  applyBranches: (payload: BranchesPayload) => void;
   setTrees: (init: TreeInitPayload) => void;
   applyTreeUpdate: (update: TreeUpdatePayload) => void;
   expandTree: (scope: PaneScope, path: string, children: TreeNode[]) => void;
@@ -303,6 +311,7 @@ export const useCockpitStore = create<State>((set) => ({
   baselineByScope: { payload: 'HEAD', lore: 'HEAD' },
   commitListByScope: { payload: [], lore: [] },
   savePoints: [],
+  branches: null,
   trees: { payload: null, lore: null, publish: null },
   treeIndex: { payload: new Map(), lore: new Map(), publish: new Map() },
   apps: [],
@@ -402,6 +411,7 @@ export const useCockpitStore = create<State>((set) => ({
       commitListByScope: { ...state.commitListByScope, [payload.scope]: payload.commits },
     })),
   applySavePoints: (payload) => set({ savePoints: payload.savePoints }),
+  applyBranches: (payload) => set({ branches: payload }),
   setTrees: (init) => {
     // Publishing-shape projects carry a third tree; default-shape inits omit
     // the field and the publish slot stays null.

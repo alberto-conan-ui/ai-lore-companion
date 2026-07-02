@@ -65,7 +65,8 @@ export function FocusView({ path, onClose }: { path: string; onClose: () => void
 
 function FrontmatterChips({ fm }: { fm: MemoryFrontmatter }): JSX.Element {
   // Lightweight chips that describe what kind of node this is. The chip
-  // colours mirror RegisterChips so the header reads as one design system.
+  // colours keep the `--color-reg-*` tokens the old header register chips
+  // introduced (the chips themselves were dropped in the P5 chrome reshape).
   const chips: { label: string; value: string; accent: string; testId: string }[] = [];
   if (fm.type === 'focus') {
     chips.push({

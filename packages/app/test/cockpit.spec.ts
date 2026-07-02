@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -684,6 +685,9 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('header-actions')).toHaveCount(0);
       await expect(page.getByTestId('header-drift')).toHaveCount(0);
       await expect(page.getByTestId('drift-cluster')).toHaveCount(0);
+      // P5 chrome reshape: the posture/altitude/commitment/focus register
+      // chips are gone — posture and dials are the verbs' to change.
+      await expect(page.getByTestId('register-chips')).toHaveCount(0);
 
       // The focus and active-child titles are clickable links.
       await expect(page.getByTestId('focus-link')).toHaveText('Demo');
@@ -828,20 +832,44 @@ test.describe('window modes', () => {
     }
   });
 
-  test('the header renders posture / altitude / commitment / focus-type chips from frontmatter', async () => {
+  test('the header shows both repo branches and follows a checkout live', async () => {
     const fixture = makeProject();
+    // Give both repos a real git identity — payload at the project root, lore
+    // at `<lore>/memory` (where the lore repo's `.git` lives).
+    const loreRepo = join(fixture.root, '.ai-lore-e2e-fixture', 'memory');
+    const git = (cwd: string, ...args: string[]): void => {
+      execFileSync('git', ['-C', cwd, ...args], { stdio: 'pipe' });
+    };
+    const seed = (cwd: string, branch: string): void => {
+      git(cwd, 'init', '-q', '-b', branch);
+      git(
+        cwd,
+        '-c',
+        'user.email=t@t',
+        '-c',
+        'user.name=T',
+        'commit',
+        '--allow-empty',
+        '-q',
+        '-m',
+        'seed',
+      );
+    };
+    seed(fixture.root, 'main');
+    seed(loreRepo, 'lore-main');
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      await expect(page.getByTestId('register-chips')).toBeVisible();
-      await expect(page.getByTestId('chip-posture')).toContainText('execute', { ignoreCase: true });
-      await expect(page.getByTestId('chip-altitude')).toContainText('mid', { ignoreCase: true });
-      await expect(page.getByTestId('chip-commitment')).toContainText('neutral', {
-        ignoreCase: true,
-      });
-      await expect(page.getByTestId('chip-focus-type')).toContainText('build', {
-        ignoreCase: true,
+      // Both indicators render, labelled by scope, with the real branch names.
+      await expect(page.getByTestId('branch-payload')).toContainText('main');
+      await expect(page.getByTestId('branch-lore')).toContainText('lore-main');
+
+      // A checkout in the payload repo reaches the header without a reload —
+      // the `.git/logs/HEAD` watcher fires on branch switches too.
+      git(fixture.root, 'checkout', '-q', '-b', 'feature');
+      await expect(page.getByTestId('branch-payload')).toContainText('feature', {
+        timeout: 5_000,
       });
 
       await app.close();
@@ -850,59 +878,30 @@ test.describe('window modes', () => {
     }
   });
 
-  test('an external edit to status.index.md updates the header (event-driven chain, no poll)', async () => {
+  test('an external edit to the focus file updates the header (event-driven chain, no poll)', async () => {
     const fixture = makeProject();
-    const statusPath = join(
+    const focusPath = join(
       fixture.root,
       '.ai-lore-e2e-fixture',
       'memory',
       'status',
-      'status.index.md',
+      'focus',
+      'demo.focus.md',
     );
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-posture')).toContainText('execute', { ignoreCase: true });
+      await expect(page.getByTestId('focus-link')).toHaveText('Demo', { timeout: 15_000 });
 
       // Write the file directly — simulating an AI session or an external
-      // editor changing the posture, not a click through the IPC writer. The
+      // editor renaming the focus, not a click through an IPC writer. The
       // chain is no longer polled, so the only way this reaches the header is
       // the lore watcher driving a debounced refresh.
-      const before = readFileSync(statusPath, 'utf8');
-      writeFileSync(statusPath, before.replace(/^posture: execute$/m, 'posture: reshape'));
+      const before = readFileSync(focusPath, 'utf8');
+      // The chain reads the frontmatter `title:` first (H1 is the pre-v0.5
+      // fallback), so the rename edits the frontmatter.
+      writeFileSync(focusPath, before.replace(/^title: Demo$/m, 'title: Demo Two'));
 
-      await expect(page.getByTestId('chip-posture')).toContainText('reshape', {
-        ignoreCase: true,
-        timeout: 5_000,
-      });
-
-      await app.close();
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('clicking a posture option writes status.index.md and the chip updates', async () => {
-    const fixture = makeProject();
-    const statusPath = join(
-      fixture.root,
-      '.ai-lore-e2e-fixture',
-      'memory',
-      'status',
-      'status.index.md',
-    );
-    try {
-      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-posture')).toContainText('execute', { ignoreCase: true });
-
-      await page.getByTestId('chip-posture').click();
-      await page.getByTestId('chip-posture-option-chat').click();
-
-      await expect(page.getByTestId('chip-posture')).toContainText('chat', {
-        ignoreCase: true,
-        timeout: 5_000,
-      });
-      const onDisk = readFileSync(statusPath, 'utf8');
-      expect(onDisk).toMatch(/^posture: chat$/m);
+      await expect(page.getByTestId('focus-link')).toHaveText('Demo Two', { timeout: 5_000 });
 
       await app.close();
     } finally {
@@ -910,36 +909,9 @@ test.describe('window modes', () => {
     }
   });
 
-  test('clicking an altitude option writes dials.altitude and the chip updates', async () => {
-    const fixture = makeProject();
-    const statusPath = join(
-      fixture.root,
-      '.ai-lore-e2e-fixture',
-      'memory',
-      'status',
-      'status.index.md',
-    );
-    try {
-      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-altitude')).toContainText('mid', { ignoreCase: true });
-
-      await page.getByTestId('chip-altitude').click();
-      await page.getByTestId('chip-altitude-option-high').click();
-
-      await expect(page.getByTestId('chip-altitude')).toContainText('high', {
-        ignoreCase: true,
-        timeout: 5_000,
-      });
-      const onDisk = readFileSync(statusPath, 'utf8');
-      expect(onDisk).toMatch(/^ {2}altitude: high$/m);
-      // The sibling commitment line is untouched.
-      expect(onDisk).toMatch(/^ {2}commitment: neutral$/m);
-
-      await app.close();
-    } finally {
-      fixture.cleanup();
-    }
-  });
+  // The three click-to-write register tests were removed in the P5 chrome
+  // reshape with the chips themselves — posture/dials writes returned to the
+  // verbs (`setRegister` deleted).
 
   test('the Status pane synthetic root includes save-points and references folders', async () => {
     const fixture = makeProject();
@@ -1049,7 +1021,7 @@ test.describe('window modes', () => {
     );
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-posture')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('status-view-toggle')).toBeVisible({ timeout: 15_000 });
 
       await page.getByTestId('status-view-toggle').click();
       await expect(page.getByTestId('focus-view')).toBeVisible({ timeout: 5_000 });
@@ -1071,7 +1043,7 @@ test.describe('window modes', () => {
     const fixture = makeProject();
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-posture')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('focus-view-toggle')).toBeVisible({ timeout: 15_000 });
 
       await page.getByTestId('focus-view-toggle').click();
       await expect(page.getByTestId('focus-view')).toBeVisible({ timeout: 5_000 });
@@ -1135,10 +1107,7 @@ test.describe('window modes', () => {
       );
 
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-focus-type')).toContainText('build', {
-        ignoreCase: true,
-        timeout: 15_000,
-      });
+      await expect(page.getByTestId('focus-view-toggle')).toBeVisible({ timeout: 15_000 });
 
       await page.getByTestId('focus-view-toggle').click();
       await expect(page.getByTestId('focus-view')).toBeVisible({ timeout: 5_000 });
@@ -1179,10 +1148,7 @@ test.describe('window modes', () => {
       );
 
       const second = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(second.page.getByTestId('chip-focus-type')).toContainText('goal', {
-        ignoreCase: true,
-        timeout: 15_000,
-      });
+      await expect(second.page.getByTestId('focus-view-toggle')).toBeVisible({ timeout: 15_000 });
       await second.page.getByTestId('focus-view-toggle').click();
       await expect(second.page.getByTestId('focus-view')).toBeVisible({ timeout: 5_000 });
       await expect(second.page.getByTestId('focus-view-focus-type')).toContainText('goal', {
@@ -1194,38 +1160,6 @@ test.describe('window modes', () => {
       await expect(goalPrimary).toContainText('the directional prose for a goal');
 
       await second.app.close();
-    } finally {
-      fixture.cleanup();
-    }
-  });
-
-  test('clicking a commitment option writes dials.commitment and the chip updates', async () => {
-    const fixture = makeProject();
-    const statusPath = join(
-      fixture.root,
-      '.ai-lore-e2e-fixture',
-      'memory',
-      'status',
-      'status.index.md',
-    );
-    try {
-      const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
-      await expect(page.getByTestId('chip-commitment')).toContainText('neutral', {
-        ignoreCase: true,
-      });
-
-      await page.getByTestId('chip-commitment').click();
-      await page.getByTestId('chip-commitment-option-go').click();
-
-      await expect(page.getByTestId('chip-commitment')).toContainText('go', {
-        ignoreCase: true,
-        timeout: 5_000,
-      });
-      const onDisk = readFileSync(statusPath, 'utf8');
-      expect(onDisk).toMatch(/^ {2}commitment: go$/m);
-      expect(onDisk).toMatch(/^ {2}altitude: mid$/m);
-
-      await app.close();
     } finally {
       fixture.cleanup();
     }
@@ -1312,15 +1246,15 @@ test.describe('window modes', () => {
     }
   });
 
-  test('the global baseline picker sits beside the pinned tabs and reveals acks', async () => {
+  test('the global baseline picker sits in the header and reveals acks', async () => {
     const fixture = makeProject();
     try {
       const { app, page } = await launchApp({ root: fixture.root, userData: fixture.userData });
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
-      // One global picker drives every pane's baseline — it lives in the locked
-      // leftRail strip beside the pinned tabs, not per-pane.
-      const picker = page.getByTestId('baseline-picker');
+      // One global picker drives every pane's baseline — the P5 chrome reshape
+      // moved it from the leftRail tab-strip into the header title bar.
+      const picker = page.getByTestId('header-identity').getByTestId('baseline-picker');
       await expect(picker).toBeVisible({ timeout: 5_000 });
       // The old per-pane baseline dropdown and inline diff preview are gone.
       await expect(page.getByTestId('changes-baseline-status')).toHaveCount(0);
