@@ -88,6 +88,7 @@
     },
     "files": ["out/**/*", "package.json"],
     "asar": false,
+    "npmRebuild": false,
     "mac": {
       "target": [
         {
