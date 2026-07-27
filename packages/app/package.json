@@ -98,6 +98,20 @@
       "icon": "build/icon.icns",
       "identity": null,
       "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.png",
+      "executableName": "ai-lore",
+      "category": "Development",
+      "maintainer": "AI-Lore",
+      "synopsis": "Human Lead cockpit for AI-Lore projects",
+      "description": "Desktop cockpit for AI-Lore projects: focus chain, Memory and Payload navigation, git drift and save-point diffs, integrated terminals and editor."
     }
   }
 }
