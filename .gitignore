@@ -1,7 +1,7 @@
 
 # AI-Lore — the Lore folder is its own concern, entirely out of this repo
 .ai-lore-ai-lore-companion/
-ai_readme.md
+/ai_readme.md
 
 # Node
 node_modules/

@@ -1,0 +1,8 @@
+{
+  "name": "@ai-lore-companion/spec",
+  "version": "0.8.0",
+  "private": true,
+  "description": "The AI-Lore methodology — the spec the companion reads and renders. Canonical source lives in process/.",
+  "license": "MIT",
+  "files": ["process/", "ai_readme.md", "README.md"]
+}
