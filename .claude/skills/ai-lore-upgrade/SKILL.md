@@ -1,21 +1,75 @@
 ---
 name: ai-lore-upgrade
-description: Migrate a project to a new core version
+description: "AI-Lore verb upgrade — move a project to a new core"
 ---
+
+> Projected from `.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/lifecycle/upgrade.verb.md` by `ai-lore.py install` — the Lore file is the source; this copy is derived. Under the golden rule every write this verb makes is confirmed with the Human Lead.
+
+> **family:** lifecycle · **track:** full · **invoker:** human-lead · **writes:** blueprint/*/core/ replaced wholesale; memory/workspace.yaml (core_version); migration playbook's writes, per its steps; engine re-projection · **contracts:** golden-rule; core-containment
 
 # upgrade
 
-`upgrade` migrates a project from one AI-Lore core version to the next. It runs once per version bump. The project ends pinned at the new `core_version`, with the methodology re-placed on disk and any structural Memory changes the version requires already applied — the focus stack, journal, and standing commitments survive the migration intact.
+Move a project to a new core version: **replace `core/` wholesale, re-validate every
+shadow, run the migration playbook, bump the pin.** Human-Lead-invoked — an upgrade
+changes what the project runs on.
+
+## When to invoke
+
+- A new AI-Lore version ships and the project wants it.
+- NOT for customizing the current version (that is shadowing, no upgrade involved).
+
+## The merge decision, made small
+
+The customization discipline is what keeps this verb routine: **core is never edited
+in place — all customization is shadow-by-name, outside `core/`.** So the new core
+replaces the old **wholesale** — no textual merge, ever. What remains is the honest
+part the Human Lead owns:
+
+**Shadow re-validation.** Every local (and parent-side) shadow was written against
+the *old* core. Walk each against the new one, together: the core artifact it
+shadows may have absorbed the fix (retire the shadow —
+[`retire-verb`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/blueprint/retire-verb.verb.md) restores the inherited artifact), changed
+shape under it (amend the shadow), or vanished/renamed (the shadow stands alone now,
+or follows the rename). Each shadow's one-line *what/why* — written when it was
+authored — is what makes this walk minutes, not archaeology.
+
+**The migration playbook** (`migration-from-v<old>.md`, shipped with the new core)
+carries the version-specific reshapes — Memory-structure changes, renames, new
+surfaces to scaffold. It is run **literally**, step by step; a playbook defect found
+mid-run is a finding to file upstream, not something to improvise past silently.
+
+Then: `core_version` bumped in the manifest (in the Memory repo — the bump leaves a
+trace), the resolved set re-projected ([`install`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/lifecycle/install.verb.md)'s motion), and
+the core-containment check re-run. The whole upgrade lands as one paired commit with
+its accumulator row — the project can point at the moment it changed versions.
 
 ## The operation
 
-1. **Read the current pin.** `core_version` in `workspace.yaml` names the version the project runs against.
-2. **Read the target version's migration notes** — the per-version description of what changed and what a project must do to move. The v0.4 → v0.5 notes are [`migration-from-v0.4.md`](../migration-from-v0.4.md).
-3. **Re-populate the methodology.** Replace the project's `ai_readme.md` (root) and `.ai-lore-<project>/process/` with the target version's content. Plain file copy from the session's loaded methodology — same operation `init` performs at project creation.
-4. **Apply the structural changes** to Memory via [`write-lore`](./write-lore.md) — new folders, schema changes, removed components. A structural rewrite that discards content trips `write-lore`'s discard guard; the Human Lead confirms each.
-5. **Update the manifest** — set `core_version` to the target.
-6. **Record the migration** in a journal entry, and take a [`save-point`](./save-point.md) once the upgrade is verified.
+1. **Verify the invoker**; **confirm the verb** (golden rule); home-mounted, no
+   open children (an upgrade is a consolidation-grade act). Both repos clean.
+2. **Replace `core/`** wholesale from the new version's source —
+   `python3 <lore>/memory/blueprint/tooling/core/ai-lore.py upgrade --from <dist>`
+   (a checkout of the new version's ai-sdlc repo at its release tag, or the local
+   `process/` in the self-hosting project). The tool places core, refreshes the
+   floor, prints the shadow list, bumps the pin, and re-projects installed engines.
+3. **Walk the shadows** with the Human Lead; retire / amend / keep each, on the
+   record.
+4. **Run the migration playbook** literally (`migration-from-v<old>.md`; for
+   0.7 → 0.8 the tool's `migrate` command is the playbook's mechanical body); file
+   defects found.
+5. **`ai-lore.py check --from <dist>`** — core-containment and the rest hold.
+6. **One paired commit + accumulator row.** State the delta: version, shadows'
+   fates, playbook findings.
 
-If the project was installed into an engine (see [`install`](./install.md)), re-run that install after upgrade so the engine-native delivery picks up the new methodology.
+## Refusals
 
-A version that changes Memory shape ships its own migration notes; `upgrade` applies them. The per-version migration content is authored alongside the version it migrates to.
+- Not the Human Lead → refuse.
+- Open child tracks → refuse; consolidate first.
+- Core was edited in place (discipline violated upstream) → stop; that project has
+  a real merge on its hands — surface it honestly before anything is replaced.
+
+## Related
+
+[`install`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/lifecycle/install.verb.md) re-projects ·
+[`retire-verb`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/blueprint/retire-verb.verb.md)-family executes shadow fates ·
+[`save-point`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/acknowledgement/save-point.verb.md) often follows an upgrade.

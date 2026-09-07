@@ -1,34 +1,76 @@
 ---
 name: ai-lore-orient
-description: Session open — load the methodology, walk the focus chain, check for drift
+description: "AI-Lore verb orient — the session-opening bookend"
 ---
+
+> Projected from `.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/bookends/orient.verb.md` by `ai-lore.py install` — the Lore file is the source; this copy is derived. Under the golden rule every write this verb makes is confirmed with the Human Lead.
+
+> **family:** bookends · **track:** n/a (runs trackless, before any mount) · **invoker:** session (intrinsic — no external trigger) · **writes:** none · **contracts:** golden-rule
 
 # orient
 
-`orient` is the **session-opening bookend.** Its aim: by the time the Human Lead asks the first question, the session is **expert on the active task** — ready to answer informed and act, not scrambling for context. The session runs `orient` on itself at the start of every session; the Human Lead does not invoke it.
+The session-opening bookend. Its aim: by the first question, the session is
+**expert on the active task** — answering informed, not scrambling. The session runs
+it on itself at every open; the Human Lead never invokes it. An engine binding may
+reinforce it with a session-start hook; the methodology never depends on that.
 
-To get there, orient loads the methodology if it isn't already loaded, walks the focus chain to its tip, reads whatever else the active focus depends on, surfaces any drift, and states where the work stands.
+## What orient loads
 
-## What orient knows after running
+1. **The floor** — `ai_readme.md` (the golden rule, the resolution chain, this
+   pointer). Usually already read; it is how the session got here.
+2. **The thin core**, from the resolved verb set (`blueprint/verbs/core/` unless
+   shadowed): `project-structure.md` (vocabulary), `status.md` (the status tree and
+   registry), `verbs.index.md` (the map). Everything else loads when invoked — a
+   verb is high-signal at invocation, degraded when carried from open.
+3. **The registry**: `status/status.stack.md` (focuses, statuses, active-marks) and
+   `status.index.md` (root wiring). The open-tracks picture from `tracks/`.
+4. **Parents, eagerly but shallowly**: the manifest's `parents:` resolved far enough
+   that inherited artifacts are *invocable* (names known); their content still loads
+   on invocation.
 
-- **The methodology.** The five pillars are loaded: [`project-structure.md`](../project-structure.md), [`memory.md`](../memory.md), [`status.md`](../status.md), [`verbs/verbs.index.md`](./verbs.index.md), [`bindings.md`](../bindings.md). On the plain-text path, `ai_readme.md` has just walked the session through them. On an installed engine, the SessionStart hook fires `orient` directly — the session reads the five files itself as its first step. Either way, by the time orient has finished, the session is AI-Lore-shaped.
-- **The current context.** The focus chain has been walked from `memory/status/status.index.md` down through the active focus and (if present) the active AT node, to whatever is at the tip. The session knows the active focus and its `focus_type`, the dials and posture in status. The journal has been read — specifically the **handover** in the most recent journal file for the active focus, which says where the work was left and what the next session does first. Any blueprint relevant to the focus has been read — contracts the Payload must honour, processes the focus invokes, mirror nodes for areas the focus touches.
-- **Whatever else the focus actually depends on.** Orient is not done at the focus chain alone. If the focus references a knowledge-tree entry, read it. If a gate or "done when" names a Payload file or area, read that. If the focus's journal trail mentions a prior session's finding that bears on what's next, pull the relevant entry. The aim is for the session to start *up to date with the work*, not merely up to date with the structure.
-- **The state of both repos.** The drift check has run on each — a dirty tree in either is unacknowledged work, surfaced so the Human Lead can [`ack`](./ack.md), [`save-point`](./save-point.md), or continue knowing the state.
+## Track-aware depth
 
-## Drift check — the right paths
+The session starts **trackless in every case**; mounting is a separate act.
 
-The lore repo's `.git/` lives at `<lore>/memory/.git/`, **not** at `<lore>/.git/`. Running `git status` from inside `<lore>/` walks up to the Payload's `.git/` and reports that instead — a silent miss. Use the explicit form:
+- **Only home open** → assume the session lands there. Walk the chain from home's
+  focus down through stages and phases to the tip; read the newest journal
+  handover, the blueprint areas the focus names. Single-session projects pay no
+  parallelism tax.
+- **Other tracks open** → defer the walk. State the open tracks and put the choice
+  to the Human Lead: mount one now, or stay trackless. Walk only what gets mounted.
+
+## The drift check
+
+Per open track, both repos, explicitly:
 
 ```
-git -C <lore>/memory status
-git -C <project> status
+git -C <project> status          # Payload repo
+git -C <lore>/memory status      # lore repo — its .git lives HERE, not at <lore>/
 ```
 
-[`project-structure.md`](../project-structure.md) carries the full git arrangement.
+against each track's branches — home's branch as its **record** names it (`trunk`
+in role-language; commonly `main` in reality — the record is authoritative),
+`track/<name>` for children. Dirty = unacknowledged work, surfaced per track;
+drift is derived here and stored nowhere. A `mounted_by` naming a session that no
+longer exists is surfaced too — [`release-track`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/tracks/release-track.verb.md) is the
+Human Lead's remedy.
 
-## How it states the context
+## The readout
 
-One readout: the active focus, its type, the posture, any drift, what is at the tip of the chain, the next step from the handover. If the project is headless, say so and wait for direction.
+One statement: open tracks (name, focus, mounted-by) · per-track drift · the walked
+chain's tip · the next step per the newest handover. Headless project (no focus, no
+tracks beyond an idle home): say so and wait. Multiple open tracks: name the
+mount-or-trackless choice. Then stop — orient ends where the Human Lead's first
+real instruction begins.
 
-An engine binding may reinforce `orient` with a SessionStart hook so a session cannot open without it; the methodology does not depend on the reinforcement.
+## Refusals
+
+- Writing anything → orient is read-only by definition; the first write of the
+  session triggers the mount flow through its own verb.
+- Skipping the drift check "to save time" → the check *is* the time saved.
+
+## Related
+
+[`mount-track`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/tracks/mount-track.verb.md) the write-capable follow-up ·
+[`close-session`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/bookends/close-session.verb.md) the closing twin ·
+[`release-track`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/tracks/release-track.verb.md) for stale mounts orient surfaces.

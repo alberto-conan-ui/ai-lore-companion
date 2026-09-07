@@ -1,45 +1,79 @@
 ---
 name: ai-lore-init
-description: Bootstrap a folder into an AI-Lore project
+description: "AI-Lore verb init — bootstrap a folder into an AI-Lore project"
 ---
+
+> Projected from `.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/lifecycle/init.verb.md` by `ai-lore.py install` — the Lore file is the source; this copy is derived. Under the golden rule every write this verb makes is confirmed with the Human Lead.
+
+> **family:** lifecycle · **track:** n/a (creates the project this machinery runs in) · **invoker:** human-lead · **writes:** the whole initial shape — bootstrap, Lore, Memory skeleton, git arrangement · **contracts:** golden-rule; core-containment
 
 # init
 
-`init` turns a plain folder into an AI-Lore project. It runs once per project. The result is a fully working AI-Lore project: a Lore folder, a Memory git repo, the methodology placed at the right paths, the manifest pinned to a `core_version`, ready for the Human Lead to open the first focus.
+Bootstrap a folder into an AI-Lore project: the floor at the root, core in the
+blueprint, Memory's skeleton, two git repos wired for the pairing discipline.
+Run once per project, with the Human Lead.
 
-`init` sets up a **project**. It does not bind AI-Lore to an engine — that is [`install`](./install.md), which runs once per engine, not per project. The two are separate layers: `install` embeds the methodology into the AI; `init` creates a project for it to work on.
+## When to invoke
+
+- A folder (empty or already holding working materials) becomes an AI-Lore project.
+- NOT for moving versions ([`upgrade`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/lifecycle/upgrade.verb.md)) or wiring an engine
+  ([`install`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/lifecycle/install.verb.md)).
+
+## What init creates
+
+**The shape** (settled with the Human Lead first — name, and Default vs Publishing):
+
+- **The floor**: `ai_readme.md` at the project root — golden rule, resolution
+  chain, orient pointer, authoring verbs. The whole methodology a session must
+  carry *before* reaching an artifact; everything else loads on invocation.
+- **The Lore**: `.ai-lore-<project_name>/` (name from the manifest;
+  `^[a-zA-Z0-9_][a-zA-Z0-9_-]*$` — unique folder per project so ancestor-walk
+  resolution never ambiguates), containing:
+  - `memory/workspace.yaml` — `project_name`, `core_version`, optional `publish:`
+    and `parents:` — **inside the Memory repo** (version bumps leave a trace).
+  - `memory/blueprint/{verbs,processes,contracts}/core/` — **the OOB artifact set,
+    placed here**; per the core-containment contract, no vendored methodology tree
+    exists anywhere else. Branch folders ready for local artifacts beside `core/`.
+  - The Memory skeleton: `status/` (+ `status.stack.md`, `backlog/`), `tracks/`
+    (home's record — `branch:` set to the repo's real branch name; the record is
+    authoritative), `journal/live/`, `notepad/`, `save-points/` with the **first
+    open `next.save-point.md` accumulator**, `mirror/`+`tooling/` branches — every
+    folder with its index, emptiness valid everywhere.
+- **The git arrangement**: the project root as the Payload repo (`.gitignore`:
+  `.ai-lore-<project>/`, `publish/`, `out/`); `<lore>/memory/` as its own repo
+  (the location wart to know: its `.git/` is at `memory/.git/` — address it
+  explicitly, `git -C <lore>/memory`). **The Lore-remote conversation happens
+  here**: Memory is the project's entire durable record, and unbacked memory is
+  the sharpest durability risk a remembering methodology can have — settle a
+  remote (or a conscious "local-only, because…") at birth, not after the first
+  scare.
+- **Publishing projects**: Payload into `payload/`, `publish/` created or
+  symlinked per the manifest.
+
+Then the first commits land on both repos — the accumulator's first row — and the
+project is mountable.
 
 ## The operation
 
-The steps below are sequential and load-bearing — each depends on what the previous one wrote.
+1. **Verify the invoker**; settle name + shape + Lore remote with the Human Lead.
+2. **Create** floor, Lore, core placement, Memory skeleton, git arrangement as
+   above — `python3 <dist>/core/tooling/ai-lore.py init <dir> --name <name>
+   --from <dist> [--branch main] [--publishing] [--lore-remote <url>]`, where
+   `<dist>` is a checkout of ai-sdlc at the wanted release tag.
+3. **Verify core-containment** (the contract's fresh-install check — light
+   bootstrap, ALL else in blueprint; the tool runs `check` as its last step).
+4. **First paired commit**, first accumulator row (the tool lands both).
+5. **State the project's shape** and hand off: orient will run on next session
+   open; [`install`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/lifecycle/install.verb.md) offers engine wiring.
 
-1. **Choose the project name.** A filesystem-safe directory segment: `^[a-zA-Z0-9_][a-zA-Z0-9_-]*$`. Refuse if an enclosing ancestor already contains a `.ai-lore-<name>/` with the same name.
-2. **Choose the project shape.** Two options:
-   - **Default** — the Payload is what ships. Payload files sit at the project root directly; no `payload/` folder, no `publish/`. Most projects are this shape.
-   - **Publishing** — the Payload lives in a `payload/` folder, paired with a `publish/` sibling that carries the curated deliverable (see [Publish](../project-structure.md#publish)). For projects whose deliverable is a folder elsewhere (Google Drive, a static site, a client folder, any path-addressable destination). The Human Lead names the `publish/` target — either a real local directory or a symlink to an external mount.
-3. **Create the Lore folder** — `.ai-lore-<project_name>/`.
-4. **Write the manifest** — `workspace.yaml` with `project_name` and `core_version`. If the project shape is Publishing, add the `publish:` block — `path` (defaults to `./publish`) and, if a symlink target is set, `target`.
-5. **Place the methodology.** Two pieces:
-   - **Root shim at `ai_readme.md`.** A two-line file the Human Lead points any AI at: a heading and the line *"This project uses AI-Lore. Read `.ai-lore-<project_name>/process/ai_readme.md` and follow its instructions."* The project name is substituted once at write time.
-   - **Methodology copy under `.ai-lore-<project>/process/`.** Copy the pillars and verbs verbatim from the session's loaded methodology. No build, no template substitution, no transformation — the relative paths inside the pillars resolve cleanly because the layout is preserved.
+## Refusals
 
-   The root shim is the AI-agnostic handshake; the copied `process/` is the methodology in full.
-6. **Shape the workshop and the publish target** — Publishing projects only.
-   - **Create `<project>/payload/`** as an empty directory. This is the workshop; the Payload's contents live inside it.
-   - **Create `<project>/publish/`.** If `publish.target` is set in `workspace.yaml`, create the symlink: `<project>/publish` → the target path. If only `publish.path` is set, create an empty directory there.
-   - The publish process itself (`blueprint/processes/publish.process.md`) is **not** seeded by `init` — it is a project-specific recipe authored at first use; until it exists, the [`publish`](./publish.md) verb refuses.
-7. **Initialise the Memory git repository** — `.ai-lore-<project>/memory/` is its own git repo, separate from the Payload. The Payload repo, if not already initialised, is the Project root. `init` adds both `.ai-lore-<project_name>/` and `publish/` to the Payload's `.gitignore` — the Lore folder and the Publish target are excluded from Payload tracking (the `publish/` entry is harmless on default-shape projects). See [`project-structure.md`](../project-structure.md#two-repositories).
-8. **Lay the Memory skeleton** via [`write-lore`](./write-lore.md):
-   - `status/status.index.md` with `posture: execute` (the default)
-   - `journal/live/` and `journal/archive/`, each with its index
-   - `blueprint/` with three children — `contracts/`, `processes/`, `mirror/` — each with its index
-   - `save-points/` with its index
+- Already an AI-Lore project → `upgrade` or nothing.
+- A nested AI-Lore project in the ancestor chain with a clashing name → refuse;
+  names disambiguate resolution.
 
-   The action tree and knowledge tree are optional and created when work first touches them.
-9. **Seed the blueprint** with the Human Lead. Each branch is optional at seed time — emptiness is a valid state:
-   - **Contracts** — the evergreen rules good Payload must honour, including any contracts that apply to `save-point` beyond the required git commit.
-   - **Processes** — repeated procedures the project performs (release runbook, migration ritual, recurring checklist). Publishing projects will author `publish.process.md` here when they first publish; `init` does not pre-seed it.
-   - **Mirror** — descriptions of Payload areas. Usually empty at init; populates as the Payload grows areas worth describing.
-10. **Open the first focus** with the Human Lead, or leave the project headless until direction arrives. Choose its `focus_type` — `build` for concrete delivery against a gate, `goal` for directional work judged by the Human Lead.
+## Related
 
-`init` writes Memory only through `write-lore`. The methodology placement in step 5 and the publish-target shaping in step 6 are plain file operations, not Memory writes.
+[`install`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/lifecycle/install.verb.md) wires an engine ·
+[`upgrade`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/lifecycle/upgrade.verb.md) moves versions ·
+[`mount-track`](../../../.ai-lore-ai-lore-companion/memory/blueprint/verbs/core/tracks/mount-track.verb.md) starts the work.
