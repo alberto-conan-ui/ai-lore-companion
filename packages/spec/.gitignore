@@ -1,0 +1,20 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+.obsidian/
+
+# Environment
+.env
+
+# AI-Lore meta workspace (self-managed release process)
+.ai-lore-ai-sdlc/
+
+# Disposable scratch (v0.7) — in no git repo, never a source of truth
+out/
