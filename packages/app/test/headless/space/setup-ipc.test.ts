@@ -10,11 +10,8 @@ import {
 } from '@ai-lore-companion/core';
 import { type FakeGitHub, createFakeGitHub, makeTempDir } from '@ai-lore-companion/core/testing';
 import { createAppGitHubPort } from '../../../src/main/space/github-service.js';
-import {
-  createSpaceSetupRegister,
-  runnerWithPath,
-  setupTemplateDir,
-} from '../../../src/main/space/ipc/setup.js';
+import { createSpaceSetupRegister, runnerWithPath } from '../../../src/main/space/ipc/setup.js';
+import { loreTemplateDir } from '../../../src/main/space/template-dir.js';
 import type {
   SpaceSetupChooseFolderResult,
   SpaceSetupForm,
@@ -230,10 +227,10 @@ test('the channels refuse a stranger, a window that is not setup, the other flow
 });
 
 test('the template folder is found above the code, or setup fails with a literal reason', () => {
-  const found = setupTemplateDir();
+  const found = loreTemplateDir();
   assert.ok(found.ok, found.ok ? '' : found.error.message);
   assert.ok(existsSync(join(found.value, 'lore')));
-  const missing = setupTemplateDir(folder('no-template-here'));
+  const missing = loreTemplateDir({ from: folder('no-template-here') });
   assert.equal(missing.ok, false);
   if (!missing.ok) {
     assert.equal(missing.error.kind, 'template-missing');

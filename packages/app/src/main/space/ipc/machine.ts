@@ -17,7 +17,7 @@
 
 import { statSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
-import { type CommandRunner, type EngineEntry, checkMachine } from '@ai-lore-companion/core';
+import type { CommandRunner, EngineEntry } from '@ai-lore-companion/core';
 import { z } from 'zod';
 import type {
   MachineCheckReport,
@@ -26,6 +26,7 @@ import type {
 } from '../../../shared/ipc.js';
 import { loadEngines } from '../../engines.js';
 import type { Deps, RegisterModule } from '../../ipc/types.js';
+import { checkMachineOfApp } from '../e2e-machine.js';
 import { parseArg } from './validate.js';
 
 const checkSchema = z.strictObject({ fresh: z.boolean() });
@@ -150,7 +151,7 @@ export function createSpaceMachineRegister(parts: Partial<SpaceMachineParts> = {
       const path = await readLoginShellPath(runner, shell, platform);
       const pathSource: MachinePathSource = path === null ? 'app-environment' : 'login-shell';
       if (path === null && platform !== 'win32') deps.space.log.warn('login-shell-path-not-read');
-      const result = await checkMachine(runner, engines(deps.space.userDataDir()), {
+      const result = await checkMachineOfApp(runner, engines(deps.space.userDataDir()), {
         platform,
         ...(path === null ? {} : { env: { PATH: path } }),
       });

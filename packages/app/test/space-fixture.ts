@@ -69,15 +69,20 @@ export function makeSpaceE2eFixture(name = 'e2e-space'): SpaceE2eFixture {
  * the app without it.
  */
 export async function launchSpaceApp(opts: {
+  /** The folder to open. Without it the app opens on the welcome screen. */
   root?: string;
   userData: string;
+  /** Variables for this launch only, such as `AI_LORE_FAKE_GITHUB`. */
+  env?: Record<string, string>;
 }): Promise<{ app: ElectronApplication; page: Page }> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    COCKPIT_ROOT: opts.root,
+    ...(opts.root === undefined ? {} : { COCKPIT_ROOT: opts.root }),
     COCKPIT_E2E: '1',
     AI_LORE_SPACE_ROUTING: '1',
+    ...opts.env,
   };
+  if (opts.root === undefined) Reflect.deleteProperty(env, 'COCKPIT_ROOT');
   const app = await electron.launch({
     args: [APP_MAIN, `--user-data-dir=${opts.userData}`],
     cwd: APP_DIR,

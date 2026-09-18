@@ -6,7 +6,9 @@
  * Which port is built (architecture document, section 5.3), by
  * `createAppGitHubPort`:
  * - in an end-to-end run (`COCKPIT_E2E=1`) with `AI_LORE_FAKE_GITHUB=<state
- *   file>`, core's `FakeGitHub` on that file. It is loaded from core's testing
+ *   file>`, in an app that is not packaged (`isFakeMachineRun` of
+ *   `e2e-machine.ts`), core's `FakeGitHub` on that file. A packaged app
+ *   started with both variables gets the unreachable port below. It is loaded from core's testing
  *   entry at that moment only, so a normal run never loads it. This is the same
  *   switch as the app's existing end-to-end mode (`E2E_BYPASS_GUARDS` in
  *   `main/index.ts`), read from the environment the app was started with; the
@@ -29,6 +31,7 @@ import {
   createGhCliGitHub,
 } from '@ai-lore-companion/core';
 import { defineSpaceService } from './context.js';
+import { isFakeMachineRun } from './e2e-machine.js';
 import { liveGitHubAllowed } from './live-github.js';
 import type { SpaceLog } from './log.js';
 
@@ -78,6 +81,8 @@ export type AppGitHubPortOptions = {
   runner: CommandRunner;
   /** The environment the app was started with. Default: `process.env`. It is read, never changed. */
   env?: Record<string, string | undefined>;
+  /** Whether this is a packaged app, which never gets the fake. Default: `isPackagedApp()`. */
+  packaged?: boolean;
   /** Where the choice is logged, when given. */
   log?: SpaceLog;
   /** Named in the log line. */
@@ -94,7 +99,7 @@ export async function createAppGitHubPort(options: AppGitHubPortOptions): Promis
   const env = options.env ?? process.env;
   const fields = options.space === undefined ? {} : { space: options.space };
   const stateFile = env.AI_LORE_FAKE_GITHUB;
-  if (env.COCKPIT_E2E === '1' && stateFile !== undefined && stateFile !== '') {
+  if (stateFile !== undefined && isFakeMachineRun(env, options.packaged)) {
     const testing = await import('@ai-lore-companion/core/testing');
     log?.info('github-port', { ...fields, port: 'fake' });
     return testing.createFakeGitHub({ stateFile });

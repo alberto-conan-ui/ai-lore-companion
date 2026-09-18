@@ -26,9 +26,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, statSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { statSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   type AdoptRepositoryInput,
   type CommandRunner,
@@ -47,7 +46,6 @@ import {
   type SetupReport,
   type SetupRunOptions,
   adoptRepository,
-  checkMachine,
   createSpace,
   folderProblem,
   openSpaceByAddress,
@@ -78,41 +76,13 @@ import type {
 import { SPACE_SETUP_CONTRACT } from '../../../shared/ipc/space/setup.contract.js';
 import { loadEngines } from '../../engines.js';
 import type { Deps, RegisterModule } from '../../ipc/types.js';
+import { checkMachineOfApp } from '../e2e-machine.js';
 import { createAppGitHubPort } from '../github-service.js';
 import type { SpaceIpcEvent } from '../host.js';
+import { loreTemplateDir } from '../template-dir.js';
 import type { SpaceWindowLike, SpaceWindowRecord } from '../windows.js';
 import { readLoginShellPath, validLoginShell } from './machine.js';
 import { parseArg } from './validate.js';
-
-/** The template's folder below a `packages` folder, in development. */
-const TEMPLATE_IN_PACKAGES = ['spec', 'lore-1.0'] as const;
-
-/**
- * The Lore template the flows scaffold from. In development it is
- * `packages/spec/lore-1.0`, found by going up from where this code runs
- * (`packages/app/out/main` in the built app, the test output folder in a
- * headless test) to the folder that holds `spec/lore-1.0`. Phase M3.9 replaces
- * this function with one that also knows the packaged app's copy.
- */
-export function setupTemplateDir(
-  from: string = dirname(fileURLToPath(import.meta.url)),
-): Result<string> {
-  let dir = resolve(from);
-  for (;;) {
-    const candidate = join(dir, ...TEMPLATE_IN_PACKAGES);
-    if (existsSync(join(candidate, 'lore'))) return { ok: true, value: candidate };
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  return {
-    ok: false,
-    error: {
-      kind: 'template-missing',
-      message: `The Lore template was not found: no folder above ${from} holds spec/lore-1.0. A Space is made from that template, so setup cannot run.`,
-    },
-  };
-}
 
 /** `runner` with `PATH` set for every command; `runner` itself when `path` is `null`. */
 export function runnerWithPath(runner: CommandRunner, path: string | null): CommandRunner {
@@ -141,7 +111,7 @@ async function pickFolderWithDialog(
 
 /** What the handlers take from their surroundings. A headless test replaces them. */
 export type SpaceSetupParts = {
-  /** The Lore template. Default: `setupTemplateDir`. */
+  /** The Lore template. Default: `loreTemplateDir` of `main/space/template-dir.ts`. */
   templateDir: () => Result<string>;
   /** The system's folder dialog; `null` when it was cancelled. Default: Electron's. */
   pickFolder: (window: SpaceWindowLike, title: string) => Promise<string | null>;
@@ -156,7 +126,7 @@ export type SpaceSetupParts = {
 };
 
 const DEFAULT_PARTS: SpaceSetupParts = {
-  templateDir: () => setupTemplateDir(),
+  templateDir: () => loreTemplateDir(),
   pickFolder: pickFolderWithDialog,
   runner: async (deps) => {
     const shell = validLoginShell(process.env.SHELL ?? '/bin/zsh');
@@ -165,7 +135,9 @@ const DEFAULT_PARTS: SpaceSetupParts = {
   },
   github: (runner, deps) => createAppGitHubPort({ runner, log: deps.space.log }),
   checkMachine: (deps, runner) =>
-    checkMachine(runner, loadEngines(deps.space.userDataDir()), { platform: process.platform }),
+    checkMachineOfApp(runner, loadEngines(deps.space.userDataDir()), {
+      platform: process.platform,
+    }),
   gitConfig: undefined,
 };
 

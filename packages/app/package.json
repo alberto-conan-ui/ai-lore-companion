@@ -87,6 +87,13 @@
       }
     },
     "files": ["out/**/*", "package.json"],
+    "extraResources": [
+      {
+        "from": "../spec/lore-1.0",
+        "to": "lore-1.0",
+        "filter": ["**/*"]
+      }
+    ],
     "asar": false,
     "npmRebuild": false,
     "mac": {
