@@ -1,0 +1,8 @@
+# Setup copies this file into the Space's folder under the name .gitignore.
+# The two folders below exist on each desk and are not part of the Space repository.
+
+# The Workbench: drafts, the journal and scratch files. It is private to the desk.
+workbench/
+
+# One checkout per repository of the Space. Each checkout has its own git history.
+repos/

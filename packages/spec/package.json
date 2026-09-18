@@ -4,5 +4,5 @@
   "private": true,
   "description": "The AI-Lore methodology — the spec the companion reads and renders. Canonical source lives in process/.",
   "license": "MIT",
-  "files": ["process/", "ai_readme.md", "README.md"]
+  "files": ["process/", "lore-1.0/", "ai_readme.md", "README.md"]
 }
