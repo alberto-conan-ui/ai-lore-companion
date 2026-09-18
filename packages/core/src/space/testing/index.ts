@@ -25,3 +25,16 @@ export {
   makeTempGitRepo,
   openTempGitRepo,
 } from './git-repo.js';
+export {
+  type FixtureChange,
+  type SpaceFixture,
+  type SpaceFixtureOptions,
+  type SpaceFixtureRepository,
+  makeSpaceFixture,
+} from './space-fixture.js';
+export {
+  type V08Fixture,
+  type V08FixtureContents,
+  type V08FixtureOptions,
+  makeV08Fixture,
+} from './v08-fixture.js';
