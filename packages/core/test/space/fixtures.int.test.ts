@@ -296,12 +296,31 @@ test('makeV08Fixture holds every kind of content the migration mapping names', a
     'memory/status/archive/single-file-work.focus.md',
   ]);
   for (const path of contents.doneFocuses) assert.match(read(path), /^status: done$/m);
+  // A finished focus that is a folder with no focus file, as older archived ones are.
+  assert.deepEqual(contents.doneFocusFoldersWithoutFile, ['memory/status/archive/first-prototype']);
+  for (const folder of contents.doneFocusFoldersWithoutFile) {
+    const inside = fixture.loreFiles.filter((path) => path.startsWith(`${folder}/`));
+    assert.equal(inside.length > 0, true, folder);
+    assert.equal(
+      inside.some((path) => path.endsWith('.focus.md')),
+      false,
+      folder,
+    );
+  }
 
-  // Two backlog files; one lists several entries as sections, the other as a numbered list.
+  // Two backlog files; one lists two entries as sections between a Purpose section and a
+  // Journal trail, the other as a numbered list. One backlog item file in a grouping folder.
   assert.equal(contents.backlogFiles.length, 2);
   for (const path of contents.backlogFiles) assert.match(read(path), /^type: backlog$/m);
-  assert.equal(read(contents.backlogFiles[0] ?? '').match(/^## /gm)?.length, 2);
+  assert.deepEqual(read(contents.backlogFiles[0] ?? '').match(/^## .*$/gm), [
+    '## Purpose',
+    '## A first parked item',
+    '## A second parked item',
+    '## Journal trail',
+  ]);
   assert.equal(read(contents.backlogFiles[1] ?? '').match(/^[0-9]+\. /gm)?.length, 2);
+  assert.deepEqual(contents.backlogItems, ['memory/status/backlog/ideas/richer-history.item.md']);
+  for (const path of contents.backlogItems) assert.match(read(path), /^type: backlog-item$/m);
 
   // Two journal entries; the newer has the handover.
   assert.deepEqual(contents.journalEntries, [
@@ -358,6 +377,7 @@ test('makeV08Fixture holds every kind of content the migration mapping names', a
     ...contents.pausedFocuses,
     ...contents.doneFocuses,
     ...contents.backlogFiles,
+    ...contents.backlogItems,
     ...contents.journalEntries,
     ...contents.projectContracts,
     ...contents.mirrorNodes,

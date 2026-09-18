@@ -5,7 +5,8 @@
  * kind of content the migration mapping of the MVP focus names: the manifest,
  * the focus registry with one in-progress focus of three stages, two paused
  * focuses and two done focuses under `archive/` (one with a folder, one that
- * is a single file), two backlog files of which one lists several entries, two
+ * is a single file), two backlog files of which one lists several entries and
+ * one backlog item file in a grouping folder, two
  * journal entries of which the newer has a handover, two project contracts as
  * files of their own and a `contracts.spec.md` that holds three more as
  * sections, beside the `core/` folder, one mirror node, a project process, a
@@ -62,7 +63,11 @@ export type V08FixtureContents = {
   stages: string[];
   pausedFocuses: string[];
   doneFocuses: string[];
+  /** Finished focuses under `archive/` that are a folder with no focus file, as older ones are. */
+  doneFocusFoldersWithoutFile: string[];
   backlogFiles: string[];
+  /** Backlog items in the v0.8 shape: one `*.item.md` file each, in a folder under `backlog/`. */
+  backlogItems: string[];
   /** Oldest first. The last one has a `## Handover` section. */
   journalEntries: string[];
   /** The contracts outside `core/` that are one file each (`*.contract.md`). */
@@ -396,6 +401,21 @@ function v08Tree(
       ['Finished and archived.'],
     ),
     ...stage('archive/earlier-work', 'E1-only-stage', 'E1 — the only stage', 'done'),
+    // A real archive also holds finished focuses from before focus files: a folder with an index and phase files only.
+    'memory/status/archive/first-prototype/first-prototype.index.md': doc(
+      'index',
+      'First prototype',
+      '../archive.index.md',
+      [],
+      ['- [01-skeleton.phase.md](./01-skeleton.phase.md)'],
+    ),
+    'memory/status/archive/first-prototype/01-skeleton.phase.md': doc(
+      'phase',
+      'Skeleton',
+      './first-prototype.index.md',
+      ['status: Achieved'],
+      ['The first phase of the prototype.'],
+    ),
     'memory/status/backlog/backlog.index.md': doc(
       'index',
       'Backlog',
@@ -404,14 +424,20 @@ function v08Tree(
       [
         '- [parked-work.backlog.md](./parked-work.backlog.md)',
         '- [upgrade-findings.backlog.md](./upgrade-findings.backlog.md)',
+        '- [ideas/](./ideas/ideas.index.md)',
       ],
     ),
+    // A real backlog file opens with a Purpose section and ends with a Journal trail; neither is an entry.
     'memory/status/backlog/parked-work.backlog.md': doc(
       'backlog',
       'Parked work',
       './backlog.index.md',
       [],
       [
+        '## Purpose',
+        '',
+        'Work that is real but not live.',
+        '',
         '## A first parked item',
         '',
         'Text of the first item.',
@@ -419,7 +445,26 @@ function v08Tree(
         '## A second parked item',
         '',
         'Text of the second item.',
+        '',
+        '## Journal trail',
+        '',
+        '- 2026-09-18 — opened',
       ],
+    ),
+    // The v0.8 shape of a backlog item: one `<slug>.item.md` file each, in a grouping folder.
+    'memory/status/backlog/ideas/ideas.index.md': doc(
+      'index',
+      'Ideas',
+      '../backlog.index.md',
+      [],
+      ['- [richer-history.item.md](./richer-history.item.md)'],
+    ),
+    'memory/status/backlog/ideas/richer-history.item.md': doc(
+      'backlog-item',
+      'Richer history in the browser tab',
+      './ideas.index.md',
+      [],
+      ['Keep more of the history and search it.'],
     ),
     'memory/status/backlog/upgrade-findings.backlog.md': doc(
       'backlog',
@@ -747,7 +792,9 @@ function v08Tree(
       'memory/status/side-helper/side-helper.focus.md',
     ],
     doneFocuses: under('memory/status/archive/', '.focus.md'),
+    doneFocusFoldersWithoutFile: ['memory/status/archive/first-prototype'],
     backlogFiles: under('memory/status/backlog/', '.backlog.md'),
+    backlogItems: under('memory/status/backlog/', '.item.md'),
     journalEntries: under('memory/journal/live/', '.md').filter(
       (path) => !path.endsWith('.index.md'),
     ),
@@ -853,7 +900,9 @@ function olderTree(
     stages: [],
     pausedFocuses: [],
     doneFocuses: [],
+    doneFocusFoldersWithoutFile: [],
     backlogFiles: [],
+    backlogItems: [],
     journalEntries: [],
     projectContracts: [],
     contractSpecFiles: [],
