@@ -13,6 +13,8 @@ yarn-error.log*
 out/
 dist/
 dist-test/
+# Test output folders chosen with AI_LORE_CORE_TEST_OUT and AI_LORE_APP_TEST_OUT
+.test-runs/
 
 # Playwright failing-test traces
 test-results/
