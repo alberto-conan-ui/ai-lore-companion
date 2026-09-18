@@ -53,6 +53,54 @@ export type McpHostSession = {
   onReport: (report: McpReport) => void;
 };
 
+/** What a tool of a {@link McpHostToolSession} answers: the text the model
+ *  reads, and whether it is an error. */
+export type McpHostToolResult = { text: string; isError?: boolean };
+
+/** One tool a {@link McpHostToolSession} brings. `shape` is the tool's
+ *  `inputSchema`; `call` receives the validated arguments and a signal that
+ *  aborts when the client goes away, so a call that waits can stop waiting. */
+export type McpHostTool = {
+  name: string;
+  description: string;
+  shape: z.ZodRawShape;
+  call: (
+    args: Record<string, unknown>,
+    extra: { signal: AbortSignal },
+  ) => McpHostToolResult | Promise<McpHostToolResult>;
+};
+
+/** A refusal a {@link McpHostToolSession} gives before the MCP layer sees the
+ *  request. Sent as `{ error }` with the status. */
+export type McpHostRefusal = { status: number; error: string };
+
+/**
+ * A session that brings **its own tools** in place of the helper's report
+ * tools (the 1.0 session server, `main/space/session-server/`). It also brings
+ * its own checks, so that the helper's sessions keep the behaviour they have:
+ *
+ * - `authorize` runs first and replaces the comparison with a stored token.
+ *   The host keeps no token for such a session. A request it refuses is
+ *   answered exactly as a request for a session that does not exist (404,
+ *   `unknown session`), so that a caller without the session's token cannot
+ *   learn which sessions exist.
+ * - `admit` runs second and may refuse the request by its headers (`Host`,
+ *   `Origin`). It receives the bound port.
+ * - Only `POST` is served. The body is read here, refused over `maxBodyBytes`
+ *   or when it has not arrived whole after `bodyTimeoutMs`, and handed to the
+ *   transport parsed.
+ */
+export type McpHostToolSession = {
+  sessionId: string;
+  /** The MCP server name the client sees. */
+  serverName: string;
+  tools: readonly McpHostTool[];
+  admit?: (req: IncomingMessage, port: number) => McpHostRefusal | null;
+  authorize: (req: IncomingMessage) => boolean;
+  maxBodyBytes: number;
+  bodyTimeoutMs: number;
+};
+
 export type McpHost = {
   /** Start listening on an ephemeral `127.0.0.1` port; idempotent — repeated
    *  calls resolve to the same port. Returns the bound port. */
@@ -65,6 +113,9 @@ export type McpHost = {
   /** Register a session so its tool calls can route in. Builds the session's
    *  `McpServer` + transport; resolves once connected. */
   register: (session: McpHostSession) => Promise<void>;
+  /** Register a session that brings its own tools and checks. It shares the
+   *  path space of `register`; `unregister` drops it. */
+  registerTools: (session: McpHostToolSession) => Promise<void>;
   /** Drop a session — later requests for it 404; tears down its server. */
   unregister: (sessionId: string) => Promise<void>;
   /** Stop the server and forget every session. */
@@ -150,16 +201,35 @@ function send(res: ServerResponse, status: number, body: unknown): void {
 async function buildServer(
   session: Registered,
 ): Promise<{ server: McpServer; transport: StreamableHTTPServerTransport }> {
-  const server = new McpServer({ name: 'ai-lore-helper', version: '1.0.0' });
-  for (const tool of REPORT_TOOLS) {
-    server.registerTool(
-      tool.name,
-      { description: tool.description, inputSchema: tool.shape },
-      async (args: Record<string, unknown>) => {
-        session.onReport({ tool: tool.name, payload: normalizePayload(tool.payload(args)) });
-        return { content: [{ type: 'text' as const, text: 'received' }] };
-      },
-    );
+  const server = new McpServer({
+    name: session.kind === 'tools' ? session.session.serverName : 'ai-lore-helper',
+    version: '1.0.0',
+  });
+  if (session.kind === 'tools') {
+    for (const tool of session.session.tools) {
+      server.registerTool(
+        tool.name,
+        { description: tool.description, inputSchema: tool.shape },
+        async (args: Record<string, unknown>, extra: { signal: AbortSignal }) => {
+          const result = await tool.call(args, { signal: extra.signal });
+          return {
+            content: [{ type: 'text' as const, text: result.text }],
+            ...(result.isError ? { isError: true } : {}),
+          };
+        },
+      );
+    }
+  } else {
+    for (const tool of REPORT_TOOLS) {
+      server.registerTool(
+        tool.name,
+        { description: tool.description, inputSchema: tool.shape },
+        async (args: Record<string, unknown>) => {
+          session.onReport({ tool: tool.name, payload: normalizePayload(tool.payload(args)) });
+          return { content: [{ type: 'text' as const, text: 'received' }] };
+        },
+      );
+    }
   }
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: undefined,
@@ -169,10 +239,88 @@ async function buildServer(
   return { server, transport };
 }
 
-type Registered = {
-  token: string;
-  onReport: (report: McpReport) => void;
-};
+type Registered =
+  | { kind: 'report'; token: string; onReport: (report: McpReport) => void }
+  | { kind: 'tools'; session: McpHostToolSession };
+
+type BodyOutcome = 'complete' | 'too-large' | 'too-slow' | 'broken';
+
+/** Read a request body as JSON, stopping at `maxBytes` and after `timeoutMs`. A
+ *  body over the cap is refused with 413 whether or not the request declared its
+ *  length; a body that has not arrived whole in time is refused with 408. */
+async function readCappedJson(
+  req: IncomingMessage,
+  maxBytes: number,
+  timeoutMs: number,
+): Promise<{ ok: true; value: unknown } | { ok: false; refusal: McpHostRefusal }> {
+  const tooLarge = { ok: false as const, refusal: { status: 413, error: 'body too large' } };
+  const declared = Number(req.headers['content-length']);
+  if (Number.isFinite(declared) && declared > maxBytes) return tooLarge;
+  // Listeners, not `for await`: leaving such a loop early destroys the socket the refusal is sent on.
+  const chunks: Buffer[] = [];
+  const outcome = await new Promise<BodyOutcome>((resolve) => {
+    let size = 0;
+    const stop = (result: BodyOutcome): void => {
+      clearTimeout(timer);
+      req.off('data', onData);
+      req.off('end', onEnd);
+      req.off('error', onError);
+      resolve(result);
+    };
+    const onData = (chunk: Buffer): void => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        req.pause();
+        stop('too-large');
+      } else chunks.push(chunk);
+    };
+    const onEnd = (): void => stop('complete');
+    const onError = (): void => stop('broken');
+    const timer = setTimeout(() => {
+      req.pause();
+      stop('too-slow');
+    }, timeoutMs);
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
+  });
+  if (outcome === 'too-large') return tooLarge;
+  if (outcome === 'too-slow')
+    return { ok: false, refusal: { status: 408, error: 'body too slow' } };
+  if (outcome === 'broken') return { ok: false, refusal: { status: 400, error: 'broken request' } };
+  try {
+    return { ok: true, value: JSON.parse(Buffer.concat(chunks).toString('utf8')) };
+  } catch {
+    return { ok: false, refusal: { status: 400, error: 'invalid json' } };
+  }
+}
+
+/** Refuse a body. What the client still sends is discarded first, for a short time and up to a
+ *  bound, so that the client reads the answer instead of a broken connection; nothing of it is
+ *  kept. The connection ends with the answer. */
+function refuseBody(req: IncomingMessage, res: ServerResponse, refusal: McpHostRefusal): void {
+  let answered = false;
+  const answer = (): void => {
+    if (answered) return;
+    answered = true;
+    clearTimeout(timer);
+    req.off('data', onData);
+    res.writeHead(refusal.status, { 'content-type': 'application/json', connection: 'close' });
+    res.end(JSON.stringify({ error: refusal.error }), () => {
+      if (!req.complete) req.destroy();
+    });
+  };
+  let discarded = 0;
+  const onData = (chunk: Buffer): void => {
+    discarded += chunk.length;
+    if (discarded > 8 * 1_048_576) answer();
+  };
+  const timer = setTimeout(answer, 1_000);
+  req.on('data', onData);
+  req.on('end', answer);
+  req.on('error', answer);
+  req.resume();
+}
 
 /** Build an MCP host. Nothing binds until `listen` is called. */
 export function createMcpHost(): McpHost {
@@ -180,6 +328,32 @@ export function createMcpHost(): McpHost {
   let server: Server | null = null;
   let listening: Promise<number> | null = null;
   let boundPort: number | null = null;
+
+  /** A request for a session that brings its own tools: its own checks, in the
+   *  order token, headers, method, body; then the same stateless MCP handling. */
+  async function handleTools(
+    session: McpHostToolSession,
+    req: IncomingMessage,
+    res: ServerResponse,
+  ): Promise<void> {
+    // The same answer as for a session that does not exist: see `McpHostToolSession`.
+    if (!session.authorize(req)) return send(res, 404, { error: 'unknown session' });
+    const refused = session.admit?.(req, boundPort ?? 0) ?? null;
+    if (refused) return send(res, refused.status, { error: refused.error });
+    if (req.method !== 'POST') {
+      res.writeHead(405, { 'content-type': 'application/json', allow: 'POST' });
+      res.end(JSON.stringify({ error: 'method not allowed' }));
+      return;
+    }
+    const body = await readCappedJson(req, session.maxBodyBytes, session.bodyTimeoutMs);
+    if (!body.ok) return refuseBody(req, res, body.refusal);
+    const { server: mcp, transport } = await buildServer({ kind: 'tools', session });
+    res.on('close', () => {
+      void transport.close();
+      void mcp.close();
+    });
+    await transport.handleRequest(req, res, body.value);
+  }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Path is `/mcp/<sessionId>`; the MCP client drives POST/GET/DELETE on it.
@@ -190,6 +364,7 @@ export function createMcpHost(): McpHost {
 
     const registered = sessions.get(sessionId);
     if (!registered) return send(res, 404, { error: 'unknown session' });
+    if (registered.kind === 'tools') return handleTools(registered.session, req, res);
     // Constant set membership is fine — the token is a random UUID and the
     // surface is localhost-only; the check rejects a stray local process, not a
     // timing attacker. (Mirrors the middleman.)
@@ -238,7 +413,18 @@ export function createMcpHost(): McpHost {
     // request arrives — but stay Promise-returning so the interface is stable if
     // a future phase needs async setup (e.g. lifting a shared schema).
     register: async (session) => {
-      sessions.set(session.sessionId, { token: session.token, onReport: session.onReport });
+      sessions.set(session.sessionId, {
+        kind: 'report',
+        token: session.token,
+        onReport: session.onReport,
+      });
+    },
+    registerTools: async (session) => {
+      // One id is one session: a second registration would take the path of the first.
+      if (sessions.has(session.sessionId)) {
+        throw new Error('a session with this id is registered already');
+      }
+      sessions.set(session.sessionId, { kind: 'tools', session });
     },
     unregister: async (sessionId) => {
       sessions.delete(sessionId);

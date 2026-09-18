@@ -171,7 +171,11 @@ function shown(mode: SpaceWindowInitPayload['mode'] | 'cockpit'): SpaceWindowRes
 export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceHostInternals {
   const { log } = bindings;
   const windows = createSpaceWindows();
-  const contexts = createSpaceContextStore({ userDataDir: bindings.userDataDir, log });
+  const contexts = createSpaceContextStore({
+    userDataDir: bindings.userDataDir,
+    log,
+    runner: bindings.runner,
+  });
   /** What detection said about the folder each window shows. */
   const detectedByWindow = new Map<number, FolderKind>();
 

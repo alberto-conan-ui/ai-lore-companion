@@ -154,6 +154,15 @@ describe('NEW_TAB_BUTTONS', () => {
     ai?.onClick(ctx);
     expect(onNewAi).toHaveBeenCalledWith('gemini');
   });
+  test('+ AI with aiUnavailableReason (a Space window) is disabled, titled with the reason, and creates nothing', () => {
+    const ai = NEW_TAB_BUTTONS.find((b) => b.testId === 'new-ai');
+    const onNewAi = vi.fn();
+    const ctx = newCtx({ onNewAi, aiUnavailableReason: 'Started by phase M4.4.' });
+    expect(ai?.disabled?.(ctx)).toBe(true);
+    expect(ai?.title(ctx)).toBe('Started by phase M4.4.');
+    ai?.onClick(ctx);
+    expect(onNewAi).not.toHaveBeenCalled();
+  });
 });
 
 describe('start-with-shortcut dropdowns', () => {

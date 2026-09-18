@@ -48,8 +48,6 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 const PLACEHOLDERS: [SpaceWindowInitPayload, string, string][] = [
-  [{ mode: 'space-welcome', recents: [] }, 'space-welcome', 'M3.6'],
-  [{ mode: 'machine-check' }, 'machine-check', 'M3.6'],
   [{ mode: 'setup', start: { kind: 'new' } }, 'setup', 'M3.7'],
   [
     {
@@ -68,7 +66,6 @@ const PLACEHOLDERS: [SpaceWindowInitPayload, string, string][] = [
     'migration',
     'M6.5',
   ],
-  [{ mode: 'space', space }, 'space', 'M3.8'],
   [{ mode: 'space-files', space }, 'space-files', 'M5.2'],
 ];
 
@@ -103,7 +100,7 @@ test('the parts that are not windows say which phase builds them', () => {
 });
 
 test('the migration screen carries Open in the v0.8 cockpit, which sends no path', async () => {
-  const [init] = PLACEHOLDERS[3] ?? [];
+  const [init] = PLACEHOLDERS.find(([row]) => row.mode === 'migration') ?? [];
   if (!init) throw new Error('the migration row is missing');
   render(<SpaceSurface init={init} />);
   expect(screen.getByTestId('migration-reason').textContent).toContain('can be migrated');
@@ -118,7 +115,7 @@ test('error state: a refused Open in the v0.8 cockpit shows the message', async 
     ok: false,
     error: { kind: 'not-allowed-here', message: 'Not from this screen.' },
   });
-  const [init] = PLACEHOLDERS[3] ?? [];
+  const [init] = PLACEHOLDERS.find(([row]) => row.mode === 'migration') ?? [];
   if (!init) throw new Error('the migration row is missing');
   render(<SpaceSurface init={init} />);
   fireEvent.click(screen.getByTestId('migration-open-in-cockpit'));

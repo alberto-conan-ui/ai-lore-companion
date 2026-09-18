@@ -40,6 +40,11 @@ export type ProjectContext = {
    *  `utilityProcess`; tests use the in-process impl. Lazily built on the first
    *  search; patched by the watcher; invalidated when ignore rules change. */
   search: SearchService;
+  /** Set for a 1.0 window only. When set, the search channels search these
+   *  folders and do not use the `dirs` of their argument, so the renderer of a
+   *  1.0 window cannot point a search outside its folder. Unset for a cockpit
+   *  window, where the channels use the argument as before. */
+  searchDirs?: readonly string[];
   /** Re-read this window's chain and push it if it changed. */
   refreshChain?: () => void;
   /** Teardown for the prompts watcher (chokidar on `<lore>/process/verbs/`). */

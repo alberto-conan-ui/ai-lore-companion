@@ -105,6 +105,8 @@ export const registerTree: RegisterModule = (reg, deps) => {
     if (!ctx) return [];
     const RENDER_CAP = 40;
     const ignore = [...loreHide(ctx.chain, 'payload'), ...ctx.ignoreLists.search];
+    // A 1.0 window searches the folders main gave it, whatever the argument says.
+    const dirs = ctx.searchDirs ? [...ctx.searchDirs] : arg.dirs;
 
     // Include-ignored lists everything under the scope via `rg --files
     // --no-ignore --hidden` (a superset of the index — it includes the
@@ -114,7 +116,7 @@ export const registerTree: RegisterModule = (reg, deps) => {
     // name search still returns its un-ignored hits — ticking the box must
     // never *lose* the matches the default search already showed.
     if (arg.includeIgnored) {
-      const files = await listFiles(arg.dirs, true);
+      const files = await listFiles(dirs, true);
       if (files.length > 0) {
         const entries = files.map((p): [string, string] => [p, basename(p)]);
         const isIgnored = createIgnoreMatcher(ignore);
@@ -130,7 +132,7 @@ export const registerTree: RegisterModule = (reg, deps) => {
     // watcher, and (in production) running in a `utilityProcess` off the main
     // thread. Skip the project's `no-search` / `hidden` ignores plus the Lore
     // folder. Rank-then-slice: the cap is a render limit, not a walk-order cut.
-    return ctx.search.search({ dirs: arg.dirs, ignore, query: arg.query, limit: RENDER_CAP });
+    return ctx.search.search({ dirs, ignore, query: arg.query, limit: RENDER_CAP });
   });
 
   reg.handle(
@@ -142,7 +144,8 @@ export const registerTree: RegisterModule = (reg, deps) => {
       // `hidden` ignores plus the Lore folder. ripgrep also honours .gitignore.
       const ignore = [...loreHide(ctx.chain, 'payload'), ...ctx.ignoreLists.search];
       const result = await searchContent({
-        dirs: arg.dirs,
+        // A 1.0 window searches the folders main gave it, whatever the argument says.
+        dirs: ctx.searchDirs ? [...ctx.searchDirs] : arg.dirs,
         query: arg.query,
         ignore,
         limit: CONTENT_CAP,

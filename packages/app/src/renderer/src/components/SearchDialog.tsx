@@ -18,6 +18,8 @@ type Props = {
   displayPath: (absPath: string) => string;
   /** Close the dialog (Esc, backdrop, ×, or after a pick). */
   onClose: () => void;
+  /** A sentence shown under the scopes. The cockpit passes none. */
+  note?: string;
 };
 
 function dirname(p: string): string {
@@ -46,7 +48,7 @@ function rowValue(row: Row): string {
  * the old dialog hand-rolled. Picking stays ours: Enter or double-click —
  * a single click only selects, as before.
  */
-export function SearchDialog({ scopes, onPick, displayPath, onClose }: Props): JSX.Element {
+export function SearchDialog({ scopes, onPick, displayPath, onClose, note }: Props): JSX.Element {
   const [query, setQuery] = useState('');
   const [nameHits, setNameHits] = useState<FileSearchHit[]>([]);
   const [contentHits, setContentHits] = useState<ContentSearchHit[]>([]);
@@ -222,6 +224,11 @@ export function SearchDialog({ scopes, onPick, displayPath, onClose }: Props): J
             incl. ignored
           </label>
         </div>
+        {note !== undefined ? (
+          <div style={hintStyle} data-testid="search-dialog-note">
+            {note}
+          </div>
+        ) : null}
 
         <Command.List style={resultsStyle}>
           {flat.length === 0 && query.trim() !== '' ? (

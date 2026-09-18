@@ -15,9 +15,9 @@
     "typecheck:node": "tsc -b tsconfig.node.json",
     "clean": "rm -rf out",
     "test": "npm run test:headless && npm run test:component",
-    "test:headless": "rm -rf dist-test && tsc -p tsconfig.test.json && echo '{\"type\":\"module\"}' > dist-test/package.json && node --import ./test/headless/register-electron.mjs --test --enable-source-maps \"dist-test/test/headless/**/*.test.js\"",
+    "test:headless": "OUT=\"${AI_LORE_APP_TEST_OUT:-dist-test}\" && rm -rf \"$OUT\" && tsc -p tsconfig.test.json --outDir \"$OUT\" && echo '{\"type\":\"module\"}' > \"$OUT/package.json\" && node --import ./test/headless/register-electron.mjs --test --enable-source-maps \"$OUT/test/headless/**/*.test.js\"",
     "test:component": "vitest run",
-    "bench:search": "rm -rf dist-test && tsc -p tsconfig.test.json && echo '{\"type\":\"module\"}' > dist-test/package.json && node --import ./test/headless/register-electron.mjs --enable-source-maps dist-test/test/bench/search.bench.js",
+    "bench:search": "OUT=\"${AI_LORE_APP_TEST_OUT:-dist-test}\" && rm -rf \"$OUT\" && tsc -p tsconfig.test.json --outDir \"$OUT\" && echo '{\"type\":\"module\"}' > \"$OUT/package.json\" && node --import ./test/headless/register-electron.mjs --enable-source-maps \"$OUT/test/bench/search.bench.js\"",
     "test:e2e": "npm run build && playwright test",
     "dist": "npm run build && PYTHON=/usr/bin/python3 npm_config_python=/usr/bin/python3 electron-builder",
     "postinstall": "electron-rebuild -f -o node-pty"

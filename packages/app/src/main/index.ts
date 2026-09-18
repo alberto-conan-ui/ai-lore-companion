@@ -1073,6 +1073,8 @@ function attachTerminalContext(window: SpaceWindowLike, folder: string): Project
     ptyService,
     ignoreLists: { drift: [], search: [], hidden: [] },
     search: new WorkerSearchService(),
+    // The search channels of a 1.0 window search this folder only.
+    searchDirs: [folder],
   };
   contexts.set(window.id, ctx);
   return ctx;

@@ -178,3 +178,38 @@ test('searchFiles reflects a watcher add without rebuilding the index', async ()
   h.ctx?.search.add(added);
   assert.deepEqual(await search('gamma'), ['gamma.ts']);
 });
+
+test('a context with searchDirs (a 1.0 window) searches those folders, not the dirs of the argument', async () => {
+  const elsewhere = mkdtempSync(join(tmpdir(), 'cockpit-tree-elsewhere-'));
+  try {
+    writeFileSync(join(elsewhere, 'outside-only.txt'), 'outside-only-content');
+    h.setCtx({
+      ...fakeContext({ root, lorePath: join(root, '.ai-lore-proj') }),
+      searchDirs: [root],
+    });
+    const byName = (await h.invoke('searchFiles', { query: 'outside', dirs: [elsewhere] })) as {
+      name: string;
+    }[];
+    assert.deepEqual(byName, []);
+    const inside = (await h.invoke('searchFiles', { query: 'alpha', dirs: [elsewhere] })) as {
+      name: string;
+    }[];
+    assert.deepEqual(
+      inside.map((hit) => hit.name),
+      ['alpha.txt'],
+    );
+    const ignoredToo = (await h.invoke('searchFiles', {
+      query: 'outside',
+      dirs: [elsewhere],
+      includeIgnored: true,
+    })) as { name: string }[];
+    assert.deepEqual(ignoredToo, []);
+    const content = (await h.invoke('searchContent', {
+      query: 'outside-only-content',
+      dirs: [elsewhere],
+    })) as { hits: unknown[] };
+    assert.deepEqual(content.hits, []);
+  } finally {
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});

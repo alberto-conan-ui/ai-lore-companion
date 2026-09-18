@@ -16,6 +16,7 @@
  */
 
 import {
+  type CommandRunner,
   type DeskPaths,
   type SpaceManifest,
   type SpacePaths,
@@ -62,6 +63,8 @@ export type SpaceContext = {
   /** The ids of the windows that show this Space. */
   readonly windowIds: ReadonlySet<number>;
   readonly log: SpaceLog;
+  /** The app's command runner (`deps.space.runner`), for a service that runs `git`. */
+  readonly runner: CommandRunner;
   /** The service of `definition` for this Space, built now when it was not yet. */
   service<T>(definition: SpaceServiceDefinition<T>): T;
 };
@@ -91,6 +94,7 @@ type Held = {
 export function createSpaceContextStore(options: {
   userDataDir: () => string;
   log: SpaceLog;
+  runner: CommandRunner;
 }): SpaceContextStore {
   const { log } = options;
   const byKey = new Map<string, Held>();
@@ -126,6 +130,7 @@ export function createSpaceContextStore(options: {
       ptyService: null,
       windowIds,
       log,
+      runner: options.runner,
       service<T>(definition: SpaceServiceDefinition<T>): T {
         const existing = services.find((entry) => entry.definition === definition);
         if (existing) return existing.service as T;

@@ -58,6 +58,10 @@ export type NewTabContext = {
   lastEngineId: string | null;
   onNewShell: () => void;
   onNewAi: (engineId: string) => void;
+  /** When set, `+ AI` is disabled and this sentence is its tooltip. The cockpit
+   *  never sets it. A Space window sets it until phase M4.4 starts AI sessions
+   *  with the write-guard. */
+  aiUnavailableReason?: string;
   onNewBrowser: () => void;
   /** Shortcuts offered in the `+ shell ▾` / `+ web ▾` start-with-shortcut
    *  dropdowns — this project's own shortcuts plus the global url/terminal
@@ -340,11 +344,16 @@ const COMPANION_TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
       testId: 'new-ai',
       order: 0,
       title: (ctx) =>
-        ctx.engines.length === 0
-          ? 'Add an engine in Settings → Engines to enable AI tabs'
-          : 'New AI session',
-      disabled: (ctx) => ctx.engines.length === 0,
-      onClick: (ctx) => ctx.onNewAi(defaultEngineId(ctx.engines, ctx.lastEngineId)),
+        ctx.aiUnavailableReason !== undefined
+          ? ctx.aiUnavailableReason
+          : ctx.engines.length === 0
+            ? 'Add an engine in Settings → Engines to enable AI tabs'
+            : 'New AI session',
+      disabled: (ctx) => ctx.aiUnavailableReason !== undefined || ctx.engines.length === 0,
+      onClick: (ctx) => {
+        if (ctx.aiUnavailableReason !== undefined) return;
+        ctx.onNewAi(defaultEngineId(ctx.engines, ctx.lastEngineId));
+      },
     },
     // An AI tab is already inert until the user clicks Start (it never
     // auto-spawns), so a restored one needs no dormant placeholder — its own
