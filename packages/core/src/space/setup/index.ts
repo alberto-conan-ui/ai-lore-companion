@@ -1,3 +1,88 @@
-/** Creating a Space, scaffolding, adopting a repository. Empty until stage M3, whose first phase for this folder owns it. */
+/**
+ * Setup (phase M3.3): creating a Space, the scaffold, adopting a plain
+ * repository and opening a Space by its GitHub address, as lists of steps for
+ * the step runner, each with a dry run.
+ */
 
-export {};
+export type {
+  AdoptRepositoryInput,
+  CreateSpaceInput,
+  OpenSpaceByAddressInput,
+  SetupDeps,
+  SetupFailure,
+  SetupFlow,
+  SetupInputProblem,
+  SetupPlan,
+  SetupPrecheckFailureKind,
+  SetupReport,
+  SetupRepositoryInput,
+  SetupRepositoryState,
+  SetupRunOptions,
+  SetupTargetState,
+} from './types.js';
+export {
+  type GitHubAddress,
+  OWNER_NAME_MAX,
+  RESERVED_PAYLOAD_NAMES,
+  SPACE_DESCRIPTION_MAX,
+  SPACE_NAME_MAX,
+  cloneAddressProblem,
+  folderProblem,
+  ownerProblem,
+  parseGitHubAddress,
+  redactCredentials,
+  repositoryNameProblem,
+  repositoryProblems,
+  spaceNameProblem,
+  validateCreateSpaceInput,
+} from './names.js';
+export {
+  GITIGNORE_TEMPLATE,
+  type ScaffoldFailureKind,
+  type ScaffoldInput,
+  type ScaffoldManifestValues,
+  ensureDeskFolders,
+  hasDeskFolders,
+  inspectSetupTarget,
+  isScaffolded,
+  listTemplateFiles,
+  scaffoldSpace,
+} from './scaffold.js';
+export {
+  type LoreWriteFailureKind,
+  MIRROR_SKELETON_DEPTH,
+  MIRROR_SKELETON_MAX_LINES,
+  REPOSITORY_SKELETON_GENERATOR,
+  type RepositoryMirrorInput,
+  SKELETON_TIMEOUT_MS,
+  type SpaceCorpusEntryInput,
+  addIndexLine,
+  corpusEntryFileName,
+  generateRepositorySkeleton,
+  hasRepositoryMirror,
+  hasSpaceCorpusEntry,
+  indexListsFile,
+  templateCorpusEntryNamed,
+  writeRepositoryMirror,
+  writeSpaceCorpusEntry,
+} from './lore-writes.js';
+export {
+  type CreateSpaceContext,
+  FIRST_COMMIT_MESSAGE,
+  FOREIGN_MATCH_KINDS,
+  type OpenSpaceContext,
+  SETUP_LABELS,
+  SETUP_VIEWS,
+  type SetupContext,
+  gitHubStepError,
+} from './steps.js';
+export {
+  adoptRepository,
+  createSpace,
+  createSpaceSteps,
+  openSpaceByAddress,
+  openSpaceSteps,
+  planAdoptRepository,
+  planCreateSpace,
+  planOpenSpaceByAddress,
+} from './flows.js';

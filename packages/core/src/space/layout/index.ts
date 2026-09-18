@@ -6,6 +6,7 @@ export {
   type DeskFileName,
   type DeskPaths,
   deskFile,
+  deskKeyPath,
   deskPaths,
   spaceKey,
   spacesDir,

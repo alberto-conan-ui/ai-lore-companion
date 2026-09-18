@@ -1,3 +1,14 @@
-/** The step runner used by setup and migration. Empty until stage M3, whose first phase for this folder owns it. */
+/** The step runner used by setup and migration (phase M3.3). */
 
-export {};
+export type {
+  PlanLine,
+  PlannedStep,
+  RunStepsOptions,
+  Step,
+  StepError,
+  StepProgress,
+  StepState,
+  StepsFailure,
+  StepsReport,
+} from './types.js';
+export { STEPS_STOPPED, STEP_THREW, planSteps, runSteps } from './run-steps.js';
