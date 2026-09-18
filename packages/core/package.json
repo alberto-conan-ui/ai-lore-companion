@@ -11,11 +11,15 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/space/testing/index.d.ts",
+      "default": "./dist/space/testing/index.js"
     }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "rm -rf dist-test && tsc -p tsconfig.test.json && node --test --enable-source-maps \"dist-test/test/**/*.test.js\"",
+    "test": "OUT=\"${AI_LORE_CORE_TEST_OUT:-dist-test}\" && rm -rf \"$OUT\" && tsc -p tsconfig.test.json --outDir \"$OUT\" && node --test --enable-source-maps \"$OUT/test/**/*.test.js\"",
     "clean": "rm -rf dist dist-test"
   },
   "dependencies": {
