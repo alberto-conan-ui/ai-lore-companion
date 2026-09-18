@@ -141,14 +141,19 @@ export async function listBaselinePoints(
   const markPoints: ReviewedMarkPoint[] = marks.value
     .slice(-BASELINE_RECORD_LIMIT)
     .map((mark) => ({ kind: 'reviewed-mark', commit: mark.commit, at: mark.markedAt }));
+  const engines = new Map(sessions.value.map((session) => [session.id, session.engine]));
   const closePoints: SessionClosePoint[] = closes.value
     .slice(-BASELINE_RECORD_LIMIT)
-    .map((close) => ({
-      kind: 'session-close',
-      commit: close.commit,
-      at: close.at,
-      sessionId: close.sessionId,
-    }));
+    .map((close) => {
+      const engine = engines.get(close.sessionId);
+      return {
+        kind: 'session-close',
+        commit: close.commit,
+        at: close.at,
+        sessionId: close.sessionId,
+        ...(engine === undefined ? {} : { engine }),
+      };
+    });
 
   let commits: CommitPoint[] = [];
   let commitsTruncated = false;

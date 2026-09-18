@@ -9,7 +9,8 @@
  *
  * - Baseline `HEAD`: `git status --porcelain -z -uall -- <subPath>`.
  * - Baseline a commit: `git diff --name-status -z <commit> -- <subPath>` for
- *   tracked files, plus the untracked files under the sub-path. The untracked
+ *   tracked files, plus the untracked files under the sub-path, taken from the
+ *   same `git status` that tells which paths are not committed. The untracked
  *   files are listed under any baseline, because they are in the working tree
  *   whatever the baseline knew.
  *
@@ -236,11 +237,13 @@ export async function readChangesIn(
   let baselineCommit: string | null = head;
   let baselineIsAncestor: boolean | null = head === null ? null : true;
   let found: ChangeEntry[];
+  /** The paths, relative to the root, that differ between `HEAD` and the working tree; `null` when every entry does. */
+  let notCommitted: Set<string> | null = null;
+  const statusArgs = ['status', '--porcelain', '-z', '-uall', '--find-renames', ...pathspec];
 
   if (baseline === HEAD_BASELINE) {
-    const args = ['status', '--porcelain', '-z', '-uall', '--find-renames', ...pathspec];
-    const status = await read(args);
-    if (!runSucceeded(status)) return gitFailed(args, status);
+    const status = await read(statusArgs);
+    if (!runSucceeded(status)) return gitFailed(statusArgs, status);
     found = parseStatusZ(status.stdout);
   } else {
     const verifyArgs = ['rev-parse', '--verify', '--quiet', `${baseline}^{commit}`];
@@ -264,31 +267,38 @@ export async function readChangesIn(
     }
 
     const diffArgs = ['diff', '--name-status', '-z', '--find-renames', baselineCommit, ...pathspec];
-    const otherArgs = [
-      'ls-files',
-      '--others',
-      '--exclude-standard',
-      '--full-name',
-      '-z',
-      ...pathspec,
-    ];
-    const [diff, others] = await Promise.all([read(diffArgs), read(otherArgs)]);
+    // One `git status` gives both the untracked files (its `??` entries, the
+    // same set as `ls-files --others --exclude-standard`) and the paths not
+    // committed, so the working tree is walked once per read.
+    const [diff, status] = await Promise.all([read(diffArgs), read(statusArgs)]);
     if (!runSucceeded(diff)) return gitFailed(diffArgs, diff);
-    if (!runSucceeded(others)) return gitFailed(otherArgs, others);
+    if (!runSucceeded(status)) return gitFailed(statusArgs, status);
+    const working = parseStatusZ(status.stdout);
     found = parseDiffNameStatusZ(diff.stdout);
-    for (const path of others.stdout.split('\0')) {
-      if (path !== '') found.push({ code: '??', path });
+    for (const entry of working) {
+      if (entry.code === '??') found.push({ code: '??', path: entry.path });
+    }
+    notCommitted = new Set();
+    for (const entry of entriesRelativeTo(sub, working)) {
+      notCommitted.add(entry.path);
+      // A rename not committed leaves its old name not committed too, whether
+      // the diff against the baseline pairs the two names or not.
+      if (entry.oldPath !== undefined) notCommitted.add(entry.oldPath);
     }
   }
 
   const entries = entriesRelativeTo(sub, found);
+  const listed = entries.slice(0, limit);
   return ok({
     baseline,
     baselineCommit,
     baselineIsAncestor,
     head,
     branch: branch.value,
-    entries: entries.slice(0, limit),
+    entries: listed,
+    uncommitted: listed
+      .filter((entry) => notCommitted === null || notCommitted.has(entry.path))
+      .map((entry) => entry.path),
     total: entries.length,
     truncated: entries.length > limit,
     limit,

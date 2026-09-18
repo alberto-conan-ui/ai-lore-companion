@@ -173,6 +173,7 @@ test('the four kinds come back in one timeline, newest first, with commits group
     commit: sessionCommit,
     at: '2026-01-08T12:00:00.000Z',
     sessionId: 's1',
+    engine: 'claude-code',
   });
   assert.deepEqual(grouped, {
     kind: 'commit',
@@ -582,5 +583,6 @@ test('the commits a session leaves are read from the roots it holds and become s
     commit: alpha.headCommit,
     at: '2026-01-10T18:00:00.000Z',
     sessionId: 's1',
+    engine: 'claude-code',
   });
 });

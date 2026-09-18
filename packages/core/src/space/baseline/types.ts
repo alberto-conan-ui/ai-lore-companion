@@ -37,12 +37,17 @@ export type MergedPullRequestPoint = {
   commitMissing?: true;
 };
 
-/** A session close: the commit a session left on the root when it left Writing, and when. */
+/**
+ * A session close: the commit a session left on the root when it left Writing,
+ * and when. `engine` is the engine of that session as the desk's session record
+ * holds it; it is absent when the desk has no record of the session.
+ */
 export type SessionClosePoint = {
   kind: 'session-close';
   commit: string;
   at: string;
   sessionId: string;
+  engine?: string;
   commitMissing?: true;
 };
 

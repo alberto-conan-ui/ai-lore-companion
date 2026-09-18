@@ -186,6 +186,11 @@ test('Reviews gate: against a reviewed mark the changes are the committed, the r
   assert.equal(sinceMark.baseline, repository.baseCommit);
   assert.equal(sinceMark.baselineCommit, repository.baseCommit);
   assert.equal(sinceMark.baselineIsAncestor, true);
+  assert.deepEqual([...sinceMark.uncommitted].sort(), [
+    'docs/delete-uncommitted.md',
+    'docs/edit-uncommitted.md',
+    'notes/untracked.md',
+  ]);
   assert.equal(sinceMark.head, repository.headCommit);
   assert.deepEqual(sinceMark.branch, { branch: 'main', detached: false });
   assert.deepEqual([sinceMark.total, sinceMark.truncated], [7, false]);

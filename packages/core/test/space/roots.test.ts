@@ -163,3 +163,38 @@ test('readChangesIn reports git output beyond the runner limit as change-set-too
   assert.equal(missing.ok, false);
   if (!missing.ok) assert.equal(missing.error.kind, 'command-not-found');
 });
+
+test('readChangesIn against a commit walks the working tree with one git status, which also names the untracked files and both names of a rename not committed', async (t) => {
+  const dir = useTempDir(t);
+  const head = 'a'.repeat(40);
+  const mark = 'b'.repeat(40);
+  const runner = createScriptedRunner([
+    { bin: 'git', args: (args) => args.includes('--show-toplevel'), reply: { stdout: `${dir}\n` } },
+    { bin: 'git', args: (args) => args.includes('--git-dir'), reply: { stdout: '.git\n' } },
+    { bin: 'git', args: (args) => args.includes('symbolic-ref'), reply: { stdout: 'main\n' } },
+    { bin: 'git', args: (args) => args.includes('HEAD^{commit}'), reply: { stdout: head } },
+    { bin: 'git', args: (args) => args.includes(`${mark}^{commit}`), reply: { stdout: mark } },
+    { bin: 'git', args: (args) => args.includes('merge-base'), reply: { code: 0 } },
+    {
+      bin: 'git',
+      args: (args) => args.includes('diff'),
+      // The diff does not pair the rename: git's similarity differs from the index's.
+      reply: { stdout: 'M\0lore/committed.md\0D\0lore/old.md\0A\0lore/new.md\0' },
+    },
+    {
+      bin: 'git',
+      args: (args) => args.includes('status'),
+      reply: { stdout: 'R  lore/new.md\0lore/old.md\0?? lore/untracked.md\0?? outside.md\0' },
+    },
+  ]);
+  const read = await readChangesIn(runner, dir, mark, 'lore');
+  assert.equal(read.ok, true);
+  if (!read.ok) return;
+  assert.deepEqual(
+    read.value.entries.map((entry) => entry.path),
+    ['committed.md', 'old.md', 'new.md', 'untracked.md'],
+  );
+  assert.deepEqual([...read.value.uncommitted].sort(), ['new.md', 'old.md', 'untracked.md']);
+  assert.equal(runner.calls.filter((call) => call.args.includes('status')).length, 1);
+  assert.equal(runner.calls.filter((call) => call.args.includes('ls-files')).length, 0);
+});

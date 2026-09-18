@@ -109,6 +109,13 @@ export type RootChanges = {
   branch: GitBranch;
   /** The changed files, tracked changes first and untracked files last, at most `limit` of them. */
   entries: ChangeEntry[];
+  /**
+   * The paths of `entries` that also differ between `HEAD` and the working
+   * tree, untracked files included: the changes not committed. They stay
+   * listed after a mark. A path of `entries` not named here was committed
+   * since the baseline. Against `HEAD` every path of `entries` is named.
+   */
+  uncommitted: string[];
   /** How many changed files there are, including those left out of `entries`. */
   total: number;
   /** Whether `entries` was cut at `limit`. */
