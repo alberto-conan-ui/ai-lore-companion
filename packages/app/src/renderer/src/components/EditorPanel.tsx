@@ -1,5 +1,5 @@
 import { type JSX, useEffect, useRef, useState } from 'react';
-import type { FileHistoryEntry, SavePointInfo } from '../../shared/ipc.js';
+import type { FileHistoryEntry, SavePointInfo } from '../../../shared/ipc.js';
 import { type EditorDoc, useCockpitStore } from '../store.js';
 import { onEffectiveTheme } from '../theme.js';
 import { CommitRow } from './CommitRow.js';

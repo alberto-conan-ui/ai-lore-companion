@@ -39,6 +39,19 @@ test('the guard refuses gh unless live GitHub is allowed', (t) => {
   assert.equal(allowed, null);
 });
 
+test('a runner built with allowLiveGitHub may start gh with no variable in the environment, but not in test mode', (t) => {
+  const dir = useTempDir(t);
+  const command = { bin: 'gh', args: ['auth', 'status'], cwd: dir };
+  assert.equal(checkLiveSystemGuard(command, { env: {}, allowLiveGitHub: true }), null);
+  assert.equal(
+    checkLiveSystemGuard(command, { env: {}, allowLiveGitHub: false })?.kind,
+    'live-system-refused',
+  );
+  const inTestMode = checkLiveSystemGuard(command, testContext(dir, { allowLiveGitHub: true }));
+  assert.equal(inTestMode?.kind, 'live-system-refused');
+  assert.match(inTestMode?.message ?? '', /test mode/);
+});
+
 test('the guard refuses gh in test mode as well, and tests never allow it', (t) => {
   const dir = useTempDir(t);
   assert.notEqual(checkLiveSystemGuard({ bin: 'gh', args: [], cwd: dir }, testContext(dir)), null);

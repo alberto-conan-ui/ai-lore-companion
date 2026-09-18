@@ -12,6 +12,7 @@ import {
   SETTINGS_REGISTRY,
   attachChangesTracker,
   attachWatcher,
+  createGitPort,
   deriveIgnoreLists,
   isChainError,
   listSavePoints,
@@ -62,6 +63,11 @@ import { addRecent, clearRecents, loadRecents, removeRecent } from './recents.js
 import { type SearchService, WorkerSearchService } from './search/service.js';
 import { loadGlobalSettings, loadProjectSettings } from './settings.js';
 import { withIcons } from './shortcuts.js';
+import { type SpaceHost, createSpaceHost } from './space/host.js';
+import { createAppCommandRunner } from './space/live-github.js';
+import { createSpaceLog } from './space/log.js';
+import { isSpaceRoutingOn } from './space/routing.js';
+import type { SpaceWindowLike } from './space/windows.js';
 import { loadWindowBounds, saveWindowBounds } from './window-state.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -81,6 +87,16 @@ const MIN_CORE_VERSION = '0.5.1';
  * users. The e2e fixture's `launchApp` sets it.
  */
 const E2E_BYPASS_GUARDS = process.env.COCKPIT_E2E === '1';
+
+/**
+ * AI-Lore 1.0 — routing by detection. With `AI_LORE_SPACE_ROUTING=1` every
+ * folder goes through `detectFolder` and opens in a 1.0 window (the Space
+ * window, the migration screen, the not-a-Space screen), and the welcome
+ * window is the 1.0 welcome screen. Without it — the default until the switch
+ * of this project — every folder is routed exactly as before, through
+ * `checkProjectCompatibility`. Read once at startup.
+ */
+const SPACE_ROUTING = isSpaceRoutingOn();
 
 /**
  * Decide whether a folder should open as a cockpit. Returns `null` when the
@@ -368,6 +384,9 @@ function createWindow(): BrowserWindow {
     if (boundsSaveTimer) clearTimeout(boundsSaveTimer);
     boundsSaveTimer = setTimeout(() => {
       if (win.isDestroyed() || win.isMinimized()) return;
+      // A 1.0 window keeps nothing in the v0.8 project-data files; what 1.0
+      // persists goes under `<userData>/spaces/`.
+      if (spaceHost.owns(win.id)) return;
       const root = contexts.get(win.id)?.root;
       if (root && layoutRestoreOn(root)) saveWindowBounds(userDataDir, root, win.getBounds());
     }, 400);
@@ -376,8 +395,11 @@ function createWindow(): BrowserWindow {
   win.on('move', saveBounds);
 
   win.once('ready-to-show', () => win.show());
+  const winId = win.id;
   win.once('closed', () => {
-    void teardownContext(win.id);
+    void teardownContext(winId);
+    // A 1.0 window also drops its record and releases its Space context.
+    void spaceHost.windowClosed(winId);
   });
   // The window title is owned by main — the project name, set per window in
   // `attachProjectContext`. The renderer's <title> must not override it.
@@ -707,6 +729,11 @@ function loadProjectIntoWindow(win: BrowserWindow, root: string): void {
  * folder comes back as a cockpit, a still-invalid one stays altered.
  */
 async function reloadWindow(win: BrowserWindow): Promise<void> {
+  // A 1.0 window runs detection again and shows what its folder now is.
+  if (spaceHost.owns(win.id)) {
+    await spaceHost.reload(win);
+    return;
+  }
   const ctx = contexts.get(win.id);
   if (!ctx) return;
   const root = ctx.root;
@@ -744,8 +771,28 @@ function windowForRoot(root: string): BrowserWindow | null {
  * window is brought to the foreground (no duplicate). Otherwise a welcome
  * window — no context — is replaced in place; a project window, or a menu
  * action with no focused window, opens a new one.
+ *
+ * With detection routing on (`AI_LORE_SPACE_ROUTING=1`) the request goes to the
+ * Space host, which runs `detectFolder` and opens a 1.0 window. Without it the
+ * request is routed as before, by {@link showProjectV08}.
  */
 function showProject(win: BrowserWindow | undefined, root: string): void {
+  if (SPACE_ROUTING) {
+    void spaceHost.openFolder(win, root).catch((caught: unknown) => {
+      spaceLog.error('open-folder-failed', {
+        folder: root,
+        message: caught instanceof Error ? caught.message : String(caught),
+      });
+    });
+    return;
+  }
+  showProjectV08(win, root);
+}
+
+/** Today's routing, unchanged: no detection, `checkProjectCompatibility` decides
+ *  between the cockpit and the altered window. Also the path of the migration
+ *  screen's "Open in the v0.8 cockpit". */
+function showProjectV08(win: BrowserWindow | undefined, root: string): void {
   const existing = windowForRoot(root);
   if (existing) {
     if (existing.isMinimized()) existing.restore();
@@ -973,6 +1020,8 @@ async function teardownContext(winId: number): Promise<void> {
 /** Tear down every remaining context — called on quit. */
 async function teardownAll(): Promise<void> {
   await Promise.all([...contexts.keys()].map((id) => teardownContext(id)));
+  // AI-Lore 1.0 — dispose every open Space's services (watchers, timers).
+  await spaceHost.dispose();
   // Close the shared helper middleman server too — per-window teardown above
   // killed each helper PTY, but the singleton HTTP ingress is app-wide.
   await disposeAllHelpers();
@@ -980,12 +1029,101 @@ async function teardownAll(): Promise<void> {
 
 /** Open the window this launch (or dock re-activation) calls for. */
 function openLaunchWindow(): void {
+  if (SPACE_ROUTING) {
+    void spaceHost.launch(launchRoot);
+    return;
+  }
   if (launchRoot) {
     openProjectWindow(launchRoot);
   } else {
     openWelcomeWindow();
   }
 }
+
+/** The Electron window behind a 1.0 window handle, unless it has been destroyed. */
+function browserWindowOf(window: SpaceWindowLike | undefined): BrowserWindow | undefined {
+  if (!window) return undefined;
+  const win = BrowserWindow.fromId(window.id);
+  return win && !win.isDestroyed() ? win : undefined;
+}
+
+/**
+ * Give a 1.0 window a terminal rooted at `folder`. The window gets the same
+ * reduced context an altered window has — no chain, no watcher, no trackers,
+ * a PTY service — so the existing terminal, browser-tab and settings channels
+ * serve it unchanged, the close guard sees its running tasks, and
+ * `teardownContext` kills its PTYs when it closes.
+ */
+function attachTerminalContext(window: SpaceWindowLike, folder: string): ProjectContext {
+  // `sendToWin` drops a message for a window that has been destroyed.
+  const win = BrowserWindow.fromId(window.id);
+  const send = (channel: string, payload: unknown): void => {
+    if (win) sendToWin(win, channel, payload);
+  };
+  const ptyService = createPtyService({
+    cwd: folder,
+    onData: (id, data) => send(CHANNELS.onTerminalData, { id, data }),
+    onExit: (id) => send(CHANNELS.onTerminalExit, { id }),
+    onStatus: (id, status, command) => send(CHANNELS.onTerminalStatus, { id, status, command }),
+  });
+  const ctx: ProjectContext = {
+    root: folder,
+    chain: { error: 'This window is an AI-Lore 1.0 window; it reads no v0.8 tracker chain.' },
+    wiring: null,
+    ptyService,
+    ignoreLists: { drift: [], search: [], hidden: [] },
+    search: new WorkerSearchService(),
+  };
+  contexts.set(window.id, ctx);
+  return ctx;
+}
+
+/** The log of the 1.0 code: JSON lines under `<userData>/logs/`, and the console. */
+const spaceLog = createSpaceLog({ logsDir: () => join(userDataDir, 'logs') });
+
+/**
+ * The command runner of the 1.0 code (`git`, `gh`). Whether it may start `gh`
+ * is an option of the runner, not a variable in `process.env`, so no terminal
+ * the app starts inherits the permission; an end-to-end or test run may not
+ * reach live GitHub. Built before any terminal exists.
+ */
+const appCommands = createAppCommandRunner(process.env);
+
+/**
+ * The Space host — everything AI-Lore 1.0 adds to main: routing by detection,
+ * the 1.0 windows, one Space context per open Space. It gets its windows from
+ * {@link createWindow}, so a 1.0 window has the same `webPreferences` (preload,
+ * sandbox, context isolation, no Node integration), close guard and title rule
+ * as every other window.
+ */
+const spaceHost: SpaceHost = createSpaceHost({
+  spaceRouting: SPACE_ROUTING,
+  userDataDir: () => userDataDir,
+  runner: appCommands.runner,
+  git: createGitPort(appCommands.runner),
+  log: spaceLog,
+  createWindow,
+  pickFolder: async (window) => {
+    const opts: OpenDialogOptions = {
+      title: 'Open a folder',
+      properties: ['openDirectory', 'createDirectory'],
+    };
+    const win = browserWindowOf(window);
+    const result = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+    const [folder] = result.filePaths;
+    return result.canceled || !folder ? null : folder;
+  },
+  attachTerminal: (window, folder) => attachTerminalContext(window, folder).ptyService,
+  detachWindow: teardownContext,
+  focusCockpitWindowFor: (folder) => {
+    const existing = windowForRoot(folder);
+    if (!existing) return false;
+    if (existing.isMinimized()) existing.restore();
+    existing.focus();
+    return true;
+  },
+  openV08: (window, folder) => showProjectV08(browserWindowOf(window), folder),
+});
 
 /**
  * The shared services the `main/ipc/*` register modules need from this host —
@@ -1009,10 +1147,14 @@ const ipcDeps: Deps = {
     rebuildMenu();
     return next;
   },
+  space: spaceHost,
 };
 
 app.whenReady().then(() => {
   userDataDir = app.getPath('userData');
+  if (SPACE_ROUTING) {
+    spaceLog.info('app-started', { spaceRouting: true, liveGitHub: appCommands.liveGitHub });
+  }
   // v0.6 Phase A — bring the Apps catalog to the current schema version
   // before any window reads settings. v1 folds in legacy folder shortcuts;
   // v2 cleans labels + dedups. Idempotent + version-gated.

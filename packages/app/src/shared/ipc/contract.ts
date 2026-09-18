@@ -78,6 +78,15 @@ import type {
   TreeUpdatePayload,
   WindowInitPayload,
 } from '../ipc.js';
+import { SPACE_DIALOGS_CONTRACT } from './space/dialogs.contract.js';
+import { SPACE_FILES_CONTRACT } from './space/files.contract.js';
+import { SPACE_MACHINE_CONTRACT } from './space/machine.contract.js';
+import { SPACE_MIGRATION_CONTRACT } from './space/migration.contract.js';
+import { SPACE_PROJECT_CONTRACT } from './space/project.contract.js';
+import { SPACE_ROOTS_CONTRACT } from './space/roots.contract.js';
+import { SPACE_SESSIONS_CONTRACT } from './space/sessions.contract.js';
+import { SPACE_SETUP_CONTRACT } from './space/setup.contract.js';
+import { SPACE_WINDOWS_CONTRACT } from './space/windows.contract.js';
 
 export type Unsubscribe = () => void;
 
@@ -293,6 +302,19 @@ export const CONTRACT = {
    *  the dashboard board and the curation results arrive here as typed data,
    *  not scraped from `answer` text. */
   onHelperReport: push<HelperReportPayload>('helper:report'),
+
+  // ── AI-Lore 1.0 (Spaces) ──────────────────────────────────────────────────
+  // One fragment per feature under `./space/`, spread here once. A 1.0 phase
+  // adds a channel to its own fragment and does not edit this file.
+  ...SPACE_WINDOWS_CONTRACT,
+  ...SPACE_SETUP_CONTRACT,
+  ...SPACE_MACHINE_CONTRACT,
+  ...SPACE_SESSIONS_CONTRACT,
+  ...SPACE_DIALOGS_CONTRACT,
+  ...SPACE_ROOTS_CONTRACT,
+  ...SPACE_FILES_CONTRACT,
+  ...SPACE_MIGRATION_CONTRACT,
+  ...SPACE_PROJECT_CONTRACT,
 } as const;
 
 type Contract = typeof CONTRACT;

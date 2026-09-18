@@ -1,0 +1,21 @@
+{
+  "note": "Type errors of the renderer project that existed in v0.8 components on 2026-09-18, when the app's typecheck was found to check no file. scripts/typecheck.ts fails when an error is not listed here or occurs more often than listed. Entries are only removed, never added.",
+  "project": "tsconfig.web.json",
+  "total": 34,
+  "errors": {
+    "src/renderer/src/App.tsx: TS18048: 'tab' is possibly 'undefined'.": 20,
+    "src/renderer/src/App.tsx: TS2322: Type '{ baseTitle: string; title: string; id?: string | undefined; kind?: TabKind | undefined; manualTitle?: boolean; status?: TerminalForegroundStatus; engine?": 1,
+    "src/renderer/src/App.tsx: TS2322: Type '{ engine: string; baseTitle: string; title: string; id?: string | undefined; kind?: TabKind | undefined; manualTitle?: boolean; status?: TerminalForegroun": 1,
+    "src/renderer/src/App.tsx: TS2322: Type '{ status: TerminalForegroundStatus; title: string; id?: string | undefined; kind?: TabKind | undefined; baseTitle?: string; manualTitle?: boolean; engine?": 1,
+    "src/renderer/src/App.tsx: TS2339: Property 'lastSession' does not exist on type 'WorkspaceTab | undefined'.": 1,
+    "src/renderer/src/App.tsx: TS2532: Object is possibly 'undefined'.": 1,
+    "src/renderer/src/components/AssistantDashboard.tsx: TS2345: Argument of type 'Map<string | undefined, string>' is not assignable to parameter of type 'Map<string, string>'.": 1,
+    "src/renderer/src/components/DockWorkspace.tsx: TS2322: Type 'MutableRefObject<HTMLElement | null>' is not assignable to type 'LegacyRef<HTMLInputElement> | undefined'.": 1,
+    "src/renderer/src/components/SearchDialog.tsx: TS2339: Property 'line' does not exist on type 'FileSearchHit | ContentSearchHit'.": 1,
+    "src/renderer/src/components/SearchDialog.tsx: TS2339: Property 'snippet' does not exist on type 'FileSearchHit | ContentSearchHit'.": 1,
+    "src/renderer/src/components/SettingsSheet.tsx: TS2322: Type 'SettingValue | undefined' is not assignable to type 'SettingValue'.": 2,
+    "src/renderer/src/components/TabbedPanel.tsx: TS2322: Type 'number | undefined' is not assignable to type 'number'.": 1,
+    "src/renderer/src/store.ts: TS2322: Type '{ mode: EditorMode; oldPath: string | undefined; path?: string | undefined; scope?: ChangeScope | undefined; name?: string | undefined; diffBaseline?: str": 1,
+    "src/renderer/src/store.ts: TS2532: Object is possibly 'undefined'.": 1
+  }
+}

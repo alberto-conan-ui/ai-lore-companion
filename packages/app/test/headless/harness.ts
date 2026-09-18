@@ -23,6 +23,7 @@ import type { Deps, ProjectContext, RegisterModule, Wiring } from '../../src/mai
 import type { PtyService } from '../../src/main/pty.js';
 import { InProcessSearchService } from '../../src/main/search/service.js';
 import type { SettingsSnapshot, Shortcut } from '../../src/shared/ipc.js';
+import { fakeSpaceHost } from './space/space-harness.js';
 
 /** A recording stub — every call's argument tuple is pushed to `.calls`. */
 export type Spy<A extends unknown[]> = ((...args: A) => void) & { calls: A[] };
@@ -156,6 +157,9 @@ export function harnessFor(register: RegisterModule): Harness {
       actions.removeRecent(path);
       return [];
     },
+    // AI-Lore 1.0: `Deps` carries the Space host. The v0.8 modules this harness
+    // drives do not read it; the 1.0 modules have `space/space-harness.ts`.
+    space: fakeSpaceHost(),
   };
 
   // Capture handlers by CONTRACT key. In production `reg` wraps `ipcMain`; the

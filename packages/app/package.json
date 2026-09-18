@@ -11,7 +11,7 @@
     "prebuild": "electron-rebuild -f -o node-pty",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "vite-node scripts/typecheck.ts --",
     "typecheck:node": "tsc -b tsconfig.node.json",
     "clean": "rm -rf out",
     "test": "npm run test:headless && npm run test:component",

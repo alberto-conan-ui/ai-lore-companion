@@ -17,9 +17,11 @@ import type {
   WorkspaceLayout,
   WriteTier,
 } from '@ai-lore-companion/core';
+import type { SpaceWindowInitPayload } from './ipc/space/windows.types.js';
 
 export type { ChangeScope };
 export type { DockWorkspaceSnapshot };
+export type { MemoryFrontmatter, MemorySections };
 
 /**
  * The channel + direction descriptors live in [`ipc/contract.ts`](./ipc/contract.ts)
@@ -38,6 +40,23 @@ export {
   type SendKey,
   type Unsubscribe,
 } from './ipc/contract.js';
+
+/**
+ * AI-Lore 1.0 (Spaces). The types of each feature's channels are in one file
+ * per feature under `./ipc/space/`, re-exported here once. A 1.0 phase fills
+ * its own file and does not edit this one. A constant the renderer needs from
+ * core is declared a second time in the feature's file, with a comment naming
+ * the original, because the renderer imports types only from core.
+ */
+export * from './ipc/space/windows.types.js';
+export * from './ipc/space/setup.types.js';
+export * from './ipc/space/machine.types.js';
+export * from './ipc/space/sessions.types.js';
+export * from './ipc/space/dialogs.types.js';
+export * from './ipc/space/roots.types.js';
+export * from './ipc/space/files.types.js';
+export * from './ipc/space/migration.types.js';
+export * from './ipc/space/project.types.js';
 
 /**
  * Type-only ChainResult discriminator that does not require importing
@@ -195,12 +214,15 @@ export type AlteredReason =
  * Main → renderer, once per window on load: what the window is. A welcome
  * window carries the recents list; an altered window carries the folder path
  * and a `reason` for its disclaimer banner — either "not an AI-Lore project"
- * or "the project is too old, upgrade required".
+ * or "the project is too old, upgrade required". The modes of AI-Lore 1.0
+ * are `SpaceWindowInitPayload`, in `./ipc/space/windows.types.ts`; main sends
+ * one only when detection routing is on.
  */
 export type WindowInitPayload =
   | { mode: 'welcome'; recents: RecentProject[] }
   | { mode: 'cockpit' }
-  | { mode: 'altered'; folder: string; reason: AlteredReason };
+  | { mode: 'altered'; folder: string; reason: AlteredReason }
+  | SpaceWindowInitPayload;
 
 /** Per-side root trees, each populated one level deep. */
 export type TreeInitPayload = {

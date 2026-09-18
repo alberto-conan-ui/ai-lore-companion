@@ -1,4 +1,5 @@
 import type { IpcMain } from 'electron';
+import { SPACE_MODULES } from '../space/ipc/index.js';
 import { registerApps } from './apps.js';
 import { registerBrowser } from './browser.js';
 import { registerChanges } from './changes.js';
@@ -30,6 +31,8 @@ const MODULES: readonly RegisterModule[] = [
   registerApps,
   registerEngines,
   registerHelper,
+  // AI-Lore 1.0 (Spaces): one module per feature, listed in `main/space/ipc/index.ts`.
+  ...SPACE_MODULES,
 ];
 
 /** Wire every cockpit IPC handler onto `ipcMain`, resolving channels off the contract. */

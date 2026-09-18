@@ -23,6 +23,7 @@ import {
   DOCK_SNAPSHOT_VERSION,
   WORKSPACE_LAYOUT_SCHEMA_VERSION,
   isChainErrorPayload,
+  isSpaceWindowInit,
 } from '../../shared/ipc.js';
 import type { AlteredReason } from '../../shared/ipc.js';
 import { AlteredScreen } from './components/AlteredScreen.js';
@@ -54,6 +55,8 @@ import {
 import { TERMINAL_FIND_EVENT } from './components/useXtermSession.js';
 import { reflowEditorThirds, scaleForResize } from './layout.js';
 import { accentColor, accentTint, accentTintLight, hueFor, projectName } from './projectAccent.js';
+import { SpaceSurface } from './space/SpaceSurface.js';
+import { useSpaceWindowStore } from './space/spaceStore.js';
 import { type EditorDoc, useCockpitStore } from './store.js';
 import { onEffectiveTheme } from './theme.js';
 
@@ -150,8 +153,10 @@ function tabFromLayout(t: LayoutTab): WorkspaceTab | null {
   return out;
 }
 
-/** What this window is — set once by main via `onWindowInit`. */
-type WindowMode = 'loading' | 'welcome' | 'cockpit' | 'altered';
+/** What this window is — set once by main via `onWindowInit`. `space` stands for
+ *  every AI-Lore 1.0 window mode; which one is in the 1.0 store, and
+ *  `SpaceSurface` renders it. */
+type WindowMode = 'loading' | 'welcome' | 'cockpit' | 'altered' | 'space';
 
 export function App(): JSX.Element {
   const setChain = useCockpitStore((s) => s.setChain);
@@ -179,6 +184,7 @@ export function App(): JSX.Element {
   );
 
   const [mode, setMode] = useState<WindowMode>('loading');
+  const spaceInit = useSpaceWindowStore((s) => s.init);
   const [recents, setRecents] = useState<RecentProject[]>([]);
   const [alteredFolder, setAlteredFolder] = useState<string>('');
   const [alteredReason, setAlteredReason] = useState<AlteredReason>({ kind: 'not-ai-lore' });
@@ -451,6 +457,14 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     return window.cockpit.onWindowInit((payload) => {
+      if (isSpaceWindowInit(payload)) {
+        // An AI-Lore 1.0 window. Main sends these modes only with detection
+        // routing on; it may send another one later to change the screen.
+        useSpaceWindowStore.getState().setInit(payload);
+        setMode('space');
+        return;
+      }
+      useSpaceWindowStore.getState().setInit(null);
       if (payload.mode === 'welcome') {
         setRecents(payload.recents);
         setMode('welcome');
@@ -1482,6 +1496,11 @@ export function App(): JSX.Element {
 
   if (mode === 'altered') {
     return <AlteredScreen folder={alteredFolder} reason={alteredReason} />;
+  }
+
+  // Every AI-Lore 1.0 window mode. The screen of each mode is under `space/`.
+  if (mode === 'space' && spaceInit) {
+    return <SpaceSurface init={spaceInit} />;
   }
 
   if (!chain) {

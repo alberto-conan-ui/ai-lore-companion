@@ -3,8 +3,11 @@
  *
  * Two rules, checked before a process is started:
  *
- * 1. `gh` does not run unless `AI_LORE_ALLOW_LIVE_GITHUB` is `1`. The app sets
- *    it; tests never do, and use `FakeGitHub` or a scripted runner.
+ * 1. `gh` does not run unless the runner was built with `allowLiveGitHub`, or
+ *    `AI_LORE_ALLOW_LIVE_GITHUB` is `1`. The app builds its own runner with the
+ *    option and does not set the variable, so the processes it starts do not
+ *    inherit the permission; tests do neither, and use `FakeGitHub` or a
+ *    scripted runner.
  * 2. In test mode (`NODE_ENV` is `test`, or `AI_LORE_TEST` is `1`):
  *    - `gh` does not run at all, whatever rule 1 says;
  *    - a command runs only with its working folder under the temporary folder;
@@ -55,6 +58,14 @@ export type GuardedCommand = {
 export type GuardContext = {
   /** Default: `process.env`. */
   env?: Record<string, string | undefined>;
+  /**
+   * Whether this runner may start `gh`, said by the program that builds it
+   * instead of by `AI_LORE_ALLOW_LIVE_GITHUB`. The app passes it to its own
+   * runner, so that the permission is not in `process.env` and no terminal or
+   * other process the app starts inherits it. Test mode refuses `gh` whatever
+   * this says. Default: false.
+   */
+  allowLiveGitHub?: boolean;
   /** Default: `os.tmpdir()`. */
   tempDir?: string;
   /** The folder a command with no `cwd` runs in. Default: `process.cwd()`. */
@@ -486,8 +497,11 @@ export function checkLiveSystemGuard(
     .toLowerCase()
     .replace(/\.exe$/, '');
 
-  if (name === 'gh' && env[ALLOW_LIVE_GITHUB_ENV] !== '1') {
-    return refuse(`gh does not run unless ${ALLOW_LIVE_GITHUB_ENV} is 1`);
+  const liveGitHubAllowed = context.allowLiveGitHub === true || env[ALLOW_LIVE_GITHUB_ENV] === '1';
+  if (name === 'gh' && !liveGitHubAllowed) {
+    return refuse(
+      `gh does not run unless ${ALLOW_LIVE_GITHUB_ENV} is 1 or the runner was built with allowLiveGitHub`,
+    );
   }
   if (!isTestMode(env)) return null;
   if (name === 'gh') {

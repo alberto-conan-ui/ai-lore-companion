@@ -9,6 +9,7 @@ import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 import type { RecentProject, SettingsSnapshot, Shortcut } from '../../shared/ipc.js';
 import type { PtyService } from '../pty.js';
 import type { SearchService } from '../search/service.js';
+import type { SpaceHost } from '../space/host.js';
 
 /** The watcher + changes tracker a valid AI-Lore project window holds. */
 export type Wiring = {
@@ -77,6 +78,12 @@ export type Deps = {
   /** Drop one project from the recents list (rebuilds the menu); returns the
    *  updated list for the caller to push back to the renderer. */
   removeRecent(path: string): RecentProject[];
+  /**
+   * AI-Lore 1.0: the Space host. `space.contextFor(event)` is the Space context
+   * of the window a call came from, `space.windowFor(event)` the 1.0 window;
+   * the rest opens folders and windows. See `main/space/host.ts`.
+   */
+  space: SpaceHost;
 };
 
 /** The signature every `main/ipc/*` register module exports. */
