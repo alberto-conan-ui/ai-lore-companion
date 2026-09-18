@@ -44,3 +44,12 @@ test('openExternal delegates to shell.openExternal', () => {
   h.invoke('openExternal', 'https://example.com');
   assert.deepEqual(shell.openExternal.calls, [['https://example.com']]);
 });
+
+test('openExternal refuses what is not a web or mail address', async () => {
+  for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'smb://host/share', 'nope', 42]) {
+    await h.invoke('openExternal', url);
+  }
+  assert.deepEqual(shell.openExternal.calls, []);
+  await h.invoke('openExternal', 'mailto:someone@example.invalid');
+  assert.equal(shell.openExternal.calls.length, 1);
+});

@@ -394,6 +394,11 @@ test.describe('window modes', () => {
   test('the prompts catalog renders grouped verbs and click injects the slash', async () => {
     const fixture = makeProject();
     seedVerbs(fixture.root);
+    // The catalog is offered only when AI-Lore is installed as slash commands
+    // (an `ai-lore-*` skill under `.claude/skills`); otherwise the column shows
+    // the plain-text bootstrap hint instead.
+    const { mkdirSync: makeDir } = await import('node:fs');
+    makeDir(join(fixture.root, '.claude', 'skills', 'ai-lore-orient'), { recursive: true });
     const fake = makeFakeEngineBinary('PHASE_D_PROMPTS_READY');
     seedEngines(fixture.userData, [{ id: 'fake', name: 'Fake', binary: fake.binary }]);
     try {
@@ -404,7 +409,10 @@ test.describe('window modes', () => {
       await page.getByTestId('ai-start').click();
       await expect(page.getByTestId('ai-prompts-column')).toBeVisible({ timeout: 10_000 });
 
-      // Curated-taxonomy verbs show by default.
+      // The catalog sits in the Skills section, collapsed by default; opened,
+      // the curated-taxonomy verbs show.
+      await expect(page.getByTestId('prompt-row-orient')).toHaveCount(0);
+      await page.getByTestId('prompts-skills-toggle').click();
       await expect(page.getByTestId('prompt-row-orient')).toBeVisible();
       await expect(page.getByTestId('prompt-row-chat')).toBeVisible();
       await expect(page.getByTestId('prompt-row-plan')).toBeVisible();
@@ -966,15 +974,15 @@ test.describe('window modes', () => {
       // per-row dismiss — no bespoke UI.
       await expect(statusPane).toContainText('save-points', { timeout: 5_000 });
       await expect(statusPane).toContainText('references', { timeout: 5_000 });
-      // Stronger assertion: the grid lists `references` as a row of its own
+      // Stronger assertion: the tree lists `references` as a row of its own
       // (not just the synthetic-root header text). This is the regression
       // gate for the v0.6 bug HL reported on 2026-05-28 — references files
-      // surface in the Status pane's tree, not silently absent.
-      const grid = statusPane.getByTestId('grid-lore');
-      await expect(grid.locator('.ag-row').filter({ hasText: 'references' })).toBeVisible({
+      // surface in the Status pane's tree, not silently absent. The pane is a
+      // tree since the grid was folded into it.
+      await expect(statusPane.getByRole('treeitem', { name: /references/ })).toBeVisible({
         timeout: 5_000,
       });
-      await expect(grid.locator('.ag-row').filter({ hasText: 'save-points' })).toBeVisible();
+      await expect(statusPane.getByRole('treeitem', { name: /save-points/ })).toBeVisible();
       await app.close();
     } finally {
       fixture.cleanup();
@@ -1306,11 +1314,9 @@ test.describe('window modes', () => {
       // even when hidden (opacity 0). data-testid matches the row's path.
       const treeKebab = page.locator('[data-testid^="row-kebab-tree-"]').first();
       await expect(treeKebab).toHaveCount(1);
-      // Grid + ChangesPanel kebabs live inside AG-Grid cells. The grid's row
-      // count depends on the fixture's tree contents; assertion is "at least
-      // one kebab exists" rather than a specific path.
-      const gridKebab = page.locator('[data-testid^="row-kebab-grid-"]').first();
-      await expect(gridKebab).toHaveCount(1);
+      // The grid surface (and its `row-kebab-grid-*` kebabs) was folded into
+      // the tree when the Changes panel moved into the file tree, so the tree
+      // kebab is the one file/folder row surface left to check.
 
       await app.close();
     } finally {

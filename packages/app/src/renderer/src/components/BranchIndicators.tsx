@@ -39,12 +39,7 @@ function BranchChip({
         ? `${scope} repo — detached HEAD (not on a branch)`
         : `${scope} repo — on branch ${info.branch}`;
   return (
-    <span
-      style={chipStyle}
-      data-testid={`branch-${scope}`}
-      data-state={state}
-      title={title}
-    >
+    <span style={chipStyle} data-testid={`branch-${scope}`} data-state={state} title={title}>
       <span style={labelStyle}>{scope}</span>
       <span style={glyphStyle} aria-hidden="true">
         ⎇

@@ -1,44 +1,84 @@
 import { strict as assert } from 'node:assert';
-import { existsSync, readdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { isChainError, readChain } from '../src/index.js';
+import { useTempDir } from './support/temp.js';
 
-function findProjectRoot(start: string): string {
-  let dir = start;
-  for (let i = 0; i < 10; i += 1) {
-    if (
-      existsSync(resolve(dir, 'package.json')) &&
-      readdirSync(dir).some((n) => n.startsWith('.ai-lore-'))
-    ) {
-      return dir;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
-  }
-  throw new Error(`could not locate project root from ${start}`);
+/**
+ * Build a small project with a tracker chain in a temporary folder: a status
+ * file pointing at a focus, and the focus pointing at a stage. The test never
+ * reads this repository's own tracker folder.
+ */
+function writeChainFixture(root: string): void {
+  const lore = join(root, '.ai-lore-example');
+  const status = join(lore, 'memory', 'status');
+  const focus = join(status, 'focus');
+  mkdirSync(focus, { recursive: true });
+  writeFileSync(join(lore, 'workspace.yaml'), 'project_name: example\n');
+  writeFileSync(
+    join(status, 'status.index.md'),
+    [
+      '---',
+      'type: status',
+      'title: example — Status',
+      'updated: 2026-05-26',
+      'references: []',
+      'active_focus: ./focus/example.focus.md',
+      'posture: execute',
+      'dials:',
+      '  altitude: mid',
+      '  commitment: neutral',
+      '---',
+      '',
+      '# example — Status',
+      '',
+    ].join('\n'),
+  );
+  writeFileSync(
+    join(focus, 'example.focus.md'),
+    [
+      '---',
+      'type: focus',
+      'title: Example focus',
+      'updated: 2026-05-26',
+      'references: []',
+      'status: Active',
+      'focus_type: build',
+      '---',
+      '',
+      '# Example focus',
+      '',
+      '## Active child pointer',
+      '',
+      '[Stage one](./stage-one.md)',
+      '',
+    ].join('\n'),
+  );
+  writeFileSync(join(focus, 'stage-one.md'), '# Stage one\n\nBody.\n');
 }
 
-const PROJECT_ROOT = findProjectRoot(process.cwd());
+test('chain reader resolves a tracker chain from the status file to the active child', (t) => {
+  const root = useTempDir(t, 'ai-lore-chain-');
+  writeChainFixture(root);
 
-test("chain reader resolves this project's own tracker chain", () => {
-  const result = readChain({ root: PROJECT_ROOT });
+  const result = readChain({ root });
   assert.ok(
     !isChainError(result),
     `expected chain success, got error: ${'error' in result ? result.error : ''}`,
   );
   if (isChainError(result)) return;
 
-  assert.equal(result.root, PROJECT_ROOT);
-  assert.ok(result.lorePath.endsWith('.ai-lore-ai-lore-companion'));
-  assert.ok(result.mode.length > 0);
+  assert.equal(result.root, root);
+  assert.equal(result.lorePath, join(root, '.ai-lore-example'));
+  assert.equal(result.mode, 'execute');
   assert.ok(result.focus, 'focus should be present');
-  assert.ok(result.focus.title.length > 0);
-  assert.ok(result.focus.path.endsWith('.focus.md'));
+  assert.equal(result.focus.title, 'Example focus');
+  assert.ok(result.focus.path.endsWith('example.focus.md'));
+  assert.equal(result.focusType, 'build');
   assert.ok(result.activeChild, 'activeChild should be present');
-  assert.ok(result.activeChild.title.length > 0);
-  assert.ok(result.activeChild.path.endsWith('.md'));
+  assert.equal(result.activeChild.title, 'Stage one');
+  assert.ok(result.activeChild.path.endsWith('stage-one.md'));
 });
 
 test('chain reader returns error for non-existent root', () => {

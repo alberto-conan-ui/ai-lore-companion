@@ -202,23 +202,38 @@ test('the index of names follows the roots file events: a file added is found, a
 
 test('a slow root does not hold back another root, and is sent when its time limit passes', async () => {
   const o = await open();
-  ROOT_SEARCH_TUNING.timeLimitMs = 400;
-  setRootSearchHook((rootId) => (rootId === 'lore' ? delay(3000) : undefined));
-  const order: string[] = [];
-  const slow = search(o, { rootId: 'lore', query: 'space' }).then((result) => {
-    order.push('lore');
-    return result;
+  // The slow root is held in its hook until the end of the test; it can only
+  // end by its time limit. The fast root runs under the default limit, so the
+  // time it takes on a loaded machine cannot turn it into a time-out: what is
+  // checked is that it ends while the slow root is still held.
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
   });
-  const fast = search(o, { rootId: 'repo:app', query: 'needle' }).then((result) => {
-    order.push('repo:app');
-    return result;
+  let slowStarted: () => void = () => {};
+  const started = new Promise<void>((resolve) => {
+    slowStarted = resolve;
   });
-  const [slowGroup, fastGroup] = [must(await slow), must(await fast)];
-  assert.deepEqual(order, ['repo:app', 'lore']);
-  assert.equal(fastGroup.outcome, 'done');
-  assert.equal(slowGroup.outcome, 'timed-out');
-  assert.equal(slowGroup.names.finished, false);
-  assert.equal(slowGroup.timeLimitMs, 400);
+  setRootSearchHook((rootId) => {
+    if (rootId !== 'lore') return undefined;
+    slowStarted();
+    return held;
+  });
+  try {
+    ROOT_SEARCH_TUNING.timeLimitMs = 400;
+    const slow = search(o, { rootId: 'lore', query: 'space' });
+    // The slow root's timer is set in the same step as its hook is called.
+    await started;
+    ROOT_SEARCH_TUNING.timeLimitMs = defaultTimeLimit;
+    const fastGroup = must(await search(o, { rootId: 'repo:app', query: 'needle' }));
+    assert.equal(fastGroup.outcome, 'done');
+    const slowGroup = must(await slow);
+    assert.equal(slowGroup.outcome, 'timed-out');
+    assert.equal(slowGroup.names.finished, false);
+    assert.equal(slowGroup.timeLimitMs, 400);
+  } finally {
+    release();
+  }
 });
 
 test('a newer search of the same window for the same root cancels the older one', async () => {

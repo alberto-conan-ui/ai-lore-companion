@@ -12,6 +12,17 @@ import type { HelperEventPayload, HelperReportPayload } from '../../src/shared/i
 /** Flush pending micro/macro-tasks (the manager's CR submit + awaits). */
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
 
+/** Wait until `check` holds. The submitting CR is written on a timer of its
+ *  own after the prompt, so a fixed tick can run before it on a loaded
+ *  machine; waiting for the condition removes that race. */
+async function until(check: () => boolean, what: string): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (check()) return;
+    await tick();
+  }
+  assert.fail(`timed out waiting for ${what}`);
+}
+
 const PROMPT = 'Read status.index.md and summarize what is pending.';
 
 /** A fully-faked manager + host: a stub middleman that hands the registered
@@ -137,7 +148,7 @@ test('the full happy path: connecting → ready → thinking → answered; the p
   await tick();
 
   h.registered?.onStarted();
-  await tick();
+  await until(() => h.writes.length >= 2, 'the prompt and the submitting CR');
 
   // The caller-built prompt was injected, then a bare CR submitted the turn.
   assert.deepEqual(h.writes, [PROMPT, '\r']);
@@ -156,7 +167,7 @@ test('a second submit while a turn is in flight is ignored (serialized)', async 
   void h.mgr.submit(1, h.host, PROMPT);
   await tick();
   h.registered?.onStarted();
-  await tick();
+  await until(() => h.writes.length >= 2, 'the first turn to be submitted');
   const writesAfterFirst = h.writes.length;
 
   // Second submit while pending — no new prompt is injected.

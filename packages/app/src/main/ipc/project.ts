@@ -2,6 +2,18 @@ import { normalizeUrl } from '@ai-lore-companion/core';
 import { BrowserWindow, shell } from 'electron';
 import type { RegisterModule } from './types.js';
 
+const EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
+
+/** Whether `url` is an http, https or mailto address. */
+function isWebOrMailUrl(url: unknown): url is string {
+  if (typeof url !== 'string' || url.length > 8192) return false;
+  try {
+    return EXTERNAL_PROTOCOLS.has(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
 /** Opening / reloading project windows and opening external URLs. */
 export const registerProject: RegisterModule = (reg, deps) => {
   reg.handle('openProject', async (event, path) => {
@@ -20,7 +32,12 @@ export const registerProject: RegisterModule = (reg, deps) => {
 
   reg.handle('recentsRemove', (_event, path) => deps.removeRecent(path));
 
-  reg.handle('openExternal', (_event, url) => shell.openExternal(url));
+  // Only web and mail addresses go to the OS: a renderer that hosts browser
+  // tabs is not trusted to hand `file:` or a custom scheme to `shell`.
+  reg.handle('openExternal', async (_event, url) => {
+    if (!isWebOrMailUrl(url)) return;
+    await shell.openExternal(url);
+  });
 
   // Open a shortcut URL in the external browser. Unlike `openExternal` (which
   // takes an already-valid URL — terminal links, the SDLC site), a shortcut
