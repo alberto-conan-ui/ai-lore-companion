@@ -113,7 +113,7 @@ packages/spec/
     lore/
       index.md
       space.md                  the Space's manifest card (section 4.4; proposal)
-      corpus/   index.md  core/
+      corpus/   index.md  core/  default/
       verbs/    index.md  core/  default/
       processes/index.md  core/ (empty, with its index)  default/
       contracts/index.md  core/  (card + Python 3 check script for three; card only for two)
@@ -130,6 +130,7 @@ packages/core/src/
     fs/                         atomic write, safe path join, tree copy with hashes
     layout/                     the paths of a Space; the data-folder paths of a desk
     manifest/                   reading and writing lore/space.md
+    frontmatter/                reading and writing the frontmatter subset (section 5.5)
     detect/                     FolderKind
     lore/                       cards, layers, the index of a part
     desk/                       claims, gate answers, unattended tags, reviewed marks,
@@ -146,6 +147,8 @@ packages/core/src/
     project/                    the Project snapshot, its cache, the Dashboard model
     legacy/                     the v0.8 reader (M6)
     migrate/                    plan, apply, verify
+      steps/                    one file per step of section 5.9
+      local/  github/           what the local steps share, and the issue writer of step 11
   index.ts                      gains one line: export * from './space/index.js'
 
 packages/core/test/
@@ -165,6 +168,8 @@ packages/app/src/
 packages/app/test/
   headless/space/  component/space/  space-*.spec.ts
 ```
+
+The tree above is the tree as built. Three entries were added while building: `frontmatter/` in core, the subfolders of `migrate/`, and `corpus/default/` in the template, which holds the corpus entries of the default layer (for example "focus", "item" and "stage-field").
 
 The template folder name `lore-1.0`, the folder name `space/` and the file names above are proposals. The stage fixes only that M1's content is "in `packages/spec`, as a 1.0 tree beside the v0.8 one".
 
@@ -258,14 +263,20 @@ type DeskPaths = {
 
 ```ts
 type FolderKind =
-  | { kind: 'space'; root: string; manifest: SpaceManifest }
+  | { kind: 'space'; root: string; manifest: SpaceManifest; reason: string }
   | { kind: 'legacy'; root: string; lorePath: string; projectName: string;
       coreVersion: string | null;
       manifestLocation: 'lore-folder' | 'memory-folder';
-      migratable: boolean }          // true when coreVersion is 0.8 or a 0.8.x
-  | { kind: 'plain-repository'; root: string; originUrl: string | null }
-  | { kind: 'other'; root: string };
+      migratable: boolean;           // true when coreVersion is 0.8 or a 0.8.x
+      versionStanding: 'v0.8' | 'older' | 'newer' | 'unknown';
+      reason: string }
+  | { kind: 'plain-repository'; root: string; originUrl: string | null; reason: string }
+  | { kind: 'other'; root: string;
+      broken: 'space-manifest' | 'legacy-project' | null;
+      reason: string };
 ```
+
+Added while building M2: every verdict carries `reason`, a sentence for the Human Lead that says why the folder was read as it was. `broken` on `other` says that the folder has a Space manifest or a legacy Lore folder that cannot be read, for example a manifest that is not valid YAML. `versionStanding` on a legacy verdict says why a project that is not migratable is not: the migration screen asks for an upgrade to v0.8 first for `older`, and says that the version is not known to it for `newer` and `unknown`.
 
 The focus fixes three cases: a Space, an AI-Lore project of v0.8 or older recognised by its manifest and core version, and neither. Stage M3 needs "neither" split in two, because a plain repository gets the offer to create a Space about it. A legacy project is recognised by a single `.ai-lore-<name>` folder whose manifest has `project_name` matching the folder name; the manifest is looked for at `memory/workspace.yaml` first, then at `workspace.yaml`. How a Space is recognised is not fixed by the sources; section 4.4 proposes the manifest card.
 
@@ -281,7 +292,7 @@ type Pillar = 'specifying' | 'planning' | 'working' | 'producing' | 'shaping';
  *  (the product document gives lore-integrity a check before a write and one after). */
 type CorpusCard   = { kind: 'corpus';   term: string; pointsAt: string[] };
 type VerbCard     = { kind: 'verb';     name: string; pillar: Pillar;
-                      mode: 'read-only' | 'writing'; invokedBy: string };
+                      mode: 'read-only' | 'writing'; invokedBy: string[] };
 type ProcessCard  = { kind: 'process';  name: string; pillar: Pillar;
                       steps: string[]; gates: string[]; unattended: boolean };
 type ContractCard = { kind: 'contract'; name: string; pillar: Pillar; target: string;
@@ -296,6 +307,8 @@ type LoreEntry<C> = {
   replacesDefault: boolean;     // an own file with the name of a default
 };
 ```
+
+Two differences in the code as built (M2). `invokedBy` is a list, because a verb card can name more than one invoker; each value is `human-lead`, `ai-session` or the name of a process. A card's frontmatter has no description key: the reader takes a card's description from its line in the index of its folder, and the value is `null` when the index has no line for the card. The install step writes that sentence into the skill it generates (section 5.5).
 
 Layer resolution, fixed by the product document and decision 13: each part has `core/`, `default/` and the Space's own files beside them. An own file with the same name as a default is used instead of it. Nothing may take the name of a core file; the reader reports such a file as an error entry and does not use it. M1 fixes the frontmatter keys; M2.3 reads what M1 wrote. If M1 and the types above disagree, M1's cards govern and the types are corrected.
 
@@ -405,7 +418,7 @@ Each of these is listed as open in the product document, and the focus uses all 
 
 **Alternative.** A git ref in the root's repository, for example `refs/ai-lore/reviewed/<account>`. It survives the loss of the data folder and could be pushed to another desk. It means the companion writes into payload repositories and the Space repository, which the product document says it does not do, and it has no meaning for a publish area outside a repository.
 
-**Containment.** All reads and writes go through `desk/marks.ts` (`listMarks(rootId)`, `addMark(rootId, commit)`). `baseline/` and the Files window call only these. Changing the store changes that one module.
+**Containment.** All reads and writes go through `desk/marks.ts` (`listMarks(desk, rootId?)`, `lastMark(desk, rootId)`, `addMark`). Each takes the open desk as its first argument, as every module of `desk/` does (section 5.4). `baseline/` and the Files window call only these. Changing the store changes that one module.
 
 ### 4.2 Where the desk's records are kept — Proposal — awaiting Human Lead
 
@@ -439,10 +452,14 @@ Each file is `{ "version": 1, "records": [...] }`. The write-guard check script 
 |---|---|---|
 | `request_writing` | `targets: WriteTarget[]`, `item?: number`, `reason: string` | `{ ticket }` at once; the companion shows the entering-Writing dialog |
 | `request_gate` | `process`, `step`, `question`, `bearsOn?: string` | `{ ticket }` at once; the companion shows the gate dialog |
-| `await_answer` | `ticket` | the answer, or `{ status: 'pending' }` after at most 120 seconds |
+| `await_answer` | `ticket` | the answer, or `{ status: 'pending' }` after at most 45 seconds (120 in the first version; see below) |
 | `leave_writing` | none | the session's new mode; lets the session return to Read only at the end of the work process, as the header's Leave Writing action does from the UI |
 
 Stage M4 and the product document describe two requests, one for entering Writing and one for a gate, each returning the Human Lead's answer. `await_answer` and `leave_writing` are additions of this document. `leave_writing` only reduces what the session may write. The request and the wait are separate calls because the Claude Code documentation, as read for this document on 2026-09-18, gives an idle limit of five minutes for a tool call over HTTP, and a Human Lead may take longer to answer. The verb text tells the session to call `await_answer` again while the status is pending. The 120 seconds is a proposal.
+
+Changed after M4.1: `await_answer` waits at most 45 seconds. Phase M4.1 observed that the engine's MCP client abandons an HTTP tool call that has sent no byte after 60 seconds, unless a tool timeout is set in the session's settings. The server answers with one JSON response and sends nothing before it, so the wait is kept under 60 seconds whatever the session's settings are.
+
+As built in M4, the answer that reports a held target names the holding session for the Human Lead by its engine, its item and its start time, and never gives the holder's session id: a session is told nothing that addresses another session. The answer `granted: false` can also carry the reasons `refused` (the claim rules refused it) and `failed` (the desk could not be written).
 
 The answer to `request_writing` is `{ granted: true, claims }`, or `{ granted: false, reason: 'held' | 'declined', heldBy? }`. The companion writes the claim to the desk's record before it returns the answer. The answer to a gate is the `GateAnswer`. The session's file-writing tools cannot write either record: the records are outside the Space, and the server offers no tool that writes them except through the Human Lead's dialog. Section 5.4 states the limit that applies to shell commands.
 
@@ -460,18 +477,19 @@ type: space
 format: 1
 name: ai-lore
 github:
-  repository: alberto-conan-ui/ai-lore        # owner/name of the Space repository
-  project: 7                                   # the Project's number under that owner
+  repository: alberto-conan-ui/ai-lore
+  project: 7
 repositories:
-  - name: ai-lore-companion                    # its folder is always repos/<name>
+  - name: ai-lore-companion
     github: alberto-conan-ui/ai-lore-companion
 publish_areas:
   - name: publish
-    path: publish                              # inside the Space's folder
-  - name: handbook                             # outside the Space: name only;
-                                               # its path is kept with the desk's records
+    path: publish
+  - name: handbook
 ---
 ```
+
+What the keys mean: `github.repository` is the owner and name of the Space repository; `github.project` is the Project's number under that owner; a repository's folder is always `repos/<name>`; the `path` of a publish area is inside the Space's folder; a publish area outside the Space has a name only, and its path is kept with the desk's records. The first version of this example had these explanations as comments at the end of lines. The frontmatter subset fixed in M1.1 (the corpus entry "frontmatter") allows a comment only as a whole line, so the example above has none.
 
 The example values are illustrative. The same file is what detection uses to recognise a 1.0 Space: a folder is a Space when `lore/space.md` exists and its frontmatter has `type: space`. The file location, the key names and the use of the file as the detection marker are this document's proposals; the product document fixes only what the manifest names.
 
@@ -519,6 +537,8 @@ Rules for every new channel: the method name starts with `space` (or `onSpace` f
 
 Main keeps a `SpaceContext` per Space (not per window), holding: `SpacePaths`, `DeskPaths`, the manifest, the roots, the root tracker, the watchers, the PTY service, the search service, the desk store, the `DialogBroker`, and the GitHub port. Both windows of a Space resolve to the same context.
 
+The GitHub port as built (changed while building M5.1, the first part of the app that read GitHub for a Space). `main/space/github-service.ts` holds one function, `createAppGitHubPort`, that chooses the port for the whole app, and a service of the Space context, `spaceGitHub`, that builds the Space's port with that function on its first call and gives the same port to every part of the app that reads or writes GitHub for that Space. A setup window has no Space context yet and calls `createAppGitHubPort` itself. The function chooses `FakeGitHub` only in an end-to-end run (`COCKPIT_E2E=1` with `AI_LORE_FAKE_GITHUB=<state file>`) of an app that is not packaged; it loads the fake from core's separate entry `@ai-lore-companion/core/testing` at that moment, so a normal run never loads it. A packaged app started with both variables gets the port whose every call answers `unreachable`, as does a test run without the fake. Otherwise the port is `gh` through the app's own command runner.
+
 ### 5.2 Command running, git and the filesystem
 
 ```ts
@@ -552,11 +572,15 @@ type GitHubPort = {
   findProject(arg: { owner: string; title: string }): Promise<Result<ProjectInfo | null, GitHubError>>;
   createProject(arg: { owner: string; title: string }): Promise<Result<ProjectInfo, GitHubError>>;
   ensureSingleSelectField(arg: { project: ProjectInfo; name: string; options: string[] }): Promise<Result<FieldInfo, GitHubError>>;
+  ensureProjectView(arg: { project: ProjectInfo; spec: ProjectViewSpec }): Promise<Result<EnsuredProjectView, GitHubError>>;
   linkProjectToRepository(arg: { project: ProjectInfo; repository: string }): Promise<Result<void, GitHubError>>;
   ensureLabels(arg: { repository: string; labels: LabelSpec[] }): Promise<Result<void, GitHubError>>;
   // issues
   findIssueByMarker(arg: { repository: string; marker: string }): Promise<Result<IssueRef | null, GitHubError>>;
+  findIssuesByMarkers(arg: { repository: string; markers: string[] }): Promise<Result<Record<string, IssueRef | null>, GitHubError>>;
+  findAllIssuesByMarkers(arg: { repository: string; markers: string[] }): Promise<Result<Record<string, IssueRef[]>, GitHubError>>;
   createIssue(arg: { repository: string; title: string; body: string; labels: string[] }): Promise<Result<IssueRef, GitHubError>>;
+  updateIssue(arg: { issue: IssueRef; title?: string; body?: string }): Promise<Result<void, GitHubError>>;
   addSubIssue(arg: { parent: IssueRef; child: IssueRef }): Promise<Result<void, GitHubError>>;
   addIssueToProject(arg: { project: ProjectInfo; issue: IssueRef }): Promise<Result<ProjectItemId, GitHubError>>;
   setSingleSelect(arg: { project: ProjectInfo; item: ProjectItemId; field: FieldInfo; option: string }): Promise<Result<void, GitHubError>>;
@@ -570,17 +594,24 @@ type GitHubPort = {
 
 type GitHubError =
   | { kind: 'unreachable'; message: string }
-  | { kind: 'not-signed-in' }
-  | { kind: 'missing-scope'; scope: string }
-  | { kind: 'rate-limited'; retryAfterSeconds: number | null }
+  | { kind: 'not-signed-in'; message: string }
+  | { kind: 'missing-scope'; scope: string; message: string }
+  | { kind: 'not-found'; message: string }
+  | { kind: 'rate-limited'; retryAfterSeconds: number | null; message: string }
   | { kind: 'failed'; message: string };
 ```
 
-Two implementations. `GhCliGitHub(runner)` builds `gh` argument arrays and parses JSON output. `FakeGitHub` keeps repositories, issues, sub-issue links, one Project with its fields and items, and pull requests in memory; it can save and load its state as one JSON file; `createRepository` creates a bare git repository in a temporary folder and returns its path as the clone address, so clone and push work without a network; it can be told to answer `unreachable` or `rate-limited`. `FakeGitHub` is in `core/src/space/github/fake.ts` and is exported, because core tests, app headless tests and the end-to-end tests all use it. Main uses it only when both `COCKPIT_E2E=1` and `AI_LORE_FAKE_GITHUB=<state file>` are set; the existing `COCKPIT_E2E` flag is the precedent for test-only behaviour in main. **Proposal.** When `COCKPIT_E2E=1` is set and `AI_LORE_FAKE_GITHUB` is not, main uses a port whose every call answers `unreachable`, and never builds `GhCliGitHub`, so an end-to-end test that forgets the fake cannot reach live GitHub.
+The interface above is the one built. Added while building M3 to M7: `ensureProjectView` (see the open point below); `findIssuesByMarkers`, which looks for many markers in one reading of the repository's issues; `findAllIssuesByMarkers`, which returns every issue that has each marker, so that the migration's verification can check that a marker is on one issue only; and `updateIssue`, which replaces an issue's title or body. Every error kind carries a `message` that can be shown as it is, and the kind `not-found` was added for a thing GitHub does not have, for example an unknown label given to `createIssue`. The marker searches read every page of the repository's issues, not GitHub's search index, so an issue created a moment earlier is found.
+
+**Issue markers**, as built (`github/marker.ts`). A marker is one HTML comment alone on a line of the issue's body: `<!-- ai-lore-<name>: <percent-encoded key> -->`. `name` says what made the issue (`migrated` for the migration, `session-issue` for a session's issue); the key says which one (a source path, a session id). The key is percent-encoded, with `/` left as it is, so a marker holds no space, no `>` and no `--` inside the key. A body has a marker only when a whole line is the marker and the line is outside a fenced code block, so an issue that quotes a marker in a sentence or in a code block does not have it.
+
+Two implementations. `GhCliGitHub(runner)` builds `gh` argument arrays and parses JSON output. `FakeGitHub` keeps repositories, issues, sub-issue links, one Project with its fields and items, and pull requests in memory; it can save and load its state as one JSON file; `createRepository` creates a bare git repository in a temporary folder and returns its path as the clone address, so clone and push work without a network; it can be told to answer `unreachable` or `rate-limited`. `FakeGitHub` is in `core/src/space/github/fake.ts` and is exported from core's entry `@ai-lore-companion/core/testing`, not from the main entry, because core tests, app headless tests and the end-to-end tests all use it. Main uses it only when both `COCKPIT_E2E=1` and `AI_LORE_FAKE_GITHUB=<state file>` are set; the existing `COCKPIT_E2E` flag is the precedent for test-only behaviour in main. **Proposal.** When `COCKPIT_E2E=1` is set and `AI_LORE_FAKE_GITHUB` is not, main uses a port whose every call answers `unreachable`, and never builds `GhCliGitHub`, so an end-to-end test that forgets the fake cannot reach live GitHub.
 
 Budget. The stage files give the limits: setup's GitHub writes are few and sequential (M3); issue creation is limited to 80 a minute and 500 an hour (M6); the Project is read in few GraphQL queries, within 5,000 points an hour shared with the sessions (M7). **Proposal**, the figures that meet them: issue creation is sequential with at least one second between two creations; the plan screen warns when a migration would create more than 400 issues; the Project is read with one query per page of 100 items, with sub-issues and field values in the same query.
 
 **Open point.** Stage M3 lists "views" among what setup creates on the Project. This document could not confirm that the GitHub API can create a Project view; `gh project` has no command for it. M3.1 must check. If it cannot be done, the options are to copy a template Project (the copy carries its views), or to list the three views in setup's summary as a step the Human Lead does by hand. The M3 gate does not mention views.
+
+**Settled while building M3** (`github/views.ts`, checked against GitHub's GraphQL reference on 2026-09-18). The API can create a Project view with a name, a layout and a filter, and the gh adapter does it with `gh api graphql`. No input of the API sets the field a board takes its columns from. `ensureProjectView` therefore creates or finds each view and returns, as sentences, the steps that are left to do on GitHub; setup lists them in its summary as steps the Human Lead does by hand. Where creating a view fails, the whole view is given as such a step.
 
 ### 5.4 The desk's records
 
@@ -591,6 +622,13 @@ Budget. The stage files give the limits: setup's GitHub writes are few and seque
 - A reader keeps fields and records it does not understand and writes them back. This is the answer to the two-builds problem recorded in the note: a development build and an installed build of different versions share `userData`.
 - **Proposal.** A file `desk/owner.json` holds the process id and start time of the app instance that opened the Space. A second instance that finds a live owner opens the Space with writing of desk records disabled and says so in the header. The sources do not cover two instances; without this, two builds could both grant the same target.
 - A file that does not parse is renamed to `<name>.corrupt-<timestamp>` and treated as empty, and the header shows a notice. For `claims.json` and `sessions.json`, empty means every session is in Read only and holds no target, so nothing in the Lore or a payload can be written until a claim is made again.
+
+The desk as built in M2. The files are those of section 4.2, each `{ "version": 1, "records": [...] }`. `desk/store.ts` holds the reader and writer that every file shares, and each file has its own module under `desk/` (`sessions.ts`, `claims.ts`, `gate-answers.ts`, `marks.ts` and the others), whose functions take the open desk as their first argument. What was added to the rules above:
+
+- A file whose `version` is higher than the build's is left untouched, and reading or writing it fails. A file larger than the size limit is left untouched as well. A symbolic link where a record file should be is set aside as a corrupt file is, and what it points to is not read.
+- The write-guard script reads `sessions.json` and `claims.json` directly. When a record file is missing, the script reads it as a record with no sessions or no claims, so the session is in Read only and holds no target. When a record file is there and cannot be read, the script refuses every write.
+- The owner file is `owner.json` in the desk folder. The owner is stale when no process has its id, or when the operating system gives that process another start time, which happens when the id was given to another program after the owner ended. It is created with a hard link from a finished temporary file, which fails when the file exists, so of two instances that start together one becomes the owner. A stale owner file is replaced only by the instance that holds a takeover file made the same way. Every write of a record confirms the owner file first.
+- The start time of a process is read by `exec/process-start.ts`, which runs `ps` with an argument list and no shell. It uses a synchronous call because opening a desk is synchronous. This departs from section 5.2, which says that modules under `core/src/space` start commands only through the `CommandRunner`; the departure awaits the Human Lead's acceptance. The start time is read on macOS only; on other systems a process with the owner's id counts as a live owner, so a live owner is never replaced.
 
 ### 5.5 Installing into Claude Code
 
@@ -607,8 +645,11 @@ Stage M3 fixes: verbs and processes become skills under a prefix; contract check
                                         at its path in the Space and follow it
   checks/                               copies of every contract check script resolved from the Lore
                                         (Python 3 files, for example write-guard.py; M1 fixes the names)
-  install.json                          what was installed, from which card, with each card's hash
+  install.json                          every file the install wrote, with its SHA-256, and the cards
+                                        each file came from, with each card's SHA-256
 ```
+
+As built in M3. An install writes only files whose content changed, and removes a file it wrote before that the projection no longer has. A file listed in `install.json` whose hash on disk is not the recorded one was edited by hand: it is left as it is and reported, unless the caller asks to overwrite it. The check scripts are copied byte for byte; the writer does not read them as text. The engine is started with `--plugin-dir <install>/claude-code/plugin` (section 5.6), and phase M4.1 observed that the session lists the skills as `lore:<name>`.
 
 Language of the scripts, by the ruling at the top of this document: the check scripts and the skeleton generators are Python 3 files that import the standard library only. They are run as `python3 <absolute path of the script> <arguments>`, by the hooks of section 5.6, by core through the `CommandRunner`, and by a person from a command line. The machine check requires `python3` (section 5.8). Two consequences. The Python standard library has no YAML parser, so each script that reads frontmatter or `lore/space.md` carries a small parser of its own, as `packages/spec/process/core/tooling/ai-lore.py` does for v0.8. **Proposal**: M1.1 limits card frontmatter and the manifest to a subset that such a parser reads (scalars, lists of scalars, one-level maps and lists of one-level maps, which is what the example of section 4.4 uses), states the subset in the corpus entry "frontmatter", and the TypeScript writers in `manifest/` and `migrate/` write only that subset. The TypeScript side reads with `js-yaml`, which core already depends on.
 
@@ -629,7 +670,7 @@ Stage M3 says contract checks become hooks. In this design the install step copi
   hooks/pre-write.py   the Claude Code adapter for the before-write checks (Python 3)
   hooks/post-write.py  the adapter for the after-write checks (Python 3)
 
-claude --settings <settings.json> --mcp-config <mcp.json> --strict-mcp-config
+claude --setting-sources '' --settings <settings.json> --mcp-config <mcp.json> --strict-mcp-config
        --plugin-dir <install>/claude-code/plugin
        --allowedTools mcp__ailore__request_writing mcp__ailore__request_gate
                       mcp__ailore__await_answer mcp__ailore__leave_writing
@@ -662,6 +703,16 @@ Claude Code's documentation also describes operating-system sandbox settings for
 
 **Sessions not started by the companion.** A `claude` process started by hand in the Space folder gets none of the above. The guards hold only for sessions the companion starts. The design does not write a `.claude/` folder into the Space, because stage M3 places settings outside the Space.
 
+**As built, from the findings of M4.1 and the build of M4.4.** Phase M4.1 ran the real engine (Claude Code 2.1.276) and recorded what it enforces in `packages/docs/m4-1-claude-code-findings.md`. Phase M4.4 built the session files on those findings. Where this differs from the text above, this paragraph describes the code.
+
+- The adapters. A `PreToolUse` hook that exits with a code other than 2, or that reaches its timeout, does not block the write. The before-write adapter therefore answers every case in JSON and exits 0: an exception, a missing field, a check that exits with a code other than 0 or 2, a check that takes too long, and the adapter's own alarm all print a `deny` decision with the reason. It prints `allow` when every check allows, and the session's `settings.json` has no allow rule for the file-writing tools, so the engine asks the Human Lead if the hook ever fails without blocking. A JSON `deny` shows the model the reason only; an exit-2 refusal would show it the whole hook command, which holds the desk's path. The adapter reads `file_path`, or `notebook_path` for `NotebookEdit`. The adapter cannot refuse when `python3` cannot be started, so the companion checks `python3` and the installed check scripts before it starts a session and does not start one without them.
+- Hook timeouts. Every hook entry sets `timeout` explicitly, because the engine's default is 600 seconds and a hook that reaches its timeout lets the write through. The before-write hook has 60 seconds, the adapter refuses by itself at 50, and one check may take 35. The after-write hook has 90, 80 and 60.
+- The allow list. It holds the reading tools, fixed forms of the read commands and the `git` and `gh` commands the default verbs use, and the four server tools. No rule has a `*` before its end, because with `*` in the middle the engine allowed a `commit` and a `checkout -b` in Read only. A prefix rule does not match `git -C repos/<name> …`, so each repository of the manifest gets its own rules with its name written out. There is no `ask` rule: a command that no rule matches asks the Human Lead. A deny list, applied before the allow list, refuses the options of an allowed `git` command that write a file or start a program (`--output`, `--upload-pack`, `--exec=`, `--exec-path`, `--config-env`, `-c`).
+- `--setting-sources ''` is passed before `--settings`, so the Human Lead's own Claude Code settings and a `.claude/` folder inside the Space add no allow rule or hook to a companion session. Managed settings of the machine still apply.
+- `AI_LORE_SESSION_ID` holds the session's id. It is set in the environment of the engine's process and in `env` of the session's `settings.json`, so a shell command of the session can read it. The name of a session's journal entry ends with this id, which is what journal-append-forward checks.
+- The check scripts exit 0 to allow and 2 to refuse, and have no other exit code: a wrong command line or an error inside the script also refuses. The adapters pass each script `--when before` or `--when after`; lore-integrity checks the path to be written with `--when before` and the whole Lore with `--when after`.
+- What the rules cannot stop, stated in `main/space/sessions/permissions.ts`: a command the Human Lead approves runs with the user's rights and can write the Lore, a repository on any branch, the desk's records and the copied check scripts; an option of an allowed `git` or `gh` command that writes a file or starts a program and is not in the deny list gets through; a Writing session holding the Lore can change a skeleton generator under `lore/mirrors/generators/` and then run it without asking, since running the generators is allowed. The engine's sandbox would limit shell writes by path, but it is fixed when the engine starts and cannot follow a claim, so it is not used.
+
 **Entering and leaving Writing.** Entering: the session calls `request_writing`; main checks `tryClaim` against the desk's record and, when GitHub is reachable, against the cached Agents board for other desks; the dialog lists the Lore, each publish area and each repository with a branch field, shows who holds what, and disables a held target (the product document also has the session read the board again after claiming, to catch another desk; stage M4 does not name it and this design does not do it); on confirm main writes the claims, sets the session's mode, pushes the new header state to the renderer, answers the ticket, and then creates or moves the session's issue on GitHub. When the item is known and a repository is claimed, the branch is created with `developBranch` before the answer is returned. Leaving: from the header action, from `leave_writing`, or at session close; main records a `SessionClose` with the current commit of each claimed root, releases the claims, sets Read only, and moves the session issue to Read only or, at close, to Done with the handover as its last comment. If GitHub cannot be reached, the claim and the mode change still happen, the GitHub update fails, and the header and the answer to the session say so; nothing is queued (the focus's cut line).
 
 ### 5.7 The session header, the Skills column and the two dialogs
@@ -689,6 +740,8 @@ type PlanLine = { what: string; from?: string; to?: string; count?: number };
 
 `runSteps` goes through the steps in order, skips a step whose `isDone` is true, stops at the first error, and reports progress through a callback. The machine check covers what stage M3 lists (`git`; `gh` signed in with the `project` scope, and how to add it; an engine from the registry present and signed in) and, by the ruling at the top of this document, `python3` (`python3 --version` answers with a 3.x version; the lowest accepted 3.x is for M3.2 to fix from what M1's scripts use). Stage M3 and decision 16 name three requirements; `python3` is a fourth, added by the ruling and reversible with it. A skeleton generator is run by core as `python3 <template or Lore path>/mirrors/generators/<script> <arguments>` through the `CommandRunner`. Creating a Space is the steps: check the machine; create or find the Space repository; create or find the Project, its Stage field with Spec, Plan, Build, Review, Done, its labels, its link to the repository; scaffold the desk from the template (copy `lore-1.0/`, fill the Space's name, write `lore/space.md`, create `workbench/` and `repos/`, write `.gitignore`); write the Space's corpus entry from the form; clone each repository into `repos/` and write its mirror with a generated skeleton; first commit and push; install into Claude Code; record `FirstSeen` for every root. Adopting a plain repository is the same list with the repository's origin address filled in; the original checkout is only read. Opening by GitHub address is: clone the Space repository, create the Workbench, install, list the manifest's repositories for confirmation, clone them.
 
+As built in M3. The machine check accepts `gh` 2.81.0 or later, the first release that has `gh auth status --json`, which the gh adapter runs; the lowest `git` is 2.28.0 and the lowest `python3` is 3.8. A run that writes on GitHub runs only the plan the Human Lead was shown: the plan request returns a token that main keeps with the planned input, and the run request carries that token and no form, so a run with no plan, with the token of an older plan, or after another folder was chosen is refused. Migration binds its run to its plan in the same way (section 5.9). Before anything is created, setup refuses a repository or a Project of the Space's name that GitHub already has and that is not this Space's own: a repository is the Space's own when it holds the Space's commits, and a Project when the manifest names its number or when it holds no item.
+
 The template folder is found by `main/space/template-dir.ts`: in development it is `packages/spec/lore-1.0`; in a packaged app it is under `process.resourcesPath`, put there by `build.extraResources`. Core receives the folder as a parameter.
 
 ### 5.9 Migration
@@ -708,14 +761,14 @@ Fixed by the focus: a new Space folder and repository; the payload repository cl
 5. Write the pointer to the old folder and the two old repository addresses. **Proposal**: in `publish/archive/index.md`, outside `v0.8/`, so that the archive folder stays identical to its source.
 6. Contracts: each project contract becomes `lore/contracts/<name>.md` with frontmatter, rule only, and the part's index is updated. **Finding**: this project's `blueprint/contracts/` holds three `*.contract.md` files with one contract each and one `contracts.spec.md` with five contracts as sections. How the second is carried is question 16 of section 10.1.
 7. Mirror: the prose of the v0.8 mirror nodes is carried into the mirror of the payload repository in `lore/mirrors/`, with a skeleton generated fresh.
-8. Workbench: the newest journal handover becomes the first entry of `workbench/journal/`; the product document, its images and the critique note go to `workbench/drafts/`.
+8. Workbench: the newest journal handover becomes the first entry of `workbench/journal/`, named `<date of the v0.8 entry>-0000-v08-handover-migration.md` (as built in M6; the id `migration` belongs to no session, so under journal-append-forward no session changes the entry afterwards); the product document, its images and the critique note go to `workbench/drafts/`.
 9. The Space's corpus entry, from the project's name and the description on the plan screen.
 10. Commit and push the Space repository. The archive must be on GitHub before step 11, because the issues link to archived files by address.
-11. Issues, sequential and paced: the in-progress focus as a focus issue at its stage, its stages as sub-issues linking to their archived files; each paused focus as a standalone issue labelled `paused`, linking to its archived subtree; each backlog item as a standalone issue.
+11. Issues, sequential and paced: the in-progress focus as a focus issue at its stage, its stages as sub-issues linking to their archived files; each paused focus as a standalone issue labelled `paused`, linking to its archived subtree; each backlog item as a standalone issue. As built in M6, every issue is put on the Project, and only the focus issue is given a Stage value; the issues of its stages are its sub-issues and have none. One backlog file becomes one issue (question 6 of section 10.1).
 12. Install into Claude Code.
-13. Verify: lore-integrity passes; every archived file's hash equals its source's; both source repositories have the head and status recorded in step 1.
+13. Verify: lore-integrity passes; every archived file's hash equals its source's; both source repositories have the head and status recorded in step 1. As built in M6, the verification has five checks, run in this order: lore-integrity passes over the new Space's Lore; every archived file's SHA-256 equals its source file's, and the archive holds no file without a source file; both source repositories are at the head and status recorded in step 1; the Space repository is committed and its branch is on `origin` at the same commit; every planned issue's marker is on exactly one issue, and that issue is on the Project once. A failed check says what was found and what to look at; nothing is undone.
 
-**Running it again duplicates nothing.** Three mechanisms. The local steps ask the real state (a file with the same hash exists; a card exists). The GitHub steps ask GitHub: the repository and the Project are found by name before they are created, and every issue the migration creates carries a hidden marker in its body, `<!-- ai-lore-migrated: <source relative path> -->`, which `findIssueByMarker` searches for before creating. The ledger `desk/migration.json` records each completed step with what it created, and is consulted first to save calls; if the ledger is lost the markers still prevent duplicates. The marker text is a proposal.
+**Running it again duplicates nothing.** Three mechanisms. The local steps ask the real state (a file with the same hash exists; a card exists). The GitHub steps ask GitHub: the repository and the Project are found by name before they are created, and every issue the migration creates carries a hidden marker in its body, `<!-- ai-lore-migrated: <source relative path> -->`, which `findIssueByMarker` searches for before creating. As built, the marker has the name `migrated` and the percent-encoded source path as its key (section 5.3), and step 11 looks for all planned markers at once with `findIssuesByMarkers`. The ledger `desk/migration.json` records each completed step with what it created, and is consulted first to save calls; if the ledger is lost the markers still prevent duplicates. The marker text is a proposal.
 
 **Migration and this document's open points.** Several details of the mapping are not fixed by the focus; they are listed in section 10 and each has a default so that M6 can be built and the plan screen can show the choice.
 
@@ -723,17 +776,21 @@ Fixed by the focus: a new Space folder and repository; the payload repository cl
 
 The Files window reuses the existing components (`FileTree`, `ChangesPanel`, `BaselinePicker`, `EditorPanel`, `CommitRow`, `SearchDialog`) with a root id where they take a scope today. **Proposal**: a component gets a root-keyed variant only where its props name `ChangeScope`; shared logic is moved into a function both variants call, and the v0.8 variant keeps its name and its tests.
 
-Main holds one `RootTracker` per Space: `snapshot(rootId)`, `baseline(rootId)`, `setBaseline`, `scheduleRefresh(rootId)`, `refreshNow()`, with the same 200 ms debounce as today's tracker. Re-reading is triggered as today: a file event from the watcher, a move of the repository's head (`.git/logs/HEAD`), and the window gaining focus. A root that is a folder inside a working tree is read with `readChangesIn(workTree, baseline, subPath)`: `git status --porcelain -z -uall -- <subPath>` for `HEAD`, or `git diff --name-status -z <baseline> -- <subPath>` plus untracked files under the sub-path; paths are made relative to the root. Renames are reported by git as `R` entries and carried as today's `ChangeEntry` does.
+Main holds one `RootTracker` per Space: `snapshot(rootId)`, `baseline(rootId)`, `setBaseline`, `scheduleRefresh(rootId)`, `refreshNow()`, with the same 200 ms debounce as today's tracker. Re-reading is triggered as today: a file event from the watcher, a move of the repository's head (`.git/logs/HEAD`), and the window gaining focus. A root that is a folder inside a working tree is read with `readChangesIn(workTree, baseline, subPath)`: `git status --porcelain -z -uall -- <subPath>` for `HEAD`, or `git diff --name-status -z <baseline> -- <subPath>` plus untracked files under the sub-path; paths are made relative to the root. Renames are reported by git as `R` entries and carried as today's `ChangeEntry` does. Added while building: the changes of a root (`RootChanges`) carry `uncommitted`, the paths that also differ between `HEAD` and the working tree, untracked files included. These stay listed after a mark; a changed path not in `uncommitted` was committed since the baseline. The Changes panel uses it to tell committed and uncommitted changes apart.
 
 Baseline points for a root are the union of: reviewed marks and session closes from the desk's records; merged pull requests from `GitHubPort.mergedPullRequests` for a repository root (each with its merge commit), omitted with a stated reason when GitHub cannot be reached; commits from `readCommitList`, grouped under a session when a session close or the session's start and end times bracket them. The per-file history shows the same four kinds and pins a diff to a point without changing the root's baseline; that is already how `EditorPanel` treats a pinned commit.
 
 What is remembered (open documents, modes, pins, the selected root, each root's baseline, both windows' positions) is written to files under `<userData>/spaces/<key>/ui/`, one file per concern, by the focused window only, following the existing rule in the product document.
 
+Editing, as built in M5.5. The Human Lead can edit and save a file of any root from the Files window, the Workbench included; this is not an AI session, and the write-guard of sessions does not apply. A save goes through main, which holds the path inside the root: a path that leaves the root by its text or through a symbolic link, or that enters `.git`, is refused. A save replaces an existing regular file and never creates one, is refused when the file changed on disk since the editor read it, and replaces the file atomically, keeping its permission bits. After a save the root's changes are read again.
+
 ### 5.11 The Dashboard and the Project cache
 
-`project/cache.ts` reads and writes `desk/project-cache.json`. `main/space/project-refresh.ts` refreshes it on a timer, when a Space window gains focus, and on demand, never more than one refresh at a time; the interval is a setting and its default is a proposal of five minutes. A refresh that fails with `unreachable` leaves the cache as it is and records the failure time. The Dashboard receives `{ snapshot, fetchedAt, state: 'fresh' | 'stale' | 'offline' }` by push and renders only that.
+`project/cache.ts` reads and writes `desk/project-cache.json`. `main/space/project-refresh.ts` refreshes it on a timer, when a Space window gains focus, and on demand, never more than one refresh at a time; the interval is a setting and its default is a proposal of five minutes. A refresh that fails with `unreachable` leaves the cache as it is and records the failure time. The Dashboard receives `{ snapshot, fetchedAt, state: 'fresh' | 'stale' | 'offline' }` by push and renders only that. As built in M7, the push also carries `version`, `failure`, `refreshing` and the Dashboard's model. `version` numbers the states the refresh service has given: the end-to-end test of M7.5 measured that the push sent when a refresh starts can reach the window after the push sent when it ended, so the Dashboard keeps the state with the highest number it has received.
 
 `project/dashboard-model.ts` is a pure function from a `ProjectSnapshot`, the desk's sessions, the pending gates and the current time to the three parts: columns in the order of the Stage field's options, with a card per focus (kind, items done over items, spec link, gate note) and standalone items beside them; one Agents board row per session issue, marked stale after the threshold (the product document proposes one day; a setting); Needs you, in order: a pending gate (opens the gate dialog), a focus at Review, a stale session. Mirrors out of date are not in the MVP. Starting an attended session from the Dashboard opens an AI tab in Sessions and starts it.
+
+As built in M4.7 and M7: a row of the Agents board carries the session issue's title, and, when the session is one of this desk, a `local` part with the session's id, engine, start time, whether it is closed, and the item it is on; a session of another desk has none. The title of a session's issue names the session's engine and start time ("The <engine> session that started at <time>"); the session's id is not shown.
 
 ### 5.12 Error handling
 
@@ -753,7 +810,7 @@ The current app logs with `console` in main and has an in-renderer activity cons
 |---|---|
 | Renderer | `contextIsolation` on, no Node integration, the bridge generated from the contract; unchanged. New handlers validate arguments with zod and resolve paths against roots. |
 | Embedded browser tabs | Unchanged isolation. They run in the same app as the dialogs, so a dialog's answer is accepted only over IPC from a Space window's own web contents, checked by `event.sender` id. |
-| Local server | As `mcp-host.ts` does today: binds `127.0.0.1` only, never `0.0.0.0` or a name; the port is chosen by the operating system at each launch; one path and one random token per session; a request for an unknown session or with a wrong token is refused. Tools are limited to the four of section 4.3. None of the tools writes a file; the only effects are a dialog and, on the Human Lead's confirmation, a desk record and a GitHub update. No request is granted without the Human Lead's confirmation in the dialog. **Proposal**, each missing from `mcp-host.ts` today and added in M4.3 without changing the helper's behaviour: the token is 32 random bytes from `node:crypto`, made when the session starts, never written anywhere but the session's `mcp.json`, and never used again after the session ends or the app restarts; tokens are compared with `timingSafeEqual`; a request whose `Host` header is not `127.0.0.1:<port>`, or that carries an `Origin` header, is refused, so that a page in an embedded browser tab cannot call the server; request bodies are capped at 1 MB, as `middleman.ts` does. |
+| Local server | As `mcp-host.ts` does today: binds `127.0.0.1` only, never `0.0.0.0` or a name; the port is chosen by the operating system at each launch; one path and one random token per session; a request for an unknown session or with a wrong token is refused. Tools are limited to the four of section 4.3. None of the tools writes a file; the only effects are a dialog and, on the Human Lead's confirmation, a desk record and a GitHub update. No request is granted without the Human Lead's confirmation in the dialog. **Proposal**, each missing from `mcp-host.ts` today and added in M4.3 without changing the helper's behaviour: the token is 32 random bytes from `node:crypto`, made when the session starts, never written anywhere but the session's `mcp.json`, and never used again after the session ends or the app restarts; tokens are compared with `timingSafeEqual`; a request whose `Host` header is not `127.0.0.1:<port>`, or that carries an `Origin` header, is refused, so that a page in an embedded browser tab cannot call the server; request bodies are capped at 1 MB, as `middleman.ts` does. As built: the server keeps only a keyed hash of each token (HMAC-SHA-256 under a secret of 32 random bytes made at each launch and kept in memory), not the token, and compares digests, so a token of an earlier launch matches nothing; a request for an unknown session and a request with a wrong token get the same answer (404, `unknown session`), so a caller without the token cannot tell whether a session exists; a session is never given another session's id (section 4.3). |
 | Session files | Settings, hooks, the MCP configuration and the token are outside the Space, in a folder created with mode `0700`, and each file with mode `0600` (**Proposal**). The token is valid for the life of the session; the session's folder is deleted when the session ends. |
 | Paths | Every path that comes from the renderer, from a session request, from the manifest or from a v0.8 source goes through `safeJoin` against its base. `safeJoin` resolves symbolic links with `realpath` on the base and on the joined path (for a path that does not exist yet, on its nearest existing parent) and checks containment after resolving, not on the text of the path. The write-guard script applies the same rule in Python (section 5.6). A manifest entry `name` must match `^[A-Za-z0-9._-]+$` and may not be `.` or `..` (**Proposal**). Archive copying refuses a symbolic link that points outside the source. |
 | Running `git`, `gh` and `python3` | Argument arrays through `execFile`, never a shell string, and never `exec` or `shell: true`. The Python scripts start `git` with an argument list and `shell=False`. A value that comes from outside (a branch name, a title, a repository name) is always a separate argument and is preceded by `--` where the command supports it. Branch names are checked with `git check-ref-format --branch`. Issue bodies are passed on standard input (`--body-file -`). |
@@ -830,6 +887,8 @@ No automated test reads or writes this project's Lore folder (`.ai-lore-ai-lore-
 - End-to-end tests start the app with `--user-data-dir=<temp>`, as `launchApp` already does, and with `AI_LORE_FAKE_GITHUB`.
 - `git` in tests is the real `git`, against repositories created in temporary folders, with `user.name`, `user.email` and `commit.gpgsign=false` set per repository, and remotes that are bare repositories in temporary folders.
 
+Environment variables of the test scripts, added while building. `AI_LORE_CORE_TEST_OUT` and `AI_LORE_APP_TEST_OUT` set the folder that core's and the app's headless tests are compiled into (default `dist-test`). The scripts remove that folder before they compile, so two runs at the same time need two folders. `AI_LORE_SLOW_TESTS=1` runs the headless tests that are skipped by default because they take long; one such test is in `root-search-ipc.test.ts`. No variable turns on tests with the real engine: those remain manual checks (section 8.6).
+
 ### 8.2 The levels, and the framework at each
 
 | Level | Framework (existing) | Where | What belongs here |
@@ -881,7 +940,7 @@ No coverage tool is configured today. **Proposal**: measure core with Node's bui
 
 A phase is done when all of the following hold, and the phase report shows the command output for each:
 
-1. `npm run build -w @ai-lore-companion/core` and `npm run typecheck -w @ai-lore-companion/app` pass.
+1. `npm run build -w @ai-lore-companion/core` and `npm run typecheck -w @ai-lore-companion/app` pass. Since M3.5 the app's typecheck requires no error in main, preload and shared code, and compares the renderer's errors with `packages/app/typecheck-baseline.json`, which records the errors v0.8 files had before the run; an error that is not in the baseline fails the check, and the baseline can only be lowered.
 2. `npm run lint` passes.
 3. `npm test` passes: core's `node:test` suite, the app's headless suite, the app's component suite. No existing test was deleted or skipped.
 4. For a phase that changes main, preload or renderer: `npm run e2e` passes, including the existing `cockpit.spec.ts`.
@@ -1022,26 +1081,37 @@ What M8 finds goes back to the stage that owns it, as the stage file says.
 Each has a default so that work can proceed; the default is a proposal.
 
 1. **The language and runtime of the check scripts and skeleton generators.** They are files in the Lore, run by the engine's hooks and from a command line. The sources name three things the machine must have: `git`, `gh` and an engine. Options: (a) dependency-free JavaScript modules, run by hooks through the companion's own binary with `ELECTRON_RUN_AS_NODE=1` so that no separate Node is needed, and with `node` on a command line; this needs an exception to the contract "TypeScript everywhere under `packages/`" for Lore content. (b) Python 3 with the standard library only, as v0.8's guard hook and `ai-lore.py` are; this adds `python3` to what the machine must have. **Answered for this run by the ruling at the top of this document: (b).** Sections 5.5, 5.6, 5.8, 6.1, 8 and 9 follow it. The Human Lead can reverse it; reversing it changes M1.5, M1.6, the adapters of M4.4, the fourth row of the machine check in M3.2, and the tests that run the scripts. The architect's draft gave (a) as its default.
-2. **Opening a v0.8 project in the cockpit from a 1.0 build before M8** (section 2.4). Default: the action is offered until the switch.
-3. **The archive and the Lore repository's `.git` folder.** "Copied as it is" and "byte-identical to the source tree" are read here as: every file of the working tree, without `.git`. Whether files ignored by the source's `.gitignore` (for example `.DS_Store`) are copied is not said. Default: copied, since the comparison is over files on disk.
-4. **A source with uncommitted changes.** Default: the plan screen says so and the Human Lead may continue; the working tree is what is copied.
-5. **The Stage of the migrated in-progress focus.** v0.8 has `draft`, `paused`, `in progress`, `done`; the Project has Spec, Plan, Build, Review, Done. Default: a choice on the plan screen, preselected to Build.
-6. **What a backlog item is.** v0.8 keeps backlog as files, each of which may list several entries. Default: one issue per backlog file, linking to the archived file. With this default this project gives about thirteen issues, close to the stage's "about fifteen".
-7. **The project's own verbs.** The gate's Installs line names "this project's own contracts, mirror and verbs". The mapping has no row for verbs, places project processes in the archive only, and this project's `blueprint/verbs/` holds only `core/`. Default: no verb is carried.
-8. **The description for the Space's corpus entry.** The v0.8 manifest holds only the project's name. Default: a field on the plan screen that the Human Lead fills.
-9. **Where the pointer to the old folder and repositories is written.** Default: `publish/archive/index.md`.
-10. **How the Agents board's four columns are represented on the Project**, and the label that marks a session issue (section 3.6).
-11. **A write to a path that is neither Lore, payload nor Workbench** (section 5.6). Default: refused.
-12. **Whether a second running instance of the app may write desk records** (section 5.4). Default: no.
+2. **Opening a v0.8 project in the cockpit from a 1.0 build before M8** (section 2.4). Default: the action is offered until the switch. **Taken for this run: the default** (the migration screen has "Open in the v0.8 cockpit").
+3. **The archive and the Lore repository's `.git` folder.** "Copied as it is" and "byte-identical to the source tree" are read here as: every file of the working tree, without `.git`. Whether files ignored by the source's `.gitignore` (for example `.DS_Store`) are copied is not said. Default: copied, since the comparison is over files on disk. **Taken for this run: the default.**
+4. **A source with uncommitted changes.** Default: the plan screen says so and the Human Lead may continue; the working tree is what is copied. **Taken for this run: the default.**
+5. **The Stage of the migrated in-progress focus.** v0.8 has `draft`, `paused`, `in progress`, `done`; the Project has Spec, Plan, Build, Review, Done. Default: a choice on the plan screen, preselected to Build. **Taken for this run: the default.**
+6. **What a backlog item is.** v0.8 keeps backlog as files, each of which may list several entries. Default: one issue per backlog file, linking to the archived file. With this default this project gives about thirteen issues, close to the stage's "about fifteen". **Taken for this run: the default.** Question 19 asks about its consequence.
+7. **The project's own verbs.** The gate's Installs line names "this project's own contracts, mirror and verbs". The mapping has no row for verbs, places project processes in the archive only, and this project's `blueprint/verbs/` holds only `core/`. Default: no verb is carried. **Taken for this run: the default.**
+8. **The description for the Space's corpus entry.** The v0.8 manifest holds only the project's name. Default: a field on the plan screen that the Human Lead fills. **Taken for this run: the default.**
+9. **Where the pointer to the old folder and repositories is written.** Default: `publish/archive/index.md`. **Taken for this run: the default.**
+10. **How the Agents board's four columns are represented on the Project**, and the label that marks a session issue (section 3.6). **Taken for this run: the default of section 3.6.**
+11. **A write to a path that is neither Lore, payload nor Workbench** (section 5.6). Default: refused. **Taken for this run: the default.**
+12. **Whether a second running instance of the app may write desk records** (section 5.4). Default: no. **Taken for this run: the default** (the owner file of section 5.4).
 
 Questions 13 to 18 were added by the review of this document. The ruling at the top covers questions 2 to 12 only, so the orchestrating session or the Human Lead still has to accept these defaults.
 
-13. **How detection routing and today's routing live side by side until M8** (Finding 6, section 2.4). Default: the environment variable `AI_LORE_SPACE_ROUTING=1` turns detection routing on; without it the app routes as today; the versioning contract is changed by the Human Lead at M8.
-14. **Where the text of the Claude Code hook adapters is kept** (section 5.6). Default: a constant in a TypeScript module of `main/space/sessions/`, written out per session. Alternative: a static `.py` file shipped with the template.
-15. **How Read only is enforced for file edits** (section 5.6). Stage M4 says deny-writes settings as the helper has; the product document lets a Read only session write the Workbench. Default: the file-writing tools stay available and the write-guard hook refuses by path.
-16. **How `contracts.spec.md`, which holds five contracts in one file, is carried** (section 5.9, step 6). Default: one card per source file, so it becomes one card; the three `*.contract.md` files become one card each.
-17. **Whether leaving Writing is refused while the Lore fails lore-integrity** (section 5.6). The product document says the session "must fix it before leaving Writing". Default: not refused in the MVP; the failure is reported to the session by the after-write hook.
-18. **Whether the contract "TypeScript everywhere under `packages/`" should name Lore content under `packages/spec` as outside its scope** (section 6.1). Default: the contract is left as it is for this run and the Python files are placed only under `packages/spec/lore-1.0/`.
+13. **How detection routing and today's routing live side by side until M8** (Finding 6, section 2.4). Default: the environment variable `AI_LORE_SPACE_ROUTING=1` turns detection routing on; without it the app routes as today; the versioning contract is changed by the Human Lead at M8. **Taken for this run: the default.**
+14. **Where the text of the Claude Code hook adapters is kept** (section 5.6). Default: a constant in a TypeScript module of `main/space/sessions/`, written out per session. Alternative: a static `.py` file shipped with the template. **Taken for this run: the default** (`main/space/sessions/adapters.ts`).
+15. **How Read only is enforced for file edits** (section 5.6). Stage M4 says deny-writes settings as the helper has; the product document lets a Read only session write the Workbench. Default: the file-writing tools stay available and the write-guard hook refuses by path. **Taken for this run: the default.**
+16. **How `contracts.spec.md`, which holds five contracts in one file, is carried** (section 5.9, step 6). Default: one card per source file, so it becomes one card; the three `*.contract.md` files become one card each. **Taken for this run: the default.**
+17. **Whether leaving Writing is refused while the Lore fails lore-integrity** (section 5.6). The product document says the session "must fix it before leaving Writing". Default: not refused in the MVP; the failure is reported to the session by the after-write hook. **Taken for this run: the default.**
+18. **Whether the contract "TypeScript everywhere under `packages/`" should name Lore content under `packages/spec` as outside its scope** (section 6.1). Default: the contract is left as it is for this run and the Python files are placed only under `packages/spec/lore-1.0/`. **Taken for this run: the default. The question itself remains the Human Lead's:** whether the contract names Lore content under `packages/spec`, the `.py` files included, as outside its scope.
+
+Questions 19 to 26 were found while building M1 to M7. Each is open for the Human Lead; the code follows the default given.
+
+19. **One backlog file becomes one issue** (question 6), so a backlog file that lists nine items becomes one issue, not nine. Default: left as built.
+20. **A root that is a subfolder of a working tree lists every commit of that working tree**, not only the commits that touch the subfolder. Default: left as built.
+21. **Setup uses an empty Project of the Space's title that something else made** (section 5.8), because an empty Project is also what a stopped run of setup leaves. Default: left as built.
+22. **`spaceRootBlob` can read any blob of a repository**, including a file outside a root that is a subfolder of the working tree. Default: left as built.
+23. **The read-only helper's own `register` can overwrite the entry of an existing session id** on the local server. Default: left as built.
+24. **The v0.8 channels for the tree, for reading a file and for writing a file serve a Space window** as they serve the cockpit. Default: left as built until the switch.
+25. **No notice is shown when a `selected-root.json` is set aside.** Default: left as built.
+26. **Stop, pressed during the migration's GitHub step, waits for that step to end.** Default: left as built.
 
 ### 10.2 Risks
 
@@ -1052,7 +1122,7 @@ Questions 13 to 18 were added by the review of this document. The ruling at the 
 | `python3` is missing or is not a 3.x version on the Human Lead's machine or on a colleague's | Every hook refuses, so no session can write any file with the engine's file-writing tools | The machine check tests for it; the adapter's refusal names the cause; the ruling is reversible (question 1) |
 | A shell command that gets past the permission rules writes a desk record | A claim or a gate answer that the Human Lead did not give | Stated in sections 5.4 and 5.6; M4.1 investigates the sandbox settings, which could deny writes to the data folder |
 | A hook that cannot find its script stops every write (Finding 5) | Agents, or sessions, are stopped for a reason unrelated to the rule | Absolute paths in every generated hook; the adapter names the missing script; a headless test runs the adapter from another working directory; agents run from the project root |
-| Project views may not be creatable through the API | Setup cannot create the three views | M3.1 checks; fallbacks in section 5.3; the M3 gate does not require views |
+| Project views may not be creatable through the API | Setup cannot create the three views | M3.1 checks; fallbacks in section 5.3; the M3 gate does not require views. Settled in M3: views are created, and the board's column field is a step by hand (section 5.3) |
 | A development build and an installed build share `userData` | Two instances grant the same target, or an older build drops fields | New files only; unknown fields kept; the owner file |
 | The Space folder is moved | The desk's records, marks and UI state are not found | Accepted for the MVP; stated in section 3.1; a change of key rule is confined to `layout/` |
 | The existing components take a two-value scope | More renderer work in M5 than "reuse" suggests | Finding 2; M5 phases sized for it; variants instead of edits to v0.8 components |
