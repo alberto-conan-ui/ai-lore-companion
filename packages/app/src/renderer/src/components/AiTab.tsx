@@ -1,5 +1,5 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
-import { type JSX, useCallback, useEffect, useRef, useState } from 'react';
+import { type JSX, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import type { PromptEntry, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { FindBar } from './FindBar.js';
 import { SidebarTab } from './SidebarTab.js';
@@ -18,6 +18,30 @@ const PTY_MIN_WIDTH = 240;
 /** Sentinel `<option>` value for the "+ Add engine…" item in the engine
  *  dropdown — picking it routes to Settings → Engines, not an engine select. */
 const ADD_ENGINE_SENTINEL = '__add-engine__';
+
+/** What starting a guarded session in a Space window answers. `message` is shown as it is. */
+export type AiTabSpaceStart =
+  | { ok: true; sessionId: string; ptyId: string }
+  | { ok: false; message: string };
+
+/**
+ * What an AI tab of a Space window (phase M4.6) uses in place of the cockpit's
+ * engine start. When it is given, Start never calls `spawnTerminalEngine`:
+ * `start` is the guarded start of the Space (`spaceSessionStart`). The header
+ * sits above the terminal and the sidebar replaces the prompts catalog.
+ * Without it the tab is the cockpit's, unchanged.
+ */
+export type AiTabSpace = {
+  start: (engineId: string) => Promise<AiTabSpaceStart>;
+  /** Start once when the tab mounts: a tab made by `+ AI`. A restored tab stays dormant. */
+  autoStart: boolean;
+  /** The tab's session started (its id) or ended (`null`). */
+  onSessionChange: (sessionId: string | null) => void;
+  header: (sessionId: string) => ReactNode;
+  sidebar: (ptyId: string, focusPty: () => void) => JSX.Element;
+  /** The sentence under Start. */
+  hint: string;
+};
 
 /**
  * An AI-session tab. Two states:
@@ -44,6 +68,7 @@ export function AiTab({
   onEngineChange,
   onStatus,
   onRunningChange,
+  space,
 }: {
   active: boolean;
   tabId: string;
@@ -57,8 +82,15 @@ export function AiTab({
   onStatus: (tabId: string, status: TerminalForegroundStatus, command: string) => void;
   /** Notify the shell when the AI session transitions running ↔ idle (for title). */
   onRunningChange: (tabId: string, running: boolean) => void;
+  /** Set in a Space window only: the guarded start, the header and the Skills column. */
+  space?: AiTabSpace;
 }): JSX.Element {
   const [ptyId, setPtyId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  /** Why the guarded start refused, shown in the empty state (Space window only). */
+  const [startError, setStartError] = useState<string | null>(null);
+  const spaceRef = useRef(space);
+  spaceRef.current = space;
   /** Set when an engine just exited — the empty state shows Restart in
    *  addition to Start, and the engine dropdown stays preselected. */
   const [justExited, setJustExited] = useState(false);
@@ -75,8 +107,29 @@ export function AiTab({
     if (selected && selected.id !== engine) onEngineChange(selected.id);
   }, [selected, engine, onEngineChange]);
 
+  const starting = useRef(false);
   const start = useCallback((): void => {
     if (!selected) return;
+    const guarded = spaceRef.current;
+    if (guarded) {
+      // A Space window: the guarded start only, never the cockpit's engine spawn.
+      if (starting.current) return;
+      starting.current = true;
+      setStartError(null);
+      void guarded.start(selected.id).then((started) => {
+        starting.current = false;
+        if (!started.ok) {
+          setStartError(started.message);
+          return;
+        }
+        setPtyId(started.ptyId);
+        setSessionId(started.sessionId);
+        setJustExited(false);
+        (spaceRef.current ?? guarded).onSessionChange(started.sessionId);
+        onRunningChange(tabId, true);
+      });
+      return;
+    }
     void window.cockpit
       .spawnTerminalEngine({ binary: selected.binary, args: selected.args })
       .then((id) => {
@@ -87,6 +140,14 @@ export function AiTab({
       });
   }, [selected, tabId, onRunningChange]);
 
+  // A tab made by `+ AI` in a Space window starts once; a restored one waits for Start.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoStarted.current || !spaceRef.current?.autoStart || !selected) return;
+    autoStarted.current = true;
+    start();
+  }, [selected, start]);
+
   // When the PTY exits (the user quits the engine), drop back to empty state
   // with the just-exited badge so the empty body offers Restart.
   useEffect(() => {
@@ -95,6 +156,10 @@ export function AiTab({
       if (p.id !== ptyId) return;
       setPtyId(null);
       setJustExited(true);
+      if (spaceRef.current) {
+        setSessionId(null);
+        spaceRef.current.onSessionChange(null);
+      }
       onRunningChange(tabId, false);
     });
   }, [ptyId, tabId, onRunningChange]);
@@ -107,6 +172,20 @@ export function AiTab({
         onSelect={onEngineChange}
         onStart={start}
         justExited={justExited}
+        {...(space ? { hint: space.hint, error: startError } : {})}
+      />
+    );
+  }
+
+  if (space && sessionId !== null) {
+    return (
+      <RunningSplit
+        active={active}
+        tabId={tabId}
+        ptyId={ptyId}
+        onStatus={onStatus}
+        header={space.header(sessionId)}
+        sidebar={space.sidebar}
       />
     );
   }
@@ -122,6 +201,8 @@ function EmptyState({
   onSelect,
   onStart,
   justExited,
+  hint,
+  error,
 }: {
   engines: readonly EngineEntry[];
   selected: EngineEntry | null;
@@ -130,6 +211,10 @@ function EmptyState({
   /** True when the engine just exited — surfaces a Restart button on top of
    *  the standard Start affordance. */
   justExited: boolean;
+  /** Space window: the sentence under Start, in place of the cockpit's. */
+  hint?: string;
+  /** Space window: why the last start was refused. */
+  error?: string | null;
 }): JSX.Element {
   if (engines.length === 0) {
     return (
@@ -199,8 +284,14 @@ function EmptyState({
         <div style={hintStyle}>
           {justExited
             ? 'The engine has stopped. Restart relaunches with the same engine, or pick a different one.'
-            : "The engine launches in this tab's shell, with the project folder as its working directory."}
+            : (hint ??
+              "The engine launches in this tab's shell, with the project folder as its working directory.")}
         </div>
+        {error ? (
+          <div style={errorStyle} role="alert" data-testid="ai-start-error">
+            {error}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -218,17 +309,52 @@ function RunningSplit({
   tabId,
   ptyId,
   onStatus,
+  header,
+  sidebar,
 }: {
   active: boolean;
   tabId: string;
   ptyId: string;
   onStatus: (tabId: string, status: TerminalForegroundStatus, command: string) => void;
+  /** Space window: the session header, one line above the split. */
+  header?: ReactNode;
+  /** Space window: the Skills column, in place of the prompts catalog. */
+  sidebar?: (ptyId: string, focusPty: () => void) => JSX.Element;
 }): JSX.Element {
   // The PTY publishes a focus handle so clicking a verb in the prompts
   // column hands focus back to the terminal — no extra trip to type the
   // continuation.
   const focusPtyRef = useRef<() => void>(() => {});
   const focusPty = useCallback((): void => focusPtyRef.current(), []);
+  if (sidebar !== undefined) {
+    // A Space window saves no width into the v0.8 settings file, so the width is not persisted.
+    return (
+      <div style={aiSpaceWrapperStyle} data-testid="ai-tab" data-ai-state="running">
+        {header}
+        <div style={aiRunningWrapperStyle}>
+          <SidebarTab
+            testIdPrefix="ai-skills"
+            icon="✦"
+            label="Skills"
+            defaultWidth={PROMPTS_DEFAULT_WIDTH}
+            expandTitle="Show skills"
+            collapseTitle="Hide skills"
+            hideTitle="Hide skills"
+            sidebar={sidebar(ptyId, focusPty)}
+            content={
+              <RunningPty
+                active={active}
+                tabId={tabId}
+                ptyId={ptyId}
+                onStatus={onStatus}
+                focusPtyRef={focusPtyRef}
+              />
+            }
+          />
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={aiRunningWrapperStyle} data-testid="ai-tab" data-ai-state="running">
       <SidebarTab
@@ -258,6 +384,14 @@ function RunningSplit({
 
 const aiRunningWrapperStyle: React.CSSProperties = {
   display: 'flex',
+  flex: 1,
+  minHeight: 0,
+  minWidth: 0,
+};
+
+const aiSpaceWrapperStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
   flex: 1,
   minHeight: 0,
   minWidth: 0,
@@ -546,6 +680,12 @@ const titleStyle: React.CSSProperties = {
 const hintStyle: React.CSSProperties = {
   fontSize: '0.8rem',
   color: 'var(--color-text-muted)',
+  lineHeight: 1.5,
+};
+
+const errorStyle: React.CSSProperties = {
+  fontSize: '0.8rem',
+  color: 'var(--color-danger, var(--color-text))',
   lineHeight: 1.5,
 };
 

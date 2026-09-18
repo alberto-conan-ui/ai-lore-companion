@@ -38,6 +38,19 @@ test('spawnTerminalEngine returns "" with no project context', () => {
   assert.equal(h.invoke('spawnTerminalEngine', { binary: 'claude' }), '');
 });
 
+test('spawnTerminalEngine refuses a window of an AI-Lore 1.0 Space: no engine starts', () => {
+  const space = h.deps.space;
+  h.deps.space = { ...space, contextFor: () => ({}) as ReturnType<typeof space.contextFor> };
+  try {
+    assert.equal(h.invoke('spawnTerminalEngine', { binary: 'claude' }), '');
+    assert.equal(pty.spawnCalls.length, 0);
+    // A plain shell still starts in that window.
+    assert.equal(h.invoke('spawnTerminal'), 'pty-7');
+  } finally {
+    h.deps.space = space;
+  }
+});
+
 test('sendTerminalInput writes the data to the addressed pty', () => {
   h.invoke('sendTerminalInput', { id: 'pty-7', data: 'ls\n' });
   assert.deepEqual(pty.write.calls, [['pty-7', 'ls\n']]);

@@ -74,5 +74,12 @@ export const MAX_TEXT_LENGTH = 4_000;
 /** The most targets one `request_writing` may name. */
 export const MAX_TARGETS_PER_REQUEST = 32;
 
+/**
+ * How long an answer waits for the Agents board on GitHub (phase M4.7). The
+ * claim is on the desk before this wait starts; after it the answer says the
+ * board was not updated in time.
+ */
+export const BOARD_UPDATE_WAIT_MS = 8_000;
+
 /** How long closing waits for the answers of open `await_answer` calls to leave. */
 export const CLOSE_FLUSH_MS = 500;

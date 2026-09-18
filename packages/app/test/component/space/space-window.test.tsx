@@ -138,14 +138,46 @@ const cockpit = {
     };
   }),
   urlOpenExternal: vi.fn(),
+  // Phase M4.6: `+ AI` asks whether a guarded session can start.
+  spaceSessionReadiness: vi.fn<(arg: unknown) => Promise<unknown>>(async () => ({
+    ok: true,
+    value: { engineId: 'default.claude' },
+  })),
+  spaceSessionStart: vi.fn(),
+  spaceSessionEnd: vi.fn(async () => ({ ok: true })),
   // The channels the cockpit uses to save a layout. The Space window must not call them.
   settingsSetLayout: vi.fn(),
   dockLayoutSet: vi.fn(),
+  // The dialogs of phase M4.5, mounted once by the Space window: no request waits.
+  spaceDialogsPending: vi.fn(async () => ({ ok: true, value: { requests: [] } })),
+  onSpaceDialogsPending: vi.fn(() => () => {}),
+  // The Dashboard of phase M7.3, mounted hidden: no Project has been read yet.
+  spaceProjectState: vi.fn(async () => ({
+    ok: true,
+    value: {
+      version: 1,
+      snapshot: null,
+      fetchedAt: null,
+      state: 'stale',
+      failure: null,
+      refreshing: false,
+      model: null,
+    },
+  })),
+  spaceProjectFocus: vi.fn(async () => ({ ok: true, value: null })),
+  spaceProjectRefresh: vi.fn(),
+  onSpaceProjectState: vi.fn(() => () => {}),
 };
 
 beforeEach(() => {
   for (const mock of Object.values(cockpit)) mock.mockClear();
   cockpit.spaceNavigate.mockResolvedValue({ ok: true, value: { mode: 'space-files' } });
+  // Sessions and the Dashboard's Start a session (M7.4) both read the engines.
+  cockpit.enginesList.mockResolvedValue([]);
+  cockpit.spaceSessionReadiness.mockResolvedValue({
+    ok: true,
+    value: { engineId: 'default.claude' },
+  });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
   useSpaceNavStore.setState({ screen: 'sessions' });
 });
@@ -170,7 +202,7 @@ test('a Space that setup has not named yet is headed Space', () => {
   expect(screen.getByTestId('space-name').textContent).toBe('Space');
 });
 
-test('the window opens on Sessions; Dashboard shows the placeholder of phase M7.3 and keeps Sessions mounted', () => {
+test('the window opens on Sessions; Dashboard shows the Dashboard and keeps Sessions mounted', async () => {
   renderWindow();
   expect(shown('space-screen-sessions')).toBe(true);
   expect(shown('space-screen-dashboard')).toBe(false);
@@ -181,8 +213,8 @@ test('the window opens on Sessions; Dashboard shows the placeholder of phase M7.
   fireEvent.click(screen.getByTestId('space-rail-dashboard'));
   expect(shown('space-screen-dashboard')).toBe(true);
   expect(shown('space-screen-sessions')).toBe(false);
-  expect(screen.getByTestId('space-placeholder-dashboard').textContent).toContain(
-    'This screen is built in phase M7.3.',
+  expect((await screen.findByTestId('dashboard-no-model')).textContent).toContain(
+    'No Project has been read from GitHub for this Space yet',
   );
   // The tab is still there, only hidden: its terminal keeps its process.
   expect(screen.getAllByTestId('dock-tab')).toHaveLength(1);
@@ -207,16 +239,22 @@ test('Sessions offers the creators while no tab is open, and hosts the dock with
   expect(screen.getByTestId('dock-tab-title').textContent).toBe('Shell 1');
 });
 
-test('+ AI is disabled in a Space window even with an engine in the registry, and the reason is written', async () => {
-  cockpit.enginesList.mockResolvedValueOnce([
+test('+ AI is disabled in a Space window while the guarded start is not ready, and the reason is written', async () => {
+  const sentence =
+    'No AI session was started: python3 3.8 or later was not found. The write-guard of a session runs with python3, and a session without it would not be guarded. Install python3 and run the machine check again.';
+  cockpit.spaceSessionReadiness.mockResolvedValue({
+    ok: false,
+    error: { kind: 'python3-missing', message: sentence },
+  });
+  cockpit.enginesList.mockResolvedValue([
     { id: 'default.claude', name: 'Claude', binary: 'claude' },
   ] as never);
   renderWindow();
-  await waitFor(() => expect(cockpit.enginesList).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(cockpit.spaceSessionReadiness).toHaveBeenCalledWith({ engineId: 'default.claude' }),
+  );
   await act(async () => {});
 
-  const sentence =
-    'AI sessions in a Space are started by the guarded start of phase M4.4. Until that phase is built, a Space window starts no AI session.';
   const ai = screen.getByTestId('new-ai') as HTMLButtonElement;
   expect(ai.disabled).toBe(true);
   expect(ai.title).toContain(sentence);
@@ -235,6 +273,18 @@ test('+ AI is disabled in a Space window even with an engine in the registry, an
   expect(screen.getByTestId('space-sessions-ai-note').textContent).toContain(sentence);
   fireEvent.click(screen.getByTestId('dock-force-new-ai'));
   expect(screen.getAllByTestId('dock-tab').map((tab) => tab.dataset.kind)).toEqual(['shell']);
+});
+
+test('+ AI is enabled when the guarded start is ready, and makes an AI tab', async () => {
+  cockpit.enginesList.mockResolvedValue([
+    { id: 'default.claude', name: 'Claude', binary: 'claude' },
+  ] as never);
+  renderWindow();
+  const ai = screen.getByTestId('new-ai') as HTMLButtonElement;
+  await waitFor(() => expect(ai.disabled).toBe(false));
+  expect(ai.title).toBe('New AI session');
+  fireEvent.click(ai);
+  expect(screen.getAllByTestId('dock-tab').map((tab) => tab.dataset.kind)).toEqual(['ai']);
 });
 
 test('a tab follows the rules of the cockpit: the running command is its title, a name set by hand stays, close removes it', () => {

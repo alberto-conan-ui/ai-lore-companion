@@ -24,6 +24,12 @@
  * `leaveWriting`, which writes the mode, then one session close per root, then
  * releases the claims.
  *
+ * The Agents board on GitHub (phase M4.7, `board.ts`) is updated after the
+ * desk: on a grant the session's issue is put in Writing, and the session's
+ * `await_answer` returns once that update ended or `boardWaitMs` passed, with a
+ * note that says whether the board was updated. Leaving Writing moves the issue
+ * to Read only the same way. The grant never depends on GitHub.
+ *
  * The broker knows nothing about MCP or HTTP. `tools.ts` is the adapter.
  */
 
@@ -55,8 +61,10 @@ import {
   recordGateAnswer,
 } from '@ai-lore-companion/core';
 import type { SpaceLog } from '../log.js';
+import { type BoardNote, type SessionBoard, boardWithin } from './board.js';
 import {
   ANSWERED_TICKET_TTL_MS,
+  BOARD_UPDATE_WAIT_MS,
   MAX_DIALOG_REQUESTS_PER_WINDOW,
   MAX_PENDING_TICKETS_PER_SESSION,
   MAX_TARGETS_PER_REQUEST,
@@ -93,7 +101,17 @@ export type DialogRequest =
 
 /** The answer to a request to enter Writing, as the session reads it. */
 export type WritingAnswer =
-  | { status: 'answered'; granted: true; claims: Claim[] }
+  | {
+      status: 'answered';
+      granted: true;
+      claims: Claim[];
+      /**
+       * The Agents board on GitHub, updated after the claim was written. The
+       * session reads it once the update ended or its time ran out; the claim
+       * never depends on it.
+       */
+      board?: BoardNote;
+    }
   | {
       status: 'answered';
       granted: false;
@@ -146,7 +164,12 @@ export type SessionPort = {
 };
 
 /** What leaving Writing answers. */
-export type WritingLeftAnswer = { mode: 'read-only'; released: WriteTarget[] };
+export type WritingLeftAnswer = {
+  mode: 'read-only';
+  released: WriteTarget[];
+  /** The Agents board, when the session has an issue there. */
+  board?: BoardNote;
+};
 
 /** What the broker tells its subscribers. */
 export type BrokerEvent =
@@ -204,6 +227,10 @@ export type DialogBrokerOptions = {
    * session close for each. Without it no session close is recorded.
    */
   closeCommits?: (desk: Desk, sessionId: string) => Promise<SessionCloseCommit[]>;
+  /** The Agents board on GitHub (phase M4.7). Without it no board is updated. */
+  board?: Pick<SessionBoard, 'entered' | 'left'>;
+  /** How long an answer waits for the board. Default: `BOARD_UPDATE_WAIT_MS`. */
+  boardWaitMs?: number;
   log: SpaceLog;
   now?: () => number;
   limits?: Partial<BrokerLimits>;
@@ -244,6 +271,8 @@ type Ticket = {
   settledAt: number | null;
   /** Wake the `await_answer` calls that wait on this ticket. */
   waiters: Set<() => void>;
+  /** The board update of a granted request; the session reads the answer once it ended. Never rejects. */
+  board: Promise<void> | null;
 };
 
 /** The part of a ticket's id that a log line carries. */
@@ -301,6 +330,7 @@ export function createDialogBroker(options: DialogBrokerOptions): DialogBroker {
   const { log } = options;
   const now = options.now ?? (() => Date.now());
   const limits: BrokerLimits = { ...DEFAULT_LIMITS, ...options.limits };
+  const boardWaitMs = options.boardWaitMs ?? BOARD_UPDATE_WAIT_MS;
   const tickets = new Map<string, Ticket>();
   const listeners = new Set<(event: BrokerEvent) => void>();
   const waiting = new Map<string, number>();
@@ -401,6 +431,7 @@ export function createDialogBroker(options: DialogBrokerOptions): DialogBroker {
       answer: null,
       settledAt: null,
       waiters: new Set(),
+      board: null,
     });
     emit({ kind: 'requested', request });
     return { ticket: request.ticket };
@@ -487,7 +518,11 @@ export function createDialogBroker(options: DialogBrokerOptions): DialogBroker {
       closes: left.value.closes.length,
     });
     emit({ kind: 'left-writing', sessionId, released });
-    return ok({ mode: 'read-only', released });
+    // The desk is written; the board follows, and leaving never waits on it beyond the limit.
+    const board = options.board
+      ? await boardWithin(options.board.left(sessionId), boardWaitMs)
+      : null;
+    return ok({ mode: 'read-only', released, ...(board !== null ? { board } : {}) });
   };
 
   const sessionPort = (sessionId: string): SessionPort => ({
@@ -587,7 +622,10 @@ export function createDialogBroker(options: DialogBrokerOptions): DialogBroker {
       if (!ticket || ticket.request.sessionId !== sessionId) {
         return fail('unknown-ticket', 'There is no such ticket for this session.');
       }
-      if (ticket.answer !== null) return ok(ticket.answer);
+      if (ticket.answer !== null) {
+        if (ticket.board !== null) await ticket.board;
+        return ok(ticket.answer);
+      }
       const count = waiting.get(sessionId) ?? 0;
       if (closed || waitMs <= 0 || signal?.aborted || count >= limits.maxWaitersPerSession) {
         return ok({ status: 'pending' });
@@ -607,6 +645,7 @@ export function createDialogBroker(options: DialogBrokerOptions): DialogBroker {
       const left = (waiting.get(sessionId) ?? 1) - 1;
       if (left > 0) waiting.set(sessionId, left);
       else waiting.delete(sessionId);
+      if (ticket.board !== null) await ticket.board;
       return ok(ticket.answer ?? { status: 'pending' });
     },
 
@@ -706,6 +745,19 @@ export function createDialogBroker(options: DialogBrokerOptions): DialogBroker {
             ticketId: short,
             targets: entered.value.claims.map((claim) => describeWriteTarget(claim.target)),
           });
+          if (options.board) {
+            // The claim is on the desk. The board follows; the session reads its note with the answer.
+            const granted = answer;
+            ticket.board = boardWithin(
+              options.board.entered(request.sessionId, {
+                targets: granted.claims.map((claim) => claim.target),
+                ...(request.item !== undefined ? { item: request.item } : {}),
+              }),
+              boardWaitMs,
+            ).then((board) => {
+              if (ticket.answer === granted) ticket.answer = { ...granted, board };
+            });
+          }
         } else if (isRefusal(entered.error) && desk.ok) {
           const told = refusalForSession(desk.value, entered.error);
           answer = {

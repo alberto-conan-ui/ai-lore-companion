@@ -13,6 +13,9 @@ export const registerTerminal: RegisterModule = (reg, deps) => {
   });
 
   reg.handle('spawnTerminalEngine', (event, arg: TerminalSpawnEngineArg) => {
+    // A window of an AI-Lore 1.0 Space starts an engine only through the guarded start
+    // (`spaceSessionStart`), never through this unguarded spawn (phase M4.6).
+    if (deps.space.contextFor(event) !== undefined) return '';
     const ctx = deps.contextFor(event);
     if (!ctx) return '';
     return ctx.ptyService.spawn({ binary: arg.binary, args: arg.args });

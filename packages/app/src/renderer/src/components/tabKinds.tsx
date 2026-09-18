@@ -2,7 +2,7 @@ import type { ChangeScope, EngineEntry, TabLastSession } from '@ai-lore-companio
 import type { CSSProperties, JSX, ReactNode } from 'react';
 import type { Shortcut, TerminalForegroundStatus } from '../../../shared/ipc.js';
 import { createContributions } from '../shell/contributions.js';
-import { AiTab } from './AiTab.js';
+import { AiTab, type AiTabSpace } from './AiTab.js';
 import { AssistantHost } from './AssistantHost.js';
 import { Banner } from './Banner.js';
 import { BrowserTab } from './BrowserTab.js';
@@ -50,6 +50,10 @@ export type TabRenderContext = {
   changesHeightByPane: Record<string, number>;
   /** Report a pane's new Changes-panel height (drag-end) for persistence. */
   onPaneChangesHeight: (paneId: string, height: number) => void;
+  /** Set by a Space window only (phase M4.6): an AI tab there starts the guarded
+   *  session, shows the session header and the Skills column. The cockpit never
+   *  sets it, and its AI tabs are unchanged. */
+  spaceAi?: (tab: WorkspaceTab) => AiTabSpace;
 };
 
 /** Context the strip's `+ <kind>` creator buttons act through. */
@@ -59,8 +63,8 @@ export type NewTabContext = {
   onNewShell: () => void;
   onNewAi: (engineId: string) => void;
   /** When set, `+ AI` is disabled and this sentence is its tooltip. The cockpit
-   *  never sets it. A Space window sets it until phase M4.4 starts AI sessions
-   *  with the write-guard. */
+   *  never sets it. A Space window sets it while its guarded start is not ready
+   *  (`spaceSessionReadiness`), with the reason. */
   aiUnavailableReason?: string;
   onNewBrowser: () => void;
   /** Shortcuts offered in the `+ shell ▾` / `+ web ▾` start-with-shortcut
@@ -381,6 +385,7 @@ const COMPANION_TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
             if (running) ctx.clearLastSession(id);
             ctx.setAiTabRunning(id, running);
           }}
+          {...(ctx.spaceAi ? { space: ctx.spaceAi(tab) } : {})}
         />
       </div>
     ),

@@ -9,7 +9,9 @@
  *   file>`, in an app that is not packaged (`isFakeMachineRun` of
  *   `e2e-machine.ts`), core's `FakeGitHub` on that file. A packaged app
  *   started with both variables gets the unreachable port below. It is loaded from core's testing
- *   entry at that moment only, so a normal run never loads it. This is the same
+ *   entry at that moment only, so a normal run never loads it. While a file at
+ *   `fakeUnreachableSwitch(<state file>)` exists, the fake answers
+ *   `unreachable` (the end-to-end test of the Dashboard offline). This is the same
  *   switch as the app's existing end-to-end mode (`E2E_BYPASS_GUARDS` in
  *   `main/index.ts`), read from the environment the app was started with; the
  *   app never sets it, and a terminal or session the app starts cannot change
@@ -24,6 +26,7 @@
  * (setup) calls `createAppGitHubPort` itself.
  */
 
+import { existsSync } from 'node:fs';
 import {
   type CommandRunner,
   type GitHubError,
@@ -62,6 +65,7 @@ export function unreachableGitHub(message: string): GitHubPort {
     ensureLabels: answer,
     findIssueByMarker: answer,
     findIssuesByMarkers: answer,
+    findAllIssuesByMarkers: answer,
     createIssue: answer,
     updateIssue: answer,
     addSubIssue: answer,
@@ -73,6 +77,37 @@ export function unreachableGitHub(message: string): GitHubPort {
     readProject: answer,
     mergedPullRequests: answer,
   };
+}
+
+/**
+ * The switch of the end-to-end fake (phase M7.5): while a file at this path
+ * exists, every call of the fake answers `unreachable`. It is read only by the
+ * fake's port, which only an end-to-end run of an unpackaged app gets
+ * (`isFakeMachineRun`), so it changes nothing in any other run.
+ */
+export function fakeUnreachableSwitch(stateFile: string): string {
+  return `${stateFile}.unreachable`;
+}
+
+/**
+ * The fake's port, which before each call sets the fake unreachable or
+ * reachable from `fakeUnreachableSwitch(stateFile)`. A plain object with the
+ * port's methods only, as `unreachableGitHub` is.
+ */
+function withUnreachableSwitch(
+  fake: GitHubPort & { setUnreachable(on: boolean): void },
+  stateFile: string,
+): GitHubPort {
+  const path = fakeUnreachableSwitch(stateFile);
+  const port = {} as Record<keyof GitHubPort, unknown>;
+  for (const name of Object.keys(unreachableGitHub('')) as (keyof GitHubPort)[]) {
+    const method = fake[name] as (...args: unknown[]) => unknown;
+    port[name] = (...args: unknown[]) => {
+      fake.setUnreachable(existsSync(path));
+      return method.apply(fake, args);
+    };
+  }
+  return port as GitHubPort;
 }
 
 /** What `createAppGitHubPort` needs. */
@@ -102,7 +137,7 @@ export async function createAppGitHubPort(options: AppGitHubPortOptions): Promis
   if (stateFile !== undefined && isFakeMachineRun(env, options.packaged)) {
     const testing = await import('@ai-lore-companion/core/testing');
     log?.info('github-port', { ...fields, port: 'fake' });
-    return testing.createFakeGitHub({ stateFile });
+    return withUnreachableSwitch(testing.createFakeGitHub({ stateFile }), stateFile);
   }
   if (!liveGitHubAllowed(env)) {
     log?.info('github-port', { ...fields, port: 'unreachable' });

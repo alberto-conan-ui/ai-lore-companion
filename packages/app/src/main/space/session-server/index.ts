@@ -32,6 +32,7 @@ import {
 import type { McpHost } from '../../helper/mcp-host.js';
 import { type SpaceContext, defineSpaceService } from '../context.js';
 import { spaceDesk } from '../desk-service.js';
+import { sessionBoard } from './board.js';
 import { type DialogBroker, type DialogBrokerOptions, createDialogBroker } from './broker.js';
 import {
   BODY_READ_TIMEOUT_MS,
@@ -271,6 +272,7 @@ type ServiceOverrides = Pick<
 > & {
   host?: () => Promise<HostPort>;
   limits?: DialogBrokerOptions['limits'];
+  boardWaitMs?: number;
 };
 
 let overrides: ServiceOverrides = {};
@@ -290,13 +292,16 @@ export const sessionServer = defineSpaceService<SessionServer>({
   create: (context: SpaceContext) => {
     // The desk first, so that it is disposed after this service.
     const desk = context.service(spaceDesk);
-    const { host, limits, awaitMs, maxCallsPerWindow, bodyTimeoutMs } = overrides;
+    const board = context.service(sessionBoard);
+    const { host, limits, awaitMs, maxCallsPerWindow, bodyTimeoutMs, boardWaitMs } = overrides;
     return createSessionServer({
       host: host ?? appHost,
       broker: {
         desk: () => desk.open(),
         manifest: () => context.manifest,
         closeCommits: (open, sessionId) => sessionCloseCommits(context, open, sessionId),
+        board,
+        ...(boardWaitMs !== undefined ? { boardWaitMs } : {}),
         log: context.log,
         ...(limits ? { limits } : {}),
       },

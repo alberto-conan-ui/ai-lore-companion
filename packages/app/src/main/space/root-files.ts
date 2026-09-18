@@ -92,30 +92,56 @@ function realpathNearest(abs: string): string {
   }
 }
 
+/** A path inside a root's folder: absolute, and relative to the root with `/` (`''` for the root's own folder). */
+export type InRootPath = { abs: string; relative: string };
+
 /**
- * Resolve `path`, relative to the root's folder, or refuse it. A path that
- * names a git folder, in any case, is refused, and so is one that reaches a
- * git folder through a symbolic link inside the root (`link -> .git`): the
- * check is made on the path as given and on the path after links are resolved.
+ * Resolve `path`, relative to the folder `rootPath` of a root, tracked by git
+ * or not, or refuse it. The empty path is the root's own folder, accepted only
+ * for a folder. A path that names a git folder, in any case, is refused, and
+ * so is one that leaves the root or reaches a git folder through a symbolic
+ * link inside the root (`link -> .git`): the check is made on the path as
+ * given and on the path after links are resolved. The one containment check
+ * of the Files window's channels; the tree (`./ipc/root-tree.ts`) uses it too.
  */
-export function resolveRootFile(root: TrackedRoot, path: string): SpaceRootsResult<RootFile> {
+export function resolveInRoot(
+  rootPath: string,
+  path: string,
+  what: 'file' | 'folder',
+): SpaceRootsResult<InRootPath> {
   const segments = path.split(/[\\/]/).filter((segment) => segment !== '' && segment !== '.');
-  if (segments.length === 0 || segments.includes('..') || entersGitFolder(segments)) {
-    return failure('path-refused', 'The path is not a path of a file inside the root.');
+  if (
+    (what === 'file' && segments.length === 0) ||
+    segments.includes('..') ||
+    entersGitFolder(segments)
+  ) {
+    return failure('path-refused', `The path is not a path of a ${what} inside the root.`);
   }
+  if (segments.length === 0) return { ok: true, value: { abs: rootPath, relative: '' } };
   const relative = segments.join('/');
-  const joined = safeJoin(root.path, relative);
+  const joined = safeJoin(rootPath, relative);
   if (!joined.ok) {
     return failure('path-refused', 'The path leaves the folder of the root.', joined.error.kind);
   }
-  const real = relativePath(realpathNearest(root.path), realpathNearest(joined.value));
+  const real = relativePath(realpathNearest(rootPath), realpathNearest(joined.value));
   if (entersGitFolder(real.split(sep))) {
     return failure('path-refused', 'The path reaches a git folder through a symbolic link.');
   }
+  return { ok: true, value: { abs: joined.value, relative } };
+}
+
+/**
+ * Resolve `path`, relative to the root's folder, as a file of a tracked root,
+ * or refuse it, by the rules of `resolveInRoot`.
+ */
+export function resolveRootFile(root: TrackedRoot, path: string): SpaceRootsResult<RootFile> {
+  const inRoot = resolveInRoot(root.path, path, 'file');
+  if (!inRoot.ok) return inRoot;
+  const { abs, relative } = inRoot.value;
   const { subPath } = root.tracking;
   return {
     ok: true,
-    value: { abs: joined.value, gitPath: subPath === '' ? relative : `${subPath}/${relative}` },
+    value: { abs, gitPath: subPath === '' ? relative : `${subPath}/${relative}` },
   };
 }
 

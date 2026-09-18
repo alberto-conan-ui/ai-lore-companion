@@ -4,13 +4,18 @@
  * fragment is spread into `CONTRACT`.
  */
 
-import { invoke } from './describe.js';
+import { invoke, push } from './describe.js';
 import type {
   SpaceSessionEndArg,
   SpaceSessionEndResult,
   SpaceSessionEngineArg,
+  SpaceSessionHeader,
+  SpaceSessionHeaderResult,
+  SpaceSessionLeaveWritingResult,
   SpaceSessionReadinessResult,
   SpaceSessionStartResult,
+  SpaceSkillsArg,
+  SpaceSkillsResult,
 } from './sessions.types.js';
 
 export const SPACE_SESSIONS_CONTRACT = {
@@ -31,4 +36,19 @@ export const SPACE_SESSIONS_CONTRACT = {
   ),
   /** End a session of the Space: its engine is stopped and its end is recorded. */
   spaceSessionEnd: invoke<[arg: SpaceSessionEndArg], SpaceSessionEndResult>('space:session-end'),
+  /** The header of a session as the desk records it now: mode, claimed targets, item (M4.6). */
+  spaceSessionHeader: invoke<[arg: SpaceSessionEndArg], SpaceSessionHeaderResult>(
+    'space:session-header',
+  ),
+  /**
+   * The header's Leave Writing: the session returns to Read only and its
+   * claims are released, the same step as the tool `leave_writing` (M4.6).
+   */
+  spaceSessionLeaveWriting: invoke<[arg: SpaceSessionEndArg], SpaceSessionLeaveWritingResult>(
+    'space:session-leave-writing',
+  ),
+  /** A session's header changed on the desk: it entered or left Writing (M4.6). */
+  onSpaceSessionHeader: push<SpaceSessionHeader>('space:on-session-header'),
+  /** The skills of the Space's install, read with the Lore reader (M4.6). */
+  spaceSkillsList: invoke<[arg: SpaceSkillsArg], SpaceSkillsResult>('space:skills-list'),
 } as const;

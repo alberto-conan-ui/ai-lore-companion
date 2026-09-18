@@ -39,6 +39,8 @@ type Props = {
   driftKindFor?: (filePath: string) => DriftKind | undefined;
   /** Right-click on a real folder or file — opens the pane's menu at the cursor. */
   onContextMenu?: (node: TreeNode, x: number, y: number) => void;
+  /** The row's Reveal in Finder button. Left out, it opens the row's absolute path, as v0.8 does. */
+  onRevealInFinder?: (node: TreeNode) => void;
 };
 
 /** Folder drift dot — the four-level scale, tuned to read on the tree's dark background. */
@@ -138,6 +140,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
     driftLevelFor,
     driftKindFor,
     onContextMenu,
+    onRevealInFinder,
   }: Props,
   forwardedRef,
 ): JSX.Element {
@@ -292,6 +295,11 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
           if (!expandedPaths.has(node.path)) {
             // Collapsed: expand. Children will appear under it; focus stays.
             if (childrenOf(node).length > 0) onToggleExpand(node.path);
+            else if (node.children === undefined) {
+              // Not loaded yet: as a click does, select it (the signal to load) and expand it.
+              onSelectFolder(node.path);
+              onToggleExpand(node.path);
+            }
           } else {
             // Expanded: move to the first child (file or folder), if any.
             const first = childrenOf(node)[0];
@@ -372,6 +380,7 @@ export const FileTree = forwardRef<FileTreeHandle, Props>(function FileTree(
               driftLevelFor={driftLevelFor}
               driftKindFor={driftKindFor}
               onContextMenu={onContextMenu}
+              onRevealInFinder={onRevealInFinder}
               setRowRef={setRowRef}
             />
           );
@@ -398,6 +407,7 @@ type RowProps = {
   driftLevelFor: (folderPath: string) => DriftLevel;
   driftKindFor?: (filePath: string) => DriftKind | undefined;
   onContextMenu?: (node: TreeNode, x: number, y: number) => void;
+  onRevealInFinder?: (node: TreeNode) => void;
   setRowRef: (path: string, el: HTMLDivElement | null) => void;
 };
 
@@ -416,6 +426,7 @@ function Row({
   driftLevelFor,
   driftKindFor,
   onContextMenu,
+  onRevealInFinder,
   setRowRef,
 }: RowProps): JSX.Element {
   const isDir = node.isDir;
@@ -492,7 +503,8 @@ function Row({
             title="Reveal in Finder"
             onClick={(e) => {
               e.stopPropagation();
-              void window.cockpit.openPath(node.path);
+              if (onRevealInFinder) onRevealInFinder(node);
+              else void window.cockpit.openPath(node.path);
             }}
           >
             ↗

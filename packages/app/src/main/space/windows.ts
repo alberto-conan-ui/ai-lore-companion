@@ -24,6 +24,8 @@ export type SpaceWindowLike = {
   isMinimized(): boolean;
   restore(): void;
   focus(): void;
+  /** Whether the window has the focus. A stand-in without it is taken as not focused. */
+  isFocused?(): boolean;
   setTitle(title: string): void;
   readonly webContents: {
     readonly id: number;

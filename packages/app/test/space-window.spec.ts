@@ -9,8 +9,11 @@ import { closeSpaceApp, withSpaceApp } from './space-fixture';
 // machine check to be ready: under `COCKPIT_E2E=1` the app's runner refuses `gh`.
 // `withSpaceApp` closes the app and removes the fixture also when a test fails.
 
-const AI_SENTENCE =
-  'AI sessions in a Space are started by the guarded start of phase M4.4. Until that phase is built, a Space window starts no AI session.';
+/**
+ * The fixture Space is not installed into Claude Code, so `+ AI` is disabled with the
+ * sentence of `spaceSessionReadiness` (phase M4.6). Every such sentence starts so.
+ */
+const AI_SENTENCE = /^No AI session/;
 
 function isAlive(pid: number): boolean {
   try {
@@ -36,10 +39,10 @@ test.describe('the Space window', () => {
       }
       await expect(page.getByTestId('space-rail-sessions')).toHaveAttribute('aria-current', 'page');
 
-      // `+ AI` is disabled in a Space window until phase M4.4, and the sentence says so.
+      // `+ AI` is disabled while the guarded start is not ready, and the sentence says why.
       const empty = page.getByTestId('space-sessions-empty');
       await expect(empty.getByTestId('new-ai')).toBeDisabled();
-      await expect(empty.getByTestId('space-sessions-ai-note')).toContainText(AI_SENTENCE);
+      await expect(empty.getByTestId('space-sessions-ai-note')).toHaveText(AI_SENTENCE);
 
       // A shell tab in the dock workspace.
       await empty.getByTestId('new-shell').click();
@@ -52,8 +55,8 @@ test.describe('the Space window', () => {
       // The dock's own `+ AI` is disabled too, with the same sentence as its tooltip.
       const dockAi = page.getByTestId('space-sessions').getByTestId('new-ai').first();
       await expect(dockAi).toBeDisabled();
-      await expect(dockAi).toHaveAttribute('title', /guarded start of phase M4\.4/);
-      await expect(page.getByTestId('space-sessions-ai-note')).toContainText(AI_SENTENCE);
+      await expect(dockAi).toHaveAttribute('title', AI_SENTENCE);
+      await expect(page.getByTestId('space-sessions-ai-note')).toHaveText(AI_SENTENCE);
       await expect(page.getByTestId('tab-ai')).toHaveCount(0);
 
       await terminal.click();
@@ -78,11 +81,11 @@ test.describe('the Space window', () => {
       expect(Number.isInteger(shellPid) && shellPid > 1).toBe(true);
       expect(isAlive(shellPid)).toBe(true);
 
-      // Dashboard is the placeholder of its phase; the shell tab is kept while it is shown.
+      // The Dashboard is shown (its content is `space-dashboard.spec.ts`'s); the shell tab is
+      // kept while it is shown.
       await page.getByTestId('space-rail-dashboard').click();
-      await expect(page.getByTestId('space-placeholder-dashboard')).toContainText(
-        'This screen is built in phase M7.3.',
-      );
+      await expect(page.getByTestId('dashboard')).toBeVisible();
+      await expect(page.getByTestId('dashboard-state')).toBeVisible();
       expect(isAlive(shellPid)).toBe(true);
       await page.getByTestId('space-rail-sessions').click();
       await expect(page.locator('.xterm-rows')).toContainText(`CWD=${fixture.root}=END`);
@@ -111,13 +114,11 @@ test.describe('the Space window', () => {
       });
       await page.keyboard.press('Escape');
 
-      // Files opens the second window of the Space, whose screen phase M5.2 builds.
+      // Files opens the second window of the Space (phase M5.2; `files-window.spec.ts` tests it).
       const opened = app.waitForEvent('window');
       await page.getByTestId('space-rail-files').click();
       const filesPage = await opened;
-      await expect(filesPage.getByTestId('space-placeholder-space-files')).toBeVisible({
-        timeout: 15_000,
-      });
+      await expect(filesPage.getByTestId('files-window')).toBeVisible({ timeout: 15_000 });
       await expect(filesPage.getByTestId('space-files-root')).toHaveText(fixture.root);
     });
   });

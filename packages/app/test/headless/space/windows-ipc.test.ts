@@ -98,6 +98,8 @@ test('every channel refuses an argument that is not of its form, and names no va
     ['spaceNavigate', { to: 'space-files', open: { rootId: '../lore' } }],
     ['spaceNavigate', { to: 'space-files', open: { rootId: 'lore', relPath: '../../etc/passwd' } }],
     ['spaceNavigate', { to: 'space-files', open: { rootId: 'lore', relPath: '/etc/passwd' } }],
+    ['spaceNavigate', { to: 'space-files', open: { rootId: 'repo:..' } }],
+    ['spaceNavigate', { to: 'space-files', open: { rootId: 'app' } }],
     ['spaceOpenInCockpit', { folder: '/etc' }],
     ['spaceOpenInCockpit', undefined],
   ];
@@ -106,6 +108,15 @@ test('every channel refuses an argument that is not of its form, and names no va
     assert.ok(!result.ok, `${key} ${JSON.stringify(arg)}`);
     assert.equal(result.error.kind, 'invalid-argument', `${key} ${JSON.stringify(arg)}`);
     assert.doesNotMatch(result.error.message, /etc|passwd|relative/);
+  }
+  // Every kind of root id is of the form: a repository's and a publish area's pass validation.
+  for (const rootId of ['lore', 'workbench', 'repo:app', 'publish:site']) {
+    const result = await call('spaceNavigate', welcome, {
+      to: 'space-files',
+      open: { rootId, relPath: 'a.md' },
+    });
+    assert.ok(!result.ok);
+    assert.equal(result.error.kind, 'not-allowed-here', rootId);
   }
   assert.equal(h.space.created.length, 1);
   assert.deepEqual(h.space.openedV08, []);

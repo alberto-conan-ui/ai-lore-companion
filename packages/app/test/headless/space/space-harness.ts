@@ -202,6 +202,7 @@ export function fakeSpaceHost(): SpaceHost {
     openInCockpit: async () => refused,
     reload: async () => {},
     owns: () => false,
+    mayRemember: () => false,
     windowClosed: async () => {},
     recentSpaces: () => [],
     resolveRecentSpace: () => ({ status: 'unknown' }),

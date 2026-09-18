@@ -6,14 +6,7 @@ vi.mock('../../../src/renderer/src/components/TerminalTab.js', () => ({
 }));
 
 import { SpaceSurface } from '../../../src/renderer/src/space/SpaceSurface.js';
-import { Dashboard } from '../../../src/renderer/src/space/dashboard/Dashboard.js';
-import { SessionHeader } from '../../../src/renderer/src/space/session-header/SessionHeader.js';
-import { SkillsColumn } from '../../../src/renderer/src/space/skills/SkillsColumn.js';
-import type {
-  SpaceSummary,
-  SpaceWindowInitPayload,
-  SpaceWindowResult,
-} from '../../../src/shared/ipc.js';
+import type { SpaceSummary, SpaceWindowResult } from '../../../src/shared/ipc.js';
 
 // The surface renders the screen of each 1.0 window mode. Until its phase builds it, a screen
 // is a placeholder that says which phase builds it. When a phase replaces a placeholder, its
@@ -47,34 +40,7 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-const PLACEHOLDERS: [SpaceWindowInitPayload, string, string][] = [
-  [{ mode: 'setup', start: { kind: 'new' } }, 'setup', 'M3.7'],
-  [
-    {
-      mode: 'migration',
-      folder: '/work/old-project',
-      legacy: {
-        projectName: 'old-project',
-        lorePath: '/work/old-project/.ai-lore-old-project',
-        coreVersion: '0.8',
-        manifestLocation: 'memory-folder',
-        migratable: true,
-        versionStanding: 'v0.8',
-        reason: 'This is the AI-Lore project old-project. It can be migrated.',
-      },
-    },
-    'migration',
-    'M6.5',
-  ],
-  [{ mode: 'space-files', space }, 'space-files', 'M5.2'],
-];
-
-test.each(PLACEHOLDERS)('mode %o renders its placeholder', (init, id, phase) => {
-  render(<SpaceSurface init={init} />);
-  const placeholder = screen.getByTestId(`space-placeholder-${id}`);
-  expect(placeholder.textContent).toContain(`This screen is built in phase ${phase}.`);
-  expect(placeholder.dataset.phase).toBe(phase);
-});
+// Every window mode's screen is built; the migration screen (M6.5) is tested in `migration.test.tsx`.
 
 test('the not-a-Space mode renders the screen itself, not a placeholder', () => {
   render(
@@ -86,42 +52,8 @@ test('the not-a-Space mode renders the screen itself, not a placeholder', () => 
   expect(screen.queryByText(/This screen is built in phase/)).toBeNull();
 });
 
-test('the parts that are not windows say which phase builds them', () => {
-  render(
-    <>
-      <Dashboard />
-      <SessionHeader />
-      <SkillsColumn />
-    </>,
-  );
-  expect(screen.getByTestId('space-placeholder-dashboard').dataset.phase).toBe('M7.3');
-  expect(screen.getByTestId('space-placeholder-session-header').dataset.phase).toBe('M4.6');
-  expect(screen.getByTestId('space-placeholder-skills').dataset.phase).toBe('M4.6');
-});
-
-test('the migration screen carries Open in the v0.8 cockpit, which sends no path', async () => {
-  const [init] = PLACEHOLDERS.find(([row]) => row.mode === 'migration') ?? [];
-  if (!init) throw new Error('the migration row is missing');
-  render(<SpaceSurface init={init} />);
-  expect(screen.getByTestId('migration-reason').textContent).toContain('can be migrated');
-  const button = screen.getByTestId('migration-open-in-cockpit');
-  expect(button.textContent).toBe('Open in the v0.8 cockpit');
-  fireEvent.click(button);
-  await waitFor(() => expect(cockpit.spaceOpenInCockpit).toHaveBeenCalledWith({}));
-});
-
-test('error state: a refused Open in the v0.8 cockpit shows the message', async () => {
-  cockpit.spaceOpenInCockpit.mockResolvedValue({
-    ok: false,
-    error: { kind: 'not-allowed-here', message: 'Not from this screen.' },
-  });
-  const [init] = PLACEHOLDERS.find(([row]) => row.mode === 'migration') ?? [];
-  if (!init) throw new Error('the migration row is missing');
-  render(<SpaceSurface init={init} />);
-  fireEvent.click(screen.getByTestId('migration-open-in-cockpit'));
-  const error = await screen.findByTestId('migration-open-in-cockpit-error');
-  expect(error.textContent).toBe('Not from this screen.');
-});
+// The session header and the Skills column (M4.6) are tested in `space-ai-session.test.tsx`;
+// the Dashboard (M7.3) in `dashboard.test.tsx`.
 
 test('the welcome placeholder opens a folder and shows why a launch folder was not opened', async () => {
   render(

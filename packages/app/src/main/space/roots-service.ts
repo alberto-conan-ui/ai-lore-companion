@@ -103,6 +103,12 @@ export type RunningRoots = {
 };
 
 export type SpaceRoots = {
+  /**
+   * Be told of every file event of the roots' watchers, before it is batched
+   * for the windows. Added by phase M5.6: the search keeps its index of file
+   * names current with it. Returns the function that stops it.
+   */
+  onFileEvent(listener: (event: RootFileEvent) => void): () => void;
   /** Where pushes go. The handlers give it on every call; the last one given is used. */
   bind(push: RootsPush): void;
   /** The running tracker, started now when there was none. */
@@ -168,6 +174,7 @@ function createSpaceRoots(context: SpaceContext): SpaceRoots {
   const lastEventAt = new Map<string, number>();
   const batches = new Map<string, { events: RootFileEventEntry[]; overflow: boolean }>();
   let batchTimer: NodeJS.Timeout | null = null;
+  const fileListeners = new Set<(event: RootFileEvent) => void>();
 
   const send = (channel: string, payload: unknown): void => {
     if (closed) return;
@@ -203,6 +210,16 @@ function createSpaceRoots(context: SpaceContext): SpaceRoots {
 
   const onFileEvent = (tracker: () => RootTracker | null, event: RootFileEvent): void => {
     if (closed) return;
+    for (const listener of fileListeners) {
+      try {
+        listener(event);
+      } catch (caught) {
+        log.warn('roots-file-listener-failed', {
+          space: context.key,
+          message: errorMessage(caught),
+        });
+      }
+    }
     const root = current?.roots.find((candidate) => candidate.id === event.rootId);
     // The maximum wait: see this file's header.
     lastEventAt.set(event.rootId, Date.now());
@@ -436,6 +453,12 @@ function createSpaceRoots(context: SpaceContext): SpaceRoots {
   };
 
   return {
+    onFileEvent(listener) {
+      fileListeners.add(listener);
+      return () => {
+        fileListeners.delete(listener);
+      };
+    },
     bind(next) {
       push = next;
     },

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { parseGhAuthStatus } from '@ai-lore-companion/core';
@@ -13,7 +14,10 @@ import {
   ghAuthStatusText,
   isFakeMachineRun,
 } from '../../../src/main/space/e2e-machine.js';
-import { createAppGitHubPort } from '../../../src/main/space/github-service.js';
+import {
+  createAppGitHubPort,
+  fakeUnreachableSwitch,
+} from '../../../src/main/space/github-service.js';
 
 // The machine check of an end-to-end run with the fake GitHub (phase M3.9): `gh` is
 // answered from the fake's state and the engine is the run's own fake, only when both
@@ -70,6 +74,28 @@ test('a packaged app never gets the fakes, even started with both variables and 
       [REAL_ENGINE.id],
     );
     assert.ok(runner.calls.some((call) => call.bin === 'gh'));
+    fake.dispose();
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test('the fake of an end-to-end run answers unreachable while its switch file exists', async () => {
+  const temp = makeTempDir('ai-lore-e2e-switch-');
+  try {
+    const stateFile = join(temp.dir, 'fake-github.json');
+    const fake = createFakeGitHub({ stateFile, reposDir: join(temp.dir, 'remotes') });
+    fake.save(stateFile);
+    const env = { COCKPIT_E2E: '1', AI_LORE_FAKE_GITHUB: stateFile };
+    const refuseAll = createScriptedRunner([]);
+    const port = await createAppGitHubPort({ runner: refuseAll, env, packaged: false });
+    assert.equal((await port.auth()).ok, true);
+    writeFileSync(fakeUnreachableSwitch(stateFile), '');
+    const off = await port.auth();
+    assert.equal(off.ok ? 'signed-in' : off.error.kind, 'unreachable');
+    rmSync(fakeUnreachableSwitch(stateFile));
+    assert.equal((await port.auth()).ok, true);
+    assert.equal(refuseAll.calls.length, 0);
     fake.dispose();
   } finally {
     temp.cleanup();

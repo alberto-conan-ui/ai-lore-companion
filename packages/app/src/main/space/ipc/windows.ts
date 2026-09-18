@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import type { SpaceWindowResult } from '../../../shared/ipc.js';
 import type { RegisterModule } from '../../ipc/types.js';
-import { absolutePathSchema, parseArg, relativePathSchema, rootIdSchema } from './validate.js';
+import { spaceRootIdSchema } from './roots.js';
+import { absolutePathSchema, parseArg, relativePathSchema } from './validate.js';
 
 const openFolderSchema = z.strictObject({ folder: absolutePathSchema.optional() });
 
+// A root id of a Space (`lore`, `workbench`, `publish:<name>`, `repo:<name>`), as the root channels take it.
 const openInFilesSchema = z.strictObject({
-  rootId: rootIdSchema,
+  rootId: spaceRootIdSchema,
   relPath: relativePathSchema.optional(),
 });
 

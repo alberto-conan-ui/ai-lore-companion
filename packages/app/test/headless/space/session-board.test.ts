@@ -1,0 +1,334 @@
+import assert from 'node:assert/strict';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { after, afterEach, before, beforeEach, test } from 'node:test';
+import {
+  AGENTS_COLUMNS,
+  AGENTS_FIELD,
+  type Desk,
+  type ProjectInfo,
+  SESSION_LABEL,
+  endSession,
+  getSession,
+  listClaims,
+  startSession,
+} from '@ai-lore-companion/core';
+import {
+  type FakeGitHub,
+  type SpaceFixture,
+  createFakeGitHub,
+  makeSpaceFixture,
+} from '@ai-lore-companion/core/testing';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { type McpHost, createMcpHost } from '../../../src/main/helper/mcp-host.js';
+import type { SpaceContext } from '../../../src/main/space/context.js';
+import { spaceDesk } from '../../../src/main/space/desk-service.js';
+import { spaceGitHub } from '../../../src/main/space/github-service.js';
+import { boardWithin, sessionBoard } from '../../../src/main/space/session-server/board.js';
+import {
+  type SessionConnection,
+  type SessionServer,
+  configureSessionServer,
+  sessionServer,
+} from '../../../src/main/space/session-server/index.js';
+import {
+  type FakeSpaceWindow,
+  LORE_TEMPLATE_DIR,
+  type SpaceHarness,
+  spaceHarnessFor,
+} from './space-harness.js';
+
+// Phase M4.7: the Agents board on the fake GitHub, through the session server and a real MCP client.
+// No test reaches GitHub.
+
+const OWNER = 'fake-human';
+const NAME = 'board-space';
+const SPACE_REPOSITORY = `${OWNER}/${NAME}`;
+const LORE = { kind: 'lore' } as const;
+const APP = { kind: 'repository', name: 'app', branch: 'feature/1-thing' } as const;
+
+let space: SpaceFixture;
+let harness: SpaceHarness;
+let host: McpHost;
+let context: SpaceContext;
+let server: SessionServer;
+let desk: Desk;
+let windows: FakeSpaceWindow[];
+let fake: FakeGitHub;
+let project: ProjectInfo;
+const clients: Client[] = [];
+
+before(async () => {
+  space = await makeSpaceFixture({
+    templateDir: LORE_TEMPLATE_DIR,
+    name: NAME,
+    owner: OWNER,
+    project: 1,
+    repositories: ['app'],
+  });
+});
+
+after(() => space.cleanup());
+
+beforeEach(async () => {
+  // What setup leaves on GitHub: the two repositories, the Project with the Agents field, the label.
+  fake = createFakeGitHub();
+  assert.ok((await fake.createRepository({ owner: OWNER, name: NAME, private: true })).ok);
+  assert.ok((await fake.createRepository({ owner: OWNER, name: 'app', private: true })).ok);
+  const made = await fake.createProject({ owner: OWNER, title: NAME });
+  assert.ok(made.ok);
+  project = made.value;
+  assert.equal(project.number, 1);
+  const field = await fake.ensureSingleSelectField({
+    project,
+    name: AGENTS_FIELD,
+    options: [...AGENTS_COLUMNS],
+  });
+  assert.ok(field.ok);
+  const labels = await fake.ensureLabels({
+    repository: SPACE_REPOSITORY,
+    labels: [{ name: SESSION_LABEL, color: 'ededed', description: 'A session' }],
+  });
+  assert.ok(labels.ok);
+
+  host = createMcpHost();
+  await host.listen();
+  configureSessionServer({ host: async () => host, awaitMs: 60, boardWaitMs: 400 });
+  harness = spaceHarnessFor(() => {});
+  await harness.space.host.openFolder(undefined, space.root);
+  windows = harness.space.created;
+  const spaceWindow = windows[0];
+  assert.ok(spaceWindow);
+  const found = harness.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+  assert.ok(found);
+  context = found;
+  context.service(spaceGitHub).use(fake);
+  server = context.service(sessionServer);
+  const opened = context.service(spaceDesk).open();
+  assert.ok(opened.ok);
+  desk = opened.value;
+});
+
+afterEach(async () => {
+  for (const client of clients.splice(0)) await client.close().catch(() => {});
+  for (const window of windows) await harness.space.host.windowClosed(window.id);
+  configureSessionServer(null);
+  await host.close();
+  harness.cleanup();
+  fake.setDelay(0);
+  await fake.dispose();
+});
+
+async function start(sessionId: string): Promise<SessionConnection> {
+  assert.ok(startSession(desk, { id: sessionId, engine: 'claude-code' }).ok);
+  const connection = await server.registerSession(sessionId);
+  assert.ok(connection.ok);
+  return connection.value;
+}
+
+async function connect(connection: SessionConnection): Promise<Client> {
+  const client = new Client({ name: 'test-engine', version: '1.0.0' });
+  const transport = new StreamableHTTPClientTransport(new URL(connection.url), {
+    requestInit: { headers: { [connection.header.name]: connection.header.value } },
+  });
+  await client.connect(transport);
+  clients.push(client);
+  return client;
+}
+
+async function call(client: Client, name: string, args: Record<string, unknown> = {}) {
+  const result = await client.callTool({ name, arguments: args });
+  const text = (result.content as Array<{ text: string }>)[0]?.text ?? '';
+  return { isError: result.isError === true, value: JSON.parse(text) as Record<string, unknown> };
+}
+
+/** Ask for Writing, have the Human Lead confirm, and read the answer as the session does. */
+async function enter(client: Client, args: Record<string, unknown>) {
+  const asked = await call(client, 'request_writing', args);
+  assert.equal(asked.isError, false, JSON.stringify(asked.value));
+  const ticket = asked.value.ticket as string;
+  const confirmed = server.broker.answerWriting(ticket, { confirm: true });
+  assert.ok(confirmed.ok && confirmed.value.granted);
+  return (await call(client, 'await_answer', { ticket })).value;
+}
+
+async function rows() {
+  const read = await fake.readProject({ project });
+  assert.ok(read.ok);
+  return read.value.sessions;
+}
+
+test('a session that writes has its issue on the board, with its targets, and ends in Done', async () => {
+  const item = await fake.createIssue({
+    repository: SPACE_REPOSITORY,
+    title: 'An item',
+    body: 'The criteria.',
+    labels: [],
+  });
+  assert.ok(item.ok);
+  const client = await connect(await start('s-board'));
+
+  const granted = await enter(client, {
+    targets: [LORE, APP],
+    item: item.value.number,
+    reason: 'Build the item.',
+  });
+  assert.equal(granted.granted, true);
+  const board = granted.board as { updated: boolean; issue?: string };
+  assert.equal(board.updated, true, JSON.stringify(board));
+
+  let on = await rows();
+  assert.equal(on.length, 1);
+  assert.equal(on[0]?.column, 'Writing');
+  assert.deepEqual(on[0]?.targets, [LORE, APP]);
+  assert.equal(on[0]?.issue.url, board.issue);
+  const record = getSession(desk, 's-board');
+  assert.ok(record.ok);
+  assert.equal(record.value?.issue?.number, on[0]?.issue.number);
+  assert.equal(record.value?.item?.number, item.value.number);
+  // The item branch, linked to the item's issue, in the payload's repository.
+  const itemIssue = fake.state().issues.find((i) => i.ref.number === item.value.number);
+  assert.deepEqual(itemIssue?.branches, [{ repository: `${OWNER}/app`, name: APP.branch }]);
+
+  // Leaving Writing moves the issue to Read only.
+  const left = await call(client, 'leave_writing');
+  assert.equal((left.value.board as { updated: boolean }).updated, true);
+  on = await rows();
+  assert.equal(on[0]?.column, 'Read only');
+
+  // A second Writing in the same session moves the same issue; none is created. The branch exists: taken.
+  const again = await enter(client, { targets: [APP], item: item.value.number, reason: 'Again.' });
+  assert.equal((again.board as { updated: boolean }).updated, true);
+  on = await rows();
+  assert.equal(on.length, 1);
+  assert.equal(on[0]?.column, 'Writing');
+  assert.deepEqual(on[0]?.targets, [APP]);
+
+  // The session closes: the journal entry's handover goes on the issue and the issue moves to Done.
+  const journal = context.paths.journal;
+  mkdirSync(journal, { recursive: true });
+  const entry = join(journal, '2026-09-18-1200-board-s-board.md');
+  writeFileSync(
+    entry,
+    `# Board\n\nDid it.\n\n## Handover\n\nDone: the item.\nNext: review ${space.root}/lore/a.md.\n`,
+  );
+  try {
+    assert.ok(endSession(desk, 's-board').ok);
+    const done = await boardWithin(context.service(sessionBoard).closed('s-board'), 2000);
+    assert.equal(done?.updated, true, JSON.stringify(done));
+  } finally {
+    rmSync(entry);
+  }
+  on = await rows();
+  assert.equal(on[0]?.column, 'Done');
+  const sessionIssue = fake.state().issues.find((i) => i.ref.number === on[0]?.issue.number);
+  // The handover section only, with the Space folder replaced; the issue stays open.
+  assert.equal(
+    sessionIssue?.comments.at(-1),
+    '## Handover\n\nDone: the item.\nNext: review <Space>/lore/a.md.\n',
+  );
+  assert.equal(sessionIssue?.state, 'open');
+});
+
+test('GitHub unreachable: the claim is granted, and the answer says the board was not updated', async () => {
+  fake.setUnreachable(true);
+  const client = await connect(await start('s-offline'));
+  const granted = await enter(client, { targets: [LORE], reason: 'Write the mirror.' });
+  assert.equal(granted.granted, true);
+  const board = granted.board as { updated: boolean; message: string };
+  assert.equal(board.updated, false);
+  assert.match(
+    board.message,
+    /^The Agents board on GitHub was not updated because GitHub could not be reached .*, and nothing will retry it\.$/,
+  );
+  const claims = listClaims(desk);
+  assert.ok(claims.ok);
+  assert.deepEqual(
+    claims.value.filter((claim) => claim.sessionId === 's-offline').map((claim) => claim.target),
+    [LORE],
+  );
+  // No issue was recorded, so leaving Writing has nothing to move and says nothing of the board.
+  const left = await call(client, 'leave_writing');
+  assert.equal(left.value.mode, 'read-only');
+  assert.equal(left.value.board, undefined);
+  fake.setUnreachable(false);
+  assert.equal(fake.state().issues.length, 0);
+});
+
+test('a slow GitHub does not hold the grant beyond the limit', async () => {
+  fake.setDelay(2000);
+  const client = await connect(await start('s-slow'));
+  const began = Date.now();
+  const granted = await enter(client, { targets: [LORE], reason: 'Write.' });
+  assert.ok(Date.now() - began < 1800, 'the answer came before GitHub did');
+  assert.equal(granted.granted, true);
+  const board = granted.board as { updated: boolean; message: string };
+  assert.equal(board.updated, false);
+  assert.match(board.message, /did not answer within/);
+  const record = getSession(desk, 's-slow');
+  assert.ok(record.ok);
+  assert.equal(record.value?.mode, 'writing');
+  // The update still in flight ends at its next call.
+  fake.setUnreachable(true);
+});
+
+/** Wait until every board update already asked for has ended: a close of a session with no issue runs after them. */
+async function drained(): Promise<void> {
+  assert.equal(await context.service(sessionBoard).closed('no-such-session'), null);
+}
+
+test('a slow update of entering does not land after the later move to Read only', async () => {
+  fake.setDelay(250);
+  const client = await connect(await start('s-order'));
+  const granted = await enter(client, { targets: [LORE], reason: 'Write.' });
+  assert.equal((granted.board as { updated: boolean }).updated, false);
+  // Leaving while the first update is still running.
+  const left = await call(client, 'leave_writing');
+  assert.equal(left.value.mode, 'read-only');
+  await drained();
+  fake.setDelay(0);
+  const on = await rows();
+  assert.equal(on.length, 1);
+  assert.equal(on[0]?.column, 'Read only');
+});
+
+test('rate-limited, or an answer lost: the claim is granted, and a second Writing makes no second issue', async () => {
+  const client = await connect(await start('s-limit'));
+  fake.failNext({
+    kind: 'rate-limited',
+    retryAfterSeconds: 60,
+    message: 'API rate limit exceeded',
+  });
+  const limited = await enter(client, { targets: [LORE], reason: 'Write.' });
+  assert.equal(limited.granted, true);
+  assert.match(
+    (limited.board as { message: string }).message,
+    /^The Agents board on GitHub was not updated because GitHub refused the request because of its rate limit; try again in 60 seconds, and nothing will retry it\.$/,
+  );
+  assert.equal((await call(client, 'leave_writing')).value.mode, 'read-only');
+
+  // GitHub makes the issue and the answer is lost: nothing is recorded on the desk, and the next Writing finds the issue by its marker.
+  fake.loseNextAnswer({ kind: 'unreachable', message: 'timed out' });
+  const lost = await enter(client, { targets: [LORE], reason: 'Write.' });
+  assert.equal(lost.granted, true);
+  assert.equal((lost.board as { updated: boolean }).updated, false);
+  assert.equal((await call(client, 'leave_writing')).value.mode, 'read-only');
+  const again = await enter(client, { targets: [LORE], reason: 'Write.' });
+  assert.equal((again.board as { updated: boolean }).updated, true);
+  assert.equal(fake.state().issues.filter((i) => i.labels.includes(SESSION_LABEL)).length, 1);
+});
+
+test('two sessions at once have two issues, titled without their ids', async () => {
+  const one = await connect(await start('s-one'));
+  const two = await connect(await start('s-two'));
+  await enter(one, { targets: [LORE], reason: 'One.' });
+  await enter(two, { targets: [APP], reason: 'Two.' });
+  const issues = fake.state().issues.filter((i) => i.labels.includes(SESSION_LABEL));
+  assert.equal(issues.length, 2);
+  for (const issue of issues) {
+    assert.match(issue.title, /^The claude-code session that started at \S+$/);
+    assert.ok(!issue.title.includes('s-one') && !issue.title.includes('s-two'));
+    assert.ok(!issue.body.includes(space.root), 'no local path in the body');
+  }
+});

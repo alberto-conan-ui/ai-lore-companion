@@ -35,6 +35,12 @@ import {
 } from './recents.js';
 import { type FolderRoute, routeFolder, windowTitleFor } from './routing.js';
 import {
+  type SpaceWindowBounds,
+  boundsConcernFor,
+  restoreWindowBounds,
+  trackWindowBounds,
+} from './window-bounds.js';
+import {
   type SpaceWindowLike,
   type SpaceWindowRecord,
   type SpaceWindows,
@@ -89,6 +95,8 @@ export type SpaceHostBindings = {
   openV08: (window: SpaceWindowLike | undefined, folder: string) => void;
   /** Replaces `detectFolder` in a test. */
   detect?: typeof detectFolder;
+  /** The position of a window, for what a Space remembers (M5.7). Without it, positions are not kept. */
+  windowBounds?: (window: SpaceWindowLike) => SpaceWindowBounds | undefined;
 };
 
 /** What `deps.space` is. */
@@ -139,6 +147,13 @@ export type SpaceHost = {
   reload(window: SpaceWindowLike): Promise<void>;
   /** Whether the window is a 1.0 window. */
   owns(windowId: number): boolean;
+  /**
+   * Whether the window may write what its Space remembers (M5.7): true unless
+   * another window of the same Space has the focus. Only the focused window
+   * writes, so that the two windows do not overwrite each other; when the app
+   * is in the background, no window has the focus and either may write.
+   */
+  mayRemember(windowId: number): boolean;
   /** The window closed. Its record is dropped and its Space context released. */
   windowClosed(windowId: number): Promise<void>;
   /** The recents of Spaces, newest first. */
@@ -188,6 +203,35 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
     return record !== undefined && record.folder === null;
   };
 
+  /** Windows whose moves are already followed. */
+  const boundsTracked = new Set<number>();
+
+  /**
+   * Give a window created for a Space its saved position, and save its moves
+   * from now on (M5.7). The concern is read at each move, from what the window
+   * shows then.
+   */
+  const rememberBounds = (
+    window: SpaceWindowLike,
+    context: SpaceContext,
+    concern: 'space-window' | 'files-window',
+    restore: boolean,
+  ): void => {
+    const bounds = bindings.windowBounds?.(window);
+    if (!bounds) return;
+    if (restore) restoreWindowBounds(bounds, context, concern);
+    if (boundsTracked.has(window.id)) return;
+    boundsTracked.add(window.id);
+    trackWindowBounds(bounds, () => {
+      if (window.isDestroyed()) return null;
+      const held = contexts.forWindow(window.id);
+      const mode = windows.recordFor(window.id)?.init.mode;
+      const now = mode === undefined ? null : boundsConcernFor(mode);
+      if (!held || now === null || !host.mayRemember(window.id)) return null;
+      return { context: held, concern: now };
+    });
+  };
+
   const bringToFront = (window: SpaceWindowLike): void => {
     if (window.isMinimized()) window.restore();
     window.focus();
@@ -219,6 +263,7 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
         windowId: window.id,
       });
       context.ptyService = ptyService;
+      rememberBounds(window, context, 'space-window', fresh);
       addRecentSpace(bindings.userDataDir(), {
         path: detected.root,
         name: detected.manifest.name,
@@ -424,10 +469,19 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
 
     owns: (windowId) => windows.recordFor(windowId) !== undefined,
 
+    mayRemember(windowId) {
+      const context = contexts.forWindow(windowId);
+      if (!context) return false;
+      return ![...context.windowIds].some(
+        (other) => other !== windowId && windows.recordFor(other)?.window.isFocused?.() === true,
+      );
+    },
+
     async windowClosed(windowId) {
       const context = contexts.forWindow(windowId);
       if (context && windows.recordFor(windowId)?.init.mode === 'space') context.ptyService = null;
       detectedByWindow.delete(windowId);
+      boundsTracked.delete(windowId);
       windows.forget(windowId);
       await contexts.release(windowId);
     },
@@ -461,6 +515,7 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
       }
       const window = bindings.createWindow();
       contexts.acquire({ root: context.root, manifest: context.manifest, windowId: window.id });
+      rememberBounds(window, context, 'files-window', true);
       window.setTitle(`${space.name === '' ? context.root : space.name} — Files`);
       windows.show(window, init, 'after-load');
       log.info('files-window-opened', { space: context.key });

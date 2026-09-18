@@ -1125,6 +1125,27 @@ const spaceHost: SpaceHost = createSpaceHost({
     return true;
   },
   openV08: (window, folder) => showProjectV08(browserWindowOf(window), folder),
+  // What a Space remembers of its windows' positions (M5.7), kept under `<userData>/spaces/`.
+  windowBounds: (window) => {
+    const win = browserWindowOf(window);
+    if (!win) return undefined;
+    return {
+      get: () =>
+        win.isDestroyed() || win.isMinimized() || win.isMaximized() || win.isFullScreen()
+          ? null
+          : win.getBounds(),
+      set: (rect) => {
+        // A position on a display that is no longer connected keeps only the size.
+        if (boundsOnScreen(rect)) win.setBounds(rect);
+        else win.setSize(rect.width, rect.height);
+      },
+      onChange: (listener) => {
+        win.on('move', listener);
+        win.on('resize', listener);
+        win.on('close', listener);
+      },
+    };
+  },
 });
 
 /**

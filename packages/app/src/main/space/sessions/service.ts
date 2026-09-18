@@ -12,7 +12,9 @@
  * Ending a session, when its engine exits or when the window asks: the
  * refusals the adapter noted go into the log, the desk records the end with
  * the present commit of each root the session held (`endSession` with
- * `closes`), the session leaves the server, and its folder is removed.
+ * `closes`), the session's issue on the Agents board takes the handover and
+ * moves to Done (phase M4.7, bounded by `BOARD_UPDATE_WAIT_MS`), the session
+ * leaves the server, and its folder is removed.
  *
  * When the service is built (the first time a Space's sessions are used in
  * this run of the app) it removes the session folders of that desk that no
@@ -31,6 +33,8 @@ import {
 import type { SpaceContext } from '../context.js';
 import { defineSpaceService } from '../context.js';
 import { spaceDesk } from '../desk-service.js';
+import { boardWithin, sessionBoard } from '../session-server/board.js';
+import { BOARD_UPDATE_WAIT_MS } from '../session-server/constants.js';
 import { sessionCloseCommits, sessionServer } from '../session-server/index.js';
 import { engineArgv } from './command-line.js';
 import { MAX_LOGGED_REFUSALS, REQUIRED_CHECKS, SESSION_ID_ENV } from './constants.js';
@@ -109,6 +113,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
   // The server first (it builds the desk first), so both are disposed after this service.
   const server = context.service(sessionServer);
   const desk = context.service(spaceDesk);
+  const board = context.service(sessionBoard);
   const live = new Map<string, Live>();
 
   const cleanup = (async () => {
@@ -172,6 +177,8 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
           kind: ended.error.kind,
         });
       }
+      // The session's issue, when it has one, takes the handover and moves to Done. The board logs a failure.
+      await boardWithin(board.closed(sessionId), BOARD_UPDATE_WAIT_MS);
     } else {
       context.log.warn('session-end-not-recorded', {
         space: context.key,
