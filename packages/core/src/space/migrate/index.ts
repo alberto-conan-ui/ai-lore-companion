@@ -21,6 +21,8 @@ export {
   type MigrationInput,
   type MigrationIssueKind,
   type MigrationIssuePlan,
+  type MigrationIssueProgress,
+  type MigrationIssueProgressState,
   type MigrationLedgerRecord,
   type MigrationMappingItem,
   type MigrationMappingRow,

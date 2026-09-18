@@ -193,6 +193,30 @@ export type MigrationIssuePlan = {
   stage: MigrationFocusStage | null;
 };
 
+/**
+ * Where one issue of step 11 is.
+ * `found`: it was already on GitHub (by its marker) or in the ledger.
+ * `created`: this run created it. `waiting`: GitHub asked for a pause; `message` says how long.
+ * `completed`: it is on the Project with its Stage or its parent, and recorded in the ledger.
+ */
+export type MigrationIssueProgressState = 'found' | 'created' | 'waiting' | 'completed';
+
+/** One progress event of step 11, per issue, given to `MigrationDeps.onIssueProgress`. */
+export type MigrationIssueProgress = {
+  /** The source-relative path the issue stands for, as `MigrationIssuePlan.key`. */
+  key: string;
+  kind: MigrationIssueKind;
+  title: string;
+  /** The issue's place in the plan, from 0. */
+  index: number;
+  total: number;
+  state: MigrationIssueProgressState;
+  /** The issue on GitHub, once it is known. */
+  issue: IssueRef | null;
+  /** A sentence for the screen. */
+  message: string;
+};
+
 /** One of the thirteen steps in the plan: the runner's planned step, with its place in section 5.9. */
 export type MigrationPlannedStep = PlannedStep & {
   stepId: MigrationStepId;

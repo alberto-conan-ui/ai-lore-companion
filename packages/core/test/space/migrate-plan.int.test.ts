@@ -89,6 +89,11 @@ async function bench(
     templateDir: loreTemplateDir(),
     userDataDir,
     checkMachine: async () => machine(),
+    gitConfig: {
+      'user.name': 'AI-Lore Test',
+      'user.email': 'test@ai-lore.invalid',
+      'commit.gpgsign': 'false',
+    },
   };
   return { fixture, fake, deps, parentDir, userDataDir, lore: `.ai-lore-${fixture.projectName}` };
 }
@@ -438,12 +443,16 @@ test('a half-done migration: the plan says which steps are done, from the ledger
     ['record-source', 'contracts'],
   );
 
-  // A run stops at the first step whose run is not built yet, and does nothing.
+  // A run skips the steps that are done and runs the others. Phase M6.3 built
+  // the local steps; the run stops at the first step of another phase whose
+  // run is not built yet, or reaches the end once those are built.
   const run = await runMigration(input(b), b.deps);
-  assert.ok(!run.ok);
-  assert.equal(run.error.stepId, 'create-space');
-  assert.equal(run.error.kind, 'not-built-yet');
-  assert.deepEqual(run.error.skipped, ['record-source']);
+  const skipped = run.ok ? run.value.skipped : run.error.skipped;
+  assert.deepEqual(skipped.slice(0, 2), ['record-source', 'contracts']);
+  if (!run.ok) {
+    assert.equal(run.error.kind, 'not-built-yet', run.error.message);
+    assert.ok(['issues', 'verify'].includes(run.error.stepId ?? ''), run.error.stepId ?? '');
+  }
 });
 
 test('with no ledger, the issues step is done only when GitHub has every issue by its marker', async (t) => {

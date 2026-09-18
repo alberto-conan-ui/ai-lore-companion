@@ -4,9 +4,10 @@
  * builds `run` with them.
  */
 
+import { deskPaths } from '../../layout/desk-paths.js';
 import { firstSeenStep, installStep as setupInstallStep } from '../../setup/steps.js';
-import { notBuiltYet } from '../checks.js';
 import type { MigrationStep } from '../context.js';
+import { recordStepDone, stepStopped } from '../local/record.js';
 
 const TITLE = 'Install into Claude Code';
 
@@ -22,6 +23,17 @@ export function installStep(): MigrationStep {
     ],
     isDone: async (ctx) =>
       (await setupInstallStep().isDone(ctx.setup)) && (await firstSeenStep().isDone(ctx.setup)),
-    run: async () => notBuiltYet(TITLE),
+    run: async (ctx) => {
+      // Both write only to the desk: the install folder and the first-seen records.
+      for (const step of [setupInstallStep(), firstSeenStep()]) {
+        if (await step.isDone(ctx.setup)) continue;
+        const done = await step.run(ctx.setup);
+        if (!done.ok) return stepStopped(done.error.kind, TITLE, done.error.message);
+      }
+      return recordStepDone(ctx, 'install', [
+        deskPaths(ctx.deps.userDataDir, ctx.spaceRoot).install,
+        'the first-seen commit of every root',
+      ]);
+    },
   };
 }

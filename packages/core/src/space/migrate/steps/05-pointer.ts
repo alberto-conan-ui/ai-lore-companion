@@ -6,8 +6,10 @@
  * Phase M6.3 builds `run`.
  */
 
-import { notBuiltYet, spaceFileHolds } from '../checks.js';
+import { writeFileAtomic } from '../../fs/atomic-write.js';
+import { inSpace, spaceFileHolds } from '../checks.js';
 import type { MigrationContext, MigrationStep } from '../context.js';
+import { recordStepDone, stepStopped } from '../local/record.js';
 import { ARCHIVE_POINTER } from '../targets.js';
 
 const TITLE = 'Point to the old folder and repositories';
@@ -35,6 +37,36 @@ export function pointerStep(): MigrationStep {
       },
     ],
     isDone: (ctx) => spaceFileHolds(ctx, ARCHIVE_POINTER, pointerTexts(ctx)),
-    run: async () => notBuiltYet(TITLE),
+    run: async (ctx) => {
+      if (!(await spaceFileHolds(ctx, ARCHIVE_POINTER, pointerTexts(ctx)))) {
+        const written = await writeFileAtomic(inSpace(ctx, ARCHIVE_POINTER), pointerText(ctx));
+        if (!written.ok) return stepStopped(written.error.kind, TITLE, written.error.message);
+      }
+      return recordStepDone(ctx, 'pointer', [ARCHIVE_POINTER]);
+    },
   };
+}
+
+function origin(repository: MigrationContext['source']['payloadRepository']): string {
+  if (!repository.present) return 'it is not a git repository of its own';
+  return repository.originUrl === null
+    ? 'it has no origin address'
+    : `its origin address is \`${repository.originUrl}\``;
+}
+
+/** The pointer file: a markdown file of the publish area, so it has no frontmatter. */
+function pointerText(ctx: MigrationContext): string {
+  const { source } = ctx;
+  return [
+    '# The AI-Lore v0.8 archive',
+    '',
+    `This Space was migrated from the AI-Lore v0.8 project "${source.project.name}". The folder \`v0.8/\` beside this file holds a copy of that project's \`memory/\` and \`references/\` folders as they were when the migration ran, without the \`.git\` folder of the Lore repository. The copy is a record: its links are left as they were written, and nothing in it is updated.`,
+    '',
+    'The migration did not change, move or remove anything of the v0.8 project. It is still in these places:',
+    '',
+    `- The old folder: \`${source.root}\`.`,
+    `- The payload repository, the folder \`${source.payloadRepository.path}\` of the old folder: ${origin(source.payloadRepository)}.`,
+    `- The Lore repository, the folder \`${source.loreRepository.path}\` of the old folder: ${origin(source.loreRepository)}.`,
+    '',
+  ].join('\n');
 }

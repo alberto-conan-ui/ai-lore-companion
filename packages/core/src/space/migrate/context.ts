@@ -17,6 +17,7 @@ import type { MigrationTargets } from './targets.js';
 import type {
   MigrationFocusStage,
   MigrationIssuePlan,
+  MigrationIssueProgress,
   MigrationLedgerRecord,
   MigrationStepId,
 } from './types.js';
@@ -30,6 +31,12 @@ export type MigrationDeps = SetupDeps & {
   pause?: (ms: number) => Promise<void>;
   /** The clock of the ledger's records. Default the machine's. */
   now?: () => Date;
+  /**
+   * Called by step 11 for each issue as it is found, created, waited for or
+   * completed. The step-level progress is `RunStepsOptions.onProgress`. An
+   * exception the listener raises is ignored.
+   */
+  onIssueProgress?: (progress: MigrationIssueProgress) => void;
 };
 
 /** The form with every value filled: the Human Lead's, or the proposed one. */

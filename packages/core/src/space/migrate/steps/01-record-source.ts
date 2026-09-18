@@ -4,9 +4,11 @@
  * the verification at the end (step 13). Phase M6.3 builds `run`.
  */
 
-import { notBuiltYet } from '../checks.js';
+import type { V08Repository } from '../../legacy/v08-types.js';
 import type { MigrationContext, MigrationStep } from '../context.js';
-import { ledgerRecords } from '../ledger.js';
+import { appendMigrationLedger, ledgerRecords } from '../ledger.js';
+import { recordStepDone, stepStopped } from '../local/record.js';
+import type { MigrationRepositoryState } from '../types.js';
 
 const TITLE = "Record the source's state";
 
@@ -37,6 +39,27 @@ export function recordSourceStep(): MigrationStep {
     ],
     // What step 1 makes is its record, so the ledger is the state it asks.
     isDone: async (ctx) => ledgerRecords(ctx, 'source-state').length > 0,
-    run: async () => notBuiltYet(TITLE),
+    run: async (ctx) => {
+      // The head and status the reader took moments ago, with read-only git
+      // commands, when the migration was prepared. Nothing is asked of the
+      // source again, so the source is not touched by this step.
+      if (ledgerRecords(ctx, 'source-state').length === 0) {
+        const state = (repository: V08Repository): MigrationRepositoryState => ({
+          path: repository.path,
+          head: repository.head,
+          statusText: repository.statusText,
+        });
+        const recorded = appendMigrationLedger(ctx, {
+          kind: 'source-state',
+          payload: state(ctx.source.payloadRepository),
+          lore: state(ctx.source.loreRepository),
+        });
+        if (!recorded.ok) return stepStopped(recorded.error.kind, TITLE, recorded.error.message);
+      }
+      return recordStepDone(ctx, 'record-source', [
+        `${ctx.source.payloadRepository.path} at ${ctx.source.payloadRepository.head ?? 'no commit'}`,
+        `${ctx.source.loreRepository.path} at ${ctx.source.loreRepository.head ?? 'no commit'}`,
+      ]);
+    },
   };
 }
