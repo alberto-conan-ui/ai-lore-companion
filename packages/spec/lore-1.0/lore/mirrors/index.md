@@ -10,4 +10,5 @@ A mirror is reviewed after work is merged, not while work is in progress.
 
 This part has no `core/` folder and no `default/` folder, because mirrors describe the Space's own payloads. Every mirror is a file in this folder, named after its payload, and each has a line here. The verb payload-add writes a payload's mirror with a first skeleton.
 
-- [generators/](./generators/index.md): the scripts that generate a payload's skeleton.
+- [publish.md](./publish.md): the mirror of the default publish area, the folder `publish/`, which says what the folder holds and how a spec is written.
+- [generators/](./generators/index.md): the scripts that generate a payload's skeleton, one for a folder and one for a repository.
