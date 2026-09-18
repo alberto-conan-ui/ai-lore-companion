@@ -547,6 +547,32 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
       return ok(found);
     },
 
+    async findAllIssuesByMarkers(arg) {
+      const parts = splitRepositoryName(arg.repository);
+      if (!parts.ok) return parts;
+      const malformed = markersError(arg.markers);
+      if (malformed !== null) return err(malformed);
+      const found: Record<string, IssueRef[]> = {};
+      for (const marker of arg.markers) found[marker] = [];
+      let after: string | null = null;
+      for (;;) {
+        const data = await graphql(Q.ISSUE_BODIES_QUERY, { ...parts.value, after });
+        if (!data.ok) return data;
+        const issues = at(data.value, 'repository', 'issues');
+        for (const node of list(issues, 'nodes')) {
+          const body = text(node, 'body') ?? '';
+          const ref = parseIssueRef(node, arg.repository);
+          if (ref === null) continue;
+          for (const marker of arg.markers) {
+            if (bodyHasMarker(body, marker)) found[marker]?.push(ref);
+          }
+        }
+        after = text(issues, 'pageInfo', 'endCursor');
+        if (at(issues, 'pageInfo', 'hasNextPage') !== true || after === null) break;
+      }
+      return ok(found);
+    },
+
     async createIssue(arg) {
       const parts = splitRepositoryName(arg.repository);
       if (!parts.ok) return parts;

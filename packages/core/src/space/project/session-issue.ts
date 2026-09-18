@@ -1,0 +1,319 @@
+/**
+ * A session's issue on the Agents board (architecture document, sections 3.6
+ * and 5.6; phase M4.7).
+ *
+ * A session gets an issue the first time it enters Writing. The issue is in
+ * the Space repository, carries the label `session`, and is on the Space's
+ * Project, where the single-select field `Agents` holds its column: Read only,
+ * Writing, Blocked or Done. Its body says which session it is, which item the
+ * session is on, and which write targets it holds with their branches, and it
+ * carries two hidden lines: the session block that `buildProjectSnapshot`
+ * reads, and a marker by which the issue is found again, so that a second
+ * Writing in the same session updates the issue and never creates another.
+ *
+ * Every function here returns the first GitHub failure and does nothing more.
+ * Nothing is retried and nothing is queued (the focus's cut line): the caller
+ * logs the failure and tells the session.
+ */
+
+import { describeWriteTarget } from '../claims/rules.js';
+import type { IssueRef, WriteTarget } from '../desk/types.js';
+import type { GitHubError } from '../github/errors.js';
+import { formatIssueMarker } from '../github/marker.js';
+import type { GitHubPort, GitHubResult } from '../github/port.js';
+import { formatSessionBlock } from '../github/snapshot.js';
+import {
+  AGENTS_COLUMNS,
+  AGENTS_FIELD,
+  type AgentsColumn,
+  type FieldInfo,
+  type ProjectInfo,
+  SESSION_LABEL,
+} from '../github/types.js';
+import { ISSUE_BODY_MAX, ISSUE_TITLE_MAX, isBranchName } from '../github/validate.js';
+import { err, ok } from '../result.js';
+
+/** Where a session's issue lives: the Space repository and the Space's Project. */
+export type SessionIssuePlace = {
+  github: GitHubPort;
+  /** The Space repository, `owner/name`. */
+  repository: string;
+  project: ProjectInfo;
+};
+
+/**
+ * What a session's issue says. The session's id is only in the hidden marker:
+ * the title and the text name the session by its engine and start time, as
+ * the desk's dialogs do.
+ */
+export type SessionIssueContent = {
+  sessionId: string;
+  /** The engine's id from the engines registry, for example `claude-code`. */
+  engine: string;
+  /** When the session started, as the desk recorded it. */
+  startedAt: string;
+  /** The write targets the session holds now. */
+  targets: readonly WriteTarget[];
+  /** The item the session is on, when it named one. */
+  item?: IssueRef;
+  attended: boolean;
+  /** The GitHub account of the person, or empty. */
+  person: string;
+  /** The machine's name, or empty. */
+  machine: string;
+};
+
+/** The marker of a session's issue: the hidden line by which it is found again. */
+export function sessionIssueMarker(sessionId: string): string {
+  return formatIssueMarker('session-issue', sessionId);
+}
+
+/** The address of issue `number` of `repository` on github.com. */
+export function issueRefFor(repository: string, number: number): IssueRef {
+  return { repository, number, url: `https://github.com/${repository}/issues/${number}` };
+}
+
+function targetLine(target: WriteTarget): string {
+  const branch = target.kind === 'repository' ? ` on the branch "${target.branch}"` : '';
+  return `- ${describeWriteTarget(target)}${branch}`;
+}
+
+/** The title of a session's issue: its engine and start time. The session's id is not shown. */
+export function sessionIssueTitle(session: { engine: string; startedAt: string }): string {
+  return `The ${session.engine} session that started at ${session.startedAt}`.slice(
+    0,
+    ISSUE_TITLE_MAX,
+  );
+}
+
+/** The body of a session's issue: short and literal, then the two hidden lines. */
+export function formatSessionIssueBody(content: SessionIssueContent): string {
+  const item = content.item === undefined ? 'none' : content.item.url;
+  const targets =
+    content.targets.length === 0 ? ['- none'] : content.targets.map((target) => targetLine(target));
+  return [
+    `The issue of the ${content.engine} session that started at ${content.startedAt}, kept by the companion.`,
+    '',
+    `Item: ${item}`,
+    '',
+    'Write targets:',
+    ...targets,
+    '',
+    formatSessionBlock({
+      targets: [...content.targets],
+      attended: content.attended,
+      person: content.person,
+      machine: content.machine,
+    }),
+    sessionIssueMarker(content.sessionId),
+    '',
+  ].join('\n');
+}
+
+/**
+ * The Space's Project: the open Project of the Space repository's owner titled
+ * with the Space's name. When the manifest gives a number, the Project found
+ * must have it. Fails with `not-found` when there is none.
+ */
+export async function findSpaceProject(
+  github: GitHubPort,
+  space: { repository: string; name: string; project: number },
+): Promise<GitHubResult<ProjectInfo>> {
+  const owner = space.repository.split('/')[0] ?? '';
+  const found = await github.findProject({ owner, title: space.name });
+  if (!found.ok) return found;
+  const project = found.value;
+  if (project === null || (space.project > 0 && project.number !== space.project)) {
+    return err({
+      kind: 'not-found',
+      message: `the Project "${space.name}" of ${owner}${space.project > 0 ? ` with the number ${space.project}` : ''} was not found`,
+    });
+  }
+  return ok(project);
+}
+
+/**
+ * The field `Agents` of the Project, with the four columns as setup made it.
+ * The same call setup makes, so a Project set up by setup is left as it is.
+ */
+export function agentsField(
+  github: GitHubPort,
+  project: ProjectInfo,
+): Promise<GitHubResult<FieldInfo>> {
+  return github.ensureSingleSelectField({
+    project,
+    name: AGENTS_FIELD,
+    options: [...AGENTS_COLUMNS],
+  });
+}
+
+/** Put an issue in a column of the Agents board. The issue is added to the Project when it is not there. */
+export async function moveSessionIssue(
+  place: SessionIssuePlace,
+  issue: IssueRef,
+  column: AgentsColumn,
+): Promise<GitHubResult<void>> {
+  const { github, project } = place;
+  const item = await github.addIssueToProject({ project, issue });
+  if (!item.ok) return item;
+  const field = await agentsField(github, project);
+  if (!field.ok) return field;
+  return github.setSingleSelect({ project, item: item.value, field: field.value, option: column });
+}
+
+/**
+ * Create or update the session's issue and put it in `column`. `known` is the
+ * issue the desk recorded for the session; without it the issue is looked for
+ * by its marker first, and created only when none has the marker.
+ */
+export async function putSessionIssue(
+  place: SessionIssuePlace,
+  content: SessionIssueContent,
+  column: AgentsColumn,
+  known?: IssueRef,
+): Promise<GitHubResult<{ issue: IssueRef; created: boolean }>> {
+  const { github, repository } = place;
+  const body = formatSessionIssueBody(content);
+  let issue = known ?? null;
+  if (issue === null) {
+    const found = await github.findIssueByMarker({
+      repository,
+      marker: sessionIssueMarker(content.sessionId),
+    });
+    if (!found.ok) return found;
+    issue = found.value;
+  }
+  let created = false;
+  if (issue === null) {
+    const made = await github.createIssue({
+      repository,
+      title: sessionIssueTitle(content),
+      body,
+      labels: [SESSION_LABEL],
+    });
+    if (!made.ok) return made;
+    issue = made.value;
+    created = true;
+  } else {
+    const updated = await github.updateIssue({ issue, body });
+    if (!updated.ok) return updated;
+  }
+  const moved = await moveSessionIssue(place, issue, column);
+  if (!moved.ok) return moved;
+  return ok({ issue, created });
+}
+
+/** A folder of this machine and the text that stands for it on GitHub. */
+export type LocalFolder = { path: string; as: string };
+
+const HANDOVER_HEAD = '## Handover\n\n';
+const HANDOVER_CUT =
+  '\n\n(The handover is longer than GitHub accepts in a comment. The rest is in the journal entry on the desk.)';
+
+/**
+ * The comment that carries a handover. Each folder of `local` (the Space, the
+ * desk, the home folder) is replaced by its stand-in wherever it appears, the
+ * longest first, so that no path of this machine reaches GitHub; a handover
+ * longer than GitHub accepts is cut and says so.
+ */
+export function formatHandoverComment(
+  handover: string,
+  local: readonly LocalFolder[] = [],
+): string {
+  let text = handover.trim();
+  const folders = local
+    .filter((folder) => folder.path.length > 1)
+    .sort((a, b) => b.path.length - a.path.length);
+  for (const folder of folders) text = text.split(folder.path).join(folder.as);
+  const room = ISSUE_BODY_MAX - HANDOVER_HEAD.length - 1;
+  if (text.length > room) text = `${text.slice(0, room - HANDOVER_CUT.length)}${HANDOVER_CUT}`;
+  return `${HANDOVER_HEAD}${text}\n`;
+}
+
+/**
+ * The session closed: the handover, when there is one, is written as a comment
+ * on the issue, and the issue moves to Done. The issue stays open. The
+ * companion does this, and the verb session-close does not (its card says so),
+ * so the handover is written once.
+ */
+export async function closeSessionIssue(
+  place: SessionIssuePlace,
+  issue: IssueRef,
+  handover: string | null,
+  local: readonly LocalFolder[] = [],
+): Promise<GitHubResult<void>> {
+  if (handover !== null && handover.trim() !== '') {
+    const commented = await place.github.comment({
+      issue,
+      body: formatHandoverComment(handover, local),
+    });
+    if (!commented.ok) return commented;
+  }
+  return moveSessionIssue(place, issue, 'Done');
+}
+
+const BRANCH_EXISTS = /already exists/i;
+
+/**
+ * The item branch: `name` in `branchRepository`, linked to the item's issue.
+ * A branch that exists already is taken as it is: the work process lets the
+ * session create the branch itself, and an earlier session may have made it.
+ */
+export async function developItemBranch(
+  github: GitHubPort,
+  arg: { item: IssueRef; branchRepository: string; name: string },
+): Promise<GitHubResult<{ branch: string; existed: boolean }>> {
+  // Refused before GitHub is asked, so that an invalid name is never read as a branch that exists.
+  if (!isBranchName(arg.name)) {
+    return err({ kind: 'failed', message: `${JSON.stringify(arg.name)} is not a branch name` });
+  }
+  const made = await github.developBranch({
+    issue: arg.item,
+    branchRepository: arg.branchRepository,
+    name: arg.name,
+  });
+  if (made.ok) return ok({ branch: made.value.branch, existed: false });
+  if (made.error.kind === 'failed' && BRANCH_EXISTS.test(made.error.message)) {
+    return ok({ branch: arg.name, existed: true });
+  }
+  return made;
+}
+
+/**
+ * The text under the heading `Handover` of a journal entry, up to the next
+ * heading of the same or a higher level, or `null` when the entry has none.
+ */
+export function readHandover(entry: string): string | null {
+  const lines = entry.split('\n');
+  const start = lines.findIndex((line) => /^#{1,6}\s+handover\b/i.test(line.trim()));
+  if (start < 0) return null;
+  const level = /^#+/.exec(lines[start]?.trim() ?? '')?.[0].length ?? 1;
+  const body: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    const heading = /^(#{1,6})\s/.exec(line);
+    if (heading !== null && (heading[1]?.length ?? 7) <= level) break;
+    body.push(line);
+  }
+  const text = body.join('\n').trim();
+  return text === '' ? null : text;
+}
+
+/** Why a GitHub operation failed, as the end of a sentence. */
+export function describeGitHubFailure(error: GitHubError): string {
+  switch (error.kind) {
+    case 'unreachable':
+      return `GitHub could not be reached (${error.message})`;
+    case 'not-signed-in':
+      return 'gh is not signed in to GitHub';
+    case 'missing-scope':
+      return `the gh token lacks the scope "${error.scope}"`;
+    case 'rate-limited':
+      return error.retryAfterSeconds === null
+        ? 'GitHub refused the request because of its rate limit'
+        : `GitHub refused the request because of its rate limit; try again in ${error.retryAfterSeconds} seconds`;
+    case 'not-found':
+      return `GitHub answered that ${error.message}`;
+    default:
+      return `GitHub answered: ${error.message}`;
+  }
+}

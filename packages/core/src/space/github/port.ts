@@ -110,6 +110,15 @@ export type GitHubPort = {
     markers: string[];
   }): Promise<GitHubResult<Record<string, IssueRef | null>>>;
   /**
+   * Every issue, open or closed, that has each marker, oldest first; an empty
+   * list for a marker no issue has. Reads every page of the repository's
+   * issues. For a check that a marker is on one issue only.
+   */
+  findAllIssuesByMarkers(arg: {
+    repository: string;
+    markers: string[];
+  }): Promise<GitHubResult<Record<string, IssueRef[]>>>;
+  /**
    * Create an issue. Every label must exist; an unknown label fails with
    * `not-found`. A title or body GitHub would refuse (empty title, more than
    * `ISSUE_TITLE_MAX` or `ISSUE_BODY_MAX` characters) fails with `failed`

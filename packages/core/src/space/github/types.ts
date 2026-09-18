@@ -152,6 +152,8 @@ export type FocusItem = PlanItem & {
 /** A session issue: one row of the Agents board. */
 export type SessionIssue = {
   issue: IssueRef;
+  /** The issue's title: "The <engine> session that started at <time>". */
+  title: string;
   column: AgentsColumn;
   targets: WriteTarget[];
   attended: boolean;

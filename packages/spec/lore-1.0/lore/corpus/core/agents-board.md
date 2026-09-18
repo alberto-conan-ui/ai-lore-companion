@@ -27,7 +27,7 @@ The Agents board is on GitHub. The session issues are issues of the Space reposi
 
 ## What acts on it
 
-A session's issue is placed in Writing when the Human Lead confirms its claim, and it is created then if the session has none. The companion does this, after it has recorded the claim on the desk, and it moves the issue to Read only when the session leaves Writing. With the default set, the verb session-orient reads the board for the sessions in Writing or Blocked and their targets, and the verb session-close writes the handover as the last comment on the session's issue, asks the companion to release the session's write targets, and moves the issue to Done.
+A session's issue is placed in Writing when the Human Lead confirms its claim, and it is created then if the session has none. The companion does this, after it has recorded the claim on the desk, and it moves the issue to Read only when the session leaves Writing. With the default set, the verb session-orient reads the board for the sessions in Writing or Blocked and their targets, and the verb session-close writes the journal entry with its handover and asks the companion to release the session's write targets. When the session ends, the companion writes the handover as the last comment on the session's issue and moves the issue to Done.
 
 ## Choices recorded here
 

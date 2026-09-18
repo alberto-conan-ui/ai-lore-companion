@@ -560,6 +560,24 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
         return ok(found);
       }),
 
+    findAllIssuesByMarkers: (arg) =>
+      operate('findAllIssuesByMarkers', false, () => {
+        const known = repositoryFor(arg.repository);
+        if (!known.ok) return known;
+        const malformed = markersError(arg.markers);
+        if (malformed !== null) return err(malformed);
+        const found: Record<string, IssueRef[]> = {};
+        for (const marker of arg.markers) {
+          found[marker] = state.issues
+            .filter(
+              (issue) =>
+                issue.ref.repository === arg.repository && bodyHasMarker(issue.body, marker),
+            )
+            .map((issue) => ({ ...issue.ref }));
+        }
+        return ok(found);
+      }),
+
     createIssue: (arg) =>
       operate('createIssue', true, () => {
         const known = repositoryFor(arg.repository);

@@ -10,7 +10,7 @@ invoked_by:
 
 # session-close
 
-This verb is what a session does last. It writes the session's journal entry in the Workbench. The entry ends with the handover: what was done, what is in progress, and what the next session should do. The next session reads that handover when it orients, so the Human Lead does not have to explain the work again. If the session has an issue on the Agents board, the handover is also written there, the session's write targets are released, and the issue moves to Done.
+This verb is what a session does last. It writes the session's journal entry in the Workbench. The entry ends with the handover: what was done, what is in progress, and what the next session should do. The next session reads that handover when it orients, so the Human Lead does not have to explain the work again. If the session is in Writing, its write targets are released. If the session has an issue on the Agents board, the companion writes the handover there when the session ends and moves the issue to Done; the verb does not.
 
 ## When it is invoked
 
@@ -23,11 +23,10 @@ Every session closes with this verb, whatever it did, including a session that n
 - The conversation and the work of this session: what was asked, what was done, what was decided, what is unfinished.
 - The state of each claimed target, when the session is in Writing: for a repository, the branch and whether it has changes that are not committed.
 - `workbench/journal/`, for the names of the entries that exist.
-- The Agents board, read with `gh`, for the session's issue, when the session has entered Writing at any time.
 
 ## What it writes and the mode it needs
 
-It writes one new file in `workbench/journal/`. When the session has an issue, it also writes one comment on that issue on GitHub and moves the issue to Done. The Workbench is always writable, and a session in Read only may update the GitHub Project, so the verb runs in Read only. It does not ask for Writing.
+It writes one new file in `workbench/journal/`. It writes nothing on GitHub. When the session has an issue on the Agents board, the companion writes the handover as a comment on that issue and moves the issue to Done when the session ends. The Workbench is always writable, so the verb runs in Read only. It does not ask for Writing.
 
 When the session is in Writing, the verb ends Writing by calling the tool `leave_writing`.
 
@@ -39,14 +38,14 @@ When the session is in Writing, the verb ends Writing by calling the tool `leave
    - what the session did;
    - what it learned that a later session needs;
    - a correction to an earlier entry, when one is needed. An earlier entry is never changed.
-3. End the entry with the handover, under a heading of its own. The handover has three parts:
+3. End the entry with the handover, under a heading that is the word `Handover`. The handover has three parts:
    - what was done;
    - what is in progress: work that is started and not finished, where it is, and which changes are not committed;
    - what the next session should do, in the order in which to do it.
-4. When the session has an issue on the Agents board, write the handover as a comment on that issue with `gh`, so that a colleague on another desk sees it. If GitHub cannot be reached, the comment is not written and nothing queues it. Say so to the Human Lead.
-5. When the session is in Writing, call the tool `leave_writing`. It takes no arguments. The companion releases the session's write targets and returns the session to Read only. A session cannot release its targets in another way, because the claims are in the desk's records, which only the companion writes. In Claude Code the tool's name is `mcp__ailore__leave_writing`.
-6. When the session has an issue on the Agents board, move it to the column Done with `gh`. If GitHub cannot be reached, say so to the Human Lead.
-7. Tell the Human Lead the path of the journal entry, and repeat the third part of the handover. The session then writes nothing more.
+
+   When the session has an issue on the Agents board, the companion copies the text under this heading to the issue as a comment when the session ends, so that a colleague on another desk sees it. The session does not write that comment itself, so that it appears once. Paths in the handover are written relative to the Space, because the companion replaces the folders of this machine before the comment goes to GitHub.
+4. When the session is in Writing, call the tool `leave_writing`. It takes no arguments. The companion releases the session's write targets and returns the session to Read only. A session cannot release its targets in another way, because the claims are in the desk's records, which only the companion writes. In Claude Code the tool's name is `mcp__ailore__leave_writing`.
+5. Tell the Human Lead the path of the journal entry, and repeat the third part of the handover. The session then writes nothing more.
 
 ## Contracts
 
@@ -66,7 +65,7 @@ When the session is in Writing, the verb ends Writing by calling the tool `leave
 
 The session that wrote this card on 2026-09-18 made the following choices. Each is open to the Human Lead's review.
 
-- The product document says that this verb writes the handover as the last comment on the session's issue, moves the issue to Done and releases the write targets. The architecture document of the first build has the companion do all three when the session closes, and does not say where the companion gets the text of the handover. This card follows the product document: the verb writes the comment and moves the issue to Done. It releases the targets by calling `leave_writing`, because the claims are in the desk's records and only the companion writes them. The Human Lead is asked to settle which of the two writes the comment and moves the issue, so that neither is done twice.
+- The product document says that this verb writes the handover as the last comment on the session's issue, moves the issue to Done and releases the write targets. The architecture document of the first build has the companion do all three when the session closes. This card follows the architecture document for the comment and the move, so that each is done once: the companion keeps the Agents board, as it keeps the claims on the desk and copies them to the board. When the session ends, the companion reads the journal entry whose file name ends with the session's id, and writes the text under its heading `Handover` as the comment. The verb releases the targets by calling `leave_writing`, because the claims are in the desk's records and only the companion writes them. The tester of phase M4.7 made this choice on 2026-09-18, after an earlier version of this card had the verb write the comment as well; the Human Lead is asked to confirm it.
 - The product document says that a session journals in the Workbench while it works, and that a session adds one journal entry when it closes. This card writes the entry once, at close. Keeping notes in `workbench/scratch/` until then is this card's.
 - The product document does not say how a journal entry's file is named. The name in step 2 is this card's: the date, the time, a few words and the session's id. The id is at the end because the check script of journal-append-forward, as it was written for the first build, allows a second write to an entry only when the file's name ends with a hyphen, the id of the current session and `.md`.
 - The architecture document of the first build gives one place where a session is told its id: the claims in the answer to `request_writing`, which is a proposal there that the Human Lead has not yet accepted. It names no way for a session that stays in Read only to learn its id. Such a session leaves the id out of the name, and its entry can then be written once. The Human Lead is asked whether the companion tells every session its id when it starts it.

@@ -104,6 +104,7 @@ function sessionIssue(raw: RawProjectIssue): SessionIssue {
       : 'Read only';
   return {
     issue: raw.issue,
+    title: raw.title,
     column,
     targets: block?.targets ?? [],
     attended: block?.attended ?? true,

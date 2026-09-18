@@ -824,6 +824,7 @@ test('readProject reads every page and sorts the issues into the snapshot', asyn
         number: 5,
         url: `https://github.com/${REPOSITORY}/issues/5`,
       },
+      title: 'Issue 5',
       column: 'Writing',
       targets: [...targets],
       attended: true,
