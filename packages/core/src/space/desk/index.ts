@@ -65,7 +65,9 @@ export { addSession, closeSession, getSession, listSessions, updateSession } fro
 export { addClaims, listClaims, releaseClaim, releaseClaims, sameWriteTarget } from './claims.js';
 // Phase M4.2: the steps of a session's life, which apply a decision of `space/claims`.
 export {
+  type LeaveOptions,
   type LifecycleOptions,
+  type SessionCloseCommit,
   type SessionRepair,
   type SessionStart,
   type WritingEntered,

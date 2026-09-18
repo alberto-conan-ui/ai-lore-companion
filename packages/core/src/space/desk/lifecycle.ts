@@ -30,6 +30,20 @@
  * When the second write fails while the process keeps running, `enterWriting`
  * releases the claims it wrote. The other two steps leave the claims for the
  * repair: putting the session back in Writing would let it write more.
+ *
+ * Session closes. A session close is the commit a session left on a root when
+ * it left Writing (architecture document, sections 3.5 and 5.6). Leaving
+ * Writing and ending a session record one for each entry of the option
+ * `closes`, when the session was in Writing at the call. They are appended
+ * after the mode is written and before the claims are released, so a close is
+ * on disk only for a session that has left Writing. A step stopped after the
+ * mode write records no close; the baseline points then group that session's
+ * commits by its start and end times. A close that cannot be written does not
+ * keep the claims: they are released, and the failure is in `closeFailure`.
+ *
+ * This file reads no repository. The caller reads the present commit of each
+ * root the session holds before it calls, with `readSessionCloseCommits` of
+ * `space/baseline`, and passes what that gave.
  */
 
 import { decideLeaveWriting, decideWritingRequest, heldReason, refusal } from '../claims/rules.js';
@@ -43,9 +57,10 @@ import { type Result, err, ok } from '../result.js';
 import { addClaims, listClaims, releaseClaim, releaseClaims } from './claims.js';
 import type { Desk, DeskFailure } from './desk.js';
 import { isJsonObject, isSessionRecord } from './guards.js';
+import { recordSessionClose } from './root-commits.js';
 import { addSession, closeSession, listSessions, updateSession } from './sessions.js';
 import { type DeskRecordFile, readDeskRecords } from './store.js';
-import type { Claim, IssueRef, JsonObject, SessionRecord } from './types.js';
+import type { Claim, IssueRef, JsonObject, SessionClose, SessionRecord } from './types.js';
 
 /** What the caller gives to start a session; the desk adds the mode and the time. */
 export type SessionStart = {
@@ -74,8 +89,27 @@ export type WritingEntered = {
   repaired: SessionRepair;
 };
 
+/** The present commit of a root a session holds, read by the caller before the session leaves Writing. */
+export type SessionCloseCommit = { rootId: string; commit: string };
+
 /** A session that left Writing, or that ended, and the claims that were released. */
-export type WritingLeft = { session: SessionRecord; released: Claim[] };
+export type WritingLeft = {
+  session: SessionRecord;
+  released: Claim[];
+  /** The session closes this step recorded. Empty when none was passed or the session was not in Writing. */
+  closes: SessionClose[];
+  /** Set when a session close could not be written. The closes before it are in `closes`; the claims were released all the same. */
+  closeFailure?: DeskFailure;
+};
+
+/** Options of leaving Writing and of ending a session. */
+export type LeaveOptions = Pick<LifecycleOptions, 'betweenWrites'> & {
+  /**
+   * The present commit of each root the session holds. One session close is
+   * recorded for each, when the session is in Writing at the call.
+   */
+  closes?: readonly SessionCloseCommit[];
+};
 
 /** Options of the steps that make two writes. */
 export type LifecycleOptions = {
@@ -229,12 +263,13 @@ export function enterWriting(
  * Return a session to Read only and release every target it holds: the header's
  * Leave Writing action and the tool `leave_writing`. The mode is written first
  * and the claims are released second. A session that is in Read only already
- * keeps its mode, and whatever it still holds is released.
+ * keeps its mode, and whatever it still holds is released. Between the two a
+ * session close is recorded for each entry of `options.closes`.
  */
 export function leaveWriting(
   desk: Desk,
   sessionId: string,
-  options: Pick<LifecycleOptions, 'betweenWrites'> = {},
+  options: LeaveOptions = {},
 ): Result<WritingLeft, DeskFailure | WritingRefusal> {
   return leave(desk, sessionId, options, (session) =>
     session.mode === 'writing'
@@ -251,7 +286,7 @@ export function leaveWriting(
 export function endSession(
   desk: Desk,
   sessionId: string,
-  options: Pick<LifecycleOptions, 'betweenWrites'> = {},
+  options: LeaveOptions = {},
 ): Result<WritingLeft, DeskFailure | WritingRefusal> {
   return leave(desk, sessionId, options, (session) =>
     session.closedAt === undefined ? closeSession(desk, sessionId) : ok(session),
@@ -261,7 +296,7 @@ export function endSession(
 function leave(
   desk: Desk,
   sessionId: string,
-  options: Pick<LifecycleOptions, 'betweenWrites'>,
+  options: LeaveOptions,
   writeSession: (session: SessionRecord) => Result<SessionRecord, DeskFailure>,
 ): Result<WritingLeft, DeskFailure | WritingRefusal> {
   const sessions = listSessions(desk);
@@ -277,8 +312,28 @@ function leave(
   // The decision refuses a session the desk has no record of, so this one has a record.
   if (current === undefined) return err(missing(sessionId));
 
+  const wasWriting = current.mode === 'writing' && current.closedAt === undefined;
+
   const session = writeSession(current);
   if (!session.ok) return session;
+
+  // The session has left Writing on disk, so a close recorded now is true. See this file's header.
+  const closes: SessionClose[] = [];
+  let closeFailure: DeskFailure | undefined;
+  if (wasWriting) {
+    for (const close of options.closes ?? []) {
+      const recorded = recordSessionClose(desk, {
+        rootId: close.rootId,
+        commit: close.commit,
+        sessionId,
+      });
+      if (!recorded.ok) {
+        closeFailure = recorded.error;
+        break;
+      }
+      closes.push(recorded.value);
+    }
+  }
 
   options.betweenWrites?.();
 
@@ -291,7 +346,12 @@ function leave(
       ),
     );
   }
-  return ok({ session: session.value, released: released.value });
+  return ok({
+    session: session.value,
+    released: released.value,
+    closes,
+    ...(closeFailure !== undefined ? { closeFailure } : {}),
+  });
 }
 
 function missing(sessionId: string): DeskFailure {

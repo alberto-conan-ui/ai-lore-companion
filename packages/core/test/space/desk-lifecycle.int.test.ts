@@ -28,6 +28,7 @@ import {
   getSession,
   leaveWriting,
   listClaims,
+  listSessionCloses,
   listSessions,
   openDesk,
   repairSessionRecords,
@@ -402,6 +403,103 @@ test('a session that ends is in Read only, holds nothing, and cannot enter Writi
   assert.equal(again.session.closedAt, ended.session.closedAt);
   must(leaveWriting(f.desk, 'first'));
   assert.equal(failure(endSession(f.desk, 'stranger')).kind, 'session-unknown');
+});
+
+// ---------- session closes ----------
+
+const CLOSE_A = 'a'.repeat(40);
+const CLOSE_B = 'b'.repeat(40);
+
+test('leaving Writing records a session close for each commit it is given, and only when the session was in Writing', async (t) => {
+  const f = await makeFixture(t);
+  start(f, 'first');
+  must(
+    enterWriting(f.desk, f.manifest, { sessionId: 'first', targets: [APP_MAIN, { kind: 'lore' }] }),
+  );
+  const closes = [
+    { rootId: 'repo:app', commit: CLOSE_A },
+    { rootId: 'lore', commit: CLOSE_B },
+  ];
+
+  const left = must(leaveWriting(f.desk, 'first', { closes }));
+  assert.equal(left.closeFailure, undefined);
+  assert.deepEqual(
+    left.closes.map((close) => [close.rootId, close.commit, close.sessionId]),
+    [
+      ['repo:app', CLOSE_A, 'first'],
+      ['lore', CLOSE_B, 'first'],
+    ],
+  );
+  assert.deepEqual(must(listSessionCloses(f.desk)), left.closes);
+  assert.deepEqual(must(listSessionCloses(f.desk, 'lore')), [left.closes[1]]);
+
+  // In Read only there is nothing to close: leaving again and ending record nothing more.
+  assert.deepEqual(must(leaveWriting(f.desk, 'first', { closes })).closes, []);
+  assert.deepEqual(must(endSession(f.desk, 'first', { closes })).closes, []);
+  assert.equal(must(listSessionCloses(f.desk)).length, 2);
+});
+
+test('ending a session that is in Writing records its session closes', async (t) => {
+  const f = await makeFixture(t);
+  start(f, 'first');
+  must(enterWriting(f.desk, f.manifest, { sessionId: 'first', targets: [APP_MAIN] }));
+  const ended = must(
+    endSession(f.desk, 'first', { closes: [{ rootId: 'repo:app', commit: CLOSE_A }] }),
+  );
+  assert.ok(ended.session.closedAt);
+  assert.equal(ended.closes.length, 1);
+  assert.deepEqual(must(listSessionCloses(f.desk, 'repo:app')), ended.closes);
+  assert.deepEqual(holdersOnDisk(f), []);
+});
+
+test('a session close is written after the mode and before the release: a refused step records none, a stopped step keeps it', async (t) => {
+  const f = await makeFixture(t);
+  start(f, 'first');
+  const closes = [{ rootId: 'lore', commit: CLOSE_A }];
+  assert.equal(failure(leaveWriting(f.desk, 'stranger', { closes })).kind, 'session-unknown');
+  assert.deepEqual(must(listSessionCloses(f.desk)), []);
+
+  must(enterWriting(f.desk, f.manifest, { sessionId: 'first', targets: [{ kind: 'lore' }] }));
+  let seenBetween: { mode: unknown; closes: number } | undefined;
+  assert.throws(
+    () =>
+      leaveWriting(f.desk, 'first', {
+        closes,
+        betweenWrites: () => {
+          seenBetween = {
+            mode: modeOnDisk(f, 'first'),
+            closes: must(listSessionCloses(f.desk)).length,
+          };
+          stop();
+        },
+      }),
+    Stopped,
+  );
+  assert.deepEqual(seenBetween, { mode: 'read-only', closes: 1 });
+  assert.deepEqual(holdersOnDisk(f), ['first'], 'the claim waits for the release');
+  // The step is run again: the session is in Read only, so no second close is recorded.
+  const left = must(leaveWriting(f.desk, 'first', { closes }));
+  assert.equal(left.released.length, 1);
+  assert.equal(must(listSessionCloses(f.desk)).length, 1);
+});
+
+test('a session close that cannot be written does not keep the claims', async (t) => {
+  const f = await makeFixture(t);
+  start(f, 'first');
+  must(enterWriting(f.desk, f.manifest, { sessionId: 'first', targets: [{ kind: 'lore' }] }));
+  const left = must(
+    leaveWriting(f.desk, 'first', {
+      closes: [
+        { rootId: 'lore', commit: '' },
+        { rootId: 'lore', commit: CLOSE_A },
+      ],
+    }),
+  );
+  assert.equal(left.closeFailure?.kind, 'invalid-record');
+  assert.deepEqual(left.closes, []);
+  assert.equal(left.released.length, 1);
+  assert.equal(modeOnDisk(f, 'first'), 'read-only');
+  assert.deepEqual(holdersOnDisk(f), []);
 });
 
 // ---------- stopped between the two writes ----------
