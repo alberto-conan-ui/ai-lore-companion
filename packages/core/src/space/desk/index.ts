@@ -63,6 +63,19 @@ export {
 export { DESK_RECORD_SIZE_LIMIT, DESK_RECORD_VERSION } from './store.js';
 export { addSession, closeSession, getSession, listSessions, updateSession } from './sessions.js';
 export { addClaims, listClaims, releaseClaim, releaseClaims, sameWriteTarget } from './claims.js';
+// Phase M4.2: the steps of a session's life, which apply a decision of `space/claims`.
+export {
+  type LifecycleOptions,
+  type SessionRepair,
+  type SessionStart,
+  type WritingEntered,
+  type WritingLeft,
+  endSession,
+  enterWriting,
+  leaveWriting,
+  repairSessionRecords,
+  startSession,
+} from './lifecycle.js';
 export { listGateAnswers, recordGateAnswer } from './gate-answers.js';
 export { addUnattendedTag, listUnattendedTags, removeUnattendedTag } from './unattended-tags.js';
 export { addMark, lastMark, listMarks } from './marks.js';
