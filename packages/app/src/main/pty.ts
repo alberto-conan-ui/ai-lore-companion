@@ -34,6 +34,22 @@ export type PtySpawnOpts = {
    * still running a task." A user shell/AI tab leaves this false.
    */
   infra?: boolean;
+  /**
+   * The working directory of this PTY. Default: the service's own `cwd`. A 1.0
+   * session passes the Space's folder (phase M4.4).
+   */
+  cwd?: string;
+  /**
+   * Variables added to the environment of this PTY, over the app's own.
+   * Default: none. A 1.0 session passes its id here. No secret goes here: the
+   * environment of a process can be read by other processes of the same user.
+   */
+  env?: Readonly<Record<string, string>>;
+  /**
+   * Called once when this PTY's process has exited, after the service's own
+   * `onExit` callback. Default: nothing. A 1.0 session ends its record here.
+   */
+  onExit?: () => void;
 };
 
 export type PtyService = {
@@ -62,7 +78,7 @@ const DEFAULT_SHELL = process.env.SHELL ?? '/bin/zsh';
  * mis-parsed. POSIX single-quote rules: wrap in `'…'`, escape any embedded
  * single quotes by closing-then-`\''`-then-reopening.
  */
-function quoteForShell(token: string): string {
+export function quoteForShell(token: string): string {
   if (/^[A-Za-z0-9_\-./]+$/.test(token)) return token;
   return `'${token.replace(/'/g, "'\\''")}'`;
 }
@@ -192,8 +208,11 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
         name: 'xterm-256color',
         cols: 80,
         rows: 24,
-        cwd: opts.cwd,
-        env: { ...process.env, COLORTERM: 'truecolor' } as Record<string, string>,
+        cwd: spawnOpts?.cwd ?? opts.cwd,
+        env: { ...process.env, COLORTERM: 'truecolor', ...(spawnOpts?.env ?? {}) } as Record<
+          string,
+          string
+        >,
         // Backpressure: with flow control on, node-pty pauses reading from the
         // child when it receives XOFF (`PTY_FLOW_PAUSE`) on the input path and
         // resumes on XON (`PTY_FLOW_RESUME`). The renderer sends these as xterm's
@@ -211,7 +230,12 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
       pty.onData((data) => opts.onData(id, data));
       pty.onExit(() => {
         ptys.delete(id);
-        opts.onExit(id);
+        try {
+          opts.onExit(id);
+        } finally {
+          // A 1.0 session's end must run even when the window's callback throws.
+          spawnOpts?.onExit?.();
+        }
       });
       return id;
     },
