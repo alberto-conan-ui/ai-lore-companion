@@ -23,10 +23,10 @@ Before a write, the check looks at the path to be written.
 
 1. The path is not in `workbench/journal/`: allowed, because the journal is this contract's only target.
 2. The path is in `workbench/journal/` and no file exists there: allowed. The write adds a new entry.
-3. The path is in `workbench/journal/`, a file exists there, and the name of the file ends with a hyphen, the id of the current session and `.md`: allowed. The file is the entry of the current session, and the session writes it again, for example to add the handover when it closes.
+3. The path is in `workbench/journal/`, a file exists there, and the name of the file ends with a hyphen, the id of the current session and `.md`: allowed. The file is the entry of the current session, and the session writes it again, for example to correct it before the session ends.
 4. The path is in `workbench/journal/` and any other file exists there: refused.
 
-The check knows the entry of the current session by the name of its file and by nothing else. A session that wants to write its entry more than once therefore ends the file's name with its id, as in `2026-09-18-1430-verb-cards-<session id>.md`. An entry whose name does not end with the id of the session that wrote it can be written once, and after that no session can change it, the session that wrote it included. The section "Choices recorded here" gives the reason.
+The check knows the entry of the current session by the name of its file and by nothing else. The name of an entry's file therefore ends with the id of the session that writes it, as in `2026-09-18-1430-verb-cards-<session id>.md`: the date, the time, a few words and the session id, with hyphens between them. The default verb session-close writes this name. An entry whose name does not end with the id of the session that wrote it can be written once, and after that no session can change it, the session that wrote it included. The section "Choices recorded here" gives the reason.
 
 The Workbench is always writable under the contract write-guard. This contract is the one limit on a write inside the Workbench.
 
@@ -64,6 +64,6 @@ The product document of AI-Lore 1.0 fixes the rule, and it says that the check r
 
 - The check knows the entry of the current session by the end of the file's name. The product document says that the check refuses a write to an entry of a previous session, that a session journals while it works, and that a correction is recorded in the current session's entry, so the current session's entry is written more than once. The product document does not say how a journal entry's file is named, and the desk's records do not say which session wrote a file. The session id at the end of the name is this card's way to tell the two apart.
 - An entry whose name does not end with the id of the session that wrote it is refused to that session as well. The check then has nothing to read that tells it from an entry of an earlier session, and it refuses.
-- The default verb session-close, as it was written for the first build, names the entry without the session id and writes it once and complete. That works under this check. For a session to write its entry while it works, the verb has to end the name with the session id, and the session has to be told its id. Neither is done in this folder.
+- The default verb session-close names the entry's file with the date, the time, a few words and the session id at the end, as in the example above, and writes the entry once and complete when the session closes. A session is told its id in the claims that the companion returns when it enters Writing. A session that does not know its id leaves it out of the name, and its entry can then be written once, which is all that session-close needs. Whether the companion tells every session its id when it starts it is a question for the Human Lead, and the card of session-close records it.
 - Every file in `workbench/journal/` and in its subfolders is an entry. The product document names no other file there.
 - The check looks at the written path and at the resolved path, so that a symbolic link cannot hide an entry that exists.

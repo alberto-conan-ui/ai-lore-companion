@@ -16,7 +16,7 @@ The next session reads the last handover for its [unit of work](./unit-of-work.m
 
 ## Where it is kept
 
-The handover is in the journal entry of the session, in `workbench/journal/`. When the session has an issue on the [Agents board](./agents-board.md), the handover is also written as the last comment on that issue, so that a colleague on another desk sees it. The journal itself stays on the desk that wrote it.
+The handover is in the journal entry of the session, in `workbench/journal/`. With the default set, the entry's file is named with the date, the time, a few words and the session's id at the end, as in `2026-09-18-1430-verb-cards-<session id>.md`, so the last handover is in the file whose name sorts last. When the session has an issue on the [Agents board](./agents-board.md), the handover is also written as the last comment on that issue, so that a colleague on another desk sees it. The journal itself stays on the desk that wrote it.
 
 ## What acts on it
 

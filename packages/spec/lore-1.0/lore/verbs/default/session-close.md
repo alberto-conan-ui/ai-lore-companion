@@ -34,7 +34,7 @@ When the session is in Writing, the verb ends Writing by calling the tool `leave
 ## Steps
 
 1. When the session is in Writing and the Lore is one of its targets, look at the last report of the check of lore-integrity. If it reported a failure that is not yet fixed, fix it now, before leaving Writing.
-2. Write the journal entry as one new file in `workbench/journal/`. Write it complete, in one write: the check of the contract journal-append-forward refuses a write to a journal entry that already exists. Read the notes that the session kept in `workbench/scratch/`, when it kept any. Begin the file's name with the date and the time, as in `2026-09-18-1430-verb-cards.md`, so that the names sort in the order in which the entries were written. The entry says:
+2. Write the journal entry as one new file in `workbench/journal/`. Read the notes that the session kept in `workbench/scratch/`, when it kept any, and write the entry complete, in one write. The file's name has four parts with hyphens between them, and ends in `.md`: the date, the time as four digits, two or three words that say what the session was about, and the session's id. An example is `2026-09-18-1430-verb-cards-<session id>.md`. The date and the time come first so that the names sort in the order in which the entries were written. The id comes last because the check of the contract journal-append-forward knows the entry of the current session by the end of its file's name: it allows this session to write that file again, and it refuses a write to every other entry that exists. The session's id is the id that the companion gave the session. The companion's answer to `request_writing` holds the session's claims, and each claim names the id. A session that does not know its id, because it never entered Writing or because the companion did not start it, leaves the id and its hyphen out of the name. The check then allows the first write of the file and no later one. The entry says:
    - which unit of work or item the session was on, with its address on GitHub, or that it was on none;
    - what the session did;
    - what it learned that a later session needs;
@@ -56,7 +56,7 @@ When the session is in Writing, the verb ends Writing by calling the tool `leave
 
 ## What it refuses
 
-- Changing or removing a journal entry that exists.
+- Changing or removing a journal entry of an earlier session.
 - Closing without a handover.
 - A handover that states as done something that is not done. What is unfinished is written under what is in progress.
 - Any write to the Lore or to a payload as part of closing, other than the fix of step 1.
@@ -68,7 +68,7 @@ The session that wrote this card on 2026-09-18 made the following choices. Each 
 
 - The product document says that this verb writes the handover as the last comment on the session's issue, moves the issue to Done and releases the write targets. The architecture document of the first build has the companion do all three when the session closes, and does not say where the companion gets the text of the handover. This card follows the product document: the verb writes the comment and moves the issue to Done. It releases the targets by calling `leave_writing`, because the claims are in the desk's records and only the companion writes them. The Human Lead is asked to settle which of the two writes the comment and moves the issue, so that neither is done twice.
 - The product document says that a session journals in the Workbench while it works, and that a session adds one journal entry when it closes. This card writes the entry once, at close. Keeping notes in `workbench/scratch/` until then is this card's.
-- The product document does not say how a journal entry's file is named. The name in step 2 is this card's.
-- The check script of journal-append-forward, as it was written for the first build, refuses a write to any journal entry that exists, and not only to an entry of an earlier session. Step 2 therefore writes the entry once and complete.
+- The product document does not say how a journal entry's file is named. The name in step 2 is this card's: the date, the time, a few words and the session's id. The id is at the end because the check script of journal-append-forward, as it was written for the first build, allows a second write to an entry only when the file's name ends with a hyphen, the id of the current session and `.md`.
+- The architecture document of the first build gives one place where a session is told its id: the claims in the answer to `request_writing`, which is a proposal there that the Human Lead has not yet accepted. It names no way for a session that stays in Read only to learn its id. Such a session leaves the id out of the name, and its entry can then be written once. The Human Lead is asked whether the companion tells every session its id when it starts it.
 - What the entry and the handover say in detail, beyond the three parts that the product document names, is this card's.
 - The name of the tool `leave_writing` comes from the architecture document of the first build, where it is a proposal that the Human Lead has not yet accepted.

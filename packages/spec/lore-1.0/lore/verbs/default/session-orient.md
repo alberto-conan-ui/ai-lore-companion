@@ -39,7 +39,7 @@ It writes nothing. It runs in Read only, and the session stays in Read only when
 3. Read every mirror. For each, find out whether it is out of date: run the generator that the mirror's frontmatter names, on the payload, and compare the lines that it prints with the mirror's stored `skeleton`. For a repository the generator lists the default branch, and for a publish area it lists the folder. When the lines differ, the mirror is out of date. Nothing is written, and the result is stored nowhere.
 4. Read the plan and the Agents board with `gh`. If GitHub cannot be reached, say so in the statement of step 7 and go on with the rest.
 5. Read the names of the drafts in `workbench/drafts/`, and which unit of work each belongs to.
-6. Read the last handover, as listed above. A handover has three parts: what was done, what is in progress, and what the next session should do.
+6. Read the last handover, as listed above. The verb session-close names an entry's file with the date, the time, a few words and the session's id at the end, as in `2026-09-18-1430-verb-cards-<session id>.md`, so the last entry is the file whose name sorts last. Read the names in `workbench/journal/` first, and open only the entry that is needed. A handover has three parts: what was done, what is in progress, and what the next session should do.
 7. State to the Human Lead, briefly:
    - where the work stands: the unit of work that the session was pointed at and its stage, or the state of the plan when it was pointed at none;
    - who is writing what: the sessions in Writing or Blocked and their write targets;

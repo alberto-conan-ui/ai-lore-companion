@@ -77,4 +77,6 @@ A spec, a planned item and the processes that produce them are offered and not r
 
 Read `lore/index.md`. It has one line per part of the Lore and one line for `lore/space.md`, the file that names the Space's repositories and publish areas. Each part has its own index, and the index of each part lists its folders and the Space's own files.
 
+A session then runs the verb session-orient on itself. It is one of the verbs of the default layer, and it is listed in `lore/verbs/default/index.md`. Its card says what else the session reads when it starts and what it states to the Human Lead before it waits for what they ask.
+
 The shape of the files in the Lore is described in two corpus entries: `lore/corpus/core/card.md` and `lore/corpus/core/frontmatter.md`. Read them before you write a file in the Lore.
