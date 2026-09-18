@@ -38,3 +38,13 @@ export {
   type V08FixtureOptions,
   makeV08Fixture,
 } from './v08-fixture.js';
+export {
+  type FakeGitHub,
+  type FakeGitHubCall,
+  type FakeGitHubOptions,
+  type FakeGitHubState,
+  type FakeIssue,
+  type FakeProject,
+  type FakeRepository,
+  createFakeGitHub,
+} from '../github/fake.js';
