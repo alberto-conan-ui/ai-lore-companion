@@ -6,7 +6,7 @@ This folder is an AI Space of AI-Lore 1.0. This file is the first file an AI Age
 
 AI-Lore is a way of working with an AI partner that remembers across sessions.
 
-An AI Space is the place where a Human Lead holds AI sessions about one subject: a product, a codebase, a client, a piece of research. A Space is one GitHub repository with one GitHub Project over its issues, and one folder on the Human Lead's machine. This folder is that folder. It is called the AI Desk, or the desk: the local instance of the Space on the Human Lead's machine, which the companion app manages. The Human Lead is the person the Space belongs to and who takes its decisions. An AI Session is the Human Lead and an AI Agent working together in the Space for a while.
+An AI Space is the place where a Human Lead holds AI sessions about one subject: a product, a codebase, a client, a piece of research. A Space is one GitHub repository with one GitHub Project over its issues, and one folder on the Human Lead's computer. This folder is that folder. It is called the AI Desk, or the desk: the local instance of the Space on the Human Lead's computer, which the companion app manages. The Human Lead is the person the Space belongs to and who takes its decisions. An AI Session is the Human Lead and an AI Agent working together in the Space for a while.
 
 The sessions of a Space produce payloads. There are two kinds of payload: repositories, which hold code, and publish areas, which hold documents.
 
@@ -40,7 +40,7 @@ The files of the Lore come from three layers. A part of the Lore can have a fold
 
 - **Core.** The files in a `core/` folder are fixed. An upgrade of AI-Lore replaces them as a whole. They are never edited in place, and no other file in the Space may take the name of a core file.
 - **Default.** The files in a `default/` folder ship with AI-Lore. An upgrade replaces them as a whole. They are not edited in place. To change a default, the Human Lead writes a file with the same name beside the `default/` folder, and the Space's file is used instead of the default.
-- **Own.** The files beside `core/` and `default/` are the Space's own. An upgrade does not touch them. A file here either replaces the default of the same name or adds something that no default covers.
+- **Custom.** The files beside `core/` and `default/` are the Space's own files, and they are the custom layer. An upgrade does not touch them. An own file either replaces the default of the same name or adds something that no default covers.
 
 All three layers are read in the same way.
 
