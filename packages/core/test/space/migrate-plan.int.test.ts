@@ -409,10 +409,21 @@ test('a half-done migration: the plan says which steps are done, from the ledger
   // What step 6 leaves: one card per contract file, each listed in the part's index.
   const contractsDir = join(ctx.spaceRoot, 'lore', 'contracts');
   mkdirSync(contractsDir, { recursive: true });
-  const index = ['---', 'type: index', '---', '', '# Contracts', ''];
+  const index = [
+    '---',
+    'type: index',
+    '---',
+    '',
+    '# Contracts',
+    '',
+    '- [core/](./core/index.md): the contracts that AI-Lore itself fixes.',
+  ];
   for (const card of ctx.targets.contracts) {
     const file = card.to.split('/').pop() ?? '';
-    writeFileSync(join(contractsDir, file), `---\nname: ${card.name}\n---\n\nThe rule.\n`);
+    writeFileSync(
+      join(contractsDir, file),
+      `---\ntype: contract\nname: ${card.name}\n---\n\nThe rule.\n`,
+    );
     index.push(`- [${file}](./${file}): the contract ${card.name}.`);
   }
   writeFileSync(join(contractsDir, 'index.md'), `${index.join('\n')}\n`);
@@ -443,16 +454,12 @@ test('a half-done migration: the plan says which steps are done, from the ledger
     ['record-source', 'contracts'],
   );
 
-  // A run skips the steps that are done and runs the others. Phase M6.3 built
-  // the local steps; the run stops at the first step of another phase whose
-  // run is not built yet, or reaches the end once those are built.
+  // A run skips the steps that are done, runs the others, and reaches the end:
+  // every step is built (phase M6.6 built step 13), and the verification passes.
   const run = await runMigration(input(b), b.deps);
-  const skipped = run.ok ? run.value.skipped : run.error.skipped;
-  assert.deepEqual(skipped.slice(0, 2), ['record-source', 'contracts']);
-  if (!run.ok) {
-    assert.equal(run.error.kind, 'not-built-yet', run.error.message);
-    assert.ok(['issues', 'verify'].includes(run.error.stepId ?? ''), run.error.stepId ?? '');
-  }
+  assert.ok(run.ok, run.ok ? '' : run.error.message);
+  assert.deepEqual(run.value.skipped.slice(0, 2), ['record-source', 'contracts']);
+  assert.equal(run.value.completed.at(-1), 'verify');
 });
 
 test('with no ledger, the issues step is done only when GitHub has every issue by its marker', async (t) => {

@@ -260,6 +260,13 @@ export function gitHubPortContract(
       // A closed issue still counts: closing the older one does not make the newer one the match.
       unwrap(await port.closeIssue({ issue: older }));
       assert.deepEqual(unwrap(await port.findIssueByMarker({ repository, marker: same })), older);
+      // Every issue with a marker, oldest first; none for a marker no issue has.
+      const absent = formatIssueMarker('test', 'absent');
+      const all = unwrap(
+        await port.findAllIssuesByMarkers({ repository, markers: [same, absent] }),
+      );
+      assert.deepEqual(all[same], [older, newer]);
+      assert.deepEqual(all[absent], []);
     },
   );
 
