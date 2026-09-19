@@ -5,12 +5,20 @@ import { requirementById } from './machineText.js';
 
 type Props = {
   check: MachineCheck;
+  /** Every setup command's line, by id (`report.commands`), so a row can show what a button runs before it is pressed. */
+  commands: Record<string, string>;
   onRunCommand: (commandId: string) => void;
   onCheckAgain: () => void;
   commandsBusy: boolean;
 };
 
-type Action = { label: string; onClick: () => void; secondary: boolean; isCommand: boolean };
+type Action = {
+  label: string;
+  onClick: () => void;
+  secondary: boolean;
+  isCommand: boolean;
+  commandId: string | null;
+};
 
 /**
  * Section B of Set up this computer: the GitHub sign-in, its `project` scope
@@ -19,6 +27,7 @@ type Action = { label: string; onClick: () => void; secondary: boolean; isComman
  */
 export function GitHubSection({
   check,
+  commands,
   onRunCommand,
   onCheckAgain,
   commandsBusy,
@@ -38,6 +47,7 @@ export function GitHubSection({
       'Sign in to GitHub in your browser. AI-Lore never sees your password or token; the GitHub CLI keeps them.';
     action = {
       label: 'Sign in with GitHub',
+      commandId: 'github-sign-in',
       onClick: () => onRunCommand('github-sign-in'),
       secondary: false,
       isCommand: true,
@@ -46,6 +56,7 @@ export function GitHubSection({
     text = `Signed in as ${account ?? ''}. GitHub Projects need one more permission.`;
     action = {
       label: 'Allow access to Projects',
+      commandId: 'github-add-project-scope',
       onClick: () => onRunCommand('github-add-project-scope'),
       secondary: false,
       isCommand: true,
@@ -58,13 +69,20 @@ export function GitHubSection({
         : 'No organisations.';
     action = {
       label: 'Use another account…',
+      commandId: 'github-sign-in',
       onClick: () => onRunCommand('github-sign-in'),
       secondary: true,
       isCommand: true,
     };
   } else if (kind === 'undetermined' && gh?.state.kind === 'undetermined') {
     text = `Could not check the GitHub sign-in: ${gh.state.reason}`;
-    action = { label: 'Check again', onClick: onCheckAgain, secondary: false, isCommand: false };
+    action = {
+      label: 'Check again',
+      commandId: null,
+      onClick: onCheckAgain,
+      secondary: false,
+      isCommand: false,
+    };
   }
 
   return (
@@ -93,6 +111,11 @@ export function GitHubSection({
           {action.label}
         </button>
       )}
+      {action?.commandId !== null && action?.commandId !== undefined && (
+        <code style={commandStyle} data-testid="machine-row-github-command">
+          Runs: {commands[action.commandId] ?? ''}
+        </code>
+      )}
     </div>
   );
 }
@@ -101,4 +124,11 @@ const textStyle: React.CSSProperties = {
   margin: 0,
   fontSize: '0.85rem',
   color: 'var(--color-text)',
+};
+
+const commandStyle: React.CSSProperties = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.78rem',
+  color: 'var(--color-text-secondary)',
+  wordBreak: 'break-all',
 };

@@ -205,6 +205,7 @@ export function MachineCheckScreen({ init }: Props): JSX.Element {
             >
               <GitHubSection
                 check={report.check}
+                commands={report.commands}
                 onRunCommand={runCommand}
                 onCheckAgain={checkAgain}
                 commandsBusy={activeCommand !== null}

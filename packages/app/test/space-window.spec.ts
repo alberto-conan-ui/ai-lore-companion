@@ -44,6 +44,21 @@ test.describe('the Space window', () => {
       await expect(empty.getByTestId('new-ai')).toBeDisabled();
       await expect(empty.getByTestId('space-sessions-ai-note')).toHaveText(AI_SENTENCE);
 
+      // The engine menu lists every catalog engine; one that cannot run a guarded
+      // session at all (Codex CLI, here, whether or not it is installed) is greyed
+      // with its reason on the line.
+      await empty.getByRole('button', { name: 'Choose the engine' }).click();
+      const engineMenu = page.getByTestId('space-sessions-engine-menu');
+      await expect(engineMenu).toBeVisible();
+      const codexOption = engineMenu.getByTestId('space-sessions-engine-menu-option-default.codex');
+      await expect(codexOption).toHaveAttribute('aria-disabled', 'true');
+      await expect(codexOption).toContainText('Codex CLI');
+      await expect(codexOption).toContainText(
+        'guarded Space sessions are not available for this engine yet',
+      );
+      await page.keyboard.press('Escape');
+      await expect(engineMenu).toHaveCount(0);
+
       // A shell tab in the dock workspace.
       await empty.getByTestId('new-shell').click();
       await expect(page.getByTestId('dock-workspace').getByTestId('tab-shell')).toBeVisible({

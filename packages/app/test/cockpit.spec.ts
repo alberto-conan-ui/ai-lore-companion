@@ -180,6 +180,12 @@ test.describe('window modes', () => {
   // last-picked one when persisted); the user changes the engine in the
   // tab's empty-state dropdown if they want. The dropdown also carries an
   // "+ Add engine…" item that deep-links Settings → Engines.
+  //
+  // M9 (onboarding stage): `engines.json` always carries the catalog engines
+  // first (`mergeEnginesWithCatalog`), so a seeded `claude` entry merges into
+  // the catalog's `default.claude` and is first in the list regardless of
+  // what else is seeded; `gemini` matches no catalog binary and is appended
+  // after the four catalog entries.
   test('+ AI opens a new AI tab with the first engine preselected', async () => {
     const fixture = makeProject();
     seedEngines(fixture.userData, [
@@ -198,8 +204,9 @@ test.describe('window modes', () => {
 
       const aiTab = centre.getByTestId('tab-ai');
       await expect(aiTab).toBeVisible({ timeout: 5_000 });
-      // The empty-state body identifies the active engine via data-ai-engine.
-      await expect(page.locator('[data-ai-engine="claude"]')).toHaveCount(1);
+      // The empty-state body identifies the active engine via data-ai-engine:
+      // the catalog's `default.claude`, first in the merged list.
+      await expect(page.locator('[data-ai-engine="default.claude"]')).toHaveCount(1);
       // The engine dropdown surfaces the "+ Add engine…" deep-link item.
       await expect(page.getByTestId('ai-engine-picker-add')).toHaveCount(1);
 
@@ -214,6 +221,12 @@ test.describe('window modes', () => {
   // the engine binary in the tab's PTY (via `zsh -l -c '<binary>'`) and the
   // body transitions to the running xterm view. We seed a fake "engine" that
   // prints a unique marker so the test can confirm the binary actually ran.
+  //
+  // M9 (onboarding stage): the merged engine list now always puts the four
+  // catalog engines first, so the seeded `fake` engine is no longer the one
+  // preselected by `+ AI`; the test picks it from the engine dropdown before
+  // pressing Start, so it still proves the PTY spawns the chosen binary (and
+  // never the real `claude` on the machine's PATH).
   test('Start launches the chosen engine in the AI tab PTY', async () => {
     const fixture = makeProject();
     const fake = makeFakeEngineBinary('PHASE_B_ENGINE_RAN');
@@ -223,18 +236,22 @@ test.describe('window modes', () => {
       await expect(page.getByTestId('tab-status')).toBeVisible({ timeout: 15_000 });
 
       const centre = page.getByTestId('dock-workspace');
-      // v0.9: `+ AI` opens the tab directly with the only seeded engine
-      // (fake) preselected — no popover.
+      // v0.9: `+ AI` opens the tab directly with an engine preselected — no
+      // popover. The catalog's `default.claude` is first in the merged list.
       await centre.getByTestId('new-ai').first().click();
 
       const aiTab = centre.getByTestId('tab-ai');
       await expect(aiTab).toBeVisible({ timeout: 5_000 });
-      // Empty state: the Start button and the engine dropdown are visible,
-      // with the fake engine preselected.
+      // Empty state: the Start button and the engine dropdown are visible.
       const emptyState = page.locator('[data-ai-state="empty"]');
       await expect(emptyState).toBeVisible();
       await expect(page.getByTestId('ai-engine-picker')).toBeVisible();
       await expect(page.getByTestId('ai-start')).toBeVisible();
+
+      // Pick the seeded fake engine explicitly, so Start spawns it and not
+      // the catalog's preselected (real) Claude Code.
+      await page.getByTestId('ai-engine-picker').selectOption('fake');
+      await expect(page.locator('[data-ai-engine="fake"]')).toHaveCount(1);
 
       await page.getByTestId('ai-start').click();
 

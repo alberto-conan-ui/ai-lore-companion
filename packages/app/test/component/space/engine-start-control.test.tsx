@@ -125,6 +125,15 @@ test('menu: always shows Codex CLI aria-disabled with its reason, even with one 
   expect(item.textContent).toContain(
     'Codex CLI — guarded Space sessions are not available for this engine yet',
   );
+
+  // The disabled row must render in the app's font, same as the enabled
+  // "Claude Code" row above it — not the browser's serif default, which is
+  // what an unstyled portalled row falls back to.
+  expect(item.style.font).toContain('inherit');
+  const enabledItem = screen.getByTestId('dashboard-start-menu-option-default.claude');
+  expect(enabledItem.style.font).toContain('inherit');
+  const menu = screen.getByTestId('dashboard-start-menu');
+  expect(menu.style.fontFamily.toLowerCase()).toContain('system-ui');
 });
 
 test('picking a startable option calls onPick', async () => {

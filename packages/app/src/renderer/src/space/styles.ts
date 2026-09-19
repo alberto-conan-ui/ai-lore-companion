@@ -91,6 +91,8 @@ export function stateTagStyle(kind: StateTagKind): React.CSSProperties {
     case 'new':
       return {
         ...base,
+        display: 'inline-block',
+        alignSelf: 'flex-start',
         fontSize: '0.75rem',
         padding: '0.1rem 0.5rem',
         borderRadius: '999px',
@@ -100,6 +102,8 @@ export function stateTagStyle(kind: StateTagKind): React.CSSProperties {
     case 'reused':
       return {
         ...base,
+        display: 'inline-block',
+        alignSelf: 'flex-start',
         fontSize: '0.75rem',
         padding: '0.1rem 0.5rem',
         borderRadius: '999px',
@@ -128,8 +132,14 @@ export const hintStyle: React.CSSProperties = {
   color: 'var(--color-text-secondary)',
 };
 
-/** A text or select input. */
+/**
+ * A text, select or textarea input. `font: inherit` first, so the app's font
+ * (set on the screen's own root, not by the browser) reaches these controls —
+ * `<input>`/`<select>`/`<textarea>` do not inherit font by default, and a
+ * bare `<textarea>` renders monospace without it.
+ */
 export const inputStyle: React.CSSProperties = {
+  font: 'inherit',
   width: '100%',
   padding: '0.4rem 0.6rem',
   fontSize: '0.85rem',

@@ -229,12 +229,17 @@ const menuButtonStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
+// `PopoverShell`'s content is portalled straight to `document.body`, outside
+// the screen's own root (where the app's font is set), so it never inherits
+// it through the DOM. Setting it here, once, at the portal's root, is what
+// every row below then picks up with `font: inherit`.
 const menuContentStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: '0.2rem',
   minWidth: '18rem',
   padding: '0.4rem',
+  fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
   background: 'var(--color-shell-deep)',
   border: '1px solid var(--color-border)',
   borderRadius: '6px',
@@ -242,6 +247,7 @@ const menuContentStyle: React.CSSProperties = {
 };
 
 const menuItemStyle: React.CSSProperties = {
+  font: 'inherit',
   display: 'block',
   width: '100%',
   padding: '0.4rem 0.5rem',
@@ -255,6 +261,7 @@ const menuItemStyle: React.CSSProperties = {
 };
 
 const menuItemDisabledStyle: React.CSSProperties = {
+  font: 'inherit',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
@@ -265,6 +272,7 @@ const menuItemDisabledStyle: React.CSSProperties = {
 };
 
 const linkButtonStyle: React.CSSProperties = {
+  font: 'inherit',
   padding: 0,
   border: 'none',
   background: 'transparent',

@@ -111,8 +111,12 @@ function seedDashboardRun(): DashboardRun {
     ]);
     root = seeded.root;
 
-    // The engine list: one engine, a script named `claude` that only sleeps. The defaults
-    // are recorded as removed, so the real `claude` on this machine is never added.
+    // The engine list: one engine, a script named `claude` that only sleeps.
+    // The catalog merge (M9.4) matches it by binary basename into the
+    // catalog's `default.claude` slot, keeping this absolute path, so a
+    // guarded session runs the stand-in and never the real `claude` on this
+    // machine's PATH. `removedDefaults` is a stale v0.8 field: catalog
+    // engines can no longer be removed, and the app drops it on load.
     const bin = join(temp, 'bin');
     mkdirSync(bin);
     const engine = join(bin, 'claude');
@@ -122,7 +126,6 @@ function seedDashboardRun(): DashboardRun {
       join(userData, 'engines.json'),
       JSON.stringify({
         engines: [{ id: 'e2e.claude', name: 'Stand-in for Claude Code', binary: engine }],
-        removedDefaults: ['default.claude', 'default.gemini'],
       }),
     );
 
@@ -297,7 +300,10 @@ test.describe('the Dashboard', () => {
           { timeout: 30_000 },
         )
         .toBe(1);
-      await expect(writingColumn).toContainText(/The e2e\.claude session that started at /);
+      // The catalog merge (M9.4) normalises the stand-in `claude` entry's id
+      // and name to the catalog's own (`default.claude` / "Claude Code"),
+      // keeping its stored absolute binary path — the stand-in still runs.
+      await expect(writingColumn).toContainText(/The default\.claude session that started at /);
       await expect(page.getByTestId('agents-board')).not.toContainText(sessionId);
 
       // A gate the session asks is first in Needs you, and its action opens its dialog.

@@ -429,6 +429,15 @@ test('the confirmation has the question, three tagged rows, few lines, and the f
   expect(project.textContent).toContain('demo');
   expect(project.textContent).toContain('New');
 
+  // The "New" tag is a compact inline pill, not a full-width block: it must
+  // size to its text regardless of the row's column-flex layout.
+  for (const row of [folder, repository, project]) {
+    const tag = row.querySelector('span:last-child') as HTMLElement;
+    expect(tag.textContent).toBe('New');
+    expect(tag.style.display).toBe('inline-block');
+    expect(tag.style.alignSelf).toBe('flex-start');
+  }
+
   expect(screen.queryByTestId('setup-plan-steps')).toBeNull();
   const section = screen.getByTestId('setup-plan');
   const before = Array.from(

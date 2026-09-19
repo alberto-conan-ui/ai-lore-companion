@@ -228,30 +228,21 @@ export function seedVerbs(root: string): void {
 }
 
 /**
- * Seed the engines store inside a fresh test `userData` directory. The cockpit
- * reads `<userData>/engines.json` at launch and back-fills `claude` / `gemini`
- * only when their binaries resolve on PATH — which they generally don't in a
- * CI environment. Writing the file directly skips the probe and pins the test
- * to known engine ids.
+ * Seed the engines store inside a fresh test `userData` directory. Since the
+ * onboarding stage (M9), the cockpit's merged engine list always puts the
+ * four catalog engines first (`mergeEnginesWithCatalog`), unconditionally —
+ * no PATH probe, and `removedDefaults` is dropped on the next load rather
+ * than honoured. An engine seeded here whose `binary`'s basename matches a
+ * catalog binary (`claude`, `codex`, `agy`, `opencode`) merges into that
+ * catalog entry (its id and name become the catalog's); anything else is
+ * appended after the four catalog entries, in the order given.
  */
 export function seedEngines(
   userData: string,
   engines: { id: string; name: string; binary: string; args?: string[] }[],
 ): void {
   mkdirSync(userData, { recursive: true });
-  // `removedDefaults` lists *all* default ids so the back-fill on load doesn't
-  // try to re-add `default.claude` / `default.gemini` on top of these.
-  writeFileSync(
-    join(userData, 'engines.json'),
-    JSON.stringify(
-      {
-        engines,
-        removedDefaults: ['default.claude', 'default.gemini'],
-      },
-      null,
-      2,
-    ),
-  );
+  writeFileSync(join(userData, 'engines.json'), JSON.stringify({ engines }, null, 2));
 }
 
 /**
