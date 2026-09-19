@@ -107,6 +107,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
 
   const addTab = useCallback(
     (kind: 'shell' | 'browser' | 'ai', engineId?: string): void => {
+      console.log('TRACE: SpaceSessions addTab', kind, engineId);
       const make = TAB_KINDS[kind].makeTab;
       if (!make) return;
       const id = crypto.randomUUID();
@@ -149,6 +150,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
 
   // A request from the Dashboard (phase M7.4): open an AI tab and start it, or show a session's tab.
   useEffect(() => {
+    console.log('TRACE: SpaceSessions sessionsRequest effect', sessionsRequest);
     if (sessionsRequest === null) return;
     sessionsRequestHandled(sessionsRequest.id);
     if (sessionsRequest.kind === 'start-ai') {
@@ -164,6 +166,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   const spaceAi = useCallback(
     (tab: WorkspaceTab): AiTabSpace => ({
       start: async (engineId) => {
+        console.log('TRACE: SpaceSessions spaceAi.start', tab.id, engineId);
         pendingStart.current.delete(tab.id);
         const started = await window.cockpit.spaceSessionStart({ engineId });
         if (!started.ok) {

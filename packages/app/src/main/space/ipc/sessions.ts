@@ -164,6 +164,7 @@ export function createSpaceSessionsRegister(
       if (!context) return notASpaceWindow;
       const parsed = parseArg(engineSchema, arg);
       if (!parsed.ok) return parsed;
+      context.log.info('TRACE: main spaceSessionStart called', { engineId: parsed.value.engineId });
       watchHeaders(context);
       const started = await context.service(spaceSessions).start(parsed.value.engineId);
       if (started.ok) rememberEngine(context, parsed.value.engineId);

@@ -107,6 +107,7 @@ export function EngineStartControl({
           title={choice !== null && !startable ? noteText : undefined}
           data-testid={buttonTestId}
           onClick={() => {
+            console.log('TRACE: EngineStartControl click', engineId);
             if (engineId === null) return;
             setStartingId(engineId);
             onStart(engineId);
