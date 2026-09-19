@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
-import type { EngineEntry, RunResult } from '@ai-lore-companion/core';
+import {
+  ENGINE_CATALOG,
+  type EngineEntry,
+  GH_WEB_SIGN_IN_COMMAND,
+  type RunResult,
+} from '@ai-lore-companion/core';
 import {
   type ScriptedRule,
   type ScriptedRunner,
@@ -9,14 +17,18 @@ import {
 import {
   LOGIN_SHELL_ARGS,
   LOGIN_SHELL_PATH_COMMAND,
+  type SpaceMachineParts,
   createSpaceMachineRegister,
   parseLoginShellPath,
   validLoginShell,
 } from '../../../src/main/space/ipc/machine.js';
+import { addRecentSpace } from '../../../src/main/space/recents.js';
 import { CONTRACT } from '../../../src/shared/ipc/contract.js';
 import {
+  CATALOG_ENGINE_IDS,
   MACHINE_REQUIREMENT_ORDER,
   type SpaceMachineCheckResult,
+  type SpaceSpacesFolderResult,
 } from '../../../src/shared/ipc/space/machine.types.js';
 import { type SpaceHarness, spaceHarnessFor } from './space-harness.js';
 
@@ -58,7 +70,11 @@ function fineRules(): ScriptedRule[] {
   ];
 }
 
-function harnessWith(runner: ScriptedRunner, clock: { now: number } = { now: 1000 }): SpaceHarness {
+function harnessWith(
+  runner: ScriptedRunner,
+  clock: { now: number } = { now: 1000 },
+  extra: Partial<SpaceMachineParts> = {},
+): SpaceHarness {
   return spaceHarnessFor(
     createSpaceMachineRegister({
       engines: () => [CLAUDE],
@@ -67,6 +83,7 @@ function harnessWith(runner: ScriptedRunner, clock: { now: number } = { now: 100
       isFile: () => true,
       platform: 'linux',
       now: () => clock.now,
+      ...extra,
     }),
   );
 }
@@ -339,4 +356,153 @@ test('an engine registry that cannot be read is a failure with a sentence, not a
   } finally {
     h.cleanup();
   }
+});
+
+// Phase M9.4: the Spaces folder, `setUp`, `commands` and the catalog engine ids.
+
+async function useFolder(
+  h: SpaceHarness,
+  sender: Parameters<SpaceHarness['invoke']>[1],
+): Promise<SpaceSpacesFolderResult> {
+  return (await h.invoke('spaceSpacesFolderUse', sender, {})) as SpaceSpacesFolderResult;
+}
+
+async function chooseFolder(
+  h: SpaceHarness,
+  sender: Parameters<SpaceHarness['invoke']>[1],
+): Promise<SpaceSpacesFolderResult> {
+  return (await h.invoke('spaceSpacesFolderChoose', sender, {})) as SpaceSpacesFolderResult;
+}
+
+test('the report proposes the parent of the newest recent Space, or <home>/Spaces with none', async () => {
+  const runner = createScriptedRunner([{ bin: SHELL, reply: SHELL_REPLY }, ...fineRules()]);
+  const home = mkdtempSync(join(tmpdir(), 'ai-lore-home-'));
+  const h = harnessWith(runner, { now: 1000 }, { home: () => home });
+  try {
+    h.space.host.openWelcome();
+    const welcome = h.space.created[0];
+    assert.ok(welcome);
+
+    const noRecents = await check(h, welcome, { fresh: true });
+    assert.ok(noRecents.ok);
+    assert.equal(noRecents.value.spacesFolder.proposed, join(home, 'Spaces'));
+    assert.equal(noRecents.value.spacesFolder.value, null);
+
+    addRecentSpace(h.space.userDataDir, {
+      path: join(home, 'projects', 'demo-space'),
+      name: 'Demo Space',
+    });
+    const withRecent = await check(h, welcome, { fresh: true });
+    assert.ok(withRecent.ok);
+    assert.equal(withRecent.value.spacesFolder.proposed, join(home, 'projects'));
+  } finally {
+    h.cleanup();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('setUp.left holds spaces-folder until spaceSpacesFolderUse creates and saves the proposal', async () => {
+  const runner = createScriptedRunner([{ bin: SHELL, reply: SHELL_REPLY }, ...fineRules()]);
+  const home = mkdtempSync(join(tmpdir(), 'ai-lore-home-'));
+  const h = harnessWith(runner, { now: 1000 }, { home: () => home });
+  try {
+    h.space.host.openWelcome();
+    const welcome = h.space.created[0];
+    assert.ok(welcome);
+
+    const before = await check(h, welcome, { fresh: true });
+    assert.ok(before.ok);
+    assert.ok(before.value.setUp.left.some((item) => item.id === 'spaces-folder'));
+
+    const used = await useFolder(h, welcome);
+    assert.ok(used.ok);
+    assert.equal(used.value.folder, join(home, 'Spaces'));
+
+    const after = await check(h, welcome, { fresh: true });
+    assert.ok(after.ok);
+    assert.equal(after.value.spacesFolder.value, join(home, 'Spaces'));
+    assert.equal(
+      after.value.setUp.left.some((item) => item.id === 'spaces-folder'),
+      false,
+    );
+  } finally {
+    h.cleanup();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('spaceSpacesFolderUse is refused from a window that is not a 1.0 window', async () => {
+  const runner = createScriptedRunner([{ bin: SHELL, reply: SHELL_REPLY }, ...fineRules()]);
+  const h = harnessWith(runner);
+  try {
+    const result = await useFolder(h, { webContentsId: 999_999 });
+    assert.equal(result.ok, false);
+    assert.equal(!result.ok && result.error.kind, 'not-allowed-here');
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('spaceSpacesFolderChoose saves the folder the stubbed dialog gives, and reports cancelled otherwise', async () => {
+  const runner = createScriptedRunner([{ bin: SHELL, reply: SHELL_REPLY }, ...fineRules()]);
+  const home = mkdtempSync(join(tmpdir(), 'ai-lore-home-'));
+  const chosen = join(home, 'chosen-spaces');
+  const h = harnessWith(
+    runner,
+    { now: 1000 },
+    { home: () => home, pickFolder: async () => chosen },
+  );
+  try {
+    h.space.host.openWelcome();
+    const welcome = h.space.created[0];
+    assert.ok(welcome);
+
+    const result = await chooseFolder(h, welcome);
+    assert.ok(result.ok);
+    assert.equal(result.value.folder, chosen);
+
+    const after = await check(h, welcome, { fresh: true });
+    assert.ok(after.ok);
+    assert.equal(after.value.spacesFolder.value, chosen);
+  } finally {
+    h.cleanup();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('spaceSpacesFolderChoose gives cancelled when the dialog gives no folder', async () => {
+  const runner = createScriptedRunner([{ bin: SHELL, reply: SHELL_REPLY }, ...fineRules()]);
+  const h = harnessWith(runner, { now: 1000 }, { pickFolder: async () => null });
+  try {
+    h.space.host.openWelcome();
+    const welcome = h.space.created[0];
+    assert.ok(welcome);
+    const result = await chooseFolder(h, welcome);
+    assert.equal(result.ok, false);
+    assert.equal(!result.ok && result.error.kind, 'cancelled');
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('the report lists every setup command by id, including github-sign-in', async () => {
+  const runner = createScriptedRunner([{ bin: SHELL, reply: SHELL_REPLY }, ...fineRules()]);
+  const h = harnessWith(runner);
+  try {
+    h.space.host.openWelcome();
+    const welcome = h.space.created[0];
+    assert.ok(welcome);
+    const result = await check(h, welcome, { fresh: true });
+    assert.ok(result.ok);
+    assert.equal(result.value.commands['github-sign-in'], GH_WEB_SIGN_IN_COMMAND);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('CATALOG_ENGINE_IDS mirrors core’s catalog, in catalog order', () => {
+  assert.deepEqual(
+    [...CATALOG_ENGINE_IDS],
+    ENGINE_CATALOG.map((entry) => entry.engineId),
+  );
 });

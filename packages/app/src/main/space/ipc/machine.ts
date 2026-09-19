@@ -16,20 +16,59 @@
  */
 
 import { statSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { isAbsolute } from 'node:path';
-import type { CommandRunner, EngineEntry } from '@ai-lore-companion/core';
+import {
+  type CommandRunner,
+  type EngineEntry,
+  setUpReadiness,
+  setupCommands,
+} from '@ai-lore-companion/core';
+import type { IpcMainInvokeEvent } from 'electron';
 import { z } from 'zod';
 import type {
   MachineCheckReport,
   MachinePathSource,
   SpaceMachineCheckResult,
+  SpaceSpacesFolderResult,
+  SpacesFolderState,
 } from '../../../shared/ipc.js';
 import { loadEngines } from '../../engines.js';
 import type { Deps, RegisterModule } from '../../ipc/types.js';
 import { checkMachineOfApp } from '../e2e-machine.js';
+import { rememberGitHubOwners } from '../github-owners.js';
+import { loadRecentSpaces } from '../recents.js';
+import { proposeSpacesFolder, readSpacesFolder, useSpacesFolder } from '../spaces-folder.js';
 import { parseArg } from './validate.js';
 
 const checkSchema = z.strictObject({ fresh: z.boolean() });
+const emptySchema = z.strictObject({});
+
+/** Title of the system folder dialog opened by "Choose…" on Set up this computer. */
+export const CHOOSE_SPACES_FOLDER_TITLE = 'Choose the folder new Spaces are created in';
+
+/**
+ * The system's folder dialog for the Spaces folder, parented on the window
+ * the request came from when there is one. `electron` is imported only when
+ * this runs, as `main/space/ipc/setup.ts`'s own folder dialog does, so the
+ * headless tier (which stubs `electron` without a `dialog`) never loads it.
+ */
+async function pickSpacesFolderWithDialog(
+  event: IpcMainInvokeEvent,
+  title: string,
+): Promise<string | null> {
+  const { BrowserWindow, dialog } = await import('electron');
+  const options = {
+    title,
+    properties: ['openDirectory', 'createDirectory'] as ('openDirectory' | 'createDirectory')[],
+  };
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  const result = owner
+    ? await dialog.showOpenDialog(owner, options)
+    : await dialog.showOpenDialog(options);
+  const [folder] = result.filePaths;
+  return result.canceled || !folder ? null : folder;
+}
 
 /** How long the login shell may take to print its `PATH`, in milliseconds. */
 export const LOGIN_SHELL_PATH_TIMEOUT_MS = 10_000;
@@ -119,6 +158,10 @@ export type SpaceMachineParts = {
   platform: NodeJS.Platform;
   /** The clock. Default: `Date.now`. */
   now: () => number;
+  /** The Human Lead's home folder, for the Spaces folder proposal. Default: `os.homedir`. */
+  home: () => string;
+  /** The system's folder dialog for "Choose…"; `null` when cancelled. Default: Electron's. */
+  pickFolder: (event: IpcMainInvokeEvent, title: string) => Promise<string | null>;
 };
 
 const DEFAULT_PARTS: SpaceMachineParts = {
@@ -128,6 +171,8 @@ const DEFAULT_PARTS: SpaceMachineParts = {
   isFile: isExistingFile,
   platform: process.platform,
   now: Date.now,
+  home: homedir,
+  pickFolder: pickSpacesFolderWithDialog,
 };
 
 /**
@@ -144,6 +189,14 @@ export function createSpaceMachineRegister(parts: Partial<SpaceMachineParts> = {
     let last: MachineCheckReport | null = null;
     let running: Promise<MachineCheckReport> | null = null;
 
+    function spacesFolderState(): SpacesFolderState {
+      const userDataDir = deps.space.userDataDir();
+      return {
+        value: readSpacesFolder(userDataDir),
+        proposed: proposeSpacesFolder(loadRecentSpaces(userDataDir), all.home()),
+      };
+    }
+
     async function check(): Promise<MachineCheckReport> {
       const runner = runnerOf(deps);
       const shell = validLoginShell(all.shell, all.isFile);
@@ -155,11 +208,23 @@ export function createSpaceMachineRegister(parts: Partial<SpaceMachineParts> = {
         platform,
         ...(path === null ? {} : { env: { PATH: path } }),
       });
-      const report: MachineCheckReport = { check: result, checkedAt: now(), pathSource };
+      const spacesFolder = spacesFolderState();
+      const setUp = setUpReadiness(result, spacesFolder.value);
+      const commands = Object.fromEntries(setupCommands().map((c) => [c.id, c.commandLine]));
+      rememberGitHubOwners(result.github);
+      const report: MachineCheckReport = {
+        check: result,
+        checkedAt: now(),
+        pathSource,
+        spacesFolder,
+        setUp,
+        commands,
+      };
       deps.space.log.info('machine-checked', {
         ready: result.ready,
         states: result.requirements.map((requirement) => requirement.state.kind).join(','),
         pathSource,
+        setUpReady: setUp.ready,
       });
       return report;
     }
@@ -191,6 +256,48 @@ export function createSpaceMachineRegister(parts: Partial<SpaceMachineParts> = {
           error: { kind: 'check-failed', message: `The machine check did not run: ${message}` },
         };
       }
+    });
+
+    reg.handle('spaceSpacesFolderUse', (event, arg): SpaceSpacesFolderResult => {
+      if (!deps.space.windowFor(event)) {
+        return {
+          ok: false,
+          error: {
+            kind: 'not-allowed-here',
+            message: 'The request did not come from an AI-Lore 1.0 window.',
+          },
+        };
+      }
+      const parsed = parseArg(emptySchema, arg);
+      if (!parsed.ok) return parsed;
+      const userDataDir = deps.space.userDataDir();
+      const proposed = proposeSpacesFolder(loadRecentSpaces(userDataDir), all.home());
+      const result = useSpacesFolder(userDataDir, proposed);
+      if (!result.ok) return result;
+      deps.broadcastSettings();
+      return { ok: true, value: { folder: result.value } };
+    });
+
+    reg.handle('spaceSpacesFolderChoose', async (event, arg): Promise<SpaceSpacesFolderResult> => {
+      if (deps.space.windowFor(event) === undefined && deps.contextFor(event) === undefined) {
+        return {
+          ok: false,
+          error: {
+            kind: 'not-allowed-here',
+            message: 'The request did not come from an AI-Lore window.',
+          },
+        };
+      }
+      const parsed = parseArg(emptySchema, arg);
+      if (!parsed.ok) return parsed;
+      const folder = await all.pickFolder(event, CHOOSE_SPACES_FOLDER_TITLE);
+      if (folder === null) {
+        return { ok: false, error: { kind: 'cancelled', message: 'No folder was chosen.' } };
+      }
+      const result = useSpacesFolder(deps.space.userDataDir(), folder);
+      if (!result.ok) return result;
+      deps.broadcastSettings();
+      return { ok: true, value: { folder: result.value } };
     });
   };
 }

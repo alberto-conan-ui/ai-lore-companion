@@ -10,20 +10,28 @@
 
 import type {
   EngineCheck,
+  EngineInstallState,
+  EngineSignInState,
   MachineCheck,
   MachineCheckState,
   MachineCheckStateKind,
   MachineRequirementCheck,
   MachineRequirementId,
+  SetUpItemId,
+  SetUpReadiness,
 } from '@ai-lore-companion/core';
 
 export type {
   EngineCheck,
+  EngineInstallState,
+  EngineSignInState,
   MachineCheck,
   MachineCheckState,
   MachineCheckStateKind,
   MachineRequirementCheck,
   MachineRequirementId,
+  SetUpItemId,
+  SetUpReadiness,
 };
 
 /**
@@ -40,6 +48,14 @@ export type MachinePathSource =
   /** The login shell's `PATH` could not be read; the commands ran with the app's own `PATH`. */
   | 'app-environment';
 
+/** The Spaces folder, as the machine report carries it. */
+export type SpacesFolderState = {
+  /** The setting's value when it names an existing folder; `null` when not set. */
+  value: string | null;
+  /** The folder Set up this computer proposes, not yet saved. */
+  proposed: string;
+};
+
 /** One machine check, as the screens receive it. */
 export type MachineCheckReport = {
   /** Core's result: the four requirements in fixed order, the engines, and `ready`. */
@@ -47,7 +63,34 @@ export type MachineCheckReport = {
   /** When the check finished, in milliseconds since the epoch. */
   checkedAt: number;
   pathSource: MachinePathSource;
+  spacesFolder: SpacesFolderState;
+  /** Whether Set up this computer is ready, and what is left when it is not. */
+  setUp: SetUpReadiness;
+  /** Every command the screens may run, by id, with its command line. */
+  commands: Record<string, string>;
 };
+
+/** The result of `spaceSpacesFolderUse` and `spaceSpacesFolderChoose`. */
+export type SpaceSpacesFolderResult =
+  | { ok: true; value: { folder: string } }
+  | {
+      ok: false;
+      error: {
+        kind: 'invalid-argument' | 'not-allowed-here' | 'cancelled' | 'not-a-folder' | 'failed';
+        message: string;
+      };
+    };
+
+/**
+ * The ids of the catalog engines, in catalog order. Mirrors core's
+ * `ENGINE_CATALOG.map((e) => e.engineId)`; a headless test checks it.
+ */
+export const CATALOG_ENGINE_IDS = [
+  'default.claude',
+  'default.codex',
+  'default.antigravity',
+  'default.opencode',
+] as const;
 
 /** Why `spaceMachineCheck` gave no report. `message` can be shown to the Human Lead. */
 export type SpaceMachineFailure = {

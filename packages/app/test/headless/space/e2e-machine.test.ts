@@ -9,10 +9,11 @@ import {
   makeTempDir,
 } from '@ai-lore-companion/core/testing';
 import {
-  FAKE_MACHINE_ENGINE,
   checkMachineOfApp,
   ghAuthStatusText,
   isFakeMachineRun,
+  probeEngineOfApp,
+  readGitHubOwnersOfApp,
 } from '../../../src/main/space/e2e-machine.js';
 import {
   createAppGitHubPort,
@@ -25,6 +26,13 @@ import {
 // the runner given; here that is a scripted runner, so no command is started.
 
 const REAL_ENGINE = { id: 'default.claude', name: 'Claude', binary: 'claude' };
+
+// The app's registry, catalog engines first, as `main/engines.ts` gives it.
+const CLAUDE = { id: 'default.claude', name: 'Claude Code', binary: 'claude' };
+const CODEX = { id: 'default.codex', name: 'Codex CLI', binary: 'codex' };
+const ANTIGRAVITY = { id: 'default.antigravity', name: 'Antigravity CLI', binary: 'agy' };
+const OPENCODE = { id: 'default.opencode', name: 'OpenCode', binary: 'opencode' };
+const CATALOG_ENGINES = [CLAUDE, CODEX, ANTIGRAVITY, OPENCODE];
 
 function toolsRunner() {
   return createScriptedRunner([
@@ -136,7 +144,7 @@ test('outside the fake machine run the check is core’s: gh and the registry’
   assert.ok(runner.calls.some((call) => call.bin === 'claude'));
 });
 
-test('in the fake machine run gh is answered from the fake, the engine is the fake one, git and python3 are asked', async () => {
+test('in the fake machine run the catalog engines are answered from the fake, Claude Code installed and signed in, the others not installed, tools and the account answered, git and python3 asked of the runner given (phase M9.4)', async () => {
   const temp = makeTempDir('ai-lore-e2e-machine-');
   try {
     const stateFile = join(temp.dir, 'fake-github.json');
@@ -145,13 +153,27 @@ test('in the fake machine run gh is answered from the fake, the engine is the fa
     const env = { COCKPIT_E2E: '1', AI_LORE_FAKE_GITHUB: stateFile };
 
     const runner = toolsRunner();
-    const ready = await checkMachineOfApp(runner, [REAL_ENGINE], { platform: 'linux' }, env);
+    const ready = await checkMachineOfApp(runner, CATALOG_ENGINES, { platform: 'linux' }, env);
     assert.equal(ready.ready, true, JSON.stringify(ready.requirements));
     assert.deepEqual(
       ready.engines.map((engine) => engine.engineId),
-      [FAKE_MACHINE_ENGINE.id],
+      CATALOG_ENGINES.map((engine) => engine.id),
     );
-    // Only git and python3 reach the runner given.
+    const claude = ready.engines.find((engine) => engine.engineId === CLAUDE.id);
+    assert.equal(claude?.installed.kind, 'installed');
+    assert.equal(claude?.signIn.kind, 'signed-in');
+    for (const other of [CODEX, ANTIGRAVITY, OPENCODE]) {
+      const engine = ready.engines.find((candidate) => candidate.engineId === other.id);
+      assert.equal(engine?.installed.kind, 'missing', `${other.id} is not installed`);
+      assert.equal(engine?.signIn.kind, 'not-checked');
+    }
+    assert.equal(ready.tools.brew, true);
+    assert.equal(ready.tools.npm, false);
+    assert.equal(ready.github.account, 'fake-human');
+    assert.deepEqual(ready.github.organisations, []);
+    // Only git and python3 reach the runner given: the catalog engines,
+    // brew, npm, gh --version, gh auth status and gh api user/orgs are all
+    // answered by the fake first.
     assert.deepEqual([...new Set(runner.calls.map((call) => call.bin))].sort(), ['git', 'python3']);
 
     // A fake without the project scope, then a signed-out fake, are seen at the next check.
@@ -164,6 +186,45 @@ test('in the fake machine run gh is answered from the fake, the engine is the fa
     const out = await checkMachineOfApp(toolsRunner(), [], { platform: 'linux' }, env);
     assert.equal(out.requirements.find((r) => r.id === 'gh')?.state.kind, 'not-signed-in');
     assert.equal(out.ready, false);
+    fake.dispose();
+  } finally {
+    temp.cleanup();
+  }
+});
+
+test('probeEngineOfApp in a fake run answers installed and signed in without calling the runner (phase M9.4)', async () => {
+  const refuseAll = createScriptedRunner([]);
+  const env = { COCKPIT_E2E: '1', AI_LORE_FAKE_GITHUB: '/tmp/does-not-matter.json' };
+  const check = await probeEngineOfApp(refuseAll, CLAUDE, { platform: 'linux' }, env);
+  assert.deepEqual(check.installed, { kind: 'installed', version: '1.0.0' });
+  assert.deepEqual(check.signIn, { kind: 'signed-in' });
+  assert.equal(check.catalogId, 'claude-code');
+  assert.equal(check.engineId, CLAUDE.id);
+  assert.equal(refuseAll.calls.length, 0);
+
+  // Outside the fake machine run, the real probe is asked of the runner given.
+  const real = toolsRunner().on({
+    bin: 'claude',
+    args: ['--version'],
+    reply: { stdout: 'claude 1.0.0\n' },
+  });
+  const outside = await probeEngineOfApp(real, CLAUDE, { platform: 'linux' }, {});
+  assert.ok(real.calls.some((call) => call.bin === 'claude'));
+  assert.equal(outside.engineId, CLAUDE.id);
+});
+
+test('readGitHubOwnersOfApp answers the fake account in a fake machine run, and the runner given otherwise', async () => {
+  const temp = makeTempDir('ai-lore-e2e-owners-');
+  try {
+    const stateFile = join(temp.dir, 'fake-github.json');
+    const fake = createFakeGitHub({ stateFile, reposDir: join(temp.dir, 'remotes') });
+    fake.save(stateFile);
+    const env = { COCKPIT_E2E: '1', AI_LORE_FAKE_GITHUB: stateFile };
+    const refuseAll = createScriptedRunner([]);
+    const owners = await readGitHubOwnersOfApp(refuseAll, { platform: 'linux' }, env);
+    assert.equal(owners.account, 'fake-human');
+    assert.deepEqual(owners.organisations, []);
+    assert.equal(refuseAll.calls.length, 0);
     fake.dispose();
   } finally {
     temp.cleanup();

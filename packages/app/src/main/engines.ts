@@ -3,90 +3,70 @@
  *
  * Sibling to `shortcuts.json` / `apps:` in `settings.json`, not part of either —
  * engines are PTY hosts (long-running, interactive), distinct from the Apps
- * catalog (one-shot openers). Format:
+ * catalog (one-shot openers). Format: `{ "engines": EngineEntry[] }`.
  *
- *   {
- *     "engines": EngineEntry[],
- *     "removedDefaults": string[]
- *   }
- *
- * On every load the store is augmented with any default engine whose id was
- * never user-removed and whose binary resolves on the user's PATH (`which`).
- * That mirrors `shortcuts.ts` — a fresh install gets `claude` + `gemini`
- * automatically, and a user who removes one is recorded so the seed doesn't
- * respawn on next launch.
+ * Phase M9.4: the store is no longer seeded from what resolves on PATH.
+ * Every load and save merges the stored list with core's engine catalog
+ * (`mergeEnginesWithCatalog`, phase M9.3), which always puts the four catalog
+ * engines first — a catalog entry cannot be removed, only kept out of date on
+ * disk until the next load or save writes it back. The v0.8 `removedDefaults`
+ * field (which recorded a catalog engine the Human Lead had removed) is
+ * dropped on the first load, since a catalog entry can no longer be removed.
  *
  * Per-project state — which engine was last picked in this project — lives
  * separately in `projectDataDir/engine-state.json`, not on the entries.
  */
 
-import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
-import { type EngineEntry, dedupEngines, parseEngineEntries } from '@ai-lore-companion/core';
+import { join, resolve } from 'node:path';
+import {
+  type EngineEntry,
+  mergeEnginesWithCatalog,
+  parseEngineEntries,
+} from '@ai-lore-companion/core';
 import { z } from 'zod';
-import { type CatalogStoreSpec, loadCatalog, saveCatalog } from './catalog-store.js';
 import { readJsonFile, writeJsonFileAtomic } from './json-file.js';
 import { projectDataDir } from './project-data.js';
 
-/** Default engines back-filled when their binary resolves on PATH. Ids are
- *  stable so removal is idempotent across sessions. */
-const DEFAULT_ENGINES: readonly EngineEntry[] = [
-  { id: 'default.claude', name: 'Claude', binary: 'claude' },
-  { id: 'default.gemini', name: 'Gemini', binary: 'gemini' },
-];
-
-const DEFAULT_SHELL = process.env.SHELL ?? '/bin/zsh';
-
-/** Quote a token for safe single-line shell interpolation in the `-c`
- *  payload. Mirror of `pty.ts`'s `quoteForShell`. */
-function shellQuote(token: string): string {
-  if (/^[A-Za-z0-9_\-./]+$/.test(token)) return token;
-  return `'${token.replace(/'/g, "'\\''")}'`;
+function enginesFilePath(userDataDir: string): string {
+  return join(userDataDir, 'engines.json');
 }
 
-/** True when `binary` resolves on the user's login shell PATH. Probes via
- *  `zsh -i -l -c 'command -v <binary>'` — the same PATH source the engine
- *  spawn uses in `pty.ts`. `-i` is what sources `~/.zshrc`, where most
- *  users keep their PATH additions (`$HOME/.local/bin`, where Claude
- *  installs); a Finder-launched Electron app's `process.env.PATH` is the
- *  minimal launchd default and would miss them. One source of PATH truth
- *  across seed and spawn — if the user's shell can find it, the cockpit
- *  can find it. */
-function binaryResolves(binary: string): boolean {
-  try {
-    execFileSync(DEFAULT_SHELL, ['-i', '-l', '-c', `command -v ${shellQuote(binary)}`], {
-      stdio: 'ignore',
-    });
-    return true;
-  } catch {
-    return false;
-  }
+/** The `engines` array of the raw file, and whether the file (if any) still
+ *  carries the v0.8 `removedDefaults` field. */
+function readEnginesFile(userDataDir: string): {
+  stored: EngineEntry[];
+  hasRemovedDefaults: boolean;
+} {
+  const raw = readJsonFile(enginesFilePath(userDataDir));
+  if (typeof raw !== 'object' || raw === null) return { stored: [], hasRemovedDefaults: false };
+  const obj = raw as Record<string, unknown>;
+  return {
+    stored: parseEngineEntries(obj.engines),
+    hasRemovedDefaults: 'removedDefaults' in obj,
+  };
 }
 
-/** The engines sidecar-store spec. A default is satisfied by any existing
- *  entry with the same binary (so a user-added `claude` blocks the seed), and
- *  is only seeded when its binary resolves on PATH. The resolved list is
- *  de-duplicated by the engine identity tuple. */
-const enginesStore: CatalogStoreSpec<EngineEntry> = {
-  fileName: 'engines.json',
-  field: 'engines',
-  parse: parseEngineEntries,
-  idOf: (e) => e.id,
-  defaults: DEFAULT_ENGINES,
-  isSatisfiedBy: (d, entries) => entries.some((e) => e.binary === d.binary),
-  canSeed: (d) => binaryResolves(d.binary),
-  dedup: dedupEngines,
-};
-
-/** Read the engine list, back-filling resolvable defaults. */
+/**
+ * Read the engine list: the catalog engines first, merged once with the
+ * Human Lead's stored list (`mergeEnginesWithCatalog`). When the merge
+ * differs from what was stored, or the file still carries a v0.8
+ * `removedDefaults` field, the merged list is written back — dropping
+ * `removedDefaults` — so a later load does not merge again.
+ */
 export function loadEngines(userDataDir: string): EngineEntry[] {
-  return loadCatalog(enginesStore, userDataDir);
+  const { stored, hasRemovedDefaults } = readEnginesFile(userDataDir);
+  const { engines, changed } = mergeEnginesWithCatalog(stored);
+  if (changed || hasRemovedDefaults) {
+    writeJsonFileAtomic(enginesFilePath(userDataDir), { engines }, { pretty: true });
+  }
+  return engines;
 }
 
-/** Replace the engine list. Any default whose id has disappeared is recorded
- *  so it does not respawn on next load. */
+/** Replace the engine list. `mergeEnginesWithCatalog` puts the catalog
+ *  engines first, so a catalog entry missing from `list` comes back. */
 export function saveEngines(userDataDir: string, list: readonly EngineEntry[]): void {
-  saveCatalog(enginesStore, userDataDir, list);
+  const { engines } = mergeEnginesWithCatalog(list);
+  writeJsonFileAtomic(enginesFilePath(userDataDir), { engines }, { pretty: true });
 }
 
 // --- Per-project AI-tab state ----------------------------------------------
