@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onboarding mockups</title>
+<style>
+:root {
+  --color-shell: #0a0f17; --color-shell-deep: #070b11; --color-inset: #101822;
+  --color-surface-blue: #1c2c3e; --color-surface-blue-border: #2f4860;
+  --color-rail-active: #16202c; --color-neutral-pill: #2d3a44; --color-code-bg: #0d141d;
+  --color-border: #1f2933; --color-border-strong: #2f3a45; --color-accent-border: #3a6da4;
+  --color-warn-banner-bg: #2a2418; --color-warn-banner-border: #4a3f23;
+  --color-amber-tag-bg: #3a2f1f; --color-amber-tag-border: #5a4a2c; --color-amber-tag-fg: #c9a06a;
+  --color-danger-box-bg: #1a1212; --color-danger-box-border: #5b2222;
+  --color-text: #dde3ea; --color-text-bright: #e6edf3; --color-text-2: #cbd5dd;
+  --color-text-secondary: #9fb1bd; --color-text-muted: #6c7783; --color-link: #6cb0ee;
+  --color-accent: #5a9bd4; --color-success-fg: #bcefcd; --color-warn-fg: #ffdf91; --color-danger-fg: #ff8a8a;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #05080d; color: var(--color-text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif; padding: 24px 16px 64px; }
+.page-intro { max-width: 60rem; margin: 0 auto 24px; }
+.page-intro h1 { font-size: 1.2rem; margin: 0 0 6px; }
+.page-intro p { margin: 0; font-size: 0.85rem; color: var(--color-text-secondary); }
+.frame { max-width: 60rem; margin: 0 auto 40px; }
+.caption { font-size: 0.78rem; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: .04em; margin: 0 0 8px; }
+.caption b { color: var(--color-text-secondary); }
+.window { background: var(--color-shell); border: 1px solid var(--color-border-strong); border-radius: 10px; overflow: hidden; }
+.titlebar { height: 28px; background: #1a1f27; display: flex; align-items: center; justify-content: center; position: relative; font-size: .75rem; color: var(--color-text-secondary); }
+.titlebar::before { content: ""; position: absolute; left: 10px; width: 44px; height: 10px;
+  background: radial-gradient(circle at 5px 5px, #ff5f57 4px, transparent 5px), radial-gradient(circle at 21px 5px, #febc2e 4px, transparent 5px), radial-gradient(circle at 37px 5px, #28c840 4px, transparent 5px); }
+.col { max-width: 40rem; margin: 0 auto; padding: 1.6rem 1.5rem 2rem; display: flex; flex-direction: column; gap: 1rem; }
+.col.wide { max-width: 46rem; }
+h2.title { margin: 0; font-size: 1.1rem; font-weight: 600; }
+.sentence { margin: 0; font-size: .85rem; color: var(--color-text-secondary); }
+.steps { font-size: .75rem; color: var(--color-text-muted); display: flex; gap: .8rem; }
+.steps .on { color: var(--color-text-bright); font-weight: 600; }
+.section-h { margin: 0; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-muted); }
+.card { background: var(--color-shell-deep); border: 1px solid var(--color-border); border-radius: 6px; padding: .8rem .9rem; display: flex; flex-direction: column; gap: .45rem; }
+.card.primary { border-color: var(--color-accent-border); background: var(--color-surface-blue); }
+.card h3 { margin: 0; font-size: .95rem; font-weight: 600; }
+.card p { margin: 0; font-size: .82rem; color: var(--color-text-secondary); }
+.btn { display: inline-flex; align-items: center; gap: .3rem; padding: .4rem 1rem; font-size: .85rem; font-weight: 600; color: var(--color-text-bright);
+  background: var(--color-surface-blue); border: 1px solid var(--color-surface-blue-border); border-radius: 5px; font-family: inherit; cursor: pointer; white-space: nowrap; }
+.btn.sec { background: transparent; color: var(--color-text); font-weight: 500; }
+.btn.small { padding: .2rem .6rem; font-size: .75rem; }
+.btn.focus { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.btn[aria-disabled="true"] { color: var(--color-text-muted); border-style: dashed; border-color: var(--color-border-strong); background: transparent; cursor: not-allowed; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--color-link); font: inherit; font-size: .82rem; cursor: pointer; }
+.actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.actions.end { justify-content: flex-end; }
+.hint { margin: 0; font-size: .78rem; color: var(--color-text-secondary); }
+.muted { color: var(--color-text-muted); }
+.mono { font-family: var(--mono); font-size: .8rem; }
+.path { font-family: var(--mono); font-size: .8rem; color: var(--color-text-bright); word-break: break-all; }
+.ok { color: var(--color-success-fg); } .warn { color: var(--color-warn-fg); } .bad { color: var(--color-danger-fg); }
+/* recents */
+.recent { display: flex; flex-direction: column; gap: .1rem; padding: .45rem .7rem; background: var(--color-shell-deep); border: 1px solid var(--color-border); border-radius: 5px; }
+.recent b { font-size: .9rem; }
+.entries { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
+@media (max-width: 640px) { .entries { grid-template-columns: 1fr; } .row { grid-template-columns: 1fr !important; } }
+/* status rows */
+.row { display: grid; grid-template-columns: 1fr auto auto; gap: .8rem; align-items: center; background: var(--color-shell-deep); border: 1px solid var(--color-border); border-radius: 6px; padding: .7rem .8rem; }
+.row .name { font-weight: 600; font-size: .92rem; }
+.row .name small { font-weight: 500; font-size: .72rem; color: var(--color-text-muted); margin-left: .4rem; }
+.row .purpose { font-size: .8rem; color: var(--color-text-secondary); }
+.state { font-size: .82rem; font-weight: 600; white-space: nowrap; }
+.row .sub { grid-column: 1 / -1; }
+.codepanel { grid-column: 1 / -1; background: var(--color-code-bg); border: 1px solid var(--color-border-strong); border-radius: 5px; padding: .6rem .7rem; display: flex; flex-direction: column; gap: .4rem; font-size: .82rem; }
+.code { font-family: var(--mono); font-size: 1.1rem; letter-spacing: .12em; color: var(--color-text-bright); }
+.engines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .3rem; font-size: .82rem; }
+.engines li { display: grid; grid-template-columns: 9rem 1fr auto; gap: .6rem; align-items: center; padding: .25rem 0; border-top: 1px solid var(--color-border); }
+/* form */
+.field { display: flex; flex-direction: column; gap: .25rem; }
+label.l, .l { font-size: .8rem; font-weight: 600; color: var(--color-text-2); }
+.input { padding: .38rem .55rem; font-size: .85rem; color: var(--color-text); background: var(--color-inset); border: 1px solid var(--color-border-strong); border-radius: 4px; font-family: inherit; }
+.select { display: flex; justify-content: space-between; }
+.radios { display: flex; gap: .6rem; }
+.radio { flex: 1; border: 1px solid var(--color-border-strong); border-radius: 5px; padding: .45rem .6rem; font-size: .83rem; }
+.radio.sel { border-color: var(--color-accent-border); background: var(--color-surface-blue); }
+.radio span { display: block; font-size: .75rem; color: var(--color-text-secondary); }
+.result { font-size: .85rem; }
+.disclosure { font-size: .83rem; color: var(--color-text-2); border-top: 1px solid var(--color-border); padding-top: .6rem; }
+.disclosure::before { content: "▸ "; color: var(--color-text-muted); }
+.checking { background: var(--color-shell-deep); border: 1px solid var(--color-border); border-radius: 6px; padding: .7rem .8rem; font-size: .82rem; display: flex; flex-direction: column; gap: .3rem; }
+.checking .head { display: flex; justify-content: space-between; font-weight: 600; }
+.dim { opacity: .55; }
+/* confirm */
+.banner { background: var(--color-warn-banner-bg); border: 1px solid var(--color-warn-banner-border); border-radius: 6px; padding: .65rem .8rem; font-size: .83rem; }
+.banner b { color: var(--color-warn-fg); }
+.checklist { display: grid; grid-template-columns: 9rem 1fr auto; gap: .55rem .8rem; align-items: center; font-size: .85rem; }
+.checklist .k { color: var(--color-text-secondary); font-size: .8rem; }
+.tag { font-size: .72rem; padding: .1rem .45rem; border-radius: 10px; background: var(--color-neutral-pill); color: var(--color-text-2); white-space: nowrap; }
+.tag.amber { background: var(--color-amber-tag-bg); border: 1px solid var(--color-amber-tag-border); color: var(--color-amber-tag-fg); }
+/* run */
+.current { font-size: 1rem; font-weight: 600; display: flex; justify-content: space-between; }
+.steplist { list-style: none; margin: 0; padding: 0; font-size: .85rem; display: flex; flex-direction: column; gap: .1rem; }
+.steplist li { display: grid; grid-template-columns: 7.5rem 1fr; gap: .6rem; padding: .25rem .4rem; border-radius: 4px; }
+.steplist li.cur { background: var(--color-rail-active); }
+.steplist .st { font-size: .8rem; }
+.failbox { grid-column: 1 / -1; background: var(--color-danger-box-bg); border: 1px solid var(--color-danger-box-border); border-radius: 5px; padding: .55rem .7rem; display: flex; flex-direction: column; gap: .45rem; font-size: .82rem; }
+/* result */
+.ready-h { font-size: 1.2rem; font-weight: 600; color: var(--color-success-fg); margin: 0; }
+.todo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; font-size: .84rem; }
+.todo li { display: grid; grid-template-columns: 1.2rem 1fr auto; gap: .5rem; align-items: start; }
+.box { width: 14px; height: 14px; border: 1px solid var(--color-border-strong); border-radius: 3px; margin-top: 2px; }
+.box.on { background: var(--color-accent); border-color: var(--color-accent); }
+/* session */
+.split { display: inline-flex; }
+.split .btn:first-child { border-radius: 5px 0 0 5px; }
+.split .btn:last-child { border-radius: 0 5px 5px 0; border-left: 0; padding: .4rem .55rem; }
+.menu { width: 26rem; max-width: 100%; background: #121a24; border: 1px solid var(--color-border-strong); border-radius: 6px; padding: .4rem 0; font-size: .82rem; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+.menu .grp { padding: .3rem .8rem .15rem; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; color: var(--color-text-muted); }
+.menu .it { padding: .35rem .8rem; display: flex; justify-content: space-between; gap: .6rem; }
+.menu .it.sel { background: var(--color-surface-blue); }
+.menu .it.off { color: var(--color-text-muted); flex-direction: column; gap: .1rem; }
+.menu .it.off span { color: var(--color-text-secondary); font-size: .78rem; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+.note { font-size: .78rem; color: var(--color-text-muted); border-left: 2px solid var(--color-border-strong); padding-left: .6rem; margin: 8px 0 0; }
+</style>
+</head>
+<body>
+
+<div class="page-intro">
+  <h1>Onboarding mockups</h1>
+  <p>Static mockups of the redesigned onboarding screens, described in <span class="mono">onboarding-ux.md</span>. Colours are the app's dark theme tokens from <span class="mono">theme.css</span>. Values such as names, paths and codes are examples.</p>
+</div>
+
+<!-- 1 Welcome -->
+<section class="frame">
+  <p class="caption"><b>1 · Welcome</b> — first launch, this computer not ready yet</p>
+  <div class="window"><div class="titlebar">AI-Lore</div>
+    <div class="col">
+      <h2 class="title">AI-Lore</h2>
+      <div class="card primary">
+        <h3>Set up this computer</h3>
+        <p>AI-Lore needs Git, a GitHub sign-in and at least one AI engine before it can create a Space. 2 of 4 are ready.</p>
+        <div class="actions"><button class="btn focus">Continue setup</button></div>
+      </div>
+      <p class="section-h">Start</p>
+      <div class="entries">
+        <div class="card"><h3>New Space</h3><p>Creates a Space on GitHub and in a folder on this computer.</p></div>
+        <div class="card"><h3>Space from GitHub</h3><p>Copies an existing Space from GitHub to this computer.</p></div>
+        <div class="card"><h3>Space from a repository on this computer</h3><p>Creates a new Space that includes a repository you already have.</p></div>
+      </div>
+      <p class="hint warn">Finish setting up this computer first. <button class="linkbtn">Continue setup</button></p>
+      <div><button class="linkbtn">Open a folder…</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- 2 Set up this computer -->
+<section class="frame">
+  <p class="caption"><b>2 · Set up this computer</b> — GitHub sign-in waiting in the browser, Claude Code not installed</p>
+  <div class="window"><div class="titlebar">AI-Lore</div>
+    <div class="col wide">
+      <div style="display:flex;justify-content:space-between;gap:1rem;align-items:flex-start">
+        <div style="display:flex;flex-direction:column;gap:.3rem">
+          <h2 class="title">Set up this computer</h2>
+          <p class="sentence">AI-Lore uses these tools on this computer. Items marked Required must be ready before you create a Space.</p>
+        </div>
+        <button class="btn sec">Back</button>
+      </div>
+      <p class="hint warn" style="font-size:.85rem;font-weight:600">2 items need your attention.</p>
+
+      <div class="row">
+        <div><div class="name">Git<small>Required</small></div><div class="purpose">Keeps the history of your Spaces.</div></div>
+        <span class="muted mono">2.46.0</span>
+        <span class="state ok">✓ Ready</span>
+      </div>
+
+      <div class="row">
+        <div><div class="name">GitHub<small>Required</small></div><div class="purpose">Stores each Space and its Project.</div></div>
+        <span></span>
+        <span class="state warn">… Waiting for the browser</span>
+        <div class="codepanel">
+          <span>Waiting for you in the browser. Enter this code on GitHub:</span>
+          <div class="actions"><span class="code">ABCD-1234</span><button class="btn sec small">Copy code</button></div>
+          <div class="actions"><button class="linkbtn">Open GitHub again</button><span class="muted">·</span><button class="linkbtn">Cancel</button></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div><div class="name">Python 3<small>Required</small></div><div class="purpose">Runs the check that protects your files during AI sessions.</div></div>
+        <span class="muted mono">3.12.4</span>
+        <span class="state ok">✓ Ready</span>
+      </div>
+
+      <div class="row">
+        <div><div class="name">AI engines<small>At least one required</small></div><div class="purpose">The programs that run AI sessions.</div></div>
+        <span></span>
+        <span class="state warn">! Needs Claude Code</span>
+        <div class="sub">
+          <ul class="engines">
+            <li><b>Claude Code</b><span class="warn">Not installed</span><button class="btn small">Install</button></li>
+            <li><b>Codex CLI</b><span class="ok">✓ Ready</span><span></span></li>
+            <li><b>Antigravity CLI</b><span class="muted">Not installed</span><button class="btn sec small">Install</button></li>
+            <li><b>OpenCode</b><span class="muted">Not installed</span><button class="btn sec small">Install</button></li>
+          </ul>
+          <p class="hint" style="margin-top:.5rem">In this version AI sessions in a Space run with Claude Code. The other engines can be installed now and are used in the cockpit.</p>
+        </div>
+      </div>
+
+      <div class="actions" style="justify-content:space-between">
+        <button class="linkbtn">Check all again</button>
+        <button class="btn" aria-disabled="true">Continue</button>
+      </div>
+    </div>
+  </div>
+  <p class="note">The GitHub row asks for the Projects permission during the same sign-in, so no second step is needed later. Each row checks itself again when its action ends.</p>
+</section>
+
+<!-- 3 New Space form -->
+<section class="frame">
+  <p class="caption"><b>3 · New Space</b> — owner from the signed-in account, default location, live result path</p>
+  <div class="two">
+    <div class="window"><div class="titlebar">AI-Lore</div>
+      <div class="col">
+        <div class="steps"><span class="on">1 Details</span><span>2 Confirm</span><span>3 Create</span></div>
+        <h2 class="title">New Space</h2>
+        <p class="sentence">A Space is a GitHub repository with a Project, and a folder on this computer.</p>
+        <div class="field"><label class="l">Name</label><div class="input">test</div><p class="hint">Used for the folder, the repository and the Project.</p></div>
+        <div class="field"><label class="l">Description</label><div class="input muted" style="min-height:3.6rem">What this Space is for.</div></div>
+        <div class="field"><label class="l">GitHub owner</label>
+          <div class="input select"><span>alberto-conan-ui (you)</span><span class="muted">▾</span></div>
+          <p class="hint">Signed in as alberto-conan-ui · <button class="linkbtn" style="font-size:.78rem">Organisation not listed?</button></p></div>
+        <div class="field"><span class="l">Visibility</span>
+          <div class="radios"><div class="radio sel">● Private<span>Only you and people you add can see it.</span></div><div class="radio">○ Public<span>Anyone can see it.</span></div></div></div>
+        <div class="field"><span class="l">Location</span>
+          <div class="actions"><span class="mono muted">/Users/albertogutierrez/volatile</span><button class="btn sec small">Change…</button></div>
+          <p class="result">Will create <span class="path">/Users/albertogutierrez/volatile/test</span></p></div>
+        <div class="disclosure">Add repositories (optional)</div>
+        <p class="hint">On GitHub: repository alberto-conan-ui/test (private) and Project test.</p>
+        <div class="actions end"><span class="hint">Nothing is created before you confirm.</span><button class="btn sec">Back</button><button class="btn">Continue</button></div>
+      </div>
+    </div>
+
+    <div class="window"><div class="titlebar">AI-Lore</div>
+      <div class="col">
+        <div class="steps"><span class="on">1 Details</span><span>2 Confirm</span><span>3 Create</span></div>
+        <h2 class="title">New Space</h2>
+        <div class="dim" style="display:flex;flex-direction:column;gap:.8rem">
+          <div class="field"><label class="l">Name</label><div class="input">test</div></div>
+          <div class="field"><span class="l">Location</span>
+            <p class="result">Will create <span class="path">/Users/albertogutierrez/volatile/test</span></p></div>
+        </div>
+        <div class="checking" role="status">
+          <div class="head"><span>Checking before anything is created</span><span class="muted mono">0:07</span></div>
+          <span class="ok">✓ <span style="color:var(--color-text)">This computer is ready</span></span>
+          <span class="ok">✓ <span style="color:var(--color-text)">The folder is free</span></span>
+          <span>… Checking GitHub for the repository alberto-conan-ui/test</span>
+          <span class="muted">· Checking GitHub for the Project "test"</span>
+          <span class="muted">· Checking the Project's fields and views</span>
+          <div class="actions end"><button class="btn sec small">Cancel</button></div>
+        </div>
+        <p class="note" style="margin:0">After 20 seconds: "GitHub is slow to answer. You can keep waiting or cancel." After the timeout: "GitHub did not answer within 60 seconds. Nothing was created." with Try again.</p>
+        <div class="field"><span class="l">Location — when the folder exists from an earlier run</span>
+          <p class="result warn"><span class="path">/…/volatile/test</span> holds this Space from an earlier run. Continuing finishes it.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 4 Confirm -->
+<section class="frame">
+  <p class="caption"><b>4 · Check and create</b> — re-run on a half-made Space</p>
+  <div class="window"><div class="titlebar">AI-Lore</div>
+    <div class="col">
+      <div class="steps"><span>1 Details</span><span class="on">2 Confirm</span><span>3 Create</span></div>
+      <h2 class="title">Check and create</h2>
+      <p class="sentence">Check these three things. Nothing has been created yet.</p>
+      <div class="banner"><b>This Space was partly created before.</b> 8 of 9 steps are done. Continuing runs the 1 that is left: Set up the Project.</div>
+      <div class="card">
+        <div class="checklist">
+          <span class="k">Folder</span><span class="path">/Users/albertogutierrez/volatile/test</span><span class="tag amber">Already exists, will be used</span>
+          <span class="k">GitHub repository</span><span>alberto-conan-ui/test · Private</span><span class="tag amber">Already exists, will be used</span>
+          <span class="k">GitHub Project</span><span>test</span><span class="tag amber">Already exists, will be used</span>
+        </div>
+      </div>
+      <div class="disclosure">Show all details (labels, views and the 9 steps)</div>
+      <div class="actions end"><button class="btn sec">Back</button><button class="btn focus">Finish the Space</button></div>
+    </div>
+  </div>
+  <p class="note">For a new Space the three tags read "New" and the button reads "Create the Space".</p>
+</section>
+
+<!-- 5 Creating -->
+<section class="frame">
+  <p class="caption"><b>5 · Creating</b> — running, and a failed step with its fix</p>
+  <div class="two">
+    <div class="window"><div class="titlebar">AI-Lore</div>
+      <div class="col">
+        <div class="steps"><span>1 Details</span><span>2 Confirm</span><span class="on">3 Create</span></div>
+        <h2 class="title">Creating test2</h2>
+        <div class="current" role="status"><span>Setting up the Project…</span><span class="muted mono" style="font-weight:400">0:12</span></div>
+        <ol class="steplist">
+          <li><span class="st ok">✓ Done</span><span>Check the machine</span></li>
+          <li><span class="st ok">✓ Done</span><span>Create the Space repository</span></li>
+          <li><span class="st ok">✓ Done</span><span>Create the Project</span></li>
+          <li class="cur"><span class="st" style="color:var(--color-text-bright)">… Running</span><span>Set up the Project</span></li>
+          <li><span class="st muted">· Waiting</span><span>Make the Space's folder</span></li>
+          <li><span class="st muted">· Waiting</span><span>Write the Space's corpus entry</span></li>
+          <li><span class="st muted">· Waiting</span><span>Commit and push the Space</span></li>
+          <li><span class="st muted">· Waiting</span><span>Install into Claude Code</span></li>
+          <li><span class="st muted">· Waiting</span><span>Record where every root starts</span></li>
+        </ol>
+        <div class="actions"><button class="btn sec">Stop</button><span class="hint">Stops after the current step. What is done is kept.</span></div>
+      </div>
+    </div>
+    <div class="window"><div class="titlebar">AI-Lore</div>
+      <div class="col">
+        <div class="steps"><span>1 Details</span><span>2 Confirm</span><span class="on">3 Create</span></div>
+        <h2 class="title">Creating test</h2>
+        <p class="hint bad" style="font-size:.85rem">Stopped at: Set up the Project. What was done is kept. Trying again continues from this step.</p>
+        <ol class="steplist">
+          <li><span class="st ok">✓ Done</span><span>Check the machine</span></li>
+          <li><span class="st ok">✓ Done</span><span>Create the Space repository</span></li>
+          <li><span class="st ok">✓ Done</span><span>Create the Project</span></li>
+          <li><span class="st bad">✗ Failed</span><span>Set up the Project</span>
+            <div class="failbox">
+              <span>The GitHub sign-in does not have access to Projects.</span>
+              <div class="actions"><button class="btn small">Allow access to GitHub Projects</button><button class="linkbtn">Copy the error</button></div>
+            </div>
+          </li>
+          <li><span class="st muted">· Waiting</span><span>Make the Space's folder</span></li>
+          <li><span class="st muted">· Waiting</span><span>…4 more</span></li>
+        </ol>
+        <div class="actions end"><button class="btn sec">Back to the form</button><button class="btn">Try again</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 6 Space ready -->
+<section class="frame">
+  <p class="caption"><b>6 · Space ready</b> — re-run result, with the GitHub settings checklist</p>
+  <div class="window"><div class="titlebar">AI-Lore</div>
+    <div class="col">
+      <p class="ready-h">✓ Space ready</p>
+      <p class="sentence" style="color:var(--color-text)">test already existed; finished the remaining step: Set up the Project.</p>
+      <p class="hint">Folder <span class="path">/Users/albertogutierrez/volatile/test</span> · GitHub alberto-conan-ui/test</p>
+      <div class="actions"><button class="btn focus">Open the Space</button><button class="linkbtn">View on GitHub</button></div>
+
+      <div class="card" style="margin-top:.4rem">
+        <h3>Three settings to make on GitHub</h3>
+        <p>GitHub does not allow apps to change these view settings. Each takes a few seconds.</p>
+        <ul class="todo">
+          <li><span class="box on"></span><span class="muted" style="text-decoration:line-through">In the view <b>Focuses by Stage</b>, set "Column by" to the field <b>Stage</b>.</span><button class="btn sec small">Open this view</button></li>
+          <li><span class="box"></span><span>In the view <b>Items by focus</b>, set "Group by" to <b>Parent issue</b>.</span><button class="btn sec small">Open this view</button></li>
+          <li><span class="box"></span><span>In the view <b>Agents board</b>, set "Column by" to the field <b>Agents</b>.</span><button class="btn sec small">Open this view</button></li>
+        </ul>
+        <p class="hint">You can do this later. The Dashboard lists what is left.</p>
+      </div>
+    </div>
+  </div>
+  <p class="note">A fresh creation reads: "test was created in /Users/…/test and on GitHub as alberto-conan-ui/test."</p>
+</section>
+
+<!-- 7 Start a session -->
+<section class="frame">
+  <p class="caption"><b>7 · Start a session</b> — engine menu open; and the card when no engine can start</p>
+  <div class="two">
+    <div class="window"><div class="titlebar">test — Dashboard</div>
+      <div class="col">
+        <div class="actions"><span class="split"><button class="btn">Start a session with Claude Code</button><button class="btn" aria-label="Choose the engine">▾</button></span></div>
+        <div class="menu" role="menu">
+          <div class="grp">Can start here</div>
+          <div class="it sel"><span>✓ Claude Code</span><span class="ok">Ready</span></div>
+          <div class="grp">Cannot start here</div>
+          <div class="it off"><b>Gemini CLI</b><span>AI sessions in a Space run with Claude Code only in this version.</span></div>
+          <div class="it off"><b>Codex CLI</b><span>AI sessions in a Space run with Claude Code only in this version.</span></div>
+          <div class="it off"><b>OpenCode</b><span>Not installed. <button class="linkbtn" style="font-size:.78rem">Install</button></span></div>
+        </div>
+        <p class="hint">Starts Claude Code in this Space's folder, in Read only. Writing needs your confirmation.</p>
+      </div>
+    </div>
+    <div class="window"><div class="titlebar">test — Sessions</div>
+      <div class="col" style="align-items:center;text-align:center">
+        <h2 class="title">Sessions</h2>
+        <div class="card" style="text-align:left;width:100%">
+          <h3>No AI session can start yet</h3>
+          <p>AI sessions in a Space need Claude Code, and Claude Code is not installed.</p>
+          <div class="actions"><button class="btn">Install Claude Code</button><button class="btn sec">Open engine settings</button></div>
+        </div>
+        <p class="hint">Other tabs:</p>
+        <div class="actions"><button class="btn sec">Terminal</button><button class="btn sec">Web page</button></div>
+      </div>
+    </div>
+  </div>
+  <p class="note">An engine that cannot start is never the default. The default is the engine used last in this Space if it can start, otherwise the first that can.</p>
+</section>
+
+</body>
+</html>
