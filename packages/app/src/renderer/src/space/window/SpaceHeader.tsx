@@ -29,17 +29,20 @@ const headerStyle: React.CSSProperties = {
   alignItems: 'baseline',
   gap: '0.75rem',
   minWidth: 0,
-  padding: '0.45rem 0.9rem',
-  background: 'var(--color-header)',
-  borderBottom: '1px solid var(--color-border)',
+  padding: '1.25rem 1.5rem',
+  background: 'var(--color-space-tint, var(--color-header))',
+  borderBottom: '2px solid var(--color-space-accent, var(--color-border))',
+  position: 'sticky',
+  top: 0,
+  zIndex: 10,
 };
 
 const nameStyle: React.CSSProperties = {
   margin: 0,
   flexShrink: 0,
-  fontSize: '0.95rem',
-  fontWeight: 600,
-  color: 'var(--color-text-bright)',
+  fontSize: '2rem',
+  fontWeight: 700,
+  color: 'var(--color-space-accent, var(--color-text-bright))',
 };
 
 const pathStyle: React.CSSProperties = {

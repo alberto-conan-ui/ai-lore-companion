@@ -102,6 +102,14 @@ export function createSpaceWindows(): SpaceWindows {
 
   return {
     show(window, init, delivery) {
+      if (init.mode === 'space' || init.mode === 'space-files') {
+        const title = init.space.name || init.space.root.split('/').pop() || 'Space';
+        let h = 0;
+        for (let i = 0; i < title.length; i += 1) h = (h * 31 + title.charCodeAt(i)) | 0;
+        const hue = ((h % 360) + 360) % 360;
+        init.spaceTitle = title;
+        init.colorScheme = hue.toString();
+      }
       const record: SpaceWindowRecord = { window, init, folder: folderOfInit(init) };
       records.set(window.id, record);
       if (delivery === 'now') {
