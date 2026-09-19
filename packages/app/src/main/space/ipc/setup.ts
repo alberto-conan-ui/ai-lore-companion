@@ -27,17 +27,19 @@
 
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import {
   type AdoptRepositoryInput,
   type CommandRunner,
   type CreateSpaceInput,
+  type ExistingSpace,
   type GitHubPort,
   type MachineCheck,
   type OpenSpaceByAddressInput,
   type Result,
   SETUP_LABELS,
   SETUP_VIEWS,
+  type SetupCheckProgress,
   type SetupDeps,
   type SetupFailure,
   type SetupFlow,
@@ -46,8 +48,10 @@ import {
   type SetupReport,
   type SetupRunOptions,
   adoptRepository,
+  createGitPort,
   createSpace,
   folderProblem,
+  inspectExistingSpace,
   openSpaceByAddress,
   parseGitHubAddress,
   planAdoptRepository,
@@ -56,17 +60,22 @@ import {
   redactCredentials,
   repositoryNameProblem,
   validateCreateSpaceInput,
+  writeFileAtomicSync,
 } from '@ai-lore-companion/core';
 import { z } from 'zod';
 import type {
   SetupStart,
   SpaceSetupChooseFolderResult,
+  SpaceSetupChooseSourceResult,
   SpaceSetupFailure,
   SpaceSetupForm,
   SpaceSetupGitHubNames,
   SpaceSetupInterrupted,
+  SpaceSetupListSpacesResult,
+  SpaceSetupOwners,
   SpaceSetupPlanResult,
   SpaceSetupRunResult,
+  SpaceSetupSource,
   SpaceSetupStateResult,
   SpaceSetupStopResult,
   SpaceSetupValidateResult,
@@ -76,13 +85,20 @@ import type {
 import { SPACE_SETUP_CONTRACT } from '../../../shared/ipc/space/setup.contract.js';
 import { loadEngines } from '../../engines.js';
 import type { Deps, RegisterModule } from '../../ipc/types.js';
-import { checkMachineOfApp } from '../e2e-machine.js';
+import { readJsonFile } from '../../json-file.js';
+import { withCommandLog } from '../command-log.js';
+import { checkMachineOfApp, readGitHubOwnersOfApp } from '../e2e-machine.js';
+import { knownGitHubOwners, rememberGitHubOwners } from '../github-owners.js';
 import { createAppGitHubPort } from '../github-service.js';
 import type { SpaceIpcEvent } from '../host.js';
+import { readSpacesFolder } from '../spaces-folder.js';
 import { loreTemplateDir } from '../template-dir.js';
 import type { SpaceWindowLike, SpaceWindowRecord } from '../windows.js';
 import { readLoginShellPath, validLoginShell } from './machine.js';
 import { parseArg } from './validate.js';
+
+/** How long a whole plan may take before it stops with `plan-timeout` (architecture document A.6). */
+export const PLAN_TIME_LIMIT_MS = 60_000;
 
 /** `runner` with `PATH` set for every command; `runner` itself when `path` is `null`. */
 export function runnerWithPath(runner: CommandRunner, path: string | null): CommandRunner {
@@ -115,7 +131,7 @@ export type SpaceSetupParts = {
   templateDir: () => Result<string>;
   /** The system's folder dialog; `null` when it was cancelled. Default: Electron's. */
   pickFolder: (window: SpaceWindowLike, title: string) => Promise<string | null>;
-  /** The runner of a plan or a run. Default: `deps.space.runner` with the login shell's `PATH`. */
+  /** The runner of a plan or a run. Default: `deps.space.runner` with the login shell's `PATH`, logging network `git` calls. */
   runner: (deps: Deps) => Promise<CommandRunner>;
   /** The GitHub port on that runner. Default: `createAppGitHubPort`, the one the Space service uses. */
   github: (runner: CommandRunner, deps: Deps) => GitHubPort | Promise<GitHubPort>;
@@ -123,6 +139,17 @@ export type SpaceSetupParts = {
   checkMachine: (deps: Deps, runner: CommandRunner) => Promise<MachineCheck>;
   /** Values for the new repository's own git configuration. Default: none. */
   gitConfig: Readonly<Record<string, string>> | undefined;
+  /** The Spaces folder setting. Default: `readSpacesFolder`. */
+  spacesFolder: (deps: Deps) => string | null;
+  /** The signed-in account and its organisations. Default: the last machine check's, else a fresh read. */
+  owners: (
+    deps: Deps,
+    runner: CommandRunner,
+  ) => Promise<{ account: string | null; organisations: string[] }>;
+  /** How long a whole plan may take. Default `PLAN_TIME_LIMIT_MS`. */
+  planTimeLimitMs: number;
+  /** Where the owner of the last finished run is remembered. Default `<userData>/spaces/setup-defaults.json`. */
+  defaultsFile: (deps: Deps) => string;
 };
 
 const DEFAULT_PARTS: SpaceSetupParts = {
@@ -131,7 +158,7 @@ const DEFAULT_PARTS: SpaceSetupParts = {
   runner: async (deps) => {
     const shell = validLoginShell(process.env.SHELL ?? '/bin/zsh');
     const path = await readLoginShellPath(deps.space.runner, shell, process.platform);
-    return runnerWithPath(deps.space.runner, path);
+    return withCommandLog(runnerWithPath(deps.space.runner, path), deps.space.log, 'git-network');
   },
   github: (runner, deps) => createAppGitHubPort({ runner, log: deps.space.log }),
   checkMachine: (deps, runner) =>
@@ -139,7 +166,37 @@ const DEFAULT_PARTS: SpaceSetupParts = {
       platform: process.platform,
     }),
   gitConfig: undefined,
+  spacesFolder: (deps) => readSpacesFolder(deps.space.userDataDir()),
+  owners: async (deps, runner) => {
+    const known = knownGitHubOwners();
+    if (known !== null) return known;
+    const fresh = await readGitHubOwnersOfApp(runner, { platform: process.platform });
+    rememberGitHubOwners(fresh);
+    return fresh;
+  },
+  planTimeLimitMs: PLAN_TIME_LIMIT_MS,
+  defaultsFile: (deps) => join(deps.space.userDataDir(), 'spaces', 'setup-defaults.json'),
 };
+
+/** The `owner` field of `setup-defaults.json`, or `null` when the file is absent or unreadable. */
+function readSetupDefaults(path: string): { owner: string | null } {
+  const raw = readJsonFile(path);
+  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+    const owner = (raw as Record<string, unknown>).owner;
+    if (typeof owner === 'string') return { owner };
+  }
+  return { owner: null };
+}
+
+/** Remember `owner` as the last one used, keeping any field of an existing file this version does not know. */
+function writeSetupDefaults(path: string, owner: string): void {
+  const raw = readJsonFile(path);
+  const base =
+    raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+      ? (raw as Record<string, unknown>)
+      : {};
+  writeFileAtomicSync(path, JSON.stringify({ ...base, version: 1, owner }, null, 2));
+}
 
 const text = (max: number) => z.string().max(max);
 const repositoryEntrySchema = z.strictObject({
@@ -176,6 +233,7 @@ const runSchema = z.strictObject({
   token: text(100),
   repositories: z.array(text(200)).max(50).optional(),
 });
+const ownerSchema = z.strictObject({ owner: text(200) });
 
 /** The flow a setup window serves. */
 export function flowOfStart(start: SetupStart): SetupFlow {
@@ -186,7 +244,7 @@ export function flowOfStart(start: SetupStart): SetupFlow {
 function refusal(kind: string, message: string): { ok: false; error: SpaceSetupFailure } {
   return {
     ok: false,
-    error: { kind, message, stepId: null, title: null, problems: [], byHand: [] },
+    error: { kind, message, stepId: null, title: null, problems: [], byHand: [], viewSettings: [] },
   };
 }
 
@@ -200,6 +258,7 @@ function fromCore(failure: SetupFailure): { ok: false; error: SpaceSetupFailure 
       title: failure.title,
       problems: failure.problems,
       byHand: failure.byHand,
+      viewSettings: failure.viewSettings,
     },
   };
 }
@@ -339,8 +398,10 @@ function gitHubNames(core: CoreInput, plan: SetupPlan): SpaceSetupGitHubNames | 
     repository: `${core.input.owner}/${core.input.name}`,
     visibility: (core.input.private ?? true) ? 'private' : 'public',
     repositoryExists: done('space-repository'),
+    repositoryUrl: plan.repository?.url ?? null,
     project: core.input.name,
     projectExists: done('project'),
+    projectUrl: plan.project?.url ?? null,
     labels: SETUP_LABELS.map((label) => label.name),
     views: SETUP_VIEWS.map((view) => view.name),
   };
@@ -359,17 +420,25 @@ type WindowSetup = {
   /** The payload the window was last told; a new one means the screens were started again. */
   init: SpaceWindowRecord['init'];
   parentDir: string | null;
+  /** For `from-repository`: the repository chosen on the form with `spaceSetupChooseSource`. */
+  source: SpaceSetupSource | null;
+  /** The last local, GitHub-free look at the form's target folder (`spaceSetupValidate`). */
+  preview: ExistingSpace | null;
   /**
    * The last plan main made for this window and sent with its token: the
    * input a run uses. A run is accepted only with this token, so it runs
    * exactly what the Human Lead saw on the plan screen. A new request for a
-   * plan, or another folder, drops it.
+   * plan, or another folder or source, drops it.
    */
-  planned: { token: string; core: CoreInput } | null;
+  planned: { token: string; core: CoreInput; form: SpaceSetupForm } | null;
   /** Counts the requests for a plan; only the last one may leave its plan. */
   planAsked: number;
+  /** Counts the plans of this window, sent with each of their progress events. */
+  planId: number;
   running: AbortController | null;
   report: SetupReport | null;
+  /** The folder of a plan that answered `complete: true`: nothing to run, only to open. */
+  completeRoot: string | null;
 };
 
 /** Build the register module of creating a Space. */
@@ -405,11 +474,15 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
           window: record.window,
           setup: {
             init: record.init,
-            parentDir: null,
+            parentDir: all.spacesFolder(deps),
+            source: null,
+            preview: null,
             planned: null,
             planAsked: 0,
+            planId: 0,
             running: null,
             report: null,
+            completeRoot: null,
           },
         };
         held.set(record.window.id, entry);
@@ -428,8 +501,50 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
           `This window serves the flow ${flow}, not ${form.flow}.`,
         );
       }
-      const sourceDir = who.start.kind === 'about-repository' ? who.start.folder : null;
+      const sourceDir =
+        who.start.kind === 'about-repository'
+          ? who.start.folder
+          : who.start.kind === 'from-repository'
+            ? (who.setup.source?.sourceDir ?? null)
+            : null;
       return coreInput(form, who.setup.parentDir ?? '', sourceDir);
+    }
+
+    /** The signed-in account and its organisations, with the default owner from the last run. */
+    async function ownersOf(runner: CommandRunner): Promise<SpaceSetupOwners> {
+      const owners = await all.owners(deps, runner);
+      const defaults = readSetupDefaults(all.defaultsFile(deps));
+      const known = [owners.account, ...owners.organisations].filter(
+        (value): value is string => value !== null,
+      );
+      const defaultOwner =
+        defaults.owner !== null && known.includes(defaults.owner) ? defaults.owner : owners.account;
+      return { ...owners, defaultOwner };
+    }
+
+    /**
+     * The local, GitHub-free look at the form's target folder, or `null` when
+     * the form does not give a folder yet, or (create, adopt) when the owner
+     * or the name is empty, or (open) when the address does not parse.
+     */
+    async function targetOf(core: CoreInput): Promise<ExistingSpace | null> {
+      const spaceRoot = spaceRootOf(core);
+      if (spaceRoot === null) return null;
+      let name: string | undefined;
+      let repository: string;
+      if (core.flow === 'open') {
+        const parsed = parseGitHubAddress(core.input.address);
+        if (parsed === null) return null;
+        repository = parsed.fullName;
+      } else {
+        const { owner, name: spaceName } = core.input;
+        if (owner === '' || spaceName === '') return null;
+        name = spaceName;
+        repository = `${owner}/${spaceName}`;
+      }
+      const made = await setupDeps();
+      if (!made.ok) return null;
+      return inspectExistingSpace({ flow: core.flow, spaceRoot, name, repository }, made.value);
     }
 
     async function setupDeps(): Promise<Result<SetupDeps>> {
@@ -455,24 +570,35 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
       return refusal('setup-threw', `Setup stopped on an error of the companion: ${message}`);
     }
 
-    reg.handle('spaceSetupState', (event, arg): SpaceSetupStateResult => {
+    reg.handle('spaceSetupState', async (event, arg): Promise<SpaceSetupStateResult> => {
       const who = asked(event);
       if ('ok' in who) return who;
       const parsed = parseArg(emptySchema, arg);
       if (!parsed.ok) return refusal(parsed.error.kind, parsed.error.message);
       const about = who.start.kind === 'about-repository' ? who.start : null;
-      return {
-        ok: true,
-        value: {
-          flow: flowOfStart(who.start),
-          parentDir: who.setup.parentDir,
-          sourceDir: about?.folder ?? null,
-          originUrl:
-            about === null || about.originUrl === null ? null : redactCredentials(about.originUrl),
-          running: who.setup.running !== null,
-          interrupted,
-        },
-      };
+      try {
+        const runner = await all.runner(deps);
+        const owners = await ownersOf(runner);
+        return {
+          ok: true,
+          value: {
+            flow: flowOfStart(who.start),
+            parentDir: who.setup.parentDir,
+            sourceDir: about?.folder ?? null,
+            originUrl:
+              about === null || about.originUrl === null
+                ? null
+                : redactCredentials(about.originUrl),
+            source: who.setup.source,
+            owners,
+            spacesFolder: all.spacesFolder(deps),
+            running: who.setup.running !== null,
+            interrupted,
+          },
+        };
+      } catch (caught) {
+        return thrown(caught);
+      }
     });
 
     reg.handle(
@@ -494,6 +620,8 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
           if (!isFolder(folder)) return refusal('not-a-folder', `${folder} is not a folder.`);
           who.setup.parentDir = resolve(folder);
           who.setup.planned = null;
+          who.setup.preview = null;
+          who.setup.completeRoot = null;
           return { ok: true, value: { parentDir: who.setup.parentDir } };
         } catch (caught) {
           return thrown(caught);
@@ -501,14 +629,77 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
       },
     );
 
-    reg.handle('spaceSetupValidate', (event, arg): SpaceSetupValidateResult => {
+    reg.handle(
+      'spaceSetupChooseSource',
+      async (event, arg): Promise<SpaceSetupChooseSourceResult> => {
+        const who = asked(event);
+        if ('ok' in who) return who;
+        const parsed = parseArg(emptySchema, arg);
+        if (!parsed.ok) return refusal(parsed.error.kind, parsed.error.message);
+        if (who.start.kind !== 'from-repository') {
+          return refusal(
+            'not-allowed-here',
+            'Choosing a repository is only for "Space from a repository on this computer".',
+          );
+        }
+        if (who.setup.running !== null) {
+          return refusal(
+            'already-running',
+            'The repository cannot be changed while a run goes on.',
+          );
+        }
+        try {
+          const folder = await all.pickFolder(
+            who.record.window,
+            'Choose the folder of the repository',
+          );
+          if (folder === null) return refusal('cancelled', 'No folder was chosen.');
+          const runner = await all.runner(deps);
+          const git = createGitPort(runner);
+          const top = await git.topLevel(folder);
+          if (!top.ok || top.value === null || resolve(top.value) !== resolve(folder)) {
+            return refusal('not-a-repository', `${folder} is not a git repository.`);
+          }
+          const origin = await git.originUrl(folder);
+          if (!origin.ok || origin.value === null) {
+            return refusal(
+              'no-origin',
+              `${folder} has no remote named origin. Push it to GitHub first.`,
+            );
+          }
+          const sourceDir = resolve(folder);
+          const source: SpaceSetupSource = {
+            sourceDir,
+            originUrl: redactCredentials(origin.value),
+            github: parseGitHubAddress(origin.value)?.fullName ?? null,
+            name: basename(sourceDir),
+          };
+          who.setup.source = source;
+          who.setup.planned = null;
+          who.setup.preview = null;
+          who.setup.completeRoot = null;
+          return { ok: true, value: source };
+        } catch (caught) {
+          return thrown(caught);
+        }
+      },
+    );
+
+    reg.handle('spaceSetupValidate', async (event, arg): Promise<SpaceSetupValidateResult> => {
       const who = asked(event);
       if ('ok' in who) return who;
       const parsed = parseArg(formSchema, arg);
       if (!parsed.ok) return refusal(parsed.error.kind, parsed.error.message);
       const core = inputOf(who, parsed.value);
       if ('ok' in core) return core;
-      return { ok: true, value: { problems: setupFormProblems(core, parsed.value) } };
+      try {
+        const problems = setupFormProblems(core, parsed.value);
+        const target = await targetOf(core);
+        who.setup.preview = target;
+        return { ok: true, value: { problems, target } };
+      } catch (caught) {
+        return thrown(caught);
+      }
     });
 
     reg.handle('spaceSetupPlan', async (event, arg): Promise<SpaceSetupPlanResult> => {
@@ -521,15 +712,42 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
       who.setup.planned = null;
       who.setup.planAsked += 1;
       const mine = who.setup.planAsked;
+      who.setup.planId += 1;
+      const { planId } = who.setup;
+      const { window } = who.record;
+      let lastRunningText: string | null = null;
+      const onCheck = (progress: SetupCheckProgress): void => {
+        lastRunningText = progress.state === 'running' ? progress.text : null;
+        if (!window.isDestroyed()) {
+          window.webContents.send(SPACE_SETUP_CONTRACT.onSpaceSetupPlanProgress.channel, {
+            planId,
+            ...progress,
+          });
+        }
+      };
       try {
         const made = await setupDeps();
         if (!made.ok) return refusal(made.error.kind, made.error.message);
-        const planned =
+        const planCall =
           core.flow === 'create'
-            ? await planCreateSpace(core.input, made.value)
+            ? planCreateSpace(core.input, made.value, { onCheck })
             : core.flow === 'adopt'
-              ? await planAdoptRepository(core.input, made.value)
-              : await planOpenSpaceByAddress(core.input, made.value);
+              ? planAdoptRepository(core.input, made.value, { onCheck })
+              : planOpenSpaceByAddress(core.input, made.value, { onCheck });
+        const timedOut = Symbol('setup-plan-timeout');
+        const timer = new Promise<typeof timedOut>((resolveTimer) => {
+          setTimeout(() => resolveTimer(timedOut), all.planTimeLimitMs);
+        });
+        const raced = await Promise.race([planCall, timer]);
+        if (raced === timedOut) {
+          deps.space.log.warn('setup-plan-timeout', { flow: core.flow });
+          const message =
+            lastRunningText === null
+              ? 'GitHub did not answer within 60 seconds. Nothing was created.'
+              : `The check "${lastRunningText}" did not answer within 60 seconds. Nothing was created.`;
+          return refusal('plan-timeout', message);
+        }
+        const planned = raced;
         if (!planned.ok) {
           deps.space.log.info('setup-plan-refused', { flow: core.flow, kind: planned.error.kind });
           return fromCore(planned.error);
@@ -537,8 +755,9 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
         if (mine !== who.setup.planAsked) {
           return refusal('superseded', 'A newer request for the plan replaced this one.');
         }
+        if (planned.value.complete) who.setup.completeRoot = planned.value.spaceRoot;
         const token = randomUUID();
-        who.setup.planned = { token, core };
+        who.setup.planned = { token, core, form: parsed.value };
         return {
           ok: true,
           value: { plan: planned.value, github: gitHubNames(core, planned.value), token },
@@ -611,13 +830,16 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
           });
           const spaceRoot = spaceRootOf(core);
           if (window.isDestroyed() && spaceRoot !== null) {
-            interrupted = { flow: core.flow, spaceRoot };
+            interrupted = { flow: core.flow, spaceRoot, form: planned.form };
           }
           return fromCore(ran.error);
         }
         deps.space.log.info('setup-run-finished', { flow: core.flow, root: ran.value.spaceRoot });
         who.setup.report = ran.value;
         if (interrupted?.spaceRoot === ran.value.spaceRoot) interrupted = null;
+        if (core.flow === 'create' || core.flow === 'adopt') {
+          writeSetupDefaults(all.defaultsFile(deps), core.input.owner);
+        }
         return ran;
       } catch (caught) {
         return thrown(caught);
@@ -644,8 +866,9 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
       }
       const parsed = parseArg(emptySchema, arg);
       if (!parsed.ok) return parsed;
-      const { report } = who.setup;
-      if (report === null) {
+      const { report, completeRoot } = who.setup;
+      const root = report?.spaceRoot ?? completeRoot;
+      if (root === null || root === undefined) {
         return {
           ok: false,
           error: {
@@ -654,9 +877,69 @@ export function createSpaceSetupRegister(parts: Partial<SpaceSetupParts> = {}): 
           },
         };
       }
-      const opened = await deps.space.openFolder(who.record.window, report.spaceRoot);
+      const opened = await deps.space.openFolder(who.record.window, root, {
+        justCreated: report !== null,
+      });
       if (opened.ok) held.delete(who.record.window.id);
       return opened;
+    });
+
+    reg.handle('spaceSetupOpenExisting', async (event, arg): Promise<SpaceWindowResult> => {
+      const who = asked(event);
+      if ('ok' in who) {
+        const kind = who.error.kind === 'not-a-space-window' ? who.error.kind : 'not-allowed-here';
+        return { ok: false, error: { kind, message: who.error.message } };
+      }
+      const parsed = parseArg(emptySchema, arg);
+      if (!parsed.ok) return parsed;
+      const { preview } = who.setup;
+      if (preview === null || (preview.state !== 'complete' && preview.state !== 'incomplete')) {
+        return {
+          ok: false,
+          error: {
+            kind: 'not-allowed-here',
+            message: 'No folder was found here to open as a Space.',
+          },
+        };
+      }
+      const opened = await deps.space.openFolder(who.record.window, preview.spaceRoot);
+      if (opened.ok) held.delete(who.record.window.id);
+      return opened;
+    });
+
+    reg.handle('spaceSetupListSpaces', async (event, arg): Promise<SpaceSetupListSpacesResult> => {
+      const who = asked(event);
+      if ('ok' in who) return who;
+      const parsed = parseArg(ownerSchema, arg);
+      if (!parsed.ok) return refusal(parsed.error.kind, parsed.error.message);
+      try {
+        const runner = await all.runner(deps);
+        const owners = await all.owners(deps, runner);
+        const known = [owners.account, ...owners.organisations].filter(
+          (value): value is string => value !== null,
+        );
+        if (!known.includes(parsed.value.owner)) {
+          return refusal(
+            'unknown-owner',
+            `${parsed.value.owner} is not the signed-in account or one of its organisations.`,
+          );
+        }
+        const github = await all.github(runner, deps);
+        const listed = await github.listSpaceRepositories(parsed.value.owner);
+        if (!listed.ok) return refusal(listed.error.kind, listed.error.message);
+        return {
+          ok: true,
+          value: {
+            repositories: listed.value.map((repository) => ({
+              fullName: repository.fullName,
+              url: repository.url,
+              private: repository.private,
+            })),
+          },
+        };
+      } catch (caught) {
+        return thrown(caught);
+      }
     });
   };
 }

@@ -284,6 +284,31 @@ async function projectIsOwn(
 }
 
 /**
+ * Report the project check's outcome from a lookup that already settled,
+ * without running `projectIsOwn` (no extra GitHub call). Used when the
+ * repository check fails or refuses first: the project lookup ran at the same
+ * time (`Promise.all`) and would otherwise never be reported, leaving a
+ * progress screen's Project row stuck at "running".
+ */
+function reportProjectLookupOutcome(
+  ctx: CreateSpaceContext,
+  project: Result<ProjectInfo | null, StepError>,
+): void {
+  if (!project.ok) {
+    reportCheck(ctx, 'project', 'failed', project.error.message);
+    return;
+  }
+  reportCheck(
+    ctx,
+    'project',
+    'done',
+    project.value === null
+      ? `No Project named ${ctx.name} yet`
+      : `The Project ${ctx.name} exists and belongs to this Space`,
+  );
+}
+
+/**
  * Refuse a repository or a Project of the Space's name that GitHub already has
  * and that is not this Space's own. GitHub finds a repository by `owner/name`
  * and a Project by its owner and its exact title among the open ones, so a
@@ -320,12 +345,14 @@ export async function refuseForeignMatches(
 
   if (!repository.ok) {
     reportCheck(ctx, 'repository', 'failed', repository.error.message);
+    reportProjectLookupOutcome(ctx, project);
     return stopAt('space-repository', repository.error);
   }
   if (repository.value !== null) {
     const own = await repositoryIsOwn(ctx, repository.value);
     if (!own.ok) {
       reportCheck(ctx, 'repository', 'failed', own.error.message);
+      reportProjectLookupOutcome(ctx, project);
       return stopAt('space-repository', own.error);
     }
     if (!own.value) {
@@ -334,6 +361,7 @@ export async function refuseForeignMatches(
         message: `The repository ${ctx.repositoryName} already exists on GitHub and holds commits that are not those of ${ctx.spaceRoot}, so nothing was created and nothing was pushed to it. Choose another name for the Space, or, when that repository is this Space, open it from its GitHub address.`,
       };
       reportCheck(ctx, 'repository', 'failed', error.message);
+      reportProjectLookupOutcome(ctx, project);
       return stopAt('space-repository', error);
     }
     reportCheck(

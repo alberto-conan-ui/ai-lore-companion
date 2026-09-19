@@ -10,7 +10,10 @@
 import { invoke, push } from './describe.js';
 import type {
   SpaceSetupChooseFolderResult,
+  SpaceSetupChooseSourceResult,
   SpaceSetupForm,
+  SpaceSetupListSpacesResult,
+  SpaceSetupPlanProgress,
   SpaceSetupPlanResult,
   SpaceSetupRunArg,
   SpaceSetupRunResult,
@@ -48,4 +51,18 @@ export const SPACE_SETUP_CONTRACT = {
   ),
   /** Every change of a step's state during the run of this window. */
   onSpaceSetupProgress: push<StepProgress>('space:setup-progress'),
+  /** Every change of one of a plan's own checks (the folder, the two lookups, the steps count). */
+  onSpaceSetupPlanProgress: push<SpaceSetupPlanProgress>('space:setup-plan-progress'),
+  /** Choose the folder of the repository, for "Space from a repository on this computer". */
+  spaceSetupChooseSource: invoke<[arg: Record<string, never>], SpaceSetupChooseSourceResult>(
+    'space:setup-choose-source',
+  ),
+  /** The Spaces of `owner` already on GitHub, for "Space from GitHub". */
+  spaceSetupListSpaces: invoke<[arg: { owner: string }], SpaceSetupListSpacesResult>(
+    'space:setup-list-spaces',
+  ),
+  /** Open the folder the last validation of this window previewed as this Space, complete or not. */
+  spaceSetupOpenExisting: invoke<[arg: Record<string, never>], SpaceWindowResult>(
+    'space:setup-open-existing',
+  ),
 } as const;

@@ -15,27 +15,33 @@
  */
 
 import type {
+  ExistingSpace,
   PlanLine,
   PlannedStep,
+  SetupCheckProgress,
   SetupFlow,
   SetupInputProblem,
   SetupPlan,
   SetupReport,
   SetupRepositoryState,
   SetupTargetState,
+  SetupViewSetting,
   StepProgress,
   StepState,
 } from '@ai-lore-companion/core';
 
 export type {
+  ExistingSpace,
   PlanLine,
   PlannedStep,
+  SetupCheckProgress,
   SetupFlow,
   SetupInputProblem,
   SetupPlan,
   SetupReport,
   SetupRepositoryState,
   SetupTargetState,
+  SetupViewSetting,
   StepProgress,
   StepState,
 };
@@ -103,7 +109,8 @@ export type SpaceSetupFailure = {
    * `project-taken`, `stopped`, a step's own kind), or one of main's:
    * `invalid-argument`, `not-a-space-window`, `not-allowed-here`,
    * `cancelled`, `already-running`, `template-missing`, `nothing-to-open`,
-   * `not-planned`, `superseded`, `setup-threw`.
+   * `not-planned`, `superseded`, `setup-threw`, `plan-timeout`,
+   * `not-a-repository`, `no-origin`, `unknown-owner`.
    */
   kind: string;
   message: string;
@@ -115,13 +122,45 @@ export type SpaceSetupFailure = {
   problems: SetupInputProblem[];
   /** The by-hand sentences gathered before the stop. */
   byHand: string[];
+  /** The view settings gathered before the stop. */
+  viewSettings: SetupViewSetting[];
 };
 
 /** The result of a setup channel. */
 export type SpaceSetupResult<T> = { ok: true; value: T } | { ok: false; error: SpaceSetupFailure };
 
 /** A run that ended because its window was closed. Running again with the same form continues it. */
-export type SpaceSetupInterrupted = { flow: SetupFlow; spaceRoot: string };
+export type SpaceSetupInterrupted = {
+  flow: SetupFlow;
+  spaceRoot: string;
+  /** The form of the input that was planned, so the screen can show it again. */
+  form: SpaceSetupForm;
+};
+
+/** The GitHub account and organisations known for setup, with which one is proposed. */
+export type SpaceSetupOwners = {
+  account: string | null;
+  organisations: string[];
+  /** The owner used by an earlier run, when it is still one of `account` or `organisations`; else `account`. */
+  defaultOwner: string | null;
+};
+
+/** What a plan's own checks report, pushed as they run (`onSpaceSetupPlanProgress`). */
+export type SpaceSetupPlanProgress = { planId: number } & SetupCheckProgress;
+
+/** What a folder holds for the form, without asking GitHub. Mirrors core's `ExistingSpace`. */
+export type SpaceSetupTargetPreview = ExistingSpace;
+
+/** The repository chosen on the form, for "Space from a repository on this computer". */
+export type SpaceSetupSource = {
+  sourceDir: string;
+  /** The origin address, with credentials removed; `null` when origin has none. */
+  originUrl: string | null;
+  /** `owner/name`, when the origin is a GitHub address. */
+  github: string | null;
+  /** The folder's own name, proposed as the repository's name in the Space. */
+  name: string;
+};
 
 /** What main holds for the setup window that asks. */
 export type SpaceSetupState = {
@@ -129,10 +168,16 @@ export type SpaceSetupState = {
   flow: SetupFlow;
   /** The folder the Space's folder is created in, as chosen in main's dialog; `null` before. */
   parentDir: string | null;
-  /** For `adopt`: the folder of the repository, as main opened it. Otherwise `null`. */
+  /** For `adopt` from `about-repository`: the folder of the repository, as main opened it. Otherwise `null`. */
   sourceDir: string | null;
-  /** For `adopt`: the origin address main read, with credentials removed. Otherwise `null`. */
+  /** For `adopt` from `about-repository`: the origin address main read, with credentials removed. Otherwise `null`. */
   originUrl: string | null;
+  /** For `adopt` from `from-repository`: the repository chosen on the form. Otherwise `null`. */
+  source: SpaceSetupSource | null;
+  /** The GitHub account and organisations known for the owner field. */
+  owners: SpaceSetupOwners;
+  /** The Spaces folder setting, when it is set. */
+  spacesFolder: string | null;
   /** True while a run of this window goes on. */
   running: boolean;
   /** The last run of this run of the app that ended because its window was closed, or `null`. */
@@ -147,10 +192,14 @@ export type SpaceSetupGitHubNames = {
   visibility: 'private' | 'public';
   /** True when the plan found the repository on GitHub; it is then used, not created. */
   repositoryExists: boolean;
+  /** The repository's page, when the plan found or planned it. */
+  repositoryUrl: string | null;
   /** The name of the Project. */
   project: string;
   /** True when the plan found the Project; it is then used, not created. */
   projectExists: boolean;
+  /** The Project's page, when the plan found it. */
+  projectUrl: string | null;
   /** The names of the labels the repository gets. */
   labels: string[];
   /** The names of the views the Project gets. */
@@ -181,7 +230,16 @@ export type SpaceSetupRunArg = {
 
 export type SpaceSetupStateResult = SpaceSetupResult<SpaceSetupState>;
 export type SpaceSetupChooseFolderResult = SpaceSetupResult<{ parentDir: string }>;
-export type SpaceSetupValidateResult = SpaceSetupResult<{ problems: SetupInputProblem[] }>;
+export type SpaceSetupValidateResult = SpaceSetupResult<{
+  problems: SetupInputProblem[];
+  target: SpaceSetupTargetPreview | null;
+}>;
 export type SpaceSetupPlanResult = SpaceSetupResult<SpaceSetupPlanValue>;
 export type SpaceSetupRunResult = SpaceSetupResult<SetupReport>;
 export type SpaceSetupStopResult = SpaceSetupResult<{ stopping: boolean }>;
+/** Choosing the folder of the repository, for "Space from a repository on this computer". */
+export type SpaceSetupChooseSourceResult = SpaceSetupResult<SpaceSetupSource>;
+/** The Spaces of an owner already on GitHub, for "Space from GitHub". */
+export type SpaceSetupListSpacesResult = SpaceSetupResult<{
+  repositories: { fullName: string; url: string; private: boolean }[];
+}>;

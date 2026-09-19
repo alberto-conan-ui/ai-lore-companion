@@ -33,10 +33,14 @@ import {
   type GitHubPort,
   createGhCliGitHub,
 } from '@ai-lore-companion/core';
+import { withCommandLog } from './command-log.js';
 import { defineSpaceService } from './context.js';
 import { isFakeMachineRun } from './e2e-machine.js';
 import { liveGitHubAllowed } from './live-github.js';
 import type { SpaceLog } from './log.js';
+
+/** How long one call of `gh` may take before it counts as unreachable (architecture document A.6). */
+export const GH_CALL_TIMEOUT_MS = 20_000;
 
 export type SpaceGitHub = {
   /** The port of this Space. Built on the first call. */
@@ -146,7 +150,7 @@ export async function createAppGitHubPort(options: AppGitHubPortOptions): Promis
     return unreachableGitHub('GitHub is not reached in a test run.');
   }
   log?.info('github-port', { ...fields, port: 'gh' });
-  return createGhCliGitHub(runner);
+  return createGhCliGitHub(withCommandLog(runner, log, 'gh'), { timeoutMs: GH_CALL_TIMEOUT_MS });
 }
 
 /** The GitHub port of an open Space, shared by every part of the app that reads GitHub for it. */

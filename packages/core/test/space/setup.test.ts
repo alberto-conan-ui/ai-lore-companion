@@ -425,6 +425,50 @@ test('onCheck reports the folder, the two lookups and the steps, in order, with 
   assert.match(text('steps', 'done') ?? '', /^\d+ of \d+ steps are already done$/);
 });
 
+test('refuseForeignMatches reports the project check even when the repository check fails', async (t) => {
+  const fake = createFakeGitHub({ account: OWNER });
+  const { deps, parentDir } = bench(t, fake);
+  const github: GitHubPort = {
+    ...fake,
+    findRepository: async () => ({
+      ok: false,
+      error: gitHubUnreachable('no route to host'),
+    }),
+  };
+  const input: CreateSpaceInput = {
+    name: 'gamma',
+    description: 'A Space for the plan tests.',
+    owner: OWNER,
+    parentDir,
+  };
+  const events: SetupCheckProgress[] = [];
+  const plan = await planCreateSpace(
+    input,
+    { ...deps, github },
+    {
+      onCheck: (event) => events.push(event),
+    },
+  );
+  assert.equal(plan.ok, false);
+  if (!plan.ok) {
+    assert.equal(plan.error.kind, 'github-unreachable');
+    assert.equal(plan.error.stepId, 'space-repository');
+  }
+  assert.deepEqual(
+    events.map((event) => `${event.checkId}:${event.state}`),
+    [
+      'folder:running',
+      'folder:done',
+      'repository:running',
+      'project:running',
+      'repository:failed',
+      'project:done',
+    ],
+  );
+  const projectDone = events.find((event) => event.checkId === 'project' && event.state === 'done');
+  assert.equal(projectDone?.text, 'No Project named gamma yet');
+});
+
 test('a plan says whether the Space is complete, and what is left', async (t) => {
   const fake = createFakeGitHub({ account: OWNER });
   const { deps, parentDir } = bench(t, fake);
