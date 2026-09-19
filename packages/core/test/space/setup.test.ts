@@ -1,31 +1,108 @@
 /**
  * The rules of setup that need no disk: names, a GitHub address, the form of
- * "create a Space", and the sentence of a step that GitHub stopped.
+ * "create a Space", and the sentence of a step that GitHub stopped. It also
+ * holds the plan's own behaviour against `FakeGitHub` (caching, `onCheck`
+ * progress, "complete"): each test runs in a temporary folder and never
+ * reaches the network.
  */
 import { strict as assert } from 'node:assert';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { execFileRunner } from '../../src/space/exec/index.js';
 import {
+  type GitHubPort,
   gitHubMissingScope,
   gitHubNotSignedIn,
   gitHubRateLimited,
   gitHubUnreachable,
 } from '../../src/space/github/index.js';
+import { deskPaths } from '../../src/space/layout/index.js';
 import { GH_ADD_SCOPE_COMMAND, GH_SIGN_IN_COMMAND } from '../../src/space/machine/index.js';
+import type { MachineCheck } from '../../src/space/machine/index.js';
 import {
+  type CreateSpaceInput,
   SETUP_LABELS,
   SETUP_VIEWS,
+  type SetupCheckProgress,
+  type SetupDeps,
   cloneAddressProblem,
   corpusEntryFileName,
+  createSpace,
   folderProblem,
   gitHubStepError,
   ownerProblem,
   parseGitHubAddress,
+  planCreateSpace,
   redactCredentials,
   repositoryNameProblem,
   repositoryProblems,
   spaceNameProblem,
   validateCreateSpaceInput,
 } from '../../src/space/setup/index.js';
+import { createFakeGitHub } from '../../src/space/testing/index.js';
+import { type CleanupHost, loreTemplateDir, useTempDir } from '../support/index.js';
+
+const OWNER = 'octo';
+
+function readyMachine(): MachineCheck {
+  const fine = { kind: 'fine', version: '1.0' } as const;
+  return {
+    ready: true,
+    engines: [],
+    requirements: [
+      { id: 'git', binary: 'git', state: fine, guidance: null, command: null },
+      { id: 'gh', binary: 'gh', state: fine, guidance: null, command: null },
+      { id: 'engine', binary: 'claude', state: fine, guidance: null, command: null },
+      { id: 'python3', binary: 'python3', state: fine, guidance: null, command: null },
+    ],
+    github: { account: null, organisations: [] },
+    tools: { brew: true, npm: true },
+  };
+}
+
+/** Wraps `github` so that `count(operation)` gives how many times it was called. */
+function countingGitHub(github: GitHubPort): { github: GitHubPort; count: (op: string) => number } {
+  const counts = new Map<string, number>();
+  const bump = (op: string): void => {
+    counts.set(op, (counts.get(op) ?? 0) + 1);
+  };
+  return {
+    github: {
+      ...github,
+      findRepository: (...args: Parameters<GitHubPort['findRepository']>) => {
+        bump('findRepository');
+        return github.findRepository(...args);
+      },
+      findProject: (...args: Parameters<GitHubPort['findProject']>) => {
+        bump('findProject');
+        return github.findProject(...args);
+      },
+    },
+    count: (op) => counts.get(op) ?? 0,
+  };
+}
+
+function bench(
+  t: CleanupHost,
+  fake: ReturnType<typeof createFakeGitHub>,
+): { deps: SetupDeps; parentDir: string } {
+  t.after(() => fake.dispose());
+  const parentDir = useTempDir(t, 'ai-lore-setup-plan-');
+  const deps: SetupDeps = {
+    runner: execFileRunner,
+    github: fake,
+    templateDir: loreTemplateDir(),
+    userDataDir: useTempDir(t, 'ai-lore-setup-userdata-'),
+    checkMachine: async () => readyMachine(),
+    gitConfig: {
+      'user.name': 'AI-Lore Test',
+      'user.email': 'test@ai-lore.invalid',
+      'commit.gpgsign': 'false',
+    },
+  };
+  return { deps, parentDir };
+}
 
 /** The bell character, written by its code so that this file holds no control character. */
 const BELL = String.fromCharCode(7);
@@ -267,4 +344,108 @@ test('the default layout has the labels of the kinds and of a session, and three
     SETUP_VIEWS.map((view) => `${view.name}:${view.layout}:${view.columnField ?? ''}`),
     ['Focuses by Stage:board:Stage', 'Items by focus:table:', 'Agents board:board:Agents'],
   );
+});
+
+// ---------- the plan: caching, onCheck progress, "complete" ----------
+
+test('a plan of a new Space calls findRepository and findProject once each', async (t) => {
+  const fake = createFakeGitHub({ account: OWNER });
+  const { deps, parentDir } = bench(t, fake);
+  const { github, count } = countingGitHub(fake);
+  const input: CreateSpaceInput = {
+    name: 'alpha',
+    description: 'A Space for the plan tests.',
+    owner: OWNER,
+    parentDir,
+  };
+  const plan = await planCreateSpace(input, { ...deps, github });
+  assert.ok(plan.ok, plan.ok ? '' : plan.error.message);
+  assert.equal(count('findRepository'), 1);
+  assert.equal(count('findProject'), 1);
+});
+
+test('with the fake unreachable, the plan fails at space-repository and findRepository is called once', async (t) => {
+  const fake = createFakeGitHub({ account: OWNER });
+  fake.setUnreachable(true);
+  const { github, count } = countingGitHub(fake);
+  const { deps, parentDir } = bench(t, fake);
+  const input: CreateSpaceInput = {
+    name: 'alpha',
+    description: 'A Space for the plan tests.',
+    owner: OWNER,
+    parentDir,
+  };
+  const plan = await planCreateSpace(input, { ...deps, github });
+  assert.equal(plan.ok, false);
+  if (!plan.ok) {
+    assert.equal(plan.error.kind, 'github-unreachable');
+    assert.equal(plan.error.stepId, 'space-repository');
+  }
+  assert.equal(count('findRepository'), 1);
+});
+
+test('onCheck reports the folder, the two lookups and the steps, in order, with their texts', async (t) => {
+  const fake = createFakeGitHub({ account: OWNER });
+  const { deps, parentDir } = bench(t, fake);
+  const input: CreateSpaceInput = {
+    name: 'alpha',
+    description: 'A Space for the plan tests.',
+    owner: OWNER,
+    parentDir,
+  };
+  const events: SetupCheckProgress[] = [];
+  const plan = await planCreateSpace(input, deps, { onCheck: (event) => events.push(event) });
+  assert.ok(plan.ok, plan.ok ? '' : plan.error.message);
+  const spaceRoot = join(parentDir, 'alpha');
+
+  assert.deepEqual(
+    events.map((event) => `${event.checkId}:${event.state}`),
+    [
+      'folder:running',
+      'folder:done',
+      'repository:running',
+      'project:running',
+      'repository:done',
+      'project:done',
+      'steps:running',
+      'steps:done',
+    ],
+  );
+  const text = (checkId: string, state: string): string | undefined =>
+    events.find((event) => event.checkId === checkId && event.state === state)?.text;
+  assert.equal(text('folder', 'running'), `Checking the folder ${spaceRoot}`);
+  assert.equal(text('folder', 'done'), `The folder ${spaceRoot} does not exist yet`);
+  assert.equal(
+    text('repository', 'running'),
+    `Looking for the repository ${OWNER}/alpha on GitHub`,
+  );
+  assert.equal(text('repository', 'done'), `The repository ${OWNER}/alpha does not exist yet`);
+  assert.equal(text('project', 'running'), 'Looking for a Project named alpha');
+  assert.equal(text('project', 'done'), 'No Project named alpha yet');
+  assert.match(text('steps', 'done') ?? '', /^\d+ of \d+ steps are already done$/);
+});
+
+test('a plan says whether the Space is complete, and what is left', async (t) => {
+  const fake = createFakeGitHub({ account: OWNER });
+  const { deps, parentDir } = bench(t, fake);
+  const input: CreateSpaceInput = {
+    name: 'beta',
+    description: 'A Space for the plan tests.',
+    owner: OWNER,
+    parentDir,
+  };
+  const made = await createSpace(input, deps);
+  assert.ok(made.ok, made.ok ? '' : made.error.message);
+
+  const spaceRoot = join(parentDir, 'beta');
+  const whole = await planCreateSpace(input, deps);
+  assert.ok(whole.ok, whole.ok ? '' : whole.error.message);
+  assert.equal(whole.value.complete, true);
+  assert.deepEqual(whole.value.leftToDo, []);
+
+  await rm(deskPaths(deps.userDataDir, spaceRoot).install, { recursive: true, force: true });
+  const partial = await planCreateSpace(input, deps);
+  assert.ok(partial.ok, partial.ok ? '' : partial.error.message);
+  assert.equal(partial.value.complete, false);
+  assert.deepEqual(partial.value.leftToDo, ['Install into Claude Code']);
 });

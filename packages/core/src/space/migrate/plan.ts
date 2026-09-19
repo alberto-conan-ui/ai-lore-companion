@@ -305,12 +305,13 @@ function makeContext(
     repositoryName,
     found: { repository: null, project: null },
     byHand: [],
+    lookups: {},
+    viewSettings: [],
     name: settings.name,
     description: settings.description,
     owner: settings.owner,
     private: settings.private,
     repositories: [{ ...payload }],
-    foreignChecked: false,
   };
   return {
     deps,

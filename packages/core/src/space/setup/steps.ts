@@ -53,7 +53,17 @@ import {
   listTemplateFiles,
   scaffoldSpace,
 } from './scaffold.js';
-import type { SetupDeps, SetupFlow, SetupRepositoryInput } from './types.js';
+import type {
+  SetupCheckId,
+  SetupCheckProgress,
+  SetupDeps,
+  SetupFlow,
+  SetupRepositoryInput,
+  SetupViewSetting,
+} from './types.js';
+
+/** The ids of the two steps run on every setup, whether or not there is anything left for them to do. */
+export const ALWAYS_RUN_STEP_IDS: readonly string[] = ['machine-check', 'project-layout'];
 
 /** The labels setup creates in the Space repository: the kinds of a focus, and the mark of a session issue. */
 export const SETUP_LABELS: readonly LabelSpec[] = [
@@ -104,6 +114,20 @@ export type SetupContext = {
   found: { repository: RepositoryInfo | null; project: ProjectInfo | null };
   /** The by-hand sentences gathered by the Project's layout step. */
   byHand: string[];
+  /**
+   * GitHub's whole answer for each lookup, `null` and failures included,
+   * cached for the life of this context (one plan or one run).
+   */
+  lookups: {
+    repository?: Result<RepositoryInfo | null, StepError>;
+    project?: Result<ProjectInfo | null, StepError>;
+  };
+  /** Whether `refuseForeignMatches` already ran, cached for the life of this context. */
+  foreign?: Result<void, StepError & { stepId: 'space-repository' | 'project' }>;
+  /** The view settings gathered by the Project's layout step, with their links. */
+  viewSettings: SetupViewSetting[];
+  /** Called as each of the plan's own checks (not a step) runs. */
+  onCheck?: (progress: SetupCheckProgress) => void;
 };
 
 /** The context of "create a Space" and of "adopt a repository". */
@@ -113,8 +137,6 @@ export type CreateSpaceContext = SetupContext & {
   owner: string;
   private: boolean;
   repositories: SetupRepositoryInput[];
-  /** Whether `refuseForeignMatches` already found nothing on GitHub that belongs to something else. */
-  foreignChecked: boolean;
 };
 
 /** The context of "open a Space by address". */
@@ -170,26 +192,48 @@ function gitHubFail(error: GitHubError): Result<never, StepError> {
   return err(gitHubStepError(error));
 }
 
-/** The Space repository on GitHub, or `null`. GitHub is asked once per setup. */
+/** Report one event of the plan's own checks. A caller that gave no `onCheck` hears nothing. */
+function reportCheck(
+  ctx: SetupContext,
+  checkId: SetupCheckId,
+  state: 'running' | 'done' | 'failed',
+  text: string,
+): void {
+  ctx.onCheck?.({ checkId, state, text });
+}
+
+/**
+ * The Space repository on GitHub, or `null`. GitHub is asked once per context
+ * (one plan or one run): the whole answer, `null` and a failure included, is
+ * cached in `ctx.lookups.repository`.
+ */
 async function lookupRepository(
   ctx: SetupContext,
 ): Promise<Result<RepositoryInfo | null, StepError>> {
   if (ctx.found.repository !== null) return ok(ctx.found.repository);
+  if (ctx.lookups.repository !== undefined) return ctx.lookups.repository;
   const found = await ctx.deps.github.findRepository(ctx.repositoryName);
-  if (!found.ok) return gitHubFail(found.error);
-  ctx.found.repository = found.value;
-  return ok(found.value);
+  const result: Result<RepositoryInfo | null, StepError> = found.ok
+    ? ok(found.value)
+    : gitHubFail(found.error);
+  ctx.lookups.repository = result;
+  if (result.ok && result.value !== null) ctx.found.repository = result.value;
+  return result;
 }
 
-/** The Project named after the Space, or `null`. */
+/** The Project named after the Space, or `null`. GitHub is asked once per context. */
 async function lookupProject(
   ctx: CreateSpaceContext,
 ): Promise<Result<ProjectInfo | null, StepError>> {
   if (ctx.found.project !== null) return ok(ctx.found.project);
+  if (ctx.lookups.project !== undefined) return ctx.lookups.project;
   const found = await ctx.deps.github.findProject({ owner: ctx.owner, title: ctx.name });
-  if (!found.ok) return gitHubFail(found.error);
-  ctx.found.project = found.value;
-  return ok(found.value);
+  const result: Result<ProjectInfo | null, StepError> = found.ok
+    ? ok(found.value)
+    : gitHubFail(found.error);
+  ctx.lookups.project = result;
+  if (result.ok && result.value !== null) ctx.found.project = result.value;
+  return result;
 }
 
 /**
@@ -244,39 +288,95 @@ async function projectIsOwn(
  * and that is not this Space's own. GitHub finds a repository by `owner/name`
  * and a Project by its owner and its exact title among the open ones, so a
  * match says nothing about who made it. The answer is kept, so GitHub is asked
- * once per setup. It reads only, and it is asked before the repository is
+ * once per context. It reads only, and it is asked before the repository is
  * created, so a refusal leaves nothing on GitHub.
+ *
+ * The two lookups run at the same time; each is reported to `ctx.onCheck` as
+ * it runs and as it finishes, with the texts of the architecture document's
+ * table of check progress.
  */
 export async function refuseForeignMatches(
   ctx: CreateSpaceContext,
-): Promise<Result<void, StepError>> {
-  if (ctx.foreignChecked) return ok(undefined);
-  const repository = await lookupRepository(ctx);
-  if (!repository.ok) return repository;
+): Promise<Result<void, StepError & { stepId: 'space-repository' | 'project' }>> {
+  if (ctx.foreign !== undefined) return ctx.foreign;
+
+  const stopAt = (
+    stepId: 'space-repository' | 'project',
+    error: StepError,
+  ): Result<never, StepError & { stepId: 'space-repository' | 'project' }> => {
+    const tagged = err({ ...error, stepId });
+    ctx.foreign = tagged;
+    return tagged;
+  };
+
+  reportCheck(
+    ctx,
+    'repository',
+    'running',
+    `Looking for the repository ${ctx.repositoryName} on GitHub`,
+  );
+  reportCheck(ctx, 'project', 'running', `Looking for a Project named ${ctx.name}`);
+  const [repository, project] = await Promise.all([lookupRepository(ctx), lookupProject(ctx)]);
+
+  if (!repository.ok) {
+    reportCheck(ctx, 'repository', 'failed', repository.error.message);
+    return stopAt('space-repository', repository.error);
+  }
   if (repository.value !== null) {
     const own = await repositoryIsOwn(ctx, repository.value);
-    if (!own.ok) return own;
-    if (!own.value) {
-      return stepFail(
-        'repository-taken',
-        `The repository ${ctx.repositoryName} already exists on GitHub and holds commits that are not those of ${ctx.spaceRoot}, so nothing was created and nothing was pushed to it. Choose another name for the Space, or, when that repository is this Space, open it from its GitHub address.`,
-      );
+    if (!own.ok) {
+      reportCheck(ctx, 'repository', 'failed', own.error.message);
+      return stopAt('space-repository', own.error);
     }
+    if (!own.value) {
+      const error: StepError = {
+        kind: 'repository-taken',
+        message: `The repository ${ctx.repositoryName} already exists on GitHub and holds commits that are not those of ${ctx.spaceRoot}, so nothing was created and nothing was pushed to it. Choose another name for the Space, or, when that repository is this Space, open it from its GitHub address.`,
+      };
+      reportCheck(ctx, 'repository', 'failed', error.message);
+      return stopAt('space-repository', error);
+    }
+    reportCheck(
+      ctx,
+      'repository',
+      'done',
+      `The repository ${ctx.repositoryName} exists and belongs to this Space`,
+    );
+  } else {
+    reportCheck(
+      ctx,
+      'repository',
+      'done',
+      `The repository ${ctx.repositoryName} does not exist yet`,
+    );
   }
-  const project = await lookupProject(ctx);
-  if (!project.ok) return project;
+
+  if (!project.ok) {
+    reportCheck(ctx, 'project', 'failed', project.error.message);
+    return stopAt('project', project.error);
+  }
   if (project.value !== null) {
     const own = await projectIsOwn(ctx, project.value);
-    if (!own.ok) return own;
-    if (!own.value) {
-      return stepFail(
-        'project-taken',
-        `${ctx.owner} already has an open Project titled "${ctx.name}" (${project.value.url}) that holds items and is not named by a manifest in ${ctx.spaceRoot}, so nothing was created and the Project was left as it is. Choose another name for the Space, or rename or close that Project on GitHub.`,
-      );
+    if (!own.ok) {
+      reportCheck(ctx, 'project', 'failed', own.error.message);
+      return stopAt('project', own.error);
     }
+    if (!own.value) {
+      const error: StepError = {
+        kind: 'project-taken',
+        message: `${ctx.owner} already has an open Project titled "${ctx.name}" (${project.value.url}) that holds items and is not named by a manifest in ${ctx.spaceRoot}, so nothing was created and the Project was left as it is. Choose another name for the Space, or rename or close that Project on GitHub.`,
+      };
+      reportCheck(ctx, 'project', 'failed', error.message);
+      return stopAt('project', error);
+    }
+    reportCheck(ctx, 'project', 'done', `The Project ${ctx.name} exists and belongs to this Space`);
+  } else {
+    reportCheck(ctx, 'project', 'done', `No Project named ${ctx.name} yet`);
   }
-  ctx.foreignChecked = true;
-  return ok(undefined);
+
+  const settled = ok<void>(undefined);
+  ctx.foreign = settled;
+  return settled;
 }
 
 /** Whether `dir` is the top folder of a git working tree of its own. */
@@ -358,6 +458,7 @@ export function spaceRepositoryStep(): Step<CreateSpaceContext> {
       });
       if (!created.ok) return gitHubFail(created.error);
       ctx.found.repository = created.value;
+      ctx.lookups.repository = ok(created.value);
       return ok(undefined);
     },
   };
@@ -387,6 +488,7 @@ export function projectStep(): Step<CreateSpaceContext> {
       const created = await ctx.deps.github.createProject({ owner: ctx.owner, title: ctx.name });
       if (!created.ok) return gitHubFail(created.error);
       ctx.found.project = created.value;
+      ctx.lookups.project = ok(created.value);
       return ok(undefined);
     },
   };
@@ -452,17 +554,33 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
       if (!linked.ok) return gitHubFail(linked.error);
 
       const byHand: string[] = [];
+      const viewSettings: SetupViewSetting[] = [];
       for (const spec of SETUP_VIEWS) {
         const view = await github.ensureProjectView({ project, spec });
         if (!view.ok) return gitHubFail(view.error);
         byHand.push(...view.value.byHand);
+        const url =
+          view.value.view !== null ? `${project.url}/views/${view.value.view.number}` : null;
+        if (spec.layout === 'board' && spec.columnField !== undefined) {
+          viewSettings.push({
+            view: spec.name,
+            setting: `Set "Column by" to the field "${spec.columnField}".`,
+            url,
+          });
+        }
         if (spec.name === ITEMS_VIEW) {
+          viewSettings.push({
+            view: ITEMS_VIEW,
+            setting: 'Set "Group by" to "Parent issue".',
+            url,
+          });
           byHand.push(
             `On GitHub, open the view "${ITEMS_VIEW}" of the Project, open the view's menu, and set "Group by" to "Parent issue". The GitHub API cannot set it.`,
           );
         }
       }
       ctx.byHand.splice(0, ctx.byHand.length, ...byHand);
+      ctx.viewSettings.splice(0, ctx.viewSettings.length, ...viewSettings);
       return ok(undefined);
     },
   };

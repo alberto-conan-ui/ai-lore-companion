@@ -28,8 +28,8 @@ import {
 } from './names.js';
 import { inspectSetupTarget } from './scaffold.js';
 import {
+  ALWAYS_RUN_STEP_IDS,
   type CreateSpaceContext,
-  FOREIGN_MATCH_KINDS,
   type OpenSpaceContext,
   type SetupContext,
   cloneConfirmedStep,
@@ -51,12 +51,14 @@ import {
 import type {
   AdoptRepositoryInput,
   CreateSpaceInput,
+  ExistingSpace,
   OpenSpaceByAddressInput,
   SetupDeps,
   SetupFailure,
   SetupFlow,
   SetupInputProblem,
   SetupPlan,
+  SetupPlanOptions,
   SetupReport,
   SetupRepositoryState,
   SetupRunOptions,
@@ -81,7 +83,20 @@ function precheckFailure(
     skipped: [],
     problems,
     byHand: [],
+    viewSettings: [],
   });
+}
+
+/** The sentence `folder`'s check reports as done, by what the target folder holds. */
+function folderDoneText(spaceRoot: string, target: SetupTargetState): string {
+  switch (target) {
+    case 'absent':
+      return `The folder ${spaceRoot} does not exist yet`;
+    case 'empty':
+      return `The folder ${spaceRoot} exists and is empty`;
+    case 'half-made':
+      return `The folder ${spaceRoot} holds this Space from an earlier run`;
+  }
 }
 
 function invalidInput(
@@ -131,6 +146,7 @@ async function prepareCreate(
   flow: SetupFlow,
   input: CreateSpaceInput,
   deps: SetupDeps,
+  options: SetupPlanOptions = {},
 ): Promise<Result<Prepared<CreateSpaceContext>, SetupFailure>> {
   const problems = validateCreateSpaceInput(input);
   if (problems.length > 0) return invalidInput(flow, problems);
@@ -157,11 +173,24 @@ async function prepareCreate(
   if (problems.length > 0) return invalidInput(flow, problems);
 
   const spaceRoot = resolve(input.parentDir, input.name);
+  options.onCheck?.({
+    checkId: 'folder',
+    state: 'running',
+    text: `Checking the folder ${spaceRoot}`,
+  });
   const target = await inspectSetupTarget(spaceRoot, {
     name: input.name,
     repository: repositoryName,
   });
-  if (!target.ok) return precheckFailure(flow, 'target-not-empty', target.error.message);
+  if (!target.ok) {
+    options.onCheck?.({ checkId: 'folder', state: 'failed', text: target.error.message });
+    return precheckFailure(flow, 'target-not-empty', target.error.message);
+  }
+  options.onCheck?.({
+    checkId: 'folder',
+    state: 'done',
+    text: folderDoneText(spaceRoot, target.value),
+  });
 
   const ctx: CreateSpaceContext = {
     flow,
@@ -171,12 +200,14 @@ async function prepareCreate(
     repositoryName,
     found: { repository: null, project: null },
     byHand: [],
+    lookups: {},
+    viewSettings: [],
+    onCheck: options.onCheck,
     name: input.name,
     description: input.description,
     owner: input.owner,
     private: input.private ?? true,
     repositories: (input.repositories ?? []).map((repository) => ({ ...repository })),
-    foreignChecked: false,
   };
   return ok({ ctx, steps: createSpaceSteps(ctx), target: target.value });
 }
@@ -245,6 +276,7 @@ async function adoptAsCreate(
 async function prepareOpen(
   input: OpenSpaceByAddressInput,
   deps: SetupDeps,
+  options: SetupPlanOptions = {},
 ): Promise<Result<Prepared<OpenSpaceContext>, SetupFailure>> {
   const problems: SetupInputProblem[] = [];
   const address = parseGitHubAddress(input.address);
@@ -278,8 +310,21 @@ async function prepareOpen(
   if (address === null || problems.length > 0) return invalidInput('open', problems);
 
   const spaceRoot = resolve(input.parentDir, folderName);
+  options.onCheck?.({
+    checkId: 'folder',
+    state: 'running',
+    text: `Checking the folder ${spaceRoot}`,
+  });
   const target = await inspectSetupTarget(spaceRoot, { repository: address.fullName });
-  if (!target.ok) return precheckFailure('open', 'target-not-empty', target.error.message);
+  if (!target.ok) {
+    options.onCheck?.({ checkId: 'folder', state: 'failed', text: target.error.message });
+    return precheckFailure('open', 'target-not-empty', target.error.message);
+  }
+  options.onCheck?.({
+    checkId: 'folder',
+    state: 'done',
+    text: folderDoneText(spaceRoot, target.value),
+  });
 
   const ctx: OpenSpaceContext = {
     flow: 'open',
@@ -289,6 +334,9 @@ async function prepareOpen(
     repositoryName: address.fullName,
     found: { repository: null, project: null },
     byHand: [],
+    lookups: {},
+    viewSettings: [],
+    onCheck: options.onCheck,
     confirmed: [...(input.repositories ?? [])],
   };
   return ok({ ctx, steps: openSpaceSteps(), target: target.value });
@@ -298,7 +346,13 @@ function stepsFailure(
   ctx: SetupContext,
   failure: StepsFailure,
 ): { ok: false; error: SetupFailure } {
-  return err({ ...failure, flow: ctx.flow, problems: [], byHand: [...ctx.byHand] });
+  return err({
+    ...failure,
+    flow: ctx.flow,
+    problems: [],
+    byHand: [...ctx.byHand],
+    viewSettings: [...ctx.viewSettings],
+  });
 }
 
 async function repositoryStates(spaceRoot: string): Promise<SetupRepositoryState[]> {
@@ -316,9 +370,36 @@ async function plan<C extends SetupContext>(
   prepared: Prepared<C>,
 ): Promise<Result<SetupPlan, SetupFailure>> {
   const { ctx, steps, target } = prepared;
+  ctx.onCheck?.({
+    checkId: 'steps',
+    state: 'running',
+    text: 'Checking which steps are already done',
+  });
   const planned = await planSteps(steps, ctx);
-  if (!planned.ok) return stepsFailure(ctx, planned.error);
-  return ok({ flow: ctx.flow, spaceRoot: ctx.spaceRoot, target, steps: planned.value });
+  if (!planned.ok) {
+    ctx.onCheck?.({ checkId: 'steps', state: 'failed', text: planned.error.message });
+    return stepsFailure(ctx, planned.error);
+  }
+  const total = planned.value.length;
+  const doneCount = planned.value.filter((step) => step.done).length;
+  ctx.onCheck?.({
+    checkId: 'steps',
+    state: 'done',
+    text: `${doneCount} of ${total} steps are already done`,
+  });
+
+  const relevant = planned.value.filter((step) => !ALWAYS_RUN_STEP_IDS.includes(step.stepId));
+  return ok({
+    flow: ctx.flow,
+    spaceRoot: ctx.spaceRoot,
+    target,
+    steps: planned.value,
+    complete: relevant.every((step) => step.done),
+    repository: ctx.found.repository,
+    project: ctx.found.project,
+    alreadyDone: relevant.filter((step) => step.done).map((step) => step.title),
+    leftToDo: relevant.filter((step) => !step.done).map((step) => step.title),
+  });
 }
 
 async function run<C extends SetupContext>(
@@ -336,28 +417,28 @@ async function run<C extends SetupContext>(
     repository: ctx.found.repository,
     project: ctx.found.project,
     byHand: [...ctx.byHand],
+    viewSettings: [...ctx.viewSettings],
     repositories: await repositoryStates(ctx.spaceRoot),
   });
 }
 
 /**
- * The plan of "create" and of "adopt". A repository or a Project of the
- * Space's name that belongs to something else stops the plan as it stops the
- * run, so the screen never offers a run that is known to be refused. When
- * GitHub cannot be asked, the plan is given and the run reports why.
+ * The plan of "create" and of "adopt". A failed lookup, foreign or not, stops
+ * the plan as it stops the run, so the screen never offers a run that is
+ * known to be refused or to fail again for the same reason. GitHub is asked
+ * once per plan, through `refuseForeignMatches`'s cache.
  */
 async function planCreate(
   prepared: Prepared<CreateSpaceContext>,
 ): Promise<Result<SetupPlan, SetupFailure>> {
   const { ctx, steps } = prepared;
   const foreign = await refuseForeignMatches(ctx);
-  if (!foreign.ok && FOREIGN_MATCH_KINDS.includes(foreign.error.kind)) {
-    const stepId = foreign.error.kind === 'project-taken' ? 'project' : 'space-repository';
-    const step = steps.find((candidate) => candidate.id === stepId);
+  if (!foreign.ok) {
+    const step = steps.find((candidate) => candidate.id === foreign.error.stepId);
     return stepsFailure(ctx, {
       ...foreign.error,
-      stepId,
-      title: step?.title ?? stepId,
+      stepId: foreign.error.stepId,
+      title: step?.title ?? foreign.error.stepId,
       completed: [],
       skipped: [],
     });
@@ -369,8 +450,9 @@ async function planCreate(
 export async function planCreateSpace(
   input: CreateSpaceInput,
   deps: SetupDeps,
+  options: SetupPlanOptions = {},
 ): Promise<Result<SetupPlan, SetupFailure>> {
-  const prepared = await prepareCreate('create', input, deps);
+  const prepared = await prepareCreate('create', input, deps, options);
   return prepared.ok ? planCreate(prepared.value) : prepared;
 }
 
@@ -393,10 +475,11 @@ export async function createSpace(
 export async function planAdoptRepository(
   input: AdoptRepositoryInput,
   deps: SetupDeps,
+  options: SetupPlanOptions = {},
 ): Promise<Result<SetupPlan, SetupFailure>> {
   const form = await adoptAsCreate(input, deps);
   if (!form.ok) return form;
-  const prepared = await prepareCreate('adopt', form.value, deps);
+  const prepared = await prepareCreate('adopt', form.value, deps, options);
   return prepared.ok ? planCreate(prepared.value) : prepared;
 }
 
@@ -419,8 +502,9 @@ export async function adoptRepository(
 export async function planOpenSpaceByAddress(
   input: OpenSpaceByAddressInput,
   deps: SetupDeps,
+  options: SetupPlanOptions = {},
 ): Promise<Result<SetupPlan, SetupFailure>> {
-  const prepared = await prepareOpen(input, deps);
+  const prepared = await prepareOpen(input, deps, options);
   return prepared.ok ? plan(prepared.value) : prepared;
 }
 
@@ -437,4 +521,112 @@ export async function openSpaceByAddress(
 ): Promise<Result<SetupReport, SetupFailure>> {
   const prepared = await prepareOpen(input, deps);
   return prepared.ok ? run(prepared.value, options) : prepared;
+}
+
+// ---------- the local, GitHub-free look at an existing folder ----------
+
+/** The ids of the steps `inspectExistingSpace` asks: those that read only the disk and git. */
+const LOCAL_CHECK_STEP_IDS: ReadonlySet<string> = new Set([
+  'scaffold',
+  'corpus-entry',
+  'first-commit',
+  'install',
+  'first-seen',
+  'clone-space',
+  'workbench',
+]);
+
+function isLocalCheckStep(id: string): boolean {
+  return LOCAL_CHECK_STEP_IDS.has(id) || id.startsWith('clone:') || id.startsWith('mirror:');
+}
+
+/** Whether every one of `steps` is done. An `isDone` that throws counts as not done. */
+async function allStepsDone<C extends SetupContext>(
+  steps: readonly Step<C>[],
+  ctx: C,
+): Promise<boolean> {
+  for (const step of steps) {
+    try {
+      if (!(await step.isDone(ctx))) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * What a folder holds for the form, without asking GitHub: nothing, an empty
+ * folder, something else, or this Space, complete or not by the steps that
+ * read only the disk and git.
+ */
+export async function inspectExistingSpace(
+  target: { flow: SetupFlow; spaceRoot: string; name?: string; repository: string },
+  deps: SetupDeps,
+): Promise<ExistingSpace> {
+  const { flow, spaceRoot, name, repository } = target;
+  const inspected = await inspectSetupTarget(spaceRoot, { name, repository });
+  if (!inspected.ok) {
+    return { spaceRoot, state: 'other-content', message: inspected.error.message };
+  }
+  if (inspected.value !== 'half-made') {
+    return { spaceRoot, state: inspected.value, message: null };
+  }
+
+  const manifest = await readSpaceManifest(spaceRoot);
+  const manifestRepositories = manifest.ok
+    ? manifest.value.repositories.map((entry) => ({ name: entry.name, github: entry.github }))
+    : [];
+  const git = createGitPort(deps.runner);
+  const owner = repository.split('/')[0] ?? '';
+
+  let complete: boolean;
+  if (flow === 'open') {
+    const ctx: OpenSpaceContext = {
+      flow: 'open',
+      deps,
+      git,
+      spaceRoot,
+      repositoryName: repository,
+      found: { repository: null, project: null },
+      byHand: [],
+      lookups: {},
+      viewSettings: [],
+      confirmed: manifestRepositories.map((entry) => entry.name),
+    };
+    complete = await allStepsDone(
+      openSpaceSteps().filter((step) => isLocalCheckStep(step.id)),
+      ctx,
+    );
+  } else {
+    const ctx: CreateSpaceContext = {
+      flow,
+      deps,
+      git,
+      spaceRoot,
+      repositoryName: repository,
+      // A stub, only so that `scaffoldStep.isDone` need not ask GitHub for the
+      // Project: its number is what the manifest, already read, already gives.
+      found: {
+        repository: null,
+        project: manifest.ok
+          ? { id: '', owner, number: manifest.value.github.project, title: name ?? '', url: '' }
+          : null,
+      },
+      byHand: [],
+      lookups: {},
+      viewSettings: [],
+      name: name ?? repository.split('/')[1] ?? '',
+      description: '',
+      owner,
+      private: true,
+      repositories: manifestRepositories,
+    };
+    complete = await allStepsDone(
+      createSpaceSteps(ctx).filter((step) => isLocalCheckStep(step.id)),
+      ctx,
+    );
+  }
+
+  return { spaceRoot, state: complete ? 'complete' : 'incomplete', message: null };
 }

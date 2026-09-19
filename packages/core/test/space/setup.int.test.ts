@@ -18,6 +18,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -42,6 +43,7 @@ import {
   type SetupDeps,
   adoptRepository,
   createSpace,
+  inspectExistingSpace,
   openSpaceByAddress,
   planAdoptRepository,
   planCreateSpace,
@@ -534,6 +536,79 @@ test('views the host cannot create come back whole as steps by hand', async (t) 
       name,
     );
   }
+});
+
+test('report.viewSettings has three entries, each with a link to its view', async (t) => {
+  const { fake, deps, form } = bench(t);
+  const result = await createSpace(form, deps);
+  assert.ok(result.ok, result.ok ? '' : result.error.message);
+  assert.equal(result.value.viewSettings.length, 3);
+  const project = fake.state().projects[0];
+  assert.ok(project !== undefined);
+  for (const setting of result.value.viewSettings) {
+    assert.match(setting.url ?? '', /\/views\/\d+$/, setting.view);
+    const matchedView: { number: number } | undefined = project.views.find(
+      (candidate) => candidate.name === setting.view,
+    );
+    assert.ok(matchedView !== undefined, setting.view);
+    assert.equal(setting.url, `${project.info.url}/views/${matchedView.number}`);
+  }
+  assert.ok(
+    result.value.viewSettings.some(
+      (setting) => setting.view === 'Focuses by Stage' && setting.setting.includes('"Column by"'),
+    ),
+  );
+  assert.ok(
+    result.value.viewSettings.some(
+      (setting) => setting.view === 'Items by focus' && setting.setting.includes('"Group by"'),
+    ),
+  );
+});
+
+test('inspectExistingSpace tells absent, empty, other-content, complete and incomplete apart, without asking GitHub', async (t) => {
+  const { fake, deps, form, parentDir } = bench(t);
+  const spaceRoot = join(parentDir, form.name);
+  const target = {
+    flow: 'create' as const,
+    spaceRoot,
+    name: form.name,
+    repository: `${OWNER}/${form.name}`,
+  };
+
+  assert.deepEqual(await inspectExistingSpace(target, deps), {
+    spaceRoot,
+    state: 'absent',
+    message: null,
+  });
+
+  mkdirSync(spaceRoot);
+  assert.deepEqual(await inspectExistingSpace(target, deps), {
+    spaceRoot,
+    state: 'empty',
+    message: null,
+  });
+
+  writeFileSync(join(spaceRoot, 'notes.txt'), 'mine\n');
+  const other = await inspectExistingSpace(target, deps);
+  assert.equal(other.state, 'other-content');
+  assert.ok(other.message !== null && other.message.length > 0);
+  rmSync(spaceRoot, { recursive: true, force: true });
+
+  const made = await createSpace(form, deps);
+  assert.ok(made.ok, made.ok ? '' : made.error.message);
+  fake.calls.length = 0;
+  assert.deepEqual(await inspectExistingSpace(target, deps), {
+    spaceRoot,
+    state: 'complete',
+    message: null,
+  });
+  assert.deepEqual(fake.calls, [], 'no GitHub call was made');
+
+  rmSync(join(spaceRoot, 'lore', 'corpus', `${form.name}.md`));
+  const incomplete = await inspectExistingSpace(target, deps);
+  assert.equal(incomplete.state, 'incomplete');
+  assert.equal(incomplete.message, null);
+  assert.deepEqual(fake.calls, [], 'no GitHub call was made');
 });
 
 test('adoptRepository clones fresh into repos/<name> and never touches the source folder', async (t) => {

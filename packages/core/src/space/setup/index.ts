@@ -7,18 +7,24 @@
 export type {
   AdoptRepositoryInput,
   CreateSpaceInput,
+  ExistingSpace,
+  ExistingSpaceState,
   OpenSpaceByAddressInput,
+  SetupCheckId,
+  SetupCheckProgress,
   SetupDeps,
   SetupFailure,
   SetupFlow,
   SetupInputProblem,
   SetupPlan,
+  SetupPlanOptions,
   SetupPrecheckFailureKind,
   SetupReport,
   SetupRepositoryInput,
   SetupRepositoryState,
   SetupRunOptions,
   SetupTargetState,
+  SetupViewSetting,
 } from './types.js';
 export {
   type GitHubAddress,
@@ -67,6 +73,7 @@ export {
   writeSpaceCorpusEntry,
 } from './lore-writes.js';
 export {
+  ALWAYS_RUN_STEP_IDS,
   type CreateSpaceContext,
   FIRST_COMMIT_MESSAGE,
   FOREIGN_MATCH_KINDS,
@@ -80,6 +87,7 @@ export {
   adoptRepository,
   createSpace,
   createSpaceSteps,
+  inspectExistingSpace,
   openSpaceByAddress,
   openSpaceSteps,
   planAdoptRepository,

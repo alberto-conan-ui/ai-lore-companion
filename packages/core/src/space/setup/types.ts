@@ -108,6 +108,22 @@ export type SetupInputProblem = {
  */
 export type SetupTargetState = 'absent' | 'empty' | 'half-made';
 
+/** Which check of a plan is progressing: the target folder, the two GitHub lookups, or building the step list. */
+export type SetupCheckId = 'folder' | 'repository' | 'project' | 'steps';
+
+/** One event of a plan's own checks (not a step of the plan itself). */
+export type SetupCheckProgress = {
+  checkId: SetupCheckId;
+  state: 'running' | 'done' | 'failed';
+  text: string;
+};
+
+/** Options of a plan: reports each of its checks as it runs. */
+export type SetupPlanOptions = { onCheck?: (progress: SetupCheckProgress) => void };
+
+/** A view setting the API could set, with the sentence describing it and the view's link, when there is one. */
+export type SetupViewSetting = { view: string; setting: string; url: string | null };
+
 /** The dry run: what setup will do, shown before the Human Lead confirms. Nothing was changed. */
 export type SetupPlan = {
   flow: SetupFlow;
@@ -115,6 +131,16 @@ export type SetupPlan = {
   spaceRoot: string;
   target: SetupTargetState;
   steps: PlannedStep[];
+  /** Whether every step is already done, except the two that always run (`ALWAYS_RUN_STEP_IDS`). */
+  complete: boolean;
+  /** The Space repository on GitHub, when the plan found it. */
+  repository: RepositoryInfo | null;
+  /** The Project, when the plan found it. */
+  project: ProjectInfo | null;
+  /** The titles of the steps found already done, in order, excluding those that always run. */
+  alreadyDone: string[];
+  /** The titles of the steps not yet done, in order, excluding those that always run. */
+  leftToDo: string[];
 };
 
 /** A repository of the manifest, and whether its checkout is on this desk. */
@@ -134,8 +160,25 @@ export type SetupReport = {
   project: ProjectInfo | null;
   /** What is left for the Human Lead to do on GitHub, one sentence each: the settings of views the API cannot make. */
   byHand: string[];
+  /** The view settings the API could set, with their links. */
+  viewSettings: SetupViewSetting[];
   /** The manifest's repositories. For a Space opened by address, those with `cloned: false` await confirmation. */
   repositories: SetupRepositoryState[];
+};
+
+/**
+ * What a folder holds for the form, without asking GitHub.
+ * `absent`: nothing is there. `empty`: an empty folder. `other-content`: something
+ * else. `incomplete` and `complete`: this same Space, by the steps that read only
+ * the disk and git.
+ */
+export type ExistingSpaceState = 'absent' | 'empty' | 'other-content' | 'incomplete' | 'complete';
+
+/** What a local, GitHub-free look at a folder found. */
+export type ExistingSpace = {
+  spaceRoot: string;
+  state: ExistingSpaceState;
+  message: string | null;
 };
 
 /**
@@ -158,6 +201,8 @@ export type SetupFailure = Failure & {
   problems: SetupInputProblem[];
   /** The by-hand sentences gathered before the stop. */
   byHand: string[];
+  /** The view settings gathered before the stop. */
+  viewSettings: SetupViewSetting[];
 };
 
 /** Options of a setup run: the progress callback and the stop signal of the step runner. */
