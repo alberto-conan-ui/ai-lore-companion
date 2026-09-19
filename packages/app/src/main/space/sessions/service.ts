@@ -229,6 +229,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
   }
 
   async function start(engineId: string, flags?: string[]): Promise<Started> {
+    context.log.info('TRACE: spaceSessions.start called', { engineId, flags, currentLiveCount: live.size });
     await cleanup;
     const pty = context.ptyService;
     if (!pty) {
@@ -279,6 +280,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         });
     };
     const connection = await server.registerSession(sessionId);
+    context.log.info('TRACE: sessionServer.registerSession returned', { sessionId, ok: connection.ok, error: !connection.ok ? connection.error : undefined });
     if (!connection.ok) {
       undoRecord();
       return {
