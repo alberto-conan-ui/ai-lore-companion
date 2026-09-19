@@ -47,6 +47,7 @@
 
 /** What both adapters share: arguments, the hook's input, the path, running a check, the alarm. */
 const ADAPTER_COMMON = String.raw`
+import fnmatch
 import json
 import os
 import signal
@@ -73,10 +74,35 @@ class Refused(Exception):
 
 DIALECTS = ('claude', 'antigravity', 'codex', 'opencode')
 
+# Antigravity CLI (M10.6, m10-architecture.md 2.3 and 5 M10.6 item 2).
+AGY_FILE_TOOLS = ('write_to_file', 'replace_file_content', 'multi_replace_file_content',
+                   'edit_notebook', 'create_file', 'edit_file', 'delete_file', 'move_file')
+AGY_PATH_KEYS = ('TargetFile', 'AbsolutePath', 'FilePath', 'NotebookPath', 'SourcePath',
+                  'DestinationPath', 'Path')
+AGY_READ_TOOLS = ('view_file', 'list_directory', 'grep_search', 'find', 'view_file_outline',
+                   'view_content_chunk', 'view_code_item', 'find_all_references',
+                   'codebase_search')
+# The plugin's name is fixed 'lore' (engines/antigravity.ts PLUGIN_DIR) and the session
+# server's name is fixed 'ailore' (session-server/constants.ts SESSION_SERVER_NAME), so the
+# server name Antigravity shows the model for a session-server call is always this exact
+# string. Matched exactly below, not as a substring: a substring match would let a spoofing
+# MCP server (for example from the Human Lead's own global Antigravity configuration, which
+# cannot be left out, 2.3) whose name merely contains "ailore" be treated as the session
+# server's calls and allowed.
+AGY_SESSION_SERVER_NAME = 'lore_ailore'
+
+
+def bash_rule_inner(rule):
+    """The text inside Bash(...) of one allow or deny rule, or None for anything else."""
+    if not isinstance(rule, str) or not rule.startswith('Bash(') or not rule.endswith(')'):
+        return None
+    return rule[len('Bash('):-1]
+
 
 def parse_arguments(argv):
     single = ('--space', '--desk', '--session', '--request-tool', '--refusals',
-              '--child-seconds', '--adapter-seconds', '--dialect')
+              '--child-seconds', '--adapter-seconds', '--dialect', '--shell-rules',
+              '--uncovered-shell')
     found = {'--check': []}
     index = 0
     while index < len(argv):
@@ -106,6 +132,10 @@ def parse_arguments(argv):
     found.setdefault('--dialect', 'claude')
     if found['--dialect'] not in DIALECTS:
         raise Fault('the command line of the adapter is wrong (--dialect %s is not known)' % found['--dialect'])
+    found.setdefault('--uncovered-shell', 'ask')
+    if found['--uncovered-shell'] not in ('ask', 'deny'):
+        raise Fault('the command line of the adapter is wrong (--uncovered-shell %s is not known)'
+                     % found['--uncovered-shell'])
     return found
 
 
@@ -116,9 +146,70 @@ def read_hook_input():
     return data
 
 
-def tool_name(data):
+def tool_name(data, dialect):
+    """The tool's name, dialect by dialect, for the refusals log."""
+    if dialect == 'antigravity':
+        tool_call = data.get('toolCall')
+        name = tool_call.get('name') if isinstance(tool_call, dict) else None
+        return name if isinstance(name, str) and name else 'an unknown tool'
     name = data.get('tool_name')
     return name if isinstance(name, str) and name else 'an unknown tool'
+
+
+def written_paths_antigravity(data):
+    """Every string value of toolCall.args under a key of AGY_PATH_KEYS, for a name of
+    AGY_FILE_TOOLS; a relative one is joined to workspacePaths[0]. Raises Fault when none is
+    found. [] for any other tool name."""
+    tool_call = data.get('toolCall')
+    if not isinstance(tool_call, dict):
+        raise Fault('the input of the hook has no toolCall')
+    name = tool_call.get('name')
+    if not isinstance(name, str) or name not in AGY_FILE_TOOLS:
+        return []
+    args = tool_call.get('args')
+    if not isinstance(args, dict):
+        raise Fault('the input of the hook names no file for the tool %s' % name)
+    workspace_paths = data.get('workspacePaths')
+    base = None
+    if isinstance(workspace_paths, list) and workspace_paths and isinstance(workspace_paths[0], str):
+        base = workspace_paths[0]
+    paths = []
+    for key in AGY_PATH_KEYS:
+        value = args.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        if '\x00' in value:
+            raise Fault('the path in the input of the hook holds a NUL character')
+        if os.path.isabs(value):
+            paths.append(value)
+        elif base is not None:
+            paths.append(os.path.join(base, value))
+        else:
+            raise Fault('the path in the input of the hook is relative and the input gives no workspace folder')
+    if not paths:
+        raise Fault('the input of the hook names no file for the tool %s' % name)
+    return paths
+
+
+def shell_command_antigravity(data):
+    """(CommandLine, Cwd or workspacePaths[0]) for a run_command call, else None."""
+    tool_call = data.get('toolCall')
+    if not isinstance(tool_call, dict) or tool_call.get('name') != 'run_command':
+        return None
+    args = tool_call.get('args')
+    if not isinstance(args, dict):
+        raise Fault('the input of the hook names no command for the tool run_command')
+    command = args.get('CommandLine')
+    if not isinstance(command, str):
+        raise Fault('the input of the hook names no command for the tool run_command')
+    cwd = args.get('Cwd')
+    if not isinstance(cwd, str) or not cwd:
+        workspace_paths = data.get('workspacePaths')
+        if isinstance(workspace_paths, list) and workspace_paths and isinstance(workspace_paths[0], str):
+            cwd = workspace_paths[0]
+        else:
+            cwd = ''
+    return command, cwd
 
 
 def written_path_claude(data):
@@ -144,6 +235,80 @@ def written_path_claude(data):
     return os.path.join(cwd, raw)
 
 
+def written_paths_codex(data):
+    """The paths one apply_patch (also Edit, Write) call writes, from the lines of its patch
+    text: '*** Add File: ', '*** Update File: ', '*** Delete File: ' and '*** Move to: ' each
+    give a path, the rest of the line, stripped. Raises Fault when tool_input.command is not a
+    string, or names no file line."""
+    tool_input = data.get('tool_input')
+    if not isinstance(tool_input, dict):
+        raise Fault('the input of the hook has no tool_input')
+    command = tool_input.get('command')
+    if not isinstance(command, str):
+        raise Fault('the input of the hook names no file (tool_input.command is not a string)')
+    cwd = data.get('cwd')
+    prefixes = ('*** Add File: ', '*** Update File: ', '*** Delete File: ', '*** Move to: ')
+    paths = []
+    for line in command.split('\n'):
+        for prefix in prefixes:
+            if not line.startswith(prefix):
+                continue
+            raw = line[len(prefix):].strip()
+            if '\x00' in raw:
+                raise Fault('the path in the input of the hook holds a NUL character')
+            if os.path.isabs(raw):
+                paths.append(raw)
+            elif isinstance(cwd, str) and os.path.isabs(cwd) and '\x00' not in cwd:
+                paths.append(os.path.join(cwd, raw))
+            else:
+                raise Fault('the path in the input of the hook is relative and the input gives no working folder')
+            break
+    if not paths:
+        raise Fault('the patch names no file')
+    return paths
+
+
+def resolve_opencode_path(raw, cwd):
+    """One path from OpenCode's guard plugin: absolute already, or joined to cwd."""
+    if not isinstance(raw, str) or not raw:
+        raise Fault('the input of the hook names no file (args names no path)')
+    if '\x00' in raw:
+        raise Fault('the path in the input of the hook holds a NUL character')
+    if os.path.isabs(raw):
+        return raw
+    if not isinstance(cwd, str) or not os.path.isabs(cwd) or '\x00' in cwd:
+        raise Fault('the path in the input of the hook is relative and the input gives no working folder')
+    return os.path.join(cwd, raw)
+
+
+def written_paths_opencode(data):
+    """OpenCode's guard plugin sends {tool, args, cwd}. edit and write name the path in
+    args.filePath; apply_patch names it in the *** Add File:, *** Update File:,
+    *** Delete File: and *** Move to: lines of args.patchText (the Codex patch format,
+    m10-architecture.md 2.4). Any other tool writes no file."""
+    tool = data.get('tool')
+    args = data.get('args')
+    if not isinstance(args, dict):
+        raise Fault('the input of the hook has no args')
+    cwd = data.get('cwd')
+    if tool in ('edit', 'write'):
+        return [resolve_opencode_path(args.get('filePath'), cwd)]
+    if tool == 'apply_patch':
+        text = args.get('patchText')
+        if not isinstance(text, str) or not text:
+            raise Fault('the input of the hook names no file (apply_patch has no patchText)')
+        prefixes = ('*** Add File: ', '*** Update File: ', '*** Delete File: ', '*** Move to: ')
+        paths = []
+        for line in text.split('\n'):
+            for prefix in prefixes:
+                if line.startswith(prefix):
+                    paths.append(resolve_opencode_path(line[len(prefix):].strip(), cwd))
+        if not paths:
+            raise Fault('the input of the hook names no file (apply_patch names no path)')
+        return paths
+    return []
+
+
 def written_paths(data, dialect):
     """The absolute paths the tool call writes, dialect by dialect. An empty list for a
     call that writes no file. Raises Fault when a file tool's input names no path."""
@@ -151,8 +316,13 @@ def written_paths(data, dialect):
     if dialect == 'claude':
         return [written_path_claude(data)]
     # dialect: antigravity
-    # dialect: codex
+    if dialect == 'antigravity':
+        return written_paths_antigravity(data)
+    if dialect == 'codex':
+        return written_paths_codex(data)
     # dialect: opencode
+    if dialect == 'opencode':
+        return written_paths_opencode(data)
     if dialect in DIALECTS:
         raise Fault('the %s dialect is not built yet' % dialect)
     raise Fault('the dialect "%s" is not known' % dialect)
@@ -165,8 +335,13 @@ def shell_command(data, dialect):
     if dialect == 'claude':
         return None
     # dialect: antigravity
-    # dialect: codex
+    if dialect == 'antigravity':
+        return shell_command_antigravity(data)
+    if dialect == 'codex':
+        return None
     # dialect: opencode
+    if dialect == 'opencode':
+        return None
     if dialect in DIALECTS:
         raise Fault('the %s dialect is not built yet' % dialect)
     raise Fault('the dialect "%s" is not known' % dialect)
@@ -294,6 +469,55 @@ def emit(decision, reason):
 
 def emit_pre(decision, reason, dialect):
     """Print the hook's decision, dialect by dialect. claude prints Claude Code's JSON form."""
+    # dialect: antigravity
+    if dialect == 'antigravity':
+        # Antigravity's PreToolUse hook prints {"decision": ..., "reason": ...} at the top
+        # level (m10-architecture.md 2.3, 5 M10.6 item 2); no reason key for allow and ask.
+        if FINISHING[0]:
+            return
+        FINISHING[0] = True
+        out = {'decision': decision}
+        if decision not in ('allow', 'ask'):
+            out['reason'] = clip(reason)
+        try:
+            sys.stdout.write(json.dumps(out) + '\n')
+            sys.stdout.flush()
+        except Exception:
+            os._exit(2)
+        os._exit(0)
+    # dialect: codex
+    if dialect == 'codex':
+        # Codex's PreToolUse hook: deny with the hookSpecificOutput JSON form (as claude);
+        # allow prints nothing and exits 0 (any other exit code lets the call go on).
+        if FINISHING[0]:
+            return
+        FINISHING[0] = True
+        if decision == 'allow':
+            os._exit(0)
+        out = {'hookSpecificOutput': {'hookEventName': EVENT, 'permissionDecision': decision,
+                                      'permissionDecisionReason': clip(reason)}}
+        try:
+            sys.stdout.write(json.dumps(out) + '\n')
+            sys.stdout.flush()
+        except Exception:
+            os._exit(2)
+        os._exit(0)
+    # dialect: opencode
+    if dialect == 'opencode':
+        # OpenCode's guard plugin parses {"decision": "allow"|"deny", "reason": ...} at the
+        # top level (m10-architecture.md 5 M10.8 item 1); no reason key for allow.
+        if FINISHING[0]:
+            return
+        FINISHING[0] = True
+        out = {'decision': decision}
+        if decision != 'allow':
+            out['reason'] = clip(reason)
+        try:
+            sys.stdout.write(json.dumps(out) + '\n')
+            sys.stdout.flush()
+        except Exception:
+            os._exit(2)
+        os._exit(0)
     # dialect: claude
     if dialect != 'claude':
         raise Fault('the %s dialect is not built yet' % dialect)
@@ -382,6 +606,119 @@ def on_signal(name):
     refuse_fault('the adapter was stopped by the signal %s' % name)
 
 
+UNCOVERED_SHELL_REASON = (
+    "This session skips Antigravity's own prompts, so a shell command outside the session's "
+    "rules is refused. Run it yourself, or start the session without "
+    "--dangerously-skip-permissions.")
+
+
+def decide_antigravity_shell(command, cwd, arguments):
+    """deny, allow or force_ask for a run_command call, judged by shell-rules.json
+    (m10-architecture.md 5, M10.6 item 2). Human Lead's ruling of 2026-09-19: when the
+    session was started with --dangerously-skip-permissions, --uncovered-shell is 'deny'
+    and a command the rules would otherwise only force_ask about is denied instead, since
+    the engine's own prompt (which force_ask relies on) is skipped."""
+    STATE['path'] = cwd
+    rules_path = arguments.get('--shell-rules')
+    try:
+        if not rules_path:
+            raise Fault('no shell rules were given to the adapter')
+        with open(rules_path, encoding='utf-8') as handle:
+            rules = json.load(handle)
+        if not isinstance(rules, dict):
+            raise Fault('the shell rules file is not a JSON object')
+    except Fault as fault:
+        deny('fault', '%s %s' % (fault_sentence(str(fault)), what_the_session_can_do()))
+        return
+    except Exception as error:
+        deny('fault', '%s %s' % (fault_sentence('the shell rules could not be read (%s)'
+                                                  % type(error).__name__), what_the_session_can_do()))
+        return
+    allow_rules = rules.get('allow')
+    deny_rules = rules.get('deny')
+    allow_rules = allow_rules if isinstance(allow_rules, list) else []
+    deny_rules = deny_rules if isinstance(deny_rules, list) else []
+    for rule in deny_rules:
+        inner = bash_rule_inner(rule)
+        if inner is not None and fnmatch.fnmatchcase(command, inner):
+            deny('refused', 'The command is refused in a companion session: it matches the rule "%s".' % rule)
+            return
+    meta_characters = (';', '|', '&', chr(96), '$(', '>', '<', '\n')
+    has_meta = any(character in command for character in meta_characters)
+    same_cwd = False
+    space = arguments.get('--space')
+    if not has_meta and space:
+        try:
+            same_cwd = bool(cwd) and os.path.realpath(cwd) == os.path.realpath(space)
+        except Exception:
+            same_cwd = False
+    if not has_meta and same_cwd:
+        for rule in allow_rules:
+            inner = bash_rule_inner(rule)
+            if inner is None:
+                continue
+            if inner.endswith(':*'):
+                prefix = inner[:-2]
+                if command == prefix or command.startswith(prefix + ' '):
+                    emit('allow', '')
+                    return
+            elif command == inner:
+                emit('allow', '')
+                return
+    if arguments.get('--uncovered-shell') == 'deny':
+        deny('refused', UNCOVERED_SHELL_REASON)
+        return
+    emit('force_ask', "The companion's rules do not cover this command; the Human Lead decides.")
+
+
+def decide_antigravity(data, arguments, deadline):
+    """The pre-write decision for Antigravity CLI (m10-architecture.md 5, M10.6 item 2), in
+    order: a file tool checks every path it names; run_command follows the shell rules; a call
+    of the session server's MCP server (toolCall.name "call_mcp_tool", args.ServerName holding
+    "ailore") or a tool in AGY_READ_TOOLS is allowed; anything else asks.
+
+    Finding, observed 2026-09-19 with agy 1.2.7 (differs from what m10-architecture.md 2.3
+    assumed from the model's own words): the hook's toolCall.name for a session-server call is
+    the fixed name "call_mcp_tool", not a name holding the plugin's server name. The server and
+    tool called are in toolCall.args.ServerName ("lore_ailore") and .ToolName ("await_answer",
+    "request_writing", ...). A check by toolCall.name alone would send every session-server
+    call to the "anything else asks" branch, which blocks headless real-engine checks.
+
+    A malformed or missing toolCall (not a dict, or with no string name) is not "anything
+    else": it is broken input, and fails closed with a Fault (a deny), as the other dialects'
+    written_paths already do for missing fields, rather than silently asking."""
+    tool_call = data.get('toolCall')
+    if not isinstance(tool_call, dict):
+        raise Fault('the input of the hook has no toolCall')
+    name = tool_call.get('name')
+    if not isinstance(name, str) or not name:
+        raise Fault('the input of the hook names no tool')
+    args = tool_call.get('args')
+    if name in AGY_FILE_TOOLS:
+        allowed = []
+        for path in written_paths(data, 'antigravity'):
+            STATE['path'] = path
+            for script in arguments['--check']:
+                remaining = int(deadline - time.monotonic())
+                try:
+                    allowed.append(run_check(script, arguments, path, 'before',
+                                             min(arguments['--child-seconds'], remaining)))
+                except Refused as refusal:
+                    deny('refused', '%s %s' % (refusal, what_the_session_can_do()))
+        emit('allow', ' '.join(text for text in allowed if text) or 'The before-write checks allow the write.')
+        return
+    shell = shell_command(data, 'antigravity')
+    if shell is not None:
+        decide_antigravity_shell(shell[0], shell[1], arguments)
+        return
+    server_name = args.get('ServerName') if isinstance(args, dict) else None
+    is_session_server_call = name == 'call_mcp_tool' and server_name == AGY_SESSION_SERVER_NAME
+    if is_session_server_call or ('ailore' in name or name in AGY_READ_TOOLS):
+        emit('allow', '')
+        return
+    emit('ask', '')
+
+
 def main():
     arguments = parse_arguments(sys.argv[1:])
     ARGUMENTS[0] = arguments
@@ -394,17 +731,27 @@ def main():
 
     start_alarm(arguments['--adapter-seconds'], on_alarm)
     data = read_hook_input()
-    STATE['tool'] = tool_name(data)
-    path = written_paths(data, arguments['--dialect'])[0]
-    STATE['path'] = path
+    STATE['tool'] = tool_name(data, arguments['--dialect'])
+    if arguments['--dialect'] == 'antigravity':
+        # Antigravity's decision is not one path per call: a file tool may name several paths,
+        # a shell call has none, and other tools are judged by name, not by path (decide_antigravity).
+        decide_antigravity(data, arguments, deadline)
+        return
+    # A call may write more than one path (a Codex apply_patch may add, update, delete or move
+    # several files in one call; an Antigravity tool may take more than one path key): every
+    # path is checked, and a refusal on any one of them denies the whole call (M10.7, also
+    # needed by M10.6's written_paths_antigravity).
+    paths = written_paths(data, arguments['--dialect'])
     allowed = []
-    for script in arguments['--check']:
-        remaining = int(deadline - time.monotonic())
-        try:
-            allowed.append(run_check(script, arguments, path, 'before',
-                                     min(arguments['--child-seconds'], remaining)))
-        except Refused as refusal:
-            deny('refused', '%s %s' % (refusal, what_the_session_can_do()))
+    for path in paths:
+        STATE['path'] = path
+        for script in arguments['--check']:
+            remaining = int(deadline - time.monotonic())
+            try:
+                allowed.append(run_check(script, arguments, path, 'before',
+                                         min(arguments['--child-seconds'], remaining)))
+            except Refused as refusal:
+                deny('refused', '%s %s' % (refusal, what_the_session_can_do()))
     emit('allow', ' '.join(text for text in allowed if text) or 'The before-write checks allow the write.')
 
 
@@ -437,6 +784,25 @@ is in the Lore it runs each check script given with --check with --when after,
 and reports a failure to the session. A write outside the Lore prints nothing.
 """${ADAPTER_COMMON}
 EVENT = 'PostToolUse'
+STATE = {'tool': 'an unknown tool', 'path': None}
+
+
+def note_after_write_refusal(reason):
+    """One line in the session's refusals file, kind after-write (antigravity only, emit_post):
+    the report a Claude Code session gets from PostToolUse cannot reach an Antigravity one."""
+    try:
+        refusals = (ARGUMENTS[0] or {}).get('--refusals')
+        if not refusals:
+            return
+        line = json.dumps({'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'kind': 'after-write',
+                           'tool': STATE['tool'], 'path': STATE['path'], 'reason': clip(reason)})
+        descriptor = os.open(refusals, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        try:
+            os.write(descriptor, (line + '\n').encode('utf-8'))
+        finally:
+            os.close(descriptor)
+    except Exception:
+        pass
 
 
 def report(reason):
@@ -453,8 +819,30 @@ def report(reason):
 def emit_post(problem, dialect):
     """Report a problem found after the write, dialect by dialect, or do nothing for None.
     claude prints Claude Code's PostToolUse block form."""
+    # dialect: antigravity
+    if dialect == 'antigravity':
+        # A PostToolUse handler cannot send a message to an Antigravity session (2.3): it
+        # must print {}. A problem is noted in refusals.jsonl instead, kind after-write.
+        if problem is not None:
+            note_after_write_refusal(problem)
+        if FINISHING[0]:
+            return
+        FINISHING[0] = True
+        try:
+            sys.stdout.write(json.dumps({}) + '\n')
+            sys.stdout.flush()
+        except Exception:
+            pass
+        os._exit(0)
+    # dialect: opencode
+    if dialect == 'opencode':
+        # No after-write hook is wired for OpenCode in this phase (m10-architecture.md 5,
+        # M10.8 item 2): the guard plugin registers tool.execute.before only, so this is
+        # never reached in a real session, but the fallback of report() may still call it.
+        return
     # dialect: claude
-    if dialect != 'claude':
+    # dialect: codex (codex reuses the Claude Code form: m10-architecture.md 5, M10.7 item 2)
+    if dialect not in ('claude', 'codex'):
         raise Fault('the %s dialect is not built yet' % dialect)
     if problem is None:
         return
@@ -509,6 +897,8 @@ def main():
     start_alarm(arguments['--adapter-seconds'], on_alarm)
     data = read_hook_input()
     path = written_paths(data, arguments['--dialect'])[0]
+    STATE['tool'] = tool_name(data, arguments['--dialect'])
+    STATE['path'] = path
     if not in_lore(arguments['--space'], path):
         os._exit(0)
     failures = []
@@ -532,4 +922,69 @@ if __name__ == '__main__':
         report(fault_sentence(str(fault)))
     except BaseException as error:
         report(fault_sentence('the adapter failed with %s' % type(error).__name__))
+`;
+
+/**
+ * `opencode/plugins/lore-guard.js` (phase M10.8, `m10-architecture.md` 5 M10.8
+ * item 1): OpenCode's own guard plugin, written into the session's folder
+ * when the session starts. It hands every `edit`, `write` and `apply_patch`
+ * call to the before-write Python adapter (`PRE_WRITE_ADAPTER` above, run
+ * with `--dialect opencode`) and throws when the adapter does not answer
+ * `allow`, so OpenCode refuses the call.
+ *
+ * `__LORE_GUARD_ARGV__` is a placeholder: the OpenCode adapter's `launch`
+ * (`engines/opencode.ts`) replaces it with `JSON.stringify(argv)`, `argv`
+ * being `hookArgv` for `hooks/pre-write.py` with `--dialect opencode` (the
+ * python path, the adapter path and the hook arguments, as the specification
+ * asks). The result is a plain JSON array literal, so the substitution cannot
+ * break the surrounding JavaScript.
+ */
+export const OPENCODE_GUARD_PLUGIN = String.raw`/**
+ * lore-guard.js: the AI-Lore companion's before-write guard for an OpenCode
+ * session. Written by the companion when the session starts. Do not edit: it
+ * is written again for each session.
+ *
+ * OpenCode runs this plugin's tool.execute.before hook before edit, write and
+ * apply_patch calls. It hands the call to the companion's before-write
+ * adapter (the same adapter Claude Code uses, run with --dialect opencode)
+ * and throws when the adapter does not answer allow, so the call is refused.
+ */
+
+import { spawnSync } from 'node:child_process';
+
+const HOOK_ARGV = __LORE_GUARD_ARGV__;
+const GUARDED_TOOLS = ['edit', 'write', 'apply_patch'];
+const FALLBACK_REASON =
+  "The companion's before-write check could not be made; the write is refused. Tell the Human Lead.";
+
+export const LoreGuard = async ({ directory }) => {
+  return {
+    'tool.execute.before': async (input, output) => {
+      if (!GUARDED_TOOLS.includes(input.tool)) return;
+      const [command, ...args] = HOOK_ARGV;
+      let result;
+      try {
+        result = spawnSync(command, args, {
+          input: JSON.stringify({ tool: input.tool, args: output.args, cwd: directory }),
+          timeout: 55000,
+          encoding: 'utf8',
+        });
+      } catch (error) {
+        throw new Error(FALLBACK_REASON);
+      }
+      let decision = null;
+      if (result && !result.error && result.status === 0 && typeof result.stdout === 'string') {
+        try {
+          decision = JSON.parse(result.stdout);
+        } catch (error) {
+          decision = null;
+        }
+      }
+      if (!decision || decision.decision !== 'allow') {
+        const reason = decision && typeof decision.reason === 'string' ? decision.reason : '';
+        throw new Error(reason || FALLBACK_REASON);
+      }
+    },
+  };
+};
 `;

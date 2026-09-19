@@ -340,6 +340,45 @@ test('M10.5: --dialect claude behaves as today, and an unknown --dialect refuses
   assert.match(refused.reason, /--dialect nonsense is not known/);
 });
 
+test('M10.8: --dialect opencode refuses an apply_patch into lore/, in the flat decision form', async () => {
+  const files = await sessionFiles('s-opencode-dialect');
+  const command = shellCommandLine(
+    hookArgv({
+      python,
+      adapter: files.preWrite,
+      spaceRoot: space.root,
+      deskDir: paths.desk,
+      sessionId: 's-opencode-dialect',
+      checks: before_,
+      childSeconds: 5,
+      adapterSeconds: 10,
+      dialect: 'opencode',
+    }),
+  );
+  // The shape OpenCode's guard plugin sends: {tool, args, cwd} (m10-architecture.md 5, M10.8 item 1),
+  // not Claude Code's {tool_name, tool_input, cwd}.
+  const input = JSON.stringify({
+    tool: 'apply_patch',
+    args: {
+      patchText: [
+        '*** Begin Patch',
+        `*** Update File: ${join(space.root, 'lore', 'x.md')}`,
+        '@@',
+        '-old',
+        '+new',
+        '*** End Patch',
+        '',
+      ].join('\n'),
+    },
+    cwd: space.root,
+  });
+  const result = runHook(command, input);
+  assert.equal(result.status, 0, 'the adapter always ends with exit code 0 and a decision');
+  const decision = JSON.parse(result.stdout) as { decision: string; reason?: string };
+  assert.equal(decision.decision, 'deny');
+  assert.match(decision.reason ?? '', /Read only/);
+});
+
 test('checkStartParams: a ticked parameter is checked against the engine options of M10.3', () => {
   const engine: EngineEntry = {
     id: 'c',

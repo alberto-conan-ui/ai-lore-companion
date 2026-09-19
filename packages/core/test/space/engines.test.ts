@@ -31,7 +31,7 @@ test('ENGINE_CATALOG has the four engines, in order, with their ids and commands
   assert.equal(codex?.installCommand, 'npm install -g @openai/codex');
   assert.equal(codex?.installNeeds, 'npm');
   assert.equal(codex?.signInCommand, 'codex login');
-  assert.deepEqual(codex?.signInCheck, { kind: 'exit-code', args: ['login', 'status'] });
+  assert.deepEqual(codex?.signInCheck, { kind: 'codex-login-status' });
   assert.equal(codex?.guardedSessions, false);
   assert.equal(codex?.required, false);
 

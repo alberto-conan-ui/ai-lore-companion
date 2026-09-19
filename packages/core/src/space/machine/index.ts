@@ -43,8 +43,10 @@ export {
   CLAUDE_AUTH_STATUS_ARGS,
   CLAUDE_BINARY_NAME,
   CLAUDE_SIGN_IN_COMMAND,
+  CODEX_LOGIN_STATUS_ARGS,
   isClaudeEngine,
   parseClaudeAuthStatus,
+  parseCodexLoginStatus,
   parseOpencodeAuthList,
   probeEngineSignIn,
 } from './engine-sign-in.js';

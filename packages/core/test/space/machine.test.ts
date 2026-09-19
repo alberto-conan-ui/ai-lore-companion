@@ -4,8 +4,10 @@ import {
   CLAUDE_AUTH_STATUS_ARGS,
   CLAUDE_BINARY_NAME,
   CLAUDE_SIGN_IN_COMMAND,
+  CODEX_LOGIN_STATUS_ARGS,
   type CommandRunner,
   DEFAULT_MACHINE_CHECK_TIMEOUT_MS,
+  ENGINE_CATALOG,
   type EngineCheck,
   type EngineEntry,
   GH_ADD_SCOPE_COMMAND,
@@ -31,6 +33,7 @@ import {
   guidanceFor,
   isClaudeEngine,
   parseClaudeAuthStatus,
+  parseCodexLoginStatus,
   parseGhAuthStatus,
   parseOpencodeAuthList,
   parseToolVersion,
@@ -788,11 +791,15 @@ test('engine: the sign-in probe is a parameter; a probe that throws or hangs is 
   assert.deepEqual(hanging.state, { kind: 'fine', version: null });
 });
 
-test('engine: codex login status exit code decides signed-in state', async () => {
+test('engine: codex login status reads the text, not the exit code (M10.7: the command exits 0 whether or not an account is signed in)', async () => {
   const signedIn = await checkEngine(
     runnerWith([
       { bin: 'codex', args: ['--version'], reply: { stdout: 'codex-cli 0.5.0\n' } },
-      { bin: 'codex', args: ['login', 'status'], reply: { code: 0 } },
+      {
+        bin: 'codex',
+        args: ['login', 'status'],
+        reply: { code: 0, stdout: 'Logged in using ChatGPT\n' },
+      },
     ]),
     CODEX,
     LINUX,
@@ -803,7 +810,7 @@ test('engine: codex login status exit code decides signed-in state', async () =>
   const notSignedIn = await checkEngine(
     runnerWith([
       { bin: 'codex', args: ['--version'], reply: { stdout: 'codex-cli 0.5.0\n' } },
-      { bin: 'codex', args: ['login', 'status'], reply: { code: 1 } },
+      { bin: 'codex', args: ['login', 'status'], reply: { code: 0, stdout: 'Not logged in\n' } },
     ]),
     CODEX,
     LINUX,
@@ -823,6 +830,19 @@ test('engine: codex login status exit code decides signed-in state', async () =>
     LINUX,
   );
   assert.equal(timedOut.signIn.kind, 'undetermined');
+
+  const unclear = await checkEngine(
+    runnerWith([
+      { bin: 'codex', args: ['--version'], reply: { stdout: 'codex-cli 0.5.0\n' } },
+      { bin: 'codex', args: ['login', 'status'], reply: { code: 0, stdout: 'something else\n' } },
+    ]),
+    CODEX,
+    LINUX,
+  );
+  assert.deepEqual(unclear.signIn, {
+    kind: 'undetermined',
+    reason: '`codex login status` gave an answer that was not understood.',
+  });
 });
 
 test('engine: antigravity has no sign-in check and is always not-checked', async () => {
@@ -850,6 +870,58 @@ test('parseOpencodeAuthList reads the credentials count, falls back to a bullet 
     ),
     true,
   );
+});
+
+test('parseCodexLoginStatus: "Not logged in" is false, "Logged in…" is true, tested before Logged in, leading white space and ANSI ignored, otherwise null', () => {
+  assert.equal(parseCodexLoginStatus('Not logged in\n'), false);
+  assert.equal(parseCodexLoginStatus('  Not logged in'), false);
+  assert.equal(parseCodexLoginStatus('Logged in using ChatGPT\n'), true);
+  assert.equal(parseCodexLoginStatus('Logged in using an API key - sk-…\n'), true);
+  assert.equal(parseCodexLoginStatus(''), null);
+  assert.equal(parseCodexLoginStatus('error: unexpected argument'), null);
+  // ANSI colour sequences, as a terminal-formatted answer would carry them.
+  const esc = String.fromCharCode(27);
+  assert.equal(parseCodexLoginStatus(`${esc}[32mNot logged in${esc}[0m\n`), false);
+  assert.equal(parseCodexLoginStatus(`${esc}[32mLogged in using ChatGPT${esc}[0m\n`), true);
+});
+
+test("engine: default.codex's catalog entry reads codex login status by its text, not its exit code", async () => {
+  const codex = ENGINE_CATALOG.find((entry) => entry.catalogId === 'codex');
+  assert.deepEqual(codex?.signInCheck, { kind: 'codex-login-status' });
+
+  const asked: string[][] = [];
+  const run = async (bin: string, args: readonly string[]) => {
+    asked.push([bin, ...args]);
+    return { code: 0, stdout: 'Not logged in\n', stderr: '' };
+  };
+  const notSignedIn = await probeEngineSignIn(CODEX, run);
+  assert.deepEqual(notSignedIn, { kind: 'not-signed-in' });
+  assert.deepEqual(asked, [['codex', ...CODEX_LOGIN_STATUS_ARGS]]);
+
+  const signedIn = await probeEngineSignIn(CODEX, async () => ({
+    code: 0,
+    stdout: 'Logged in using ChatGPT\n',
+    stderr: '',
+  }));
+  assert.deepEqual(signedIn, { kind: 'signed-in' });
+
+  const unclear = await probeEngineSignIn(CODEX, async () => ({
+    code: 0,
+    stdout: 'something else',
+    stderr: '',
+  }));
+  assert.deepEqual(unclear, {
+    kind: 'undetermined',
+    reason: '`codex login status` gave an answer that was not understood.',
+  });
+
+  const timedOut = await probeEngineSignIn(CODEX, async () => ({
+    code: -1,
+    stdout: '',
+    stderr: 'stopped',
+    failure: 'timeout',
+  }));
+  assert.equal(timedOut.kind, 'undetermined');
 });
 
 test('engine: opencode is signed in by its credentials count', async () => {
@@ -1031,7 +1103,11 @@ test('checkMachine: Claude Code missing and Codex installed and signed in still 
   const runner = runnerWith([
     { bin: 'claude', args: ['--version'], reply: NOT_FOUND },
     { bin: 'codex', args: ['--version'], reply: { stdout: 'codex-cli 0.5.0\n' } },
-    { bin: 'codex', args: ['login', 'status'], reply: { code: 0 } },
+    {
+      bin: 'codex',
+      args: ['login', 'status'],
+      reply: { code: 0, stdout: 'Logged in using ChatGPT\n' },
+    },
   ]);
   const check = await checkMachine(runner, [CLAUDE, CODEX], LINUX);
   const engineReq = check.requirements.find((r) => r.id === 'engine');

@@ -114,6 +114,54 @@ export function parseOpencodeAuthList(stdout: string): boolean | null {
   return null;
 }
 
+/** The arguments that ask Codex CLI for its sign-in status. */
+export const CODEX_LOGIN_STATUS_ARGS: readonly string[] = ['login', 'status'];
+
+/** A line that starts with "Not logged in" (leading white space ignored, case not). */
+const CODEX_NOT_LOGGED_IN_LINE = /^not logged in/i;
+/** A line that starts with "Logged in" (leading white space ignored, case not). */
+const CODEX_LOGGED_IN_LINE = /^logged in/i;
+
+/**
+ * Read `codex login status`'s answer (standard output and standard error
+ * joined; ANSI sequences removed here): `false` when a line starts with
+ * "Not logged in", `true` when a line starts with "Logged in", otherwise
+ * `null`. Leading white space on a line is ignored; case is not. "Not logged
+ * in" is tested before "Logged in" (M10.7, the defect of section 2.4: the
+ * command's exit code is 0 whether or not an account is signed in).
+ */
+export function parseCodexLoginStatus(text: string): boolean | null {
+  const lines = text
+    .replace(ANSI_SEQUENCE, '')
+    .split('\n')
+    .map((line) => line.replace(/^\s+/, ''));
+  if (lines.some((line) => CODEX_NOT_LOGGED_IN_LINE.test(line))) return false;
+  if (lines.some((line) => CODEX_LOGGED_IN_LINE.test(line))) return true;
+  return null;
+}
+
+/** Ask Codex CLI with `codex login status` and read the text of its answer. */
+async function probeCodexLoginStatus(
+  engine: EngineEntry,
+  run: ProbeRun,
+): Promise<EngineSignInState> {
+  const result = await run(engine.binary, CODEX_LOGIN_STATUS_ARGS);
+  const command = `${engine.binary} ${CODEX_LOGIN_STATUS_ARGS.join(' ')}`;
+  if (result.failure === 'timeout') {
+    return { kind: 'undetermined', reason: `\`${command}\` did not answer in time.` };
+  }
+  if (result.failure !== undefined) {
+    return { kind: 'undetermined', reason: `\`${command}\` could not be run (${result.failure}).` };
+  }
+  const parsed = parseCodexLoginStatus(`${result.stdout}\n${result.stderr}`);
+  if (parsed === true) return { kind: 'signed-in' };
+  if (parsed === false) return { kind: 'not-signed-in' };
+  return {
+    kind: 'undetermined',
+    reason: '`codex login status` gave an answer that was not understood.',
+  };
+}
+
 /** Ask OpenCode with `opencode auth list`. */
 async function probeOpencodeAuthList(
   engine: EngineEntry,
@@ -158,6 +206,8 @@ export async function probeEngineSignIn(
       return probeExitCode(engine, run, catalog.signInCheck.args);
     case 'opencode-auth-list':
       return probeOpencodeAuthList(engine, run);
+    case 'codex-login-status':
+      return probeCodexLoginStatus(engine, run);
     case 'none':
       return { kind: 'not-checked' };
   }

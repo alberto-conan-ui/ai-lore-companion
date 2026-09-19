@@ -28,6 +28,7 @@ export type EngineSignInCheck =
   | { kind: 'claude-auth-status' } // `claude auth status --json`, field `loggedIn`
   | { kind: 'exit-code'; args: readonly string[] } // exit 0 = signed in
   | { kind: 'opencode-auth-list' } // at least one provider listed = signed in
+  | { kind: 'codex-login-status' } // `codex login status`: a line "Logged in…" = signed in, "Not logged in" = not
   | { kind: 'none' }; // the state is "Not checked"
 
 /** One engine of the catalog. */
@@ -83,7 +84,7 @@ export const ENGINE_CATALOG: readonly EngineCatalogEntry[] = [
     installCommand: 'npm install -g @openai/codex',
     installNeeds: 'npm',
     signInCommand: 'codex login',
-    signInCheck: { kind: 'exit-code', args: ['login', 'status'] },
+    signInCheck: { kind: 'codex-login-status' },
     seedParams: [],
     guardedSessions: false,
     required: false,
