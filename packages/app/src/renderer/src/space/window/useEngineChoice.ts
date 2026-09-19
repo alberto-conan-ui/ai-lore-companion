@@ -26,12 +26,12 @@ export function useEngineChoice(): EngineChoiceState {
   const [choice, setChoice] = useState<SpaceEngineChoice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const live = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    live.current = true;
+    return () => {
       live.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const ask = useCallback((): void => {
     void window.cockpit.spaceSessionEngines({}).then((result) => {
