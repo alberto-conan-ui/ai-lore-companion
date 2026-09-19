@@ -68,7 +68,7 @@ export type SessionReadiness =
 export type SpaceSessions = {
   /** Check what a start needs, without starting. */
   readiness(engineId: string): Promise<SessionReadiness>;
-  start(engineId: string): Promise<Started>;
+  start(engineId: string, flags?: string[]): Promise<Started>;
   /** End a session of this service. `false` when it has no such session. The engine is stopped. */
   end(sessionId: string): Promise<boolean>;
   /** The ids of the sessions running now. */
@@ -228,7 +228,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
     return entry.ending;
   }
 
-  async function start(engineId: string): Promise<Started> {
+  async function start(engineId: string, flags?: string[]): Promise<Started> {
     await cleanup;
     const pty = context.ptyService;
     if (!pty) {
@@ -324,6 +324,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
             mcpFile: paths.mcp,
             pluginDir: install.pluginDir,
             tools: sessionToolNames(connection.value),
+            flags,
           }),
         },
         {

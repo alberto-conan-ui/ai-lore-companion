@@ -39,7 +39,7 @@ import { spaceUi } from '../ui-store.js';
 import { readLoginShellPath, validLoginShell } from './machine.js';
 import { parseArg } from './validate.js';
 
-const engineSchema = z.strictObject({ engineId: z.string().min(1).max(256) });
+const engineSchema = z.strictObject({ engineId: z.string().min(1).max(256), flags: z.array(z.string()).optional() });
 const endSchema = z.strictObject({
   sessionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
 });
@@ -166,7 +166,7 @@ export function createSpaceSessionsRegister(
       if (!parsed.ok) return parsed;
       context.log.info('TRACE: main spaceSessionStart called', { engineId: parsed.value.engineId });
       watchHeaders(context);
-      const started = await context.service(spaceSessions).start(parsed.value.engineId);
+      const started = await context.service(spaceSessions).start(parsed.value.engineId, parsed.value.flags);
       if (started.ok) rememberEngine(context, parsed.value.engineId);
       return started;
     });

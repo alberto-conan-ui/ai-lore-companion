@@ -77,6 +77,8 @@ export type EngineArgvParts = {
   pluginDir: string;
   /** The full names of the session server's tools (`mcp__<server>__<tool>`). */
   tools: readonly string[];
+  /** Additional execution flags (e.g. --dangerously-skip-permissions) */
+  flags?: readonly string[];
 };
 
 /**
@@ -141,5 +143,6 @@ export function engineArgv(parts: EngineArgvParts): string[] {
     '--plugin-dir',
     parts.pluginDir,
     ...(parts.tools.length > 0 ? ['--allowedTools', ...parts.tools] : []),
+    ...(parts.flags ?? []),
   ];
 }
