@@ -46,10 +46,23 @@ export type PtySpawnOpts = {
    */
   env?: Readonly<Record<string, string>>;
   /**
-   * Called once when this PTY's process has exited, after the service's own
-   * `onExit` callback. Default: nothing. A 1.0 session ends its record here.
+   * A shell command line run as `$SHELL -i -l -c <command>` instead of a plain
+   * shell. Only command lines that are constants of core or main reach it: the
+   * setup commands of `setupCommands()`.
    */
-  onExit?: () => void;
+  command?: string;
+  /**
+   * Called with every chunk of output this PTY writes, after the service's own
+   * `onData` callback. Default: nothing. The command panel reads a device code
+   * out of it (M9.5).
+   */
+  onData?: (data: string) => void;
+  /**
+   * Called once when this PTY's process has exited, after the service's own
+   * `onExit` callback, with the process's exit code. Default: nothing. A 1.0
+   * session ends its record here.
+   */
+  onExit?: (exitCode: number) => void;
 };
 
 export type PtyService = {
@@ -198,6 +211,9 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
         args.unshift('-i');
         const tokens = [engine.binary, ...(engine.args ?? [])].map(quoteForShell);
         args.push('-c', tokens.join(' '));
+      } else if (spawnOpts?.command !== undefined) {
+        args.unshift('-i');
+        args.push('-c', spawnOpts.command);
       }
       const pty = spawn(DEFAULT_SHELL, args, {
         // 'xterm-256color' is what node-pty publishes as $TERM. The legacy
@@ -227,14 +243,17 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
         last: IDLE,
         infra: spawnOpts?.infra ?? false,
       });
-      pty.onData((data) => opts.onData(id, data));
-      pty.onExit(() => {
+      pty.onData((data) => {
+        opts.onData(id, data);
+        spawnOpts?.onData?.(data);
+      });
+      pty.onExit(({ exitCode }) => {
         ptys.delete(id);
         try {
           opts.onExit(id);
         } finally {
           // A 1.0 session's end must run even when the window's callback throws.
-          spawnOpts?.onExit?.();
+          spawnOpts?.onExit?.(exitCode);
         }
       });
       return id;

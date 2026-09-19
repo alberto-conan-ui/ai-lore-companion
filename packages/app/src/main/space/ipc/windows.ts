@@ -12,12 +12,14 @@ const openInFilesSchema = z.strictObject({
   relPath: relativePathSchema.optional(),
 });
 
+const machineSectionSchema = z.enum(['tools', 'github', 'engines', 'spaces-folder']);
+
 const navigateSchema = z.discriminatedUnion('to', [
   z.strictObject({ to: z.literal('space-welcome') }),
-  z.strictObject({ to: z.literal('machine-check') }),
+  z.strictObject({ to: z.literal('machine-check'), section: machineSectionSchema.optional() }),
   z.strictObject({
     to: z.literal('setup'),
-    start: z.enum(['new', 'from-address', 'about-this-folder']),
+    start: z.enum(['new', 'from-address', 'about-this-folder', 'from-repository']),
   }),
   z.strictObject({ to: z.literal('space-files'), open: openInFilesSchema.optional() }),
 ]);

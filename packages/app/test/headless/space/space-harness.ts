@@ -204,6 +204,7 @@ export function fakeSpaceHost(): SpaceHost {
     owns: () => false,
     mayRemember: () => false,
     windowClosed: async () => {},
+    commandTerminal: () => undefined,
     recentSpaces: () => [],
     resolveRecentSpace: () => ({ status: 'unknown' }),
     removeRecentSpace: () => [],

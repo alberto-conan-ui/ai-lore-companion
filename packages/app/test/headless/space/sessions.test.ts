@@ -695,7 +695,7 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
       resize: () => {},
       kill: (id) => {
         killed.push(id);
-        spawned[Number(id.slice(4)) - 1]?.opts?.onExit?.();
+        spawned[Number(id.slice(4)) - 1]?.opts?.onExit?.(0);
       },
       killAll: () => {},
       hasRunningTask: () => false,
@@ -806,7 +806,7 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
       engineId: 'claude-code',
     })) as { ok: boolean; value: { sessionId: string } };
     assert.equal(second.ok, true, JSON.stringify(second));
-    spawned[1]?.opts?.onExit?.();
+    spawned[1]?.opts?.onExit?.(0);
     await endedOnItsOwn(second.value.sessionId);
     // A session still running when its Space window closes (and at app quit) is ended too.
     const third = (await h.invoke('spaceSessionStart', spaceWindow, {

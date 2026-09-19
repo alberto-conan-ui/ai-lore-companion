@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { homedir } from 'node:os';
 import { after, afterEach, before, beforeEach, test } from 'node:test';
 import { deskPaths, spaceKey } from '@ai-lore-companion/core';
 import {
@@ -283,4 +284,73 @@ test('reload runs detection again for the window folder', async () => {
     ['not-a-space', 'not-a-space'],
   );
   assert.equal(t.terminals.length, 2, 'the terminal was attached again');
+});
+
+test('launch(null) shows the welcome screen with checkOnLaunch; other ways to it send no flag', async () => {
+  await t.host.launch(null);
+  const [launched] = t.created;
+  assert.ok(launched);
+  launched.finishLoad();
+  const init = launched.inits()[0];
+  assert.ok(init?.mode === 'space-welcome');
+  assert.equal(init.checkOnLaunch, true);
+
+  const result = await t.host.navigate(launched, { to: 'space-welcome' });
+  assert.deepEqual(result, { ok: true, value: { mode: 'space-welcome' } });
+  const again = launched.inits().at(-1);
+  assert.ok(again?.mode === 'space-welcome');
+  assert.equal(again.checkOnLaunch, undefined);
+});
+
+test('navigate to machine-check from a window of a Space opens or reuses a second window, with its section', async () => {
+  await t.host.openFolder(undefined, space.root);
+  const [spaceWindow] = t.created;
+  assert.ok(spaceWindow);
+
+  const opened = await t.host.navigate(spaceWindow, { to: 'machine-check', section: 'engines' });
+  assert.deepEqual(opened, { ok: true, value: { mode: 'machine-check' } });
+  assert.equal(t.created.length, 2, 'a second window was created for it');
+  const machineWindow = t.created[1];
+  assert.ok(machineWindow);
+  machineWindow.finishLoad();
+  assert.deepEqual(machineWindow.inits().at(-1), { mode: 'machine-check', section: 'engines' });
+
+  const again = await t.host.navigate(spaceWindow, { to: 'machine-check', section: 'engines' });
+  assert.deepEqual(again, { ok: true, value: { mode: 'machine-check' } });
+  assert.equal(t.created.length, 2, 'the existing machine-check window was reused');
+  assert.equal(machineWindow.focusCount, 1);
+});
+
+test('navigate to setup with start "from-repository", from the welcome window', async () => {
+  t.host.openWelcome();
+  const [welcome] = t.created;
+  assert.ok(welcome);
+  welcome.finishLoad();
+  const result = await t.host.navigate(welcome, { to: 'setup', start: 'from-repository' });
+  assert.deepEqual(result, { ok: true, value: { mode: 'setup' } });
+  welcome.finishLoad();
+  const init = welcome.inits().at(-1);
+  assert.ok(init?.mode === 'setup');
+  assert.deepEqual(init.start, { kind: 'from-repository' });
+});
+
+test('commandTerminal gives a window with no folder one terminal, torn down when it is given another screen', async () => {
+  t.host.openWelcome();
+  const [welcome] = t.created;
+  assert.ok(welcome);
+  welcome.finishLoad();
+  await t.host.navigate(welcome, { to: 'machine-check' });
+
+  const first = t.host.commandTerminal(welcome);
+  assert.ok(first);
+  assert.deepEqual(t.terminals, [{ windowId: welcome.id, folder: homedir() }]);
+  const second = t.host.commandTerminal(welcome);
+  assert.equal(second, first, 'the same terminal is kept while the screen does not change');
+  assert.equal(t.terminals.length, 1, 'attachTerminal was called once');
+
+  await t.host.navigate(welcome, { to: 'space-welcome' });
+  assert.deepEqual(t.detached, [welcome.id]);
+  const third = t.host.commandTerminal(welcome);
+  assert.notEqual(third, first, 'a new terminal is made after the screen changed');
+  assert.equal(t.terminals.length, 2);
 });

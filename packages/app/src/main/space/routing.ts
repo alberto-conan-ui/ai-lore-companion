@@ -82,10 +82,17 @@ export function legacySummaryOf(detected: Extract<FolderKind, { kind: 'legacy' }
  * false; a plain repository and anything else open the not-a-Space screen,
  * the first with the offer to create a Space about it.
  */
-export function windowInitFor(detected: FolderKind): FolderWindowInit {
+export function windowInitFor(
+  detected: FolderKind,
+  opts?: { justCreated?: boolean },
+): FolderWindowInit {
   switch (detected.kind) {
     case 'space':
-      return { mode: 'space', space: spaceSummaryOf(detected) };
+      return {
+        mode: 'space',
+        space: spaceSummaryOf(detected),
+        ...(opts?.justCreated ? { justCreated: true } : {}),
+      };
     case 'legacy':
       return { mode: 'migration', folder: detected.root, legacy: legacySummaryOf(detected) };
     case 'plain-repository':
@@ -112,7 +119,11 @@ export function windowTitleFor(init: FolderWindowInit): string {
 }
 
 /** Decide where `root` goes. It reads the folder and writes nothing. */
-export async function routeFolder(root: string, deps: RouteDeps): Promise<FolderRoute> {
+export async function routeFolder(
+  root: string,
+  deps: RouteDeps,
+  opts?: { justCreated?: boolean },
+): Promise<FolderRoute> {
   if (!deps.spaceRouting) return { route: 'v08-routing', root };
   const detected = await (deps.detect ?? detectFolder)(root, { git: deps.git });
   if (!detected.ok) return { route: 'failed', root, error: detected.error };
@@ -120,6 +131,6 @@ export async function routeFolder(root: string, deps: RouteDeps): Promise<Folder
     route: 'space-window',
     root: detected.value.root,
     detected: detected.value,
-    init: windowInitFor(detected.value),
+    init: windowInitFor(detected.value, opts),
   };
 }

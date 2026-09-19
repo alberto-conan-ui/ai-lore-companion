@@ -13,6 +13,7 @@
  * test in the headless suite.
  */
 
+import { homedir } from 'node:os';
 import type { CommandRunner, FolderKind, GitPort, detectFolder } from '@ai-lore-companion/core';
 import type {
   OpenInFiles,
@@ -128,13 +129,22 @@ export type SpaceHost = {
    * folder, otherwise in a new window. A folder that is already open is
    * brought to the front. Main calls this with a path it trusts (the folder
    * dialog, the launch argument, a Space that setup just created); a path
-   * from the renderer is checked by the IPC handler first.
+   * from the renderer is checked by the IPC handler first. `opts.justCreated`
+   * marks a Space just made by setup, carried into the `space` payload.
    */
-  openFolder(window: SpaceWindowLike | undefined, folder: string): Promise<SpaceWindowResult>;
+  openFolder(
+    window: SpaceWindowLike | undefined,
+    folder: string,
+    opts?: { justCreated?: boolean },
+  ): Promise<SpaceWindowResult>;
   /** Ask for a folder, then open it. */
   promptAndOpenFolder(window: SpaceWindowLike | undefined): Promise<SpaceWindowResult>;
-  /** Show the 1.0 welcome screen, in `window` when it shows no folder, otherwise in a new window. */
-  openWelcome(window?: SpaceWindowLike, notice?: string): void;
+  /**
+   * Show the 1.0 welcome screen, in `window` when it shows no folder, otherwise
+   * in a new window. `opts.checkOnLaunch` is set only when the launch itself
+   * opens the welcome screen; every other way to it sends no flag.
+   */
+  openWelcome(window?: SpaceWindowLike, opts?: { notice?: string; checkOnLaunch?: boolean }): void;
   /** Open the window a launch calls for: `root` through detection, or the welcome screen. */
   launch(root: string | null): Promise<void>;
   /** Show another screen in the window. See `SpaceNavigateArg` for what is accepted from where. */
@@ -156,6 +166,13 @@ export type SpaceHost = {
   mayRemember(windowId: number): boolean;
   /** The window closed. Its record is dropped and its Space context released. */
   windowClosed(windowId: number): Promise<void>;
+  /**
+   * The PTY service a command panel runs a command in: the terminal of a
+   * window of a Space, or, for a window that shows no folder, a terminal
+   * rooted at the home folder, created on first use and kept until the window
+   * is given another screen or closes.
+   */
+  commandTerminal(window: SpaceWindowLike): PtyService | undefined;
   /** The recents of Spaces, newest first. */
   recentSpaces(): RecentSpace[];
   /**
@@ -193,6 +210,12 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
   });
   /** What detection said about the folder each window shows. */
   const detectedByWindow = new Map<number, FolderKind>();
+  /**
+   * The command-panel terminal of a window that shows no folder, by window id
+   * (see {@link SpaceHost.commandTerminal}). Torn down when the window is
+   * given another screen or closes.
+   */
+  const noFolderTerminals = new Map<number, PtyService>();
 
   const usable = (window: SpaceWindowLike | undefined): window is SpaceWindowLike =>
     window !== undefined && !window.isDestroyed();
@@ -286,17 +309,23 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
   ): Promise<void> => {
     const hadFolder = !holdsNoFolder(window) && windows.recordFor(window.id) !== undefined;
     if (hadFolder) await detachFolder(window);
+    if (noFolderTerminals.has(window.id)) {
+      await bindings.detachWindow(window.id);
+      noFolderTerminals.delete(window.id);
+    }
     window.setTitle('AI-Lore');
     // A window that showed a folder is reloaded, so that nothing of its terminal stays in the page.
     windows.show(window, init, hadFolder ? 'reload-then-send' : 'now');
   };
 
-  const welcomeInit = (
-    notice?: string,
-  ): Extract<SpaceWindowInitPayload, { mode: 'space-welcome' }> => ({
+  const welcomeInit = (opts?: { notice?: string; checkOnLaunch?: boolean }): Extract<
+    SpaceWindowInitPayload,
+    { mode: 'space-welcome' }
+  > => ({
     mode: 'space-welcome',
     recents: loadRecentSpaces(bindings.userDataDir()),
-    ...(notice === undefined ? {} : { notice }),
+    ...(opts?.notice === undefined ? {} : { notice: opts.notice }),
+    ...(opts?.checkOnLaunch === undefined ? {} : { checkOnLaunch: opts.checkOnLaunch }),
   });
 
   const host: SpaceHost & SpaceHostInternals = {
@@ -316,12 +345,16 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
     contextForKey: (key) => contexts.forKey(key),
     sendToSpace: (root, channel, payload) => windows.sendToSpace(root, channel, payload),
 
-    async openFolder(window, folder) {
-      const route = await routeFolder(folder, {
-        spaceRouting: bindings.spaceRouting,
-        git: bindings.git,
-        detect: bindings.detect,
-      });
+    async openFolder(window, folder, opts) {
+      const route = await routeFolder(
+        folder,
+        {
+          spaceRouting: bindings.spaceRouting,
+          git: bindings.git,
+          detect: bindings.detect,
+        },
+        opts,
+      );
       if (route.route === 'failed') {
         log.warn('folder-not-detected', { folder, kind: route.error.kind });
         return { ok: false, error: route.error };
@@ -350,22 +383,22 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
       return host.openFolder(window, folder);
     },
 
-    openWelcome(window, notice) {
+    openWelcome(window, opts) {
       if (usable(window) && holdsNoFolder(window)) {
         window.setTitle('AI-Lore');
-        windows.show(window, welcomeInit(notice), 'now');
+        windows.show(window, welcomeInit(opts), 'now');
         return;
       }
-      windows.show(bindings.createWindow(), welcomeInit(notice), 'after-load');
+      windows.show(bindings.createWindow(), welcomeInit(opts), 'after-load');
     },
 
     async launch(root) {
       if (root === null) {
-        host.openWelcome();
+        host.openWelcome(undefined, { checkOnLaunch: true });
         return;
       }
       const result = await host.openFolder(undefined, root);
-      if (!result.ok) host.openWelcome(undefined, result.error.message);
+      if (!result.ok) host.openWelcome(undefined, { notice: result.error.message });
     },
 
     async navigate(window, arg) {
@@ -383,6 +416,25 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
         return shown('space-files');
       }
 
+      if (arg.to === 'machine-check') {
+        const init: Extract<SpaceWindowInitPayload, { mode: 'machine-check' }> =
+          arg.section === undefined
+            ? { mode: 'machine-check' }
+            : { mode: 'machine-check', section: arg.section };
+        if (mode === 'space' || mode === 'space-files') {
+          const existing = windows.findByMode('machine-check');
+          if (existing) {
+            windows.show(existing.window, init, 'now');
+            bringToFront(existing.window);
+            return shown('machine-check');
+          }
+          windows.show(bindings.createWindow(), init, 'after-load');
+          return shown('machine-check');
+        }
+        await showScreen(window, init);
+        return shown('machine-check');
+      }
+
       if (mode === 'space' || mode === 'space-files') {
         return failure(
           'not-allowed-here',
@@ -393,10 +445,6 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
       if (arg.to === 'space-welcome') {
         await showScreen(window, welcomeInit());
         return shown('space-welcome');
-      }
-      if (arg.to === 'machine-check') {
-        await showScreen(window, { mode: 'machine-check' });
-        return shown('machine-check');
       }
 
       let start: SetupStart;
@@ -484,6 +532,20 @@ export function createSpaceHost(bindings: SpaceHostBindings): SpaceHost & SpaceH
       boundsTracked.delete(windowId);
       windows.forget(windowId);
       await contexts.release(windowId);
+      if (noFolderTerminals.has(windowId)) {
+        await bindings.detachWindow(windowId);
+        noFolderTerminals.delete(windowId);
+      }
+    },
+
+    commandTerminal(window) {
+      const context = contexts.forWindow(window.id);
+      if (context) return context.ptyService ?? undefined;
+      const existing = noFolderTerminals.get(window.id);
+      if (existing) return existing;
+      const service = bindings.attachTerminal(window, homedir());
+      noFolderTerminals.set(window.id, service);
+      return service;
     },
 
     recentSpaces: () => loadRecentSpaces(bindings.userDataDir()),

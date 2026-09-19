@@ -57,7 +57,12 @@ export type SetupStart =
   /** A Space opened from its GitHub address, from the welcome screen. */
   | { kind: 'from-address' }
   /** A Space about a plain repository, from the not-a-Space screen. Main fills both fields. */
-  | { kind: 'about-repository'; folder: string; originUrl: string | null };
+  | { kind: 'about-repository'; folder: string; originUrl: string | null }
+  /** A Space about a repository chosen on the form, from the welcome screen. */
+  | { kind: 'from-repository' };
+
+/** A section of Set up this computer that a fix or a link opens on. */
+export type MachineSection = 'tools' | 'github' | 'engines' | 'spaces-folder';
 
 /** What the Files window opens on when it is shown. */
 export type OpenInFiles = {
@@ -72,12 +77,12 @@ export type OpenInFiles = {
  * where `welcome` is sent today, and only when detection routing is on.
  */
 export type SpaceWindowInitPayload =
-  | { mode: 'space-welcome'; recents: RecentSpace[]; notice?: string }
-  | { mode: 'machine-check' }
+  | { mode: 'space-welcome'; recents: RecentSpace[]; notice?: string; checkOnLaunch?: boolean }
+  | { mode: 'machine-check'; section?: MachineSection }
   | { mode: 'setup'; start: SetupStart }
   | { mode: 'migration'; folder: string; legacy: LegacySummary }
   | { mode: 'not-a-space'; folder: string; plainRepository: boolean; reason: string }
-  | { mode: 'space'; space: SpaceSummary }
+  | { mode: 'space'; space: SpaceSummary; justCreated?: boolean }
   | { mode: 'space-files'; space: SpaceSummary; open?: OpenInFiles };
 
 /** The name of a 1.0 window mode. */
@@ -139,9 +144,10 @@ export type SpaceOpenFolderArg = { folder?: string };
 /** Argument of `spaceNavigate`: the screen to show next. */
 export type SpaceNavigateArg =
   | { to: 'space-welcome' }
-  | { to: 'machine-check' }
+  /** From a window of a Space, this opens or brings forward the Set up this computer window. */
+  | { to: 'machine-check'; section?: MachineSection }
   /** `about-this-folder` is accepted only from the not-a-Space screen of a plain repository. */
-  | { to: 'setup'; start: 'new' | 'from-address' | 'about-this-folder' }
+  | { to: 'setup'; start: 'new' | 'from-address' | 'about-this-folder' | 'from-repository' }
   /** Accepted only from a window of a Space. Opens the Files window of that Space, or shows it. */
   | { to: 'space-files'; open?: OpenInFiles };
 

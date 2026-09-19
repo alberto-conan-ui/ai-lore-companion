@@ -81,6 +81,8 @@ export type SpaceWindows = {
     folder: string,
     modes: readonly SpaceWindowInitPayload['mode'][],
   ): SpaceWindowRecord | undefined;
+  /** The open window shown in `mode`, if there is one. */
+  findByMode(mode: SpaceWindowInitPayload['mode']): SpaceWindowRecord | undefined;
   /** Every open 1.0 window. */
   all(): SpaceWindowRecord[];
   /** Send a push to every window that shows the Space at `root` (the Space window and the Files window). */
@@ -129,6 +131,7 @@ export function createSpaceWindows(): SpaceWindows {
           canonicalFolder(record.folder) === target,
       );
     },
+    findByMode: (mode) => live().find((record) => record.init.mode === mode),
     all: live,
     sendToSpace(root, channel, payload) {
       const target = canonicalFolder(root);
