@@ -25,6 +25,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   type CommandRunner,
+  type EngineCheck,
   type EngineEntry,
   endSession,
   listSessions,
@@ -83,6 +84,8 @@ export type SpaceSessionParts = {
   runner: (context: SpaceContext) => CommandRunner;
   /** A new session id. */
   newId: () => string;
+  /** Whether `engine` is installed and signed in (A.10). Default: `probeEngineOfApp`. */
+  probeEngine: (engine: EngineEntry) => Promise<EngineCheck>;
 };
 
 let parts: SpaceSessionParts | null = null;
@@ -135,6 +138,25 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
   async function readiness(engineId: string): Promise<SessionReadiness> {
     const engine = checkSessionEngine(use.engines(), engineId);
     if (!engine.ok) return engine;
+    const probed = await use.probeEngine(engine.value);
+    if (probed.installed.kind === 'missing') {
+      return {
+        ok: false,
+        error: {
+          kind: 'engine-not-installed',
+          message: `No AI session was started: ${engine.value.name} is not installed.`,
+        },
+      };
+    }
+    if (probed.signIn.kind === 'not-signed-in') {
+      return {
+        ok: false,
+        error: {
+          kind: 'engine-not-signed-in',
+          message: `No AI session was started: ${engine.value.name} is installed and not signed in.`,
+        },
+      };
+    }
     const python = await findPython3(use.runner(context), await use.loginPath(), context.root);
     if (!python.ok) return python;
     const install = await verifyInstall(context.desk.install);

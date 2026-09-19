@@ -9,6 +9,8 @@ import type {
   SpaceSessionEndArg,
   SpaceSessionEndResult,
   SpaceSessionEngineArg,
+  SpaceSessionEnginePickArg,
+  SpaceSessionEnginesResult,
   SpaceSessionHeader,
   SpaceSessionHeaderResult,
   SpaceSessionLeaveWritingResult,
@@ -51,4 +53,16 @@ export const SPACE_SESSIONS_CONTRACT = {
   onSpaceSessionHeader: push<SpaceSessionHeader>('space:on-session-header'),
   /** The skills of the Space's install, read with the Lore reader (M4.6). */
   spaceSkillsList: invoke<[arg: SpaceSkillsArg], SpaceSkillsResult>('space:skills-list'),
+  /** The engine of a Space session, chosen by readiness (A.9, M9.7). Starts nothing. */
+  spaceSessionEngines: invoke<[arg: Record<string, never>], SpaceSessionEnginesResult>(
+    'space:session-engines',
+  ),
+  /** Remember `engineId` for this Space, when it can start; answers the new choice either way. */
+  spaceSessionEnginePick: invoke<[arg: SpaceSessionEnginePickArg], SpaceSessionEnginesResult>(
+    'space:session-engine-pick',
+  ),
+  /** Install the Lore again into Claude Code, then answer the choice. */
+  spaceSessionReinstall: invoke<[arg: Record<string, never>], SpaceSessionEnginesResult>(
+    'space:session-reinstall',
+  ),
 } as const;

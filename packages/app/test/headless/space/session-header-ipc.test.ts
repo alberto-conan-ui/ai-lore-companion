@@ -56,6 +56,26 @@ test('the header follows the desk, Leave Writing releases the claims, and the sk
       loginPath: async () => null,
       runner: () => execFileRunner,
       newId: () => `s-hdr-${Math.random().toString(16).slice(2, 8)}`,
+      // M9.7: readiness also probes the engine; here it is always installed and signed in.
+      probeEngine: async (engine) => ({
+        engineId: engine.id,
+        name: engine.name,
+        binary: engine.binary,
+        state: { kind: 'fine', version: null },
+        guidance: null,
+        command: null,
+        catalogId: null,
+        maker: null,
+        required: false,
+        guardedSessions: true,
+        installed: { kind: 'installed', version: null },
+        signIn: { kind: 'signed-in' },
+        installCommand: null,
+        installNeeds: null,
+        signInCommand: null,
+        note: null,
+        page: null,
+      }),
     })),
   );
   try {

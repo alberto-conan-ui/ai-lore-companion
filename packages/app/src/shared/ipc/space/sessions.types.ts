@@ -20,6 +20,8 @@ export type SpaceSessionFailure = {
     | 'no-terminal'
     | 'engine-not-found'
     | 'engine-not-supported'
+    | 'engine-not-installed'
+    | 'engine-not-signed-in'
     | 'python3-missing'
     | 'not-installed'
     | 'install-record-unreadable'
@@ -33,7 +35,8 @@ export type SpaceSessionFailure = {
     | 'start-failed'
     | 'unknown-session'
     | 'leave-failed'
-    | 'lore-unreadable';
+    | 'lore-unreadable'
+    | 'reinstall-failed';
   message: string;
 };
 
@@ -105,4 +108,57 @@ export type SpaceSkillsArg = Record<string, never>;
 
 export type SpaceSkillsResult =
   | { ok: true; value: SpaceSkillsList }
+  | { ok: false; error: SpaceSessionFailure };
+
+/**
+ * The engine of a Space session is chosen by readiness, not by the order of
+ * `engines.json` (phase M9.7, finding 8: a new Space picked Gemini and could
+ * not start a session). The fix a refusal offers.
+ */
+export type SpaceEngineFixKind =
+  | 'set-up-claude-code'
+  | 'sign-in'
+  | 'set-up-python3'
+  | 'reinstall-lore'
+  | 'edit-engine';
+
+export type SpaceEngineFix = {
+  kind: SpaceEngineFixKind;
+  /** The button's text. */
+  label: string;
+  /** For `sign-in`. */
+  commandId: string | null;
+  /** Shown beside the button, for `sign-in`. */
+  commandLine: string | null;
+  /** Set up this computer opens at this section. */
+  section: 'tools' | 'engines' | null;
+};
+
+/** One engine of the list `spaceSessionEngines` answers with. */
+export type SpaceEngineOption = {
+  engineId: string;
+  name: string;
+  canStart: boolean;
+  /** `null` when `canStart`. */
+  reason: string | null;
+  fix: SpaceEngineFix | null;
+};
+
+/** The engine choice of A.9: every engine of the list, and which one a session starts with. */
+export type SpaceEngineChoice = {
+  /** Every engine of the list, in list order (catalog first). */
+  options: SpaceEngineOption[];
+  /** The engine the start control uses; `null` when none can start. */
+  engineId: string | null;
+  /** The name on the button: the chosen engine's, else the first guarded catalog engine's. */
+  buttonName: string;
+  /** Set when `engineId` is `null`. */
+  refusal: { message: string; fix: SpaceEngineFix | null } | null;
+};
+
+/** Argument of `spaceSessionEnginePick`. */
+export type SpaceSessionEnginePickArg = { engineId: string };
+
+export type SpaceSessionEnginesResult =
+  | { ok: true; value: SpaceEngineChoice }
   | { ok: false; error: SpaceSessionFailure };

@@ -18,8 +18,8 @@ import {
   type CommandRunner,
   type EngineEntry,
   type InstallRecord,
+  canRunGuardedSession,
   claudeCodeInstallPaths,
-  isClaudeEngine,
   readInstallRecord,
   sha256File,
 } from '@ai-lore-companion/core';
@@ -33,6 +33,8 @@ export type SessionStartFailureKind =
   | 'no-terminal'
   | 'engine-not-found'
   | 'engine-not-supported'
+  | 'engine-not-installed'
+  | 'engine-not-signed-in'
   | 'python3-missing'
   | 'not-installed'
   | 'install-record-unreadable'
@@ -66,7 +68,7 @@ export function checkSessionEngine(
       `No AI session was started: the engine "${engineId}" is not in the list of engines.`,
     );
   }
-  if (!isClaudeEngine(engine)) {
+  if (!canRunGuardedSession(engine)) {
     return failed(
       'engine-not-supported',
       `No AI session was started: a guarded session in a Space is started with Claude Code only, and "${engine.name}" is not Claude Code.`,

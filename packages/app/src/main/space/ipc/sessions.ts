@@ -7,9 +7,11 @@
  * (read, pushed on a change of mode, Leave Writing) and the skills list.
  */
 
+import { installClaudeCode, readLore } from '@ai-lore-companion/core';
 import { z } from 'zod';
 import type {
   SpaceSessionEndResult,
+  SpaceSessionEnginesResult,
   SpaceSessionFailure,
   SpaceSessionHeaderResult,
   SpaceSessionLeaveWritingResult,
@@ -22,8 +24,10 @@ import { loadEngines } from '../../engines.js';
 import type { Deps, RegisterModule } from '../../ipc/types.js';
 import type { SpaceContext } from '../context.js';
 import { spaceDesk } from '../desk-service.js';
+import { probeEngineOfApp } from '../e2e-machine.js';
 import type { SpaceIpcEvent } from '../host.js';
 import { sessionServer } from '../session-server/index.js';
+import { engineChoice } from '../sessions/engine-choice.js';
 import { pushHeadersOnChange, readSessionHeader, readSpaceSkills } from '../sessions/header.js';
 import {
   type SpaceSessionParts,
@@ -31,6 +35,7 @@ import {
   newSessionId,
   spaceSessions,
 } from '../sessions/service.js';
+import { spaceUi } from '../ui-store.js';
 import { readLoginShellPath, validLoginShell } from './machine.js';
 import { parseArg } from './validate.js';
 
@@ -40,6 +45,11 @@ const endSchema = z.strictObject({
 });
 
 const emptySchema = z.strictObject({});
+
+const reinstallFailed = (message: string): { ok: false; error: SpaceSessionFailure } => ({
+  ok: false,
+  error: { kind: 'reinstall-failed', message },
+});
 
 const unknownSession: { ok: false; error: SpaceSessionFailure } = {
   ok: false,
@@ -59,16 +69,24 @@ const notASpaceWindow: { ok: false; error: SpaceSessionFailure } = {
 
 /** The parts the app builds the service with. */
 function appParts(deps: Deps): SpaceSessionParts {
+  const loginPath = () =>
+    readLoginShellPath(
+      deps.space.runner,
+      validLoginShell(process.env.SHELL ?? '/bin/zsh'),
+      process.platform,
+    );
   return {
     engines: () => loadEngines(deps.space.userDataDir()),
-    loginPath: () =>
-      readLoginShellPath(
-        deps.space.runner,
-        validLoginShell(process.env.SHELL ?? '/bin/zsh'),
-        process.platform,
-      ),
+    loginPath,
     runner: () => deps.space.runner,
     newId: () => newSessionId(),
+    probeEngine: async (engine) => {
+      const path = await loginPath();
+      return probeEngineOfApp(deps.space.runner, engine, {
+        platform: process.platform,
+        ...(path === null ? {} : { env: { PATH: path } }),
+      });
+    },
   };
 }
 
@@ -77,6 +95,17 @@ function spaceWindowContext(deps: Deps, event: SpaceIpcEvent): SpaceContext | un
   const record = deps.space.windowFor(event);
   if (!record || record.init.mode !== 'space') return undefined;
   return deps.space.contextFor(event);
+}
+
+/** The engine id the `session-engine` concern remembers for this Space, or `null`. */
+function rememberedEngine(context: SpaceContext): string | null {
+  const engineId = context.service(spaceUi).read('session-engine').state?.engineId;
+  return typeof engineId === 'string' ? engineId : null;
+}
+
+/** Remember `engineId` as the one this Space's sessions start with. */
+function rememberEngine(context: SpaceContext, engineId: string): void {
+  context.service(spaceUi).save('session-engine', { version: 1, engineId });
 }
 
 /**
@@ -136,7 +165,62 @@ export function createSpaceSessionsRegister(
       const parsed = parseArg(engineSchema, arg);
       if (!parsed.ok) return parsed;
       watchHeaders(context);
-      return context.service(spaceSessions).start(parsed.value.engineId);
+      const started = await context.service(spaceSessions).start(parsed.value.engineId);
+      if (started.ok) rememberEngine(context, parsed.value.engineId);
+      return started;
+    });
+
+    reg.handle('spaceSessionEngines', async (event, arg): Promise<SpaceSessionEnginesResult> => {
+      const context = spaceWindowContext(deps, event);
+      if (!context) return notASpaceWindow;
+      const parsed = parseArg(emptySchema, arg);
+      if (!parsed.ok) return parsed;
+      const sessions = context.service(spaceSessions);
+      const engines = loadEngines(deps.space.userDataDir());
+      const choice = await engineChoice(
+        engines,
+        (id) => sessions.readiness(id),
+        rememberedEngine(context),
+      );
+      return { ok: true, value: choice };
+    });
+
+    reg.handle('spaceSessionEnginePick', async (event, arg): Promise<SpaceSessionEnginesResult> => {
+      const context = spaceWindowContext(deps, event);
+      if (!context) return notASpaceWindow;
+      const parsed = parseArg(engineSchema, arg);
+      if (!parsed.ok) return parsed;
+      const sessions = context.service(spaceSessions);
+      const engines = loadEngines(deps.space.userDataDir());
+      const readiness = (id: string) => sessions.readiness(id);
+      const attempted = await engineChoice(engines, readiness, parsed.value.engineId);
+      if (attempted.engineId === parsed.value.engineId) {
+        rememberEngine(context, parsed.value.engineId);
+        return { ok: true, value: attempted };
+      }
+      // The picked engine cannot start: nothing changes, and the choice stays what it was.
+      const unchanged = await engineChoice(engines, readiness, rememberedEngine(context));
+      return { ok: true, value: unchanged };
+    });
+
+    reg.handle('spaceSessionReinstall', async (event, arg): Promise<SpaceSessionEnginesResult> => {
+      const context = spaceWindowContext(deps, event);
+      if (!context) return notASpaceWindow;
+      const parsed = parseArg(emptySchema, arg);
+      if (!parsed.ok) return parsed;
+      const lore = await readLore(context.root);
+      if (!lore.ok) return reinstallFailed(lore.error.message);
+      const installed = await installClaudeCode(lore.value, context.desk.install);
+      if (!installed.ok) return reinstallFailed(installed.error.message);
+      context.log.info('lore-reinstalled', { space: context.key });
+      const sessions = context.service(spaceSessions);
+      const engines = loadEngines(deps.space.userDataDir());
+      const choice = await engineChoice(
+        engines,
+        (id) => sessions.readiness(id),
+        rememberedEngine(context),
+      );
+      return { ok: true, value: choice };
     });
 
     reg.handle('spaceSessionHeader', async (event, arg): Promise<SpaceSessionHeaderResult> => {

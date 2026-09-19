@@ -19,6 +19,7 @@ import { after, before, test } from 'node:test';
 import {
   type Desk,
   type DeskPaths,
+  type EngineCheck,
   type EngineEntry,
   claudeCodeInstallPaths,
   deskPaths,
@@ -31,6 +32,7 @@ import {
   startSession,
 } from '@ai-lore-companion/core';
 import { type SpaceFixture, makeSpaceFixture } from '@ai-lore-companion/core/testing';
+import { loadEngines } from '../../../src/main/engines.js';
 import { type McpHost, createMcpHost } from '../../../src/main/helper/mcp-host.js';
 import {
   type PtyService,
@@ -61,6 +63,7 @@ import {
   findPython3,
   verifyInstall,
 } from '../../../src/main/space/sessions/preflight.js';
+import { UI_FILES, spaceUi } from '../../../src/main/space/ui-store.js';
 import { LORE_TEMPLATE_DIR, spaceHarnessFor } from './space-harness.js';
 
 // Phase M4.4: the files of a guarded session, its command lines, and the two adapters run
@@ -86,6 +89,30 @@ const CONNECTION: SessionConnection = {
   header: { name: 'authorization', value: 'Bearer secret-token-for-the-test' },
   tools: ['request_writing', 'request_gate', 'await_answer', 'leave_writing'],
 };
+
+/** An `EngineCheck` for `engine`, installed and signed in unless `overrides` says otherwise (M9.7). */
+function fineEngineCheck(engine: EngineEntry, overrides: Partial<EngineCheck> = {}): EngineCheck {
+  return {
+    engineId: engine.id,
+    name: engine.name,
+    binary: engine.binary,
+    state: { kind: 'fine', version: null },
+    guidance: null,
+    command: null,
+    catalogId: null,
+    maker: null,
+    required: false,
+    guardedSessions: true,
+    installed: { kind: 'installed', version: null },
+    signIn: { kind: 'signed-in' },
+    installCommand: null,
+    installNeeds: null,
+    signInCommand: null,
+    note: null,
+    page: null,
+    ...overrides,
+  };
+}
 
 before(async () => {
   space = await makeSpaceFixture({
@@ -676,6 +703,7 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
       loginPath: async () => null,
       runner: () => execFileRunner,
       newId: () => `s-ipc-${Math.random().toString(16).slice(2, 8)}`,
+      probeEngine: async (engine) => fineEngineCheck(engine),
     })),
   );
   try {
@@ -833,6 +861,131 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
   } finally {
     configureSessionServer(null);
     await mcp.close();
+    h.cleanup();
+  }
+});
+
+// Phase M9.7: the engine of a session is chosen by readiness (A.10), not the
+// order of `engines.json`; a picked engine that can start is remembered.
+
+test('readiness refuses engine-not-installed, refuses engine-not-signed-in, and passes on undetermined sign-in', async () => {
+  const engine: EngineEntry = {
+    id: 'claude-code',
+    name: 'Claude Code',
+    binary: '/opt/nowhere/claude',
+  };
+  let probed: EngineCheck = fineEngineCheck(engine, { installed: { kind: 'missing' } });
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister(() => ({
+      engines: () => [engine],
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () => `s-probe-${Math.random().toString(16).slice(2, 8)}`,
+      probeEngine: async () => probed,
+    })),
+  );
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const spaceWindow = h.space.created[0];
+    assert.ok(spaceWindow);
+    const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+    assert.ok(context);
+    const lore = await readLore(space.root);
+    assert.ok(lore.ok);
+    assert.ok((await installClaudeCode(lore.value, context.desk.install)).ok);
+
+    const missing = (await h.invoke('spaceSessionReadiness', spaceWindow, {
+      engineId: 'claude-code',
+    })) as { error?: { kind: string } };
+    assert.equal(missing.error?.kind, 'engine-not-installed');
+
+    probed = fineEngineCheck(engine, { signIn: { kind: 'not-signed-in' } });
+    const notSignedIn = (await h.invoke('spaceSessionReadiness', spaceWindow, {
+      engineId: 'claude-code',
+    })) as { error?: { kind: string } };
+    assert.equal(notSignedIn.error?.kind, 'engine-not-signed-in');
+
+    probed = fineEngineCheck(engine, {
+      signIn: { kind: 'undetermined', reason: 'could not check' },
+    });
+    const passes = (await h.invoke('spaceSessionReadiness', spaceWindow, {
+      engineId: 'claude-code',
+    })) as { ok: boolean };
+    assert.equal(passes.ok, true);
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('spaceSessionEnginePick writes ui/session-engine.json when the engine can start', async () => {
+  // `spaceSessionEnginePick` reads the app's live list with `loadEngines` (A.9 handlers), the
+  // same list `sessions.readiness` must see, so `engines()` here mirrors it rather than a list
+  // of its own: `default.claude`, the catalog's own id, is always in it.
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister((deps) => ({
+      engines: () => loadEngines(deps.space.userDataDir()),
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () => `s-pick-${Math.random().toString(16).slice(2, 8)}`,
+      probeEngine: async (e) => fineEngineCheck(e),
+    })),
+  );
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const spaceWindow = h.space.created[0];
+    assert.ok(spaceWindow);
+    const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+    assert.ok(context);
+    const lore = await readLore(space.root);
+    assert.ok(lore.ok);
+    assert.ok((await installClaudeCode(lore.value, context.desk.install)).ok);
+
+    const picked = (await h.invoke('spaceSessionEnginePick', spaceWindow, {
+      engineId: 'default.claude',
+    })) as { ok: boolean; value: { engineId: string | null } };
+    assert.equal(picked.ok, true);
+    assert.equal(picked.value.engineId, 'default.claude');
+
+    context.service(spaceUi).flush();
+    const ui = deskPaths(h.space.userDataDir, space.root).ui;
+    const saved = JSON.parse(readFileSync(join(ui, UI_FILES['session-engine']), 'utf8')) as {
+      engineId: string;
+    };
+    assert.equal(saved.engineId, 'default.claude');
+  } finally {
+    h.cleanup();
+  }
+});
+
+test('spaceSessionEngines from a Files window is refused', async () => {
+  const engine: EngineEntry = {
+    id: 'claude-code',
+    name: 'Claude Code',
+    binary: '/opt/nowhere/claude',
+  };
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister(() => ({
+      engines: () => [engine],
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () => 's-files-window',
+      probeEngine: async (e) => fineEngineCheck(e),
+    })),
+  );
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const spaceWindow = h.space.created[0];
+    assert.ok(spaceWindow);
+    const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+    assert.ok(context);
+    h.space.host.openFilesWindow(context);
+    const filesWindow = h.space.created[1];
+    assert.ok(filesWindow);
+    const refused = (await h.invoke('spaceSessionEngines', filesWindow, {})) as {
+      error?: { kind: string };
+    };
+    assert.equal(refused.error?.kind, 'not-a-space-window');
+  } finally {
     h.cleanup();
   }
 });
