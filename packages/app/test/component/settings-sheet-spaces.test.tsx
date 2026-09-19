@@ -93,9 +93,9 @@ test('the Engines section has no Remove for default.claude and has one for a han
   render(<SettingsSheetModal onClose={() => {}} initialSection="engines" />);
   const claudeRow = await screen.findByTestId('engine-row-default.claude');
   expect(within(claudeRow).queryByTestId('engine-remove-default.claude')).toBeNull();
-  expect(claudeRow.textContent).toContain('Listed by AI-Lore; it cannot be removed.');
+  expect(claudeRow.textContent).toContain('Listed by AI-Lore; it cannot be removed, but you can edit its arguments.');
 
   const ownRow = screen.getByTestId('engine-row-my-own-cli');
   expect(within(ownRow).getByTestId('engine-remove-my-own-cli')).toBeTruthy();
-  expect(ownRow.textContent).not.toContain('Listed by AI-Lore; it cannot be removed.');
+  expect(ownRow.textContent).not.toContain('Listed by AI-Lore; it cannot be removed, but you can edit its arguments.');
 });

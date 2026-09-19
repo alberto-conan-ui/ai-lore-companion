@@ -66,7 +66,6 @@ export const useSpaceNavStore = create<SpaceNavState>((set) => ({
   sessionsRequest: null,
   sessionsWithTab: [],
   startAiSession: (engineId) => {
-    console.log('TRACE: spaceNavStore.startAiSession', engineId);
     lastRequestId += 1;
     set({ screen: 'sessions', sessionsRequest: { id: lastRequestId, kind: 'start-ai', engineId } });
   },

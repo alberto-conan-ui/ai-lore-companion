@@ -143,7 +143,6 @@ export function AiTab({
   // A tab made by `+ AI` in a Space window starts once; a restored one waits for Start.
   const autoStarted = useRef(false);
   useEffect(() => {
-    console.log('TRACE: AiTab autoStart effect', { autoStarted: autoStarted.current, autoStartProp: spaceRef.current?.autoStart, selected: !!selected });
     if (autoStarted.current || !spaceRef.current?.autoStart || !selected) return;
     autoStarted.current = true;
     start();

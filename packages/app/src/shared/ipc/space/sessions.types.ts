@@ -120,7 +120,8 @@ export type SpaceEngineFixKind =
   | 'sign-in'
   | 'set-up-python3'
   | 'reinstall-lore'
-  | 'edit-engine' | 'install-engine';
+  | 'edit-engine'
+  | 'install-engine';
 
 export type SpaceEngineFix = {
   kind: SpaceEngineFixKind;
@@ -132,7 +133,6 @@ export type SpaceEngineFix = {
   commandLine: string | null;
   /** Set up this computer opens at this section. */
   section: 'tools' | 'engines' | null;
-  engineId?: string;
 };
 
 /** One engine of the list `spaceSessionEngines` answers with. */

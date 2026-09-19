@@ -53,7 +53,6 @@ export function EngineStartControl({
   const [flagsOpen, setFlagsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
-  const [installingId, setInstallingId] = useState<string | null>(null);
   const [running, setRunning] = useState<SpaceEngineFix | null>(null);
 
   // A new choice (mount, window focus, the registry changing, or an explicit refresh) is the
@@ -67,18 +66,7 @@ export function EngineStartControl({
   const engineId = choice?.engineId ?? null;
   const startable = choice !== null && engineId !== null;
   const startableCount = choice?.options.filter((option) => option.canStart).length ?? 0;
-  
-  if (installingId !== null) {
-      return (
-          <div style={rootStyle}>
-              <span style={splitStyle}>
-                  <button type="button" style={primaryButtonStyle} disabled>
-                      Installing...
-                  </button>
-              </span>
-          </div>
-      );
-  }
+
   const showMenu = choice !== null && (menu === 'always' || startableCount >= 2);
 
   const buttonLabel =
@@ -97,6 +85,7 @@ export function EngineStartControl({
     setMenuOpen(false);
     switch (fix.kind) {
       case 'sign-in':
+      case 'install-engine':
         setRunning(fix);
         return;
       case 'set-up-claude-code':
@@ -110,17 +99,6 @@ export function EngineStartControl({
         return;
       case 'edit-engine':
         useSpaceSettings.getState().open('engines');
-        return;
-      case 'install-engine':
-        if (fix.engineId) {
-          setInstallingId(fix.engineId);
-          window.cockpit.spaceSessionInstallEngine({ engineId: fix.engineId }).then((result) => {
-             setInstallingId(null);
-             if (result.ok) {
-                 onRefresh();
-             }
-          });
-        }
         return;
     }
   };
@@ -136,7 +114,6 @@ export function EngineStartControl({
           title={choice !== null && !startable ? noteText : undefined}
           data-testid={buttonTestId}
           onClick={() => {
-            console.log('TRACE: EngineStartControl click', engineId);
             if (engineId === null) return;
             setStartingId(engineId);
             onStart(engineId);
@@ -219,7 +196,14 @@ export function EngineStartControl({
                     const newFlags = e.target.value.split(' ').filter(Boolean);
                     onFlagsChange(newFlags);
                   }}
-                  style={{ flex: 1, padding: '0.2rem', fontSize: '0.75rem', background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+                  style={{
+                    flex: 1,
+                    padding: '0.2rem',
+                    fontSize: '0.75rem',
+                    background: 'var(--color-bg)',
+                    border: '1px solid var(--color-border)',
+                    color: 'var(--color-text)',
+                  }}
                 />
               </label>
             </div>
@@ -272,10 +256,33 @@ const rootStyle: React.CSSProperties = {
 
 const splitStyle: React.CSSProperties = { display: 'inline-flex', gap: '0.3rem' };
 
-const flagsWrapperStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '0.2rem' };
-const flagsToggleStyle: React.CSSProperties = { background: 'transparent', border: 'none', color: 'var(--color-text-soft)', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left', padding: 0 };
-const flagsPanelStyle: React.CSSProperties = { padding: '0.4rem', background: 'var(--color-inset)', borderRadius: '4px', border: '1px solid var(--color-border-2)' };
-const flagLabelStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--color-text)' };
+const flagsWrapperStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.2rem',
+};
+const flagsToggleStyle: React.CSSProperties = {
+  background: 'transparent',
+  border: 'none',
+  color: 'var(--color-text-soft)',
+  fontSize: '0.75rem',
+  cursor: 'pointer',
+  textAlign: 'left',
+  padding: 0,
+};
+const flagsPanelStyle: React.CSSProperties = {
+  padding: '0.4rem',
+  background: 'var(--color-inset)',
+  borderRadius: '4px',
+  border: '1px solid var(--color-border-2)',
+};
+const flagLabelStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.4rem',
+  fontSize: '0.75rem',
+  color: 'var(--color-text)',
+};
 
 const menuButtonStyle: React.CSSProperties = {
   padding: '0.4rem 0.6rem',

@@ -20,7 +20,6 @@ import type {
   SpaceSkillsResult,
 } from '../../../shared/ipc.js';
 import { SPACE_SESSIONS_CONTRACT } from '../../../shared/ipc/space/sessions.contract.js';
-import { catalogEntryFor } from '@ai-lore-companion/core';
 import { loadEngines } from '../../engines.js';
 import type { Deps, RegisterModule } from '../../ipc/types.js';
 import type { SpaceContext } from '../context.js';
@@ -40,7 +39,10 @@ import { spaceUi } from '../ui-store.js';
 import { readLoginShellPath, validLoginShell } from './machine.js';
 import { parseArg } from './validate.js';
 
-const engineSchema = z.strictObject({ engineId: z.string().min(1).max(256), flags: z.array(z.string()).optional() });
+const engineSchema = z.strictObject({
+  engineId: z.string().min(1).max(256),
+  flags: z.array(z.string()).optional(),
+});
 const endSchema = z.strictObject({
   sessionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
 });
@@ -165,9 +167,10 @@ export function createSpaceSessionsRegister(
       if (!context) return notASpaceWindow;
       const parsed = parseArg(engineSchema, arg);
       if (!parsed.ok) return parsed;
-      context.log.info('TRACE: main spaceSessionStart called', { engineId: parsed.value.engineId });
       watchHeaders(context);
-      const started = await context.service(spaceSessions).start(parsed.value.engineId, parsed.value.flags);
+      const started = await context
+        .service(spaceSessions)
+        .start(parsed.value.engineId, parsed.value.flags);
       if (started.ok) rememberEngine(context, parsed.value.engineId);
       return started;
     });
@@ -215,37 +218,6 @@ export function createSpaceSessionsRegister(
       const installed = await installClaudeCode(lore.value, context.desk.install);
       if (!installed.ok) return reinstallFailed(installed.error.message);
       context.log.info('lore-reinstalled', { space: context.key });
-    reg.handle('spaceSessionInstallEngine', async (event, arg): Promise<SpaceSessionEnginesResult> => {
-      const context = spaceWindowContext(deps, event);
-      if (!context) return notASpaceWindow;
-      const parsed = parseArg(engineSchema, arg);
-      if (!parsed.ok) return parsed;
-      
-      const engines = loadEngines(deps.space.userDataDir());
-      const engine = engines.find(e => e.id === parsed.value.engineId);
-      if (!engine) return { ok: false, error: { kind: 'engine-not-found', message: 'Engine not found' } };
-      
-      const catalog = catalogEntryFor(engine);
-      if (catalog && catalog.installCommand) {
-        context.log.info('installing-engine', { engineId: engine.id, command: catalog.installCommand });
-        try {
-          await deps.space.runner.run(process.env.SHELL || 'bash', ['-i', '-l', '-c', catalog.installCommand], {
-            timeoutMs: 300000,
-          });
-        } catch (e) {
-          context.log.error('install-engine-failed', { message: String(e) });
-        }
-      }
-
-      const sessions = context.service(spaceSessions);
-      const choice = await engineChoice(
-        engines,
-        (id) => sessions.readiness(id),
-        rememberedEngine(context),
-      );
-      return { ok: true, value: choice };
-    });
-
       const sessions = context.service(spaceSessions);
       const engines = loadEngines(deps.space.userDataDir());
       const choice = await engineChoice(

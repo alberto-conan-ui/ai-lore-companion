@@ -134,6 +134,7 @@ export function guardChangingEngineOption(args: readonly string[]): string | und
 export function engineArgv(parts: EngineArgvParts): string[] {
   return [
     ...parts.engineArgs,
+    ...(parts.flags ?? []),
     ...SETTING_SOURCES_ARGS,
     '--settings',
     parts.settingsFile,
@@ -143,6 +144,5 @@ export function engineArgv(parts: EngineArgvParts): string[] {
     '--plugin-dir',
     parts.pluginDir,
     ...(parts.tools.length > 0 ? ['--allowedTools', ...parts.tools] : []),
-    ...(parts.flags ?? []),
   ];
 }

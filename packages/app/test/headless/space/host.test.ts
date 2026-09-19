@@ -243,6 +243,8 @@ test('the Files window shares the context of its Space, and the context ends wit
   assert.deepEqual(filesWindow.inits().at(-1), {
     mode: 'space-files',
     space: init.space,
+    spaceTitle: init.spaceTitle,
+    colorScheme: init.colorScheme,
     open: { rootId: 'publish' },
   });
 

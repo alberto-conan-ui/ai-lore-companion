@@ -47,18 +47,17 @@ export function fixFor(
   failure: SessionStartFailure,
   engine: EngineEntry | null,
 ): SpaceEngineFix | null {
-  void engine; // Reserved for a future catalog engine whose fix depends on it (A.9 note).
   switch (failure.kind) {
     case 'engine-not-found':
     case 'engine-not-installed': {
       const catalog = engine ? catalogEntryFor(engine) : null;
-      if (catalog && catalog.installCommand) {
+      if (catalog && catalog.catalogId !== 'claude-code') {
+        const commandId = `engine-install:${catalog.catalogId}` as const;
         return {
           kind: 'install-engine',
-          engineId: engine?.id,
-          label: 'Install',
-          commandId: null,
-          commandLine: null,
+          label: `Install ${catalog.name}`,
+          commandId,
+          commandLine: setupCommandLine(commandId),
           section: null,
         };
       }
