@@ -17,6 +17,8 @@ type Props = {
 export function StartSession({ justCreated }: Props): JSX.Element {
   const { choice, pick, reinstall, refresh } = useEngineChoice();
   const startAiSession = useSpaceNavStore((state) => state.startAiSession);
+  const executionFlags = useSpaceNavStore((state) => state.executionFlags);
+  const setExecutionFlags = useSpaceNavStore((state) => state.setExecutionFlags);
 
   return (
     <section style={sectionStyle} aria-label="Start a session" data-testid="dashboard-start">
@@ -35,6 +37,8 @@ export function StartSession({ justCreated }: Props): JSX.Element {
         buttonTestId="dashboard-start-session"
         noteTestId="dashboard-start-session-note"
         menuTestId="dashboard-start-menu"
+        flags={executionFlags}
+        onFlagsChange={setExecutionFlags}
       />
     </section>
   );

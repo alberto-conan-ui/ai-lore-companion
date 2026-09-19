@@ -129,8 +129,8 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
     void window.cockpit.spaceSessionEnd({ sessionId });
   }, []);
 
-  const [executionFlags, setExecutionFlags] = useState<string[]>([]);
-
+  const executionFlags = useSpaceNavStore((state) => state.executionFlags);
+  const setExecutionFlags = useSpaceNavStore((state) => state.setExecutionFlags);
   const closeTab = useCallback(
     (tabId: string): void => {
       const tab = tabs.find((t) => t.id === tabId);

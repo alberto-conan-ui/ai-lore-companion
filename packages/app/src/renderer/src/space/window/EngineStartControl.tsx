@@ -117,7 +117,7 @@ export function EngineStartControl({
           window.cockpit.spaceSessionInstallEngine({ engineId: fix.engineId }).then((result) => {
              setInstallingId(null);
              if (result.ok) {
-                 useSpaceSessions.getState().setChoice(result.value);
+                 onRefresh();
              }
           });
         }
@@ -210,15 +210,17 @@ export function EngineStartControl({
           {flagsOpen && (
             <div style={flagsPanelStyle}>
               <label style={flagLabelStyle}>
+                Parameters:
                 <input
-                  type="checkbox"
-                  checked={flags.includes('--dangerously-skip-permissions')}
+                  type="text"
+                  placeholder="e.g. --dangerously"
+                  value={flags.join(' ')}
                   onChange={(e) => {
-                    if (e.target.checked) onFlagsChange([...flags, '--dangerously-skip-permissions']);
-                    else onFlagsChange(flags.filter((f) => f !== '--dangerously-skip-permissions'));
+                    const newFlags = e.target.value.split(' ').filter(Boolean);
+                    onFlagsChange(newFlags);
                   }}
+                  style={{ flex: 1, padding: '0.2rem', fontSize: '0.75rem', background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
                 />
-                --dangerously-skip-permissions
               </label>
             </div>
           )}

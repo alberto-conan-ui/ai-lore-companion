@@ -45,6 +45,9 @@ type SpaceNavState = {
   showSessionTab: (sessionId: string) => void;
   sessionsRequestHandled: (id: number) => void;
   setSessionsWithTab: (sessionIds: readonly string[]) => void;
+  /** The execution flags (e.g. --dangerously) shared across start session components. */
+  executionFlags: string[];
+  setExecutionFlags: (flags: string[]) => void;
 };
 
 let lastRequestId = 0;
@@ -77,4 +80,6 @@ export const useSpaceNavStore = create<SpaceNavState>((set) => ({
   sessionsRequestHandled: (id) =>
     set((state) => (state.sessionsRequest?.id === id ? { sessionsRequest: null } : {})),
   setSessionsWithTab: (sessionIds) => set({ sessionsWithTab: sessionIds }),
+  executionFlags: [],
+  setExecutionFlags: (flags) => set({ executionFlags: flags }),
 }));
