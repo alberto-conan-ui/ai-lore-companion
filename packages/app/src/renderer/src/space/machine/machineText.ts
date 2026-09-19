@@ -221,3 +221,15 @@ export function spacesFolderCollapsedLine(spacesFolder: SpacesFolderState): stri
 export function leftSentence(setUp: SetUpReadiness): string {
   return `Left to do: ${setUp.left.map((item) => item.text).join(', ')}.`;
 }
+
+/**
+ * `path`, with a leading `home` written as `~` (CTO addition to M9.10: the
+ * design shows the Spaces folder as `~/…`, not the full absolute path).
+ * `path` outside `home` is returned as it is.
+ */
+export function withHomeTilde(path: string, home: string): string {
+  if (home === '') return path;
+  if (path === home) return '~';
+  if (path.startsWith(`${home}/`)) return `~${path.slice(home.length)}`;
+  return path;
+}

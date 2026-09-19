@@ -1,5 +1,6 @@
 import type { JSX } from 'react';
 import type { SpaceWindowInitPayload } from '../../../shared/ipc.js';
+import { SpaceSettings } from './SpaceSettings.js';
 import { FilesWindow } from './files/FilesWindow.js';
 import { MachineCheckScreen } from './machine/MachineCheckScreen.js';
 import { MigrationScreen } from './migration/MigrationScreen.js';
@@ -18,6 +19,15 @@ import { SpaceWindow } from './window/SpaceWindow.js';
  * start afresh when main sends the same mode a second time with other content.
  */
 export function SpaceSurface({ init }: { init: SpaceWindowInitPayload }): JSX.Element {
+  return (
+    <>
+      {screenFor(init)}
+      <SpaceSettings />
+    </>
+  );
+}
+
+function screenFor(init: SpaceWindowInitPayload): JSX.Element {
   switch (init.mode) {
     case 'space-welcome':
       return <SpaceWelcomeScreen init={init} />;

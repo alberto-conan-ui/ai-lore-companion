@@ -110,7 +110,36 @@ vi.mock('../../../src/renderer/src/components/SearchDialog.js', () => ({
 
 import { SpaceSurface } from '../../../src/renderer/src/space/SpaceSurface.js';
 import { useSpaceNavStore } from '../../../src/renderer/src/space/window/spaceNavStore.js';
-import type { SpaceSummary, SpaceWindowResult } from '../../../src/shared/ipc.js';
+import type {
+  SpaceEngineChoice,
+  SpaceSessionEnginesResult,
+  SpaceSummary,
+  SpaceWindowResult,
+} from '../../../src/shared/ipc.js';
+
+/** A ready `SpaceEngineChoice`: one engine, startable. */
+function readyChoice(engineId = 'default.claude', name = 'Claude'): SpaceEngineChoice {
+  return {
+    options: [{ engineId, name, canStart: true, reason: null, fix: null }],
+    engineId,
+    buttonName: name,
+    refusal: null,
+  };
+}
+
+/** A refused `SpaceEngineChoice`: no engine can start, with `message` as the refusal's sentence. */
+function refusedChoice(
+  message: string,
+  engineId = 'default.claude',
+  name = 'Claude',
+): SpaceEngineChoice {
+  return {
+    options: [{ engineId, name, canStart: false, reason: message, fix: null }],
+    engineId: null,
+    buttonName: name,
+    refusal: { message, fix: null },
+  };
+}
 
 const space: SpaceSummary = {
   root: '/work/my-space',
@@ -137,12 +166,12 @@ const cockpit = {
       focusGlobalSearch = null;
     };
   }),
+  onSettingsOpen: vi.fn(() => () => {}),
   urlOpenExternal: vi.fn(),
-  // Phase M4.6: `+ AI` asks whether a guarded session can start.
-  spaceSessionReadiness: vi.fn<(arg: unknown) => Promise<unknown>>(async () => ({
-    ok: true,
-    value: { engineId: 'default.claude' },
-  })),
+  // Phase M9.10: the engine start control asks the engine choice.
+  spaceSessionEngines: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
+  spaceSessionEnginePick: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
+  spaceSessionReinstall: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionStart: vi.fn(),
   spaceSessionEnd: vi.fn(async () => ({ ok: true })),
   // The channels the cockpit uses to save a layout. The Space window must not call them.
@@ -174,9 +203,12 @@ beforeEach(() => {
   cockpit.spaceNavigate.mockResolvedValue({ ok: true, value: { mode: 'space-files' } });
   // Sessions and the Dashboard's Start a session (M7.4) both read the engines.
   cockpit.enginesList.mockResolvedValue([]);
-  cockpit.spaceSessionReadiness.mockResolvedValue({
+  // No engine configured by default, as an empty `enginesList` used to mean.
+  cockpit.spaceSessionEngines.mockResolvedValue({
     ok: true,
-    value: { engineId: 'default.claude' },
+    value: refusedChoice(
+      'No AI session can start: the list of engines is empty. Add Claude Code under Settings, Engines.',
+    ),
   });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
   useSpaceNavStore.setState({ screen: 'sessions' });
@@ -242,22 +274,16 @@ test('Sessions offers the creators while no tab is open, and hosts the dock with
 test('+ AI is disabled in a Space window while the guarded start is not ready, and the reason is written', async () => {
   const sentence =
     'No AI session was started: python3 3.8 or later was not found. The write-guard of a session runs with python3, and a session without it would not be guarded. Install python3 and run the machine check again.';
-  cockpit.spaceSessionReadiness.mockResolvedValue({
-    ok: false,
-    error: { kind: 'python3-missing', message: sentence },
-  });
+  cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: refusedChoice(sentence) });
   cockpit.enginesList.mockResolvedValue([
     { id: 'default.claude', name: 'Claude', binary: 'claude' },
   ] as never);
   renderWindow();
-  await waitFor(() =>
-    expect(cockpit.spaceSessionReadiness).toHaveBeenCalledWith({ engineId: 'default.claude' }),
-  );
+  await waitFor(() => expect(cockpit.spaceSessionEngines).toHaveBeenCalledWith({}));
   await act(async () => {});
 
   const ai = screen.getByTestId('new-ai') as HTMLButtonElement;
   expect(ai.disabled).toBe(true);
-  expect(ai.title).toContain(sentence);
   const note = screen.getByTestId('space-sessions-ai-note');
   expect(note.textContent).toContain(sentence);
   expect(ai.getAttribute('aria-describedby')).toBe(note.id);
@@ -276,15 +302,22 @@ test('+ AI is disabled in a Space window while the guarded start is not ready, a
 });
 
 test('+ AI is enabled when the guarded start is ready, and makes an AI tab', async () => {
+  cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: readyChoice() });
   cockpit.enginesList.mockResolvedValue([
     { id: 'default.claude', name: 'Claude', binary: 'claude' },
   ] as never);
   renderWindow();
   const ai = screen.getByTestId('new-ai') as HTMLButtonElement;
   await waitFor(() => expect(ai.disabled).toBe(false));
-  expect(ai.title).toBe('New AI session');
   fireEvent.click(ai);
   expect(screen.getAllByTestId('dock-tab').map((tab) => tab.dataset.kind)).toEqual(['ai']);
+});
+
+test('a Space window opened with justCreated shows the Dashboard, not Sessions', () => {
+  cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: readyChoice() });
+  render(<SpaceSurface init={{ mode: 'space', space, justCreated: true }} />);
+  expect(shown('space-screen-dashboard')).toBe(true);
+  expect(shown('space-screen-sessions')).toBe(false);
 });
 
 test('a tab follows the rules of the cockpit: the running command is its title, a name set by hand stays, close removes it', () => {

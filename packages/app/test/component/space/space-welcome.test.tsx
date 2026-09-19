@@ -84,6 +84,7 @@ function report(ready: boolean): MachineCheckReport {
     check,
     checkedAt: 1_789_000_000_000,
     pathSource: 'login-shell',
+    home: '/Users/alberto',
     spacesFolder: {
       value: ready ? '/Users/alberto/Spaces' : null,
       proposed: '/Users/alberto/Spaces',
@@ -170,8 +171,9 @@ test('the screen asks for the last machine check, not for a new one', async () =
 test('ready: the status line names the account and the folder, with Change… back to setup', async () => {
   render(<SpaceWelcomeScreen init={init()} />);
   await settled();
+  // The Spaces folder is shown with the home folder written as `~` (CTO addition to M9.10).
   expect(screen.getByTestId('space-welcome-machine-status').textContent).toBe(
-    '✓ This computer is set up: GitHub alberto-conan-ui, Claude Code signed in, Spaces in /Users/alberto/Spaces.',
+    '✓ This computer is set up: GitHub alberto-conan-ui, Claude Code signed in, Spaces in ~/Spaces.',
   );
   expect(screen.queryByTestId('space-welcome-setup-card')).toBeNull();
   fireEvent.click(screen.getByTestId('space-welcome-change-setup'));

@@ -49,7 +49,21 @@ import { StartSession } from '../../../src/renderer/src/space/dashboard/StartSes
 import { SpaceDialogs } from '../../../src/renderer/src/space/dialogs/SpaceDialogs.js';
 import { SpaceSessions } from '../../../src/renderer/src/space/window/SpaceSessions.js';
 import { useSpaceNavStore } from '../../../src/renderer/src/space/window/spaceNavStore.js';
-import type { PendingDialog } from '../../../src/shared/ipc.js';
+import type {
+  PendingDialog,
+  SpaceEngineChoice,
+  SpaceSessionEnginesResult,
+} from '../../../src/shared/ipc.js';
+
+/** A ready `SpaceEngineChoice`: one engine, startable. */
+function readyChoice(engineId = 'claude-code', name = 'Claude Code'): SpaceEngineChoice {
+  return {
+    options: [{ engineId, name, canStart: true, reason: null, fix: null }],
+    engineId,
+    buttonName: name,
+    refusal: null,
+  };
+}
 
 const REPO = 'fake-human/dash-space';
 const ref = (number: number) => ({
@@ -111,7 +125,9 @@ const cockpit = {
   urlOpenExternal: vi.fn(),
   enginesList: vi.fn(async () => [ENGINE]),
   onEnginesChanged: vi.fn(() => () => {}),
-  spaceSessionReadiness: vi.fn<(arg: unknown) => Promise<unknown>>(),
+  spaceSessionEngines: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
+  spaceSessionEnginePick: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
+  spaceSessionReinstall: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionStart: vi.fn<(arg: unknown) => Promise<unknown>>(),
   spaceSessionEnd: vi.fn(async () => ({ ok: true, value: { sessionId: 's-1' } })),
   spaceDialogsPending: vi.fn(async () => ({ ok: true, value: { requests: [GATE] } })),
@@ -138,7 +154,7 @@ const cockpit = {
 
 beforeEach(() => {
   for (const mock of Object.values(cockpit)) mock.mockClear();
-  cockpit.spaceSessionReadiness.mockResolvedValue({ ok: true, value: { engineId: 'claude-code' } });
+  cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: readyChoice() });
   cockpit.spaceSessionStart.mockResolvedValue({
     ok: true,
     value: { sessionId: 's-1', ptyId: 'pty-1', engineId: 'claude-code' },
@@ -258,9 +274,22 @@ test('the gate of Needs you opens the gate dialog of its ticket', async () => {
 });
 
 test('Start a session is disabled with the reason while a session cannot start', async () => {
-  cockpit.spaceSessionReadiness.mockResolvedValue({
-    ok: false,
-    error: { kind: 'python3-missing', message: 'Python 3 was not found.' },
+  cockpit.spaceSessionEngines.mockResolvedValue({
+    ok: true,
+    value: {
+      options: [
+        {
+          engineId: 'claude-code',
+          name: 'Claude Code',
+          canStart: false,
+          reason: 'Python 3 was not found.',
+          fix: null,
+        },
+      ],
+      engineId: null,
+      buttonName: 'Claude Code',
+      refusal: { message: 'Python 3 was not found.', fix: null },
+    },
   });
   render(<StartSession />);
   await waitFor(() =>
@@ -268,7 +297,9 @@ test('Start a session is disabled with the reason while a session cannot start',
       'Python 3 was not found.',
     ),
   );
-  const button = screen.getByRole('button', { name: 'Start a session' }) as HTMLButtonElement;
+  const button = screen.getByRole('button', {
+    name: 'Start a Claude Code session',
+  }) as HTMLButtonElement;
   expect(button.disabled).toBe(true);
   expect(button.getAttribute('aria-describedby')).toBe('dashboard-start-session-note');
 });
@@ -280,9 +311,10 @@ test('Start a session shows Sessions, opens an AI tab there and starts its guard
       <SpaceSessions spaceRoot="/space" />
     </>,
   );
-  const button = screen.getByRole('button', { name: 'Start a session' }) as HTMLButtonElement;
+  const button = screen.getByTestId('dashboard-start-session') as HTMLButtonElement;
   await waitFor(() => expect(button.disabled).toBe(false));
-  expect(cockpit.spaceSessionReadiness).toHaveBeenCalledWith({ engineId: 'claude-code' });
+  expect(button.textContent).toBe('Start a Claude Code session');
+  expect(cockpit.spaceSessionEngines).toHaveBeenCalledWith({});
   await act(async () => {
     fireEvent.click(button);
   });

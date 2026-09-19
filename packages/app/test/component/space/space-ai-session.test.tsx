@@ -57,9 +57,23 @@ import type { WorkspaceTab } from '../../../src/renderer/src/components/TabbedPa
 import { StartSession } from '../../../src/renderer/src/space/dashboard/StartSession.js';
 import { SpaceSessions } from '../../../src/renderer/src/space/window/SpaceSessions.js';
 import { useSpaceNavStore } from '../../../src/renderer/src/space/window/spaceNavStore.js';
-import type { SpaceSessionHeader } from '../../../src/shared/ipc.js';
+import type {
+  SpaceEngineChoice,
+  SpaceSessionEnginesResult,
+  SpaceSessionHeader,
+} from '../../../src/shared/ipc.js';
 
 const ENGINE = { id: 'claude-code', name: 'Claude Code', binary: 'claude' };
+
+/** A ready `SpaceEngineChoice`: Claude Code, startable. */
+const READY_CHOICE: SpaceEngineChoice = {
+  options: [
+    { engineId: 'claude-code', name: 'Claude Code', canStart: true, reason: null, fix: null },
+  ],
+  engineId: 'claude-code',
+  buttonName: 'Claude Code',
+  refusal: null,
+};
 
 let headerListener: ((header: SpaceSessionHeader) => void) | null = null;
 
@@ -82,7 +96,9 @@ const cockpit = {
   spawnTerminalEngine: vi.fn(async () => 'unguarded-pty'),
   aiPromptsWidthGet: vi.fn(async () => null),
   aiPromptsWidthSet: vi.fn(),
-  spaceSessionReadiness: vi.fn<(arg: unknown) => Promise<unknown>>(),
+  spaceSessionEngines: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
+  spaceSessionEnginePick: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
+  spaceSessionReinstall: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionStart: vi.fn<(arg: unknown) => Promise<unknown>>(),
   spaceSessionEnd: vi.fn(async () => ({ ok: true, value: { sessionId: 's-1' } })),
   spaceSessionHeader: vi.fn(async () => ({ ok: true, value: readOnly })),
@@ -108,7 +124,7 @@ const cockpit = {
 
 beforeEach(() => {
   for (const mock of Object.values(cockpit)) mock.mockClear();
-  cockpit.spaceSessionReadiness.mockResolvedValue({ ok: true, value: { engineId: 'claude-code' } });
+  cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: READY_CHOICE });
   cockpit.spaceSessionStart.mockResolvedValue({
     ok: true,
     value: { sessionId: 's-1', ptyId: 'pty-1', engineId: 'claude-code' },

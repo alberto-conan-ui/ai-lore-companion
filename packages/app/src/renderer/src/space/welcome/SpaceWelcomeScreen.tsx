@@ -5,6 +5,7 @@ import type {
   SetUpReadiness,
   SpaceInitOf,
 } from '../../../../shared/ipc.js';
+import { withHomeTilde } from '../machine/machineText.js';
 import { useMachineCheck } from '../machine/useMachineCheck.js';
 import {
   cardStyle,
@@ -27,7 +28,8 @@ function readyCount(setUp: SetUpReadiness): number {
 /** "✓ This computer is set up: GitHub …" once ready; empty until then. */
 function readySentence(report: MachineCheckReport | null): string {
   if (report === null || !report.setUp.ready) return '';
-  return `✓ This computer is set up: GitHub ${report.check.github.account ?? ''}, Claude Code signed in, Spaces in ${report.spacesFolder.value ?? ''}.`;
+  const folder = withHomeTilde(report.spacesFolder.value ?? '', report.home);
+  return `✓ This computer is set up: GitHub ${report.check.github.account ?? ''}, Claude Code signed in, Spaces in ${folder}.`;
 }
 
 /**

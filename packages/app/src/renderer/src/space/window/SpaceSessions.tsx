@@ -4,15 +4,11 @@ import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import type { AiTabSpace } from '../../components/AiTab.js';
 import { DockWorkspace } from '../../components/DockWorkspace.js';
 import type { PanelId, WorkspaceTab } from '../../components/TabbedPanel.js';
-import {
-  NEW_TAB_BUTTONS,
-  type NewTabContext,
-  TAB_KINDS,
-  type TabRenderContext,
-  defaultEngineId,
-} from '../../components/tabKinds.js';
+import { type NewTabContext, TAB_KINDS, type TabRenderContext } from '../../components/tabKinds.js';
 import { SessionHeader } from '../session-header/SessionHeader.js';
 import { SkillsColumn } from '../skills/SkillsColumn.js';
+import { secondaryButtonStyle } from '../styles.js';
+import { AI_READINESS_CHECKING, EngineStartControl } from './EngineStartControl.js';
 import {
   nextIndexOf,
   withAiEngine,
@@ -23,6 +19,7 @@ import {
   withoutTab,
 } from './sessionTabs.js';
 import { useSpaceNavStore } from './spaceNavStore.js';
+import { useEngineChoice } from './useEngineChoice.js';
 
 type Props = {
   /** The Space's folder. Main roots every terminal of this window there. */
@@ -38,17 +35,6 @@ type Props = {
 type Panel = { tabs: WorkspaceTab[]; activeId: string };
 
 const EMPTY_PANEL: Panel = { tabs: [], activeId: '' };
-
-/** The note while `spaceSessionReadiness` has not answered yet. */
-export const AI_READINESS_CHECKING = 'Checking whether an AI session can start in this Space.';
-
-/** The note when the registry has no engine to start. */
-export const AI_NO_ENGINE =
-  'No AI session can start: the list of engines is empty. Add Claude Code under Settings, Engines.';
-
-/** The note when `+ AI` can start a guarded session. */
-export const AI_SESSIONS_GUARDED =
-  "An AI session starts in Read only, with the write-guard of this Space, in the Space's folder.";
 
 /** The sentence under an AI tab's Start button in a Space window. */
 const AI_TAB_HINT =
@@ -67,9 +53,10 @@ const AI_NOTE_ID = 'space-sessions-ai-note';
  * is the Space's folder (`attachTerminal` in `main/space/host.ts`), so a shell
  * tab starts there.
  *
- * AI tabs (phase M4.6). `+ AI` is enabled only when `spaceSessionReadiness`
- * answers ready for the engine it would use; otherwise it is disabled and the
- * answer's sentence is its tooltip and the note. An AI tab here gets
+ * AI tabs (phase M4.6, engine choice M9.10). `+ AI` is enabled only when the
+ * engine choice (`useEngineChoice`, architecture document A.9) has an engine
+ * that can start; otherwise it is disabled and the refusal's sentence is its
+ * tooltip and the note. An AI tab here gets
  * `spaceAi`: its Start calls `spaceSessionStart` (the guarded start of M4.4)
  * and never the cockpit's engine spawn; it shows the session header and the
  * Skills column. A tab made by `+ AI` starts at once; a restored one waits for
@@ -82,8 +69,7 @@ const AI_NOTE_ID = 'space-sessions-ai-note';
 export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   const [tabs, setTabs] = useState<WorkspaceTab[]>(() => initialTabs ?? []);
   const [engines, setEngines] = useState<EngineEntry[]>([]);
-  const [lastEngineId, setLastEngineId] = useState<string | null>(null);
-  const [aiReason, setAiReason] = useState<string | undefined>(AI_READINESS_CHECKING);
+  const { choice, pick, reinstall, refresh } = useEngineChoice();
   /** AI tabs made by `+ AI` that have not started yet. */
   const pendingStart = useRef(new Set<string>());
   /** The session of each AI tab whose engine runs. */
@@ -99,23 +85,8 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
     setSessionsWithTab([...sessionByTab.current.values()]);
   }, [setSessionsWithTab]);
 
-  const readyEngineId = defaultEngineId(engines, lastEngineId);
-  const checkReadiness = useCallback((): void => {
-    if (readyEngineId === '') {
-      setAiReason(AI_NO_ENGINE);
-      return;
-    }
-    void window.cockpit.spaceSessionReadiness({ engineId: readyEngineId }).then((ready) => {
-      setAiReason(ready.ok ? undefined : ready.error.message);
-    });
-  }, [readyEngineId]);
-
-  useEffect(() => {
-    checkReadiness();
-    // Python, the install or the desk can change while the window is in the background.
-    window.addEventListener('focus', checkReadiness);
-    return () => window.removeEventListener('focus', checkReadiness);
-  }, [checkReadiness]);
+  const engineId = choice?.engineId ?? null;
+  const aiReason = choice === null ? AI_READINESS_CHECKING : (choice.refusal?.message ?? undefined);
 
   useEffect(() => {
     let live = true;
@@ -181,7 +152,6 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
     if (sessionsRequest === null) return;
     sessionsRequestHandled(sessionsRequest.id);
     if (sessionsRequest.kind === 'start-ai') {
-      setLastEngineId(sessionsRequest.engineId);
       addTab('ai', sessionsRequest.engineId);
       return;
     }
@@ -197,7 +167,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
         pendingStart.current.delete(tab.id);
         const started = await window.cockpit.spaceSessionStart({ engineId });
         if (!started.ok) {
-          checkReadiness();
+          refresh();
           return { ok: false, message: started.error.message };
         }
         return { ok: true, sessionId: started.value.sessionId, ptyId: started.value.ptyId };
@@ -223,7 +193,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       sidebar: (ptyId, focusPty) => <SkillsColumn ptyId={ptyId} focusPty={focusPty} />,
       hint: AI_TAB_HINT,
     }),
-    [engineName, endSession, checkReadiness, reportSessions],
+    [engineName, endSession, refresh, reportSessions],
   );
 
   const onDockApi = useCallback((api: DockviewApi): void => {
@@ -249,7 +219,6 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       engines,
       setAiTabEngine: (tabId, engineId) => {
         setTabs((prev) => withAiEngine(prev, tabId, engineId, engineName));
-        setLastEngineId(engineId);
       },
       setAiTabRunning: (tabId, running) =>
         setTabs((prev) => withAiRunning(prev, tabId, running, engineName)),
@@ -264,13 +233,12 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   const newTabCtx = useMemo<NewTabContext>(
     () => ({
       engines,
-      lastEngineId,
+      lastEngineId: engineId,
       onNewShell: () => addTab('shell'),
       // While `aiUnavailableReason` is set, a call that arrives anyway creates nothing.
-      onNewAi: (engineId) => {
+      onNewAi: (id) => {
         if (aiReason !== undefined) return;
-        setLastEngineId(engineId);
-        addTab('ai', engineId);
+        addTab('ai', id);
       },
       ...(aiReason !== undefined ? { aiUnavailableReason: aiReason } : {}),
       onNewBrowser: () => addTab('browser'),
@@ -280,10 +248,13 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       onNewBrowserWithUrl: () => {},
       onLaunchUrlExternal: (url) => void window.cockpit.urlOpenExternal(url),
     }),
-    [engines, lastEngineId, addTab, aiReason],
+    [engines, engineId, addTab, aiReason],
   );
 
-  const aiNote = aiReason ?? AI_SESSIONS_GUARDED;
+  /** `onStart` of the empty view's and the compact row's `EngineStartControl`: opens the AI
+   *  tab and starts it, exactly as `onNewAi` does (the guard against a stale click is the
+   *  same: nothing is created once `aiReason` is set). */
+  const startEngine = useCallback((id: string): void => newTabCtx.onNewAi(id), [newTabCtx]);
 
   const panels = useMemo<Record<PanelId, Panel>>(
     () => ({
@@ -304,24 +275,35 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       <section style={emptyStyle} aria-label="Sessions" data-testid="space-sessions-empty">
         <h2 style={emptyTitleStyle}>Sessions</h2>
         <p style={emptyTextStyle}>No tab is open. A shell starts in the Space's folder.</p>
-        <p id={AI_NOTE_ID} style={emptyTextStyle} data-testid={AI_NOTE_ID}>
-          {aiNote}
-        </p>
+        <EngineStartControl
+          choice={choice}
+          onStart={startEngine}
+          onPick={pick}
+          onReinstall={reinstall}
+          onRefresh={refresh}
+          menu="always"
+          buttonTestId="new-ai"
+          noteTestId={AI_NOTE_ID}
+          menuTestId="space-sessions-engine-menu"
+        />
+        <p style={emptyTextStyle}>Other tabs:</p>
         <div style={emptyActionsStyle}>
-          {NEW_TAB_BUTTONS.map((button) => (
-            <button
-              key={button.testId}
-              type="button"
-              style={emptyButtonStyle}
-              data-testid={button.testId}
-              title={button.title(newTabCtx)}
-              aria-describedby={button.testId === 'new-ai' ? AI_NOTE_ID : undefined}
-              disabled={button.disabled?.(newTabCtx) ?? false}
-              onClick={() => button.onClick(newTabCtx)}
-            >
-              {button.label}
-            </button>
-          ))}
+          <button
+            type="button"
+            style={secondaryButtonStyle}
+            data-testid="new-shell"
+            onClick={() => newTabCtx.onNewShell()}
+          >
+            Terminal
+          </button>
+          <button
+            type="button"
+            style={secondaryButtonStyle}
+            data-testid="new-browser"
+            onClick={() => newTabCtx.onNewBrowser()}
+          >
+            Web page
+          </button>
         </div>
       </section>
     );
@@ -329,9 +311,19 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
 
   return (
     <section style={dockStyle} aria-label="Sessions" data-testid="space-sessions">
-      <p id={AI_NOTE_ID} style={aiNoteStyle} data-testid={AI_NOTE_ID}>
-        {aiNote}
-      </p>
+      <div style={aiCompactRowStyle}>
+        <EngineStartControl
+          choice={choice}
+          onStart={startEngine}
+          onPick={pick}
+          onReinstall={reinstall}
+          onRefresh={refresh}
+          menu="always"
+          buttonTestId="new-ai"
+          noteTestId={AI_NOTE_ID}
+          menuTestId="space-sessions-engine-menu"
+        />
+      </div>
       <DockWorkspace
         panels={panels}
         renderCtx={renderCtx}
@@ -344,12 +336,9 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   );
 }
 
-const aiNoteStyle: React.CSSProperties = {
+const aiCompactRowStyle: React.CSSProperties = {
   flexShrink: 0,
-  margin: 0,
-  padding: '0.3rem 0.9rem',
-  fontSize: '0.75rem',
-  color: 'var(--color-text-secondary)',
+  padding: '0.4rem 0.9rem',
   borderBottom: '1px solid var(--color-border)',
 };
 
@@ -391,15 +380,4 @@ const emptyActionsStyle: React.CSSProperties = {
   display: 'flex',
   gap: '0.5rem',
   marginTop: '0.4rem',
-};
-
-const emptyButtonStyle: React.CSSProperties = {
-  padding: '0.35rem 0.8rem',
-  fontSize: '0.8rem',
-  fontWeight: 600,
-  color: 'var(--color-text)',
-  background: 'transparent',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: '5px',
-  cursor: 'pointer',
 };

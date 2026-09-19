@@ -7,11 +7,13 @@ import type {
   SettingValue,
 } from '@ai-lore-companion/core';
 import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
-import type {
-  SettingsSnapshot,
-  Shortcut,
-  ShortcutInput,
-  ShortcutTarget,
+import {
+  CATALOG_ENGINE_IDS,
+  type SettingsSnapshot,
+  type Shortcut,
+  type ShortcutInput,
+  type ShortcutTarget,
+  type SpaceSpacesFolderResult,
 } from '../../../shared/ipc.js';
 import { AppPickerModal } from './AppPickerModal.js';
 import { ModalSheet } from './overlay/ModalSheet.js';
@@ -29,6 +31,8 @@ const SHORTCUTS_SECTION = 'Shortcuts';
 const APPS_SECTION = 'Apps';
 /** The rail section that hosts the AI engines editor — global-only. */
 const ENGINES_SECTION = 'Engines';
+/** The registry section that hosts the Spaces folder control (M9.10). */
+const SPACES_SECTION = 'Spaces';
 
 /** The ignore levels, with their human labels. */
 const LEVEL_OPTIONS: { value: IgnoreLevel; label: string }[] = [
@@ -64,7 +68,7 @@ function valueForScope(def: SettingDef, snap: SettingsSnapshot, scope: Scope): S
 }
 
 /** Open the Settings sheet at a specific section, or with no section preference. */
-export type SettingsSheetSection = 'shortcuts' | 'engines' | null;
+export type SettingsSheetSection = 'shortcuts' | 'engines' | 'spaces' | null;
 
 /**
  * The Settings sheet modal — controlled by the parent. `initialSection`
@@ -100,7 +104,9 @@ function SettingsSheet({
       ? SHORTCUTS_SECTION
       : initialSection === 'engines'
         ? ENGINES_SECTION
-        : null,
+        : initialSection === 'spaces'
+          ? SPACES_SECTION
+          : null,
   );
 
   useEffect(() => {
@@ -231,11 +237,15 @@ function SettingsSheet({
             rows.map((def) => (
               <div key={def.key} style={settingRowStyle}>
                 <span style={settingLabelStyle}>{def.label}</span>
-                <Control
-                  def={def}
-                  value={valueForScope(def, snap, scope)}
-                  onChange={(v) => write(def.key, v)}
-                />
+                {def.key === 'spaces.folder' ? (
+                  <SpacesFolderControl value={valueForScope(def, snap, scope)} />
+                ) : (
+                  <Control
+                    def={def}
+                    value={valueForScope(def, snap, scope)}
+                    onChange={(v) => write(def.key, v)}
+                  />
+                )}
               </div>
             ))
           )}
@@ -303,6 +313,41 @@ function Control({
         />
       );
   }
+}
+
+/**
+ * The Spaces folder row (M9.10): the path in monospace, or `Not set`, and
+ * `Choose…`, which asks main for the system's folder dialog
+ * (`spaceSpacesFolderChoose`) — the renderer never sends a path of its own.
+ * The value shown follows `snap` through `onSettingsChanged`, pushed after
+ * main saves the choice.
+ */
+function SpacesFolderControl({ value }: { value: SettingValue }): JSX.Element {
+  const [message, setMessage] = useState<string | null>(null);
+  const path = typeof value === 'string' && value !== '' ? value : null;
+
+  const choose = async (): Promise<void> => {
+    setMessage(null);
+    const result: SpaceSpacesFolderResult = await window.cockpit.spaceSpacesFolderChoose({});
+    if (!result.ok && result.error.kind !== 'cancelled') setMessage(result.error.message);
+  };
+
+  return (
+    <div style={spacesFolderStyle}>
+      <span style={path !== null ? spacesFolderPathStyle : spacesFolderNotSetStyle}>
+        {path ?? 'Not set'}
+      </span>
+      <button
+        type="button"
+        style={chooseAppStyle}
+        data-testid="setting-spaces.folder-choose"
+        onClick={() => void choose()}
+      >
+        Choose…
+      </button>
+      {message !== null ? <span style={spacesFolderErrorStyle}>{message}</span> : null}
+    </div>
+  );
 }
 
 /**
@@ -1167,23 +1212,33 @@ function EnginesSection(): JSX.Element {
         <div style={appsEmptyStyle}>No engines configured yet.</div>
       ) : (
         <ul style={appsListStyle}>
-          {engines.map((engine) => (
-            <li key={engine.id} style={appRowStyle} data-testid={`engine-row-${engine.id}`}>
-              <span style={appIconPlaceholder}>✦</span>
-              <div style={appLabelColumnStyle}>
-                <span style={appLabelStyle}>{engine.name}</span>
-                <span style={appMetaStyle}>{engineMetaSummary(engine)}</span>
-              </div>
-              <button
-                type="button"
-                style={appRemoveStyle}
-                onClick={() => removeEngine(engine.id)}
-                data-testid={`engine-remove-${engine.id}`}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
+          {engines.map((engine) => {
+            const isCatalog = (CATALOG_ENGINE_IDS as readonly string[]).includes(engine.id);
+            return (
+              <li key={engine.id} style={appRowStyle} data-testid={`engine-row-${engine.id}`}>
+                <span style={appIconPlaceholder}>✦</span>
+                <div style={appLabelColumnStyle}>
+                  <span style={appLabelStyle}>{engine.name}</span>
+                  <span style={appMetaStyle}>{engineMetaSummary(engine)}</span>
+                  {isCatalog ? (
+                    <span style={catalogEngineNoteStyle}>
+                      Listed by AI-Lore; it cannot be removed.
+                    </span>
+                  ) : null}
+                </div>
+                {isCatalog ? null : (
+                  <button
+                    type="button"
+                    style={appRemoveStyle}
+                    onClick={() => removeEngine(engine.id)}
+                    data-testid={`engine-remove-${engine.id}`}
+                  >
+                    Remove
+                  </button>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
       {draft ? (
@@ -1280,4 +1335,35 @@ const engineDraftButtonRow: React.CSSProperties = {
   display: 'flex',
   gap: '0.4rem',
   alignItems: 'center',
+};
+
+const spacesFolderStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.6rem',
+  flexWrap: 'wrap',
+};
+
+const spacesFolderPathStyle: React.CSSProperties = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.78rem',
+  color: 'var(--color-text-bright)',
+  wordBreak: 'break-all',
+};
+
+const spacesFolderNotSetStyle: React.CSSProperties = {
+  fontSize: '0.78rem',
+  color: 'var(--color-text-soft)',
+  fontStyle: 'italic',
+};
+
+const spacesFolderErrorStyle: React.CSSProperties = {
+  fontSize: '0.74rem',
+  color: 'var(--color-warn-fg)',
+};
+
+/** M9.10: "Listed by AI-Lore; it cannot be removed." under a catalog engine row. */
+const catalogEngineNoteStyle: React.CSSProperties = {
+  fontSize: '0.72rem',
+  color: 'var(--color-text-soft)',
 };

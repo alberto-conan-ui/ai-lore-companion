@@ -93,6 +93,7 @@ function reportOf(
     check,
     checkedAt: 1_789_000_000_000,
     pathSource: 'login-shell',
+    home: '/Users/alberto',
     spacesFolder: { value: spacesFolder, proposed: '/Users/alberto/Spaces' },
     setUp: (() => {
       const left: {
@@ -444,14 +445,27 @@ test('Spaces folder: not set offers Use this folder and Choose, and re-checks af
   });
   render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
   const row = await screen.findByTestId('machine-row-spaces-folder');
-  expect(within(row).getByTestId('machine-spaces-folder-path').textContent).toBe(
-    '/Users/alberto/Spaces',
-  );
+  // The Spaces folder is shown with the home folder written as `~` (CTO addition to M9.10).
+  expect(within(row).getByTestId('machine-spaces-folder-path').textContent).toBe('~/Spaces');
   expect(within(row).getByTestId('machine-spaces-folder-use')).toBeTruthy();
   cockpit.spaceMachineCheck.mockClear();
   fireEvent.click(within(row).getByTestId('machine-spaces-folder-use'));
   await waitFor(() => expect(cockpit.spaceSpacesFolderUse).toHaveBeenCalledWith({}));
   await waitFor(() => expect(cockpit.spaceMachineCheck).toHaveBeenCalledWith({ fresh: true }));
+});
+
+test('Spaces folder: a path outside the home folder is shown in full, not shortened', async () => {
+  const check = fineCheck();
+  check.ready = true;
+  const report = reportOf(check, '/Volumes/External/Spaces');
+  answerWith(report);
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  // The section is fine (a folder is set), so it starts collapsed; open it to see the row.
+  fireEvent.click(await screen.findByTestId('machine-section-spaces-folder-toggle'));
+  const row = await screen.findByTestId('machine-row-spaces-folder');
+  expect(within(row).getByTestId('machine-spaces-folder-path').textContent).toBe(
+    '/Volumes/External/Spaces',
+  );
 });
 
 test('while a command is active, other command buttons are disabled until Close', async () => {

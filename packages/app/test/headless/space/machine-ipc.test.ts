@@ -506,3 +506,22 @@ test('CATALOG_ENGINE_IDS mirrors core’s catalog, in catalog order', () => {
     ENGINE_CATALOG.map((entry) => entry.engineId),
   );
 });
+
+// CTO addition to M9.10: the report carries the home folder, so a screen can write a path
+// under it with `~` instead of the full absolute path.
+test('the report carries the home folder', async () => {
+  const runner = createScriptedRunner([{ bin: SHELL, reply: SHELL_REPLY }, ...fineRules()]);
+  const home = mkdtempSync(join(tmpdir(), 'ai-lore-home-'));
+  const h = harnessWith(runner, { now: 1000 }, { home: () => home });
+  try {
+    h.space.host.openWelcome();
+    const welcome = h.space.created[0];
+    assert.ok(welcome);
+    const result = await check(h, welcome, { fresh: true });
+    assert.ok(result.ok);
+    assert.equal(result.value.home, home);
+  } finally {
+    h.cleanup();
+    rmSync(home, { recursive: true, force: true });
+  }
+});

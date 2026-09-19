@@ -6,9 +6,12 @@ import {
   rowCardStyle,
   secondaryButtonStyle,
 } from '../styles.js';
+import { withHomeTilde } from './machineText.js';
 
 type Props = {
   spacesFolder: SpacesFolderState;
+  /** The Human Lead's home folder, so the path is shown with `~` (CTO addition to M9.10). */
+  home: string;
   onUse: () => void;
   onChoose: () => void;
   busy: boolean;
@@ -19,7 +22,13 @@ type Props = {
  * The Human Lead confirms the proposed folder with "Use this folder" or picks
  * another with "Choose…"; the renderer never sends a path of its own.
  */
-export function SpacesFolderSection({ spacesFolder, onUse, onChoose, busy }: Props): JSX.Element {
+export function SpacesFolderSection({
+  spacesFolder,
+  home,
+  onUse,
+  onChoose,
+  busy,
+}: Props): JSX.Element {
   const isSet = spacesFolder.value !== null;
   const path = spacesFolder.value ?? spacesFolder.proposed;
   return (
@@ -28,7 +37,7 @@ export function SpacesFolderSection({ spacesFolder, onUse, onChoose, busy }: Pro
         New Spaces are created in this folder. You can choose another folder for any one Space.
       </p>
       <code style={folderPathStyle} data-testid="machine-spaces-folder-path">
-        {path}
+        {withHomeTilde(path, home)}
       </code>
       <div style={actionsStyle}>
         {isSet ? (

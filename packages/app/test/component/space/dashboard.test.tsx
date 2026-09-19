@@ -2,7 +2,22 @@ import type { DashboardModel, FocusCard, ItemCard } from '@ai-lore-companion/cor
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { Dashboard } from '../../../src/renderer/src/space/dashboard/Dashboard.js';
-import type { SpaceProjectState, SpaceProjectStateResult } from '../../../src/shared/ipc.js';
+import type {
+  SpaceEngineChoice,
+  SpaceProjectState,
+  SpaceProjectStateResult,
+  SpaceSessionEnginesResult,
+} from '../../../src/shared/ipc.js';
+
+/** A ready `SpaceEngineChoice`: Claude Code, startable. */
+const READY_CHOICE: SpaceEngineChoice = {
+  options: [
+    { engineId: 'default.claude', name: 'Claude Code', canStart: true, reason: null, fix: null },
+  ],
+  engineId: 'default.claude',
+  buttonName: 'Claude Code',
+  refusal: null,
+};
 
 const REPO = 'owner/space';
 const ref = (number: number) => ({
@@ -93,10 +108,13 @@ const cockpit = {
     };
   }),
   urlOpenExternal: vi.fn(),
-  // Start a session (phase M7.4) reads the engines.
+  // Start a session (phase M7.4, engine choice M9.10).
   enginesList: vi.fn(async () => []),
   onEnginesChanged: vi.fn(() => () => {}),
-  spaceSessionReadiness: vi.fn(),
+  spaceSessionEngines: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
+  spaceSessionEnginePick: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
+  spaceSessionReinstall: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
+  spaceNavigate: vi.fn(),
 };
 
 const push = (payload: SpaceProjectState): void => {
@@ -111,6 +129,7 @@ beforeEach(() => {
   cockpit.spaceProjectState.mockResolvedValue(answer(state()));
   cockpit.spaceProjectRefresh.mockResolvedValue(answer(state()));
   cockpit.spaceProjectFocus.mockResolvedValue(answer(state()));
+  cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: READY_CHOICE });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
 });
 
@@ -328,4 +347,17 @@ test('Start a session is shown before the first read of the Project', async () =
   expect(screen.getByTestId('dashboard-start')).toBeTruthy();
   expect(screen.queryByTestId('needs-you')).toBeNull();
   expect(screen.queryByTestId('agents-board')).toBeNull();
+});
+
+test('the start button names the engine of a stubbed choice (M9.10)', async () => {
+  await shown();
+  expect(await screen.findByRole('button', { name: 'Start a Claude Code session' })).toBeTruthy();
+});
+
+test('justCreated shows the ready line above the start control', async () => {
+  render(<Dashboard justCreated />);
+  await screen.findByTestId('dashboard-columns');
+  expect(screen.getByTestId('dashboard-just-created').textContent).toBe(
+    'The Space is ready. Start a session to begin work; it starts in Read only.',
+  );
 });

@@ -241,6 +241,8 @@ const cockpit = {
   // Phase M5.7: nothing remembered in these tests; `files-memory.test.tsx` covers the restore.
   spaceUiRead: vi.fn(async () => ({ ok: true as const, value: { state: null, notice: null } })),
   spaceUiSave: vi.fn(async () => ({ ok: true as const, value: { outcome: 'scheduled' as const } })),
+  // Every screen is now shown beside `<SpaceSettings />` (M9.10), which listens for it.
+  onSettingsOpen: vi.fn(() => () => {}),
 };
 
 const LORE_LISTING = LISTINGS['lore:'];

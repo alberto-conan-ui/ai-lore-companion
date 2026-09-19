@@ -47,6 +47,13 @@ export function SpaceWindow({ init }: Props): JSX.Element {
   const [searchOpen, setSearchOpen] = useState(false);
   const files = useWindowRequest();
 
+  // A Space just out of setup opens on the Dashboard (M9.10); otherwise the store's initial
+  // screen, Sessions, stays. Going Back and forth inside the window does not move again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: runs once, on mount, like `init` itself.
+  useEffect(() => {
+    if (init.justCreated === true) showScreen('dashboard');
+  }, []);
+
   const openFiles = useCallback((): void => {
     void files.run(() => window.cockpit.spaceNavigate({ to: 'space-files' }));
   }, [files.run]);
@@ -100,7 +107,7 @@ export function SpaceWindow({ init }: Props): JSX.Element {
           style={screen === 'dashboard' ? screenStyle : hiddenStyle}
           data-testid="space-screen-dashboard"
         >
-          <Dashboard />
+          <Dashboard justCreated={init.justCreated === true} />
         </div>
         <div
           style={screen === 'sessions' ? screenStyle : hiddenStyle}

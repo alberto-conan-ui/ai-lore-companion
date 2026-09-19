@@ -21,7 +21,12 @@ const AGE_TICK_MS = 30 * 1000;
  * mounted here; each carries its own heading. The Space window mounts the
  * Dashboard inside the Dashboard entry of its rail, so it fills its parent.
  */
-export function Dashboard(): JSX.Element {
+type Props = {
+  /** Whether the Space window opened with `init.justCreated` (M9.10). */
+  justCreated?: boolean;
+};
+
+export function Dashboard({ justCreated }: Props = {}): JSX.Element {
   const { project, problem, requested, refresh } = useProjectState();
   const [, setTick] = useState(0);
   const [openUrl, setOpenUrl] = useState<string | null>(null);
@@ -72,7 +77,7 @@ export function Dashboard(): JSX.Element {
           {problem}
         </p>
       ) : null}
-      <StartSession />
+      <StartSession justCreated={justCreated === true} />
       {project !== null && model === null ? (
         <p style={emptyStyle} data-testid="dashboard-no-model">
           No Project has been read from GitHub for this Space yet, so there is nothing to show.

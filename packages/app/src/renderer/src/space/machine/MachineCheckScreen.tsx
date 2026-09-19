@@ -249,6 +249,7 @@ export function MachineCheckScreen({ init }: Props): JSX.Element {
             >
               <SpacesFolderSection
                 spacesFolder={report.spacesFolder}
+                home={report.home}
                 onUse={() => void useFolder()}
                 onChoose={() => void chooseFolder()}
                 busy={folderBusy}

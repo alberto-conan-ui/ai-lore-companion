@@ -63,6 +63,8 @@ export type MachineCheckReport = {
   /** When the check finished, in milliseconds since the epoch. */
   checkedAt: number;
   pathSource: MachinePathSource;
+  /** The Human Lead's home folder, so a screen can write a path under it with `~`. */
+  home: string;
   spacesFolder: SpacesFolderState;
   /** Whether Set up this computer is ready, and what is left when it is not. */
   setUp: SetUpReadiness;

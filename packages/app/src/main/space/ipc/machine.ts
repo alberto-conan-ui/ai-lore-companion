@@ -216,6 +216,7 @@ export function createSpaceMachineRegister(parts: Partial<SpaceMachineParts> = {
         check: result,
         checkedAt: now(),
         pathSource,
+        home: all.home(),
         spacesFolder,
         setUp,
         commands,

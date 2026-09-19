@@ -28,6 +28,8 @@ const space: SpaceSummary = {
 const cockpit = {
   spaceOpenInCockpit: vi.fn<(arg: unknown) => Promise<SpaceWindowResult>>(),
   spaceOpenFolder: vi.fn<(arg: unknown) => Promise<SpaceWindowResult>>(),
+  // Every screen is now shown beside `<SpaceSettings />` (M9.10), which listens for it.
+  onSettingsOpen: vi.fn(() => () => {}),
 };
 
 beforeEach(() => {
