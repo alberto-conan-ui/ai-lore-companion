@@ -1216,49 +1216,6 @@ function EnginesSection(): JSX.Element {
         Defaults are seeded automatically when <code>claude</code> or <code>gemini</code>
         are on PATH.
       </div>
-      {engines.length === 0 ? (
-        <div style={appsEmptyStyle}>No engines configured yet.</div>
-      ) : (
-        <ul style={appsListStyle}>
-          {engines.map((engine) => {
-            const isCatalog = (CATALOG_ENGINE_IDS as readonly string[]).includes(engine.id);
-            return (
-              <li key={engine.id} style={appRowStyle} data-testid={`engine-row-${engine.id}`}>
-                <span style={appIconPlaceholder}>✦</span>
-                <div style={appLabelColumnStyle}>
-                  <span style={appLabelStyle}>{engine.name}</span>
-                  <span style={appMetaStyle}>{engineMetaSummary(engine)}</span>
-                  {isCatalog ? (
-                    <span style={catalogEngineNoteStyle}>
-                      Listed by AI-Lore; it cannot be removed, but you can edit its arguments.
-                    </span>
-                  ) : null}
-                </div>
-                <div style={{ display: 'flex', gap: '0.4rem' }}>
-                  <button
-                    type="button"
-                    style={appRemoveStyle}
-                    onClick={() => setDraft(engine)}
-                    data-testid={`engine-edit-${engine.id}`}
-                  >
-                    Edit
-                  </button>
-                  {isCatalog ? null : (
-                    <button
-                      type="button"
-                      style={appRemoveStyle}
-                      onClick={() => removeEngine(engine.id)}
-                      data-testid={`engine-remove-${engine.id}`}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
       {draft ? (
         <div style={engineDraftStyle} data-testid="engine-draft">
           <input
@@ -1311,14 +1268,59 @@ function EnginesSection(): JSX.Element {
           </div>
         </div>
       ) : (
-        <button
-          type="button"
-          style={shortcutAddBtnStyle}
-          onClick={startDraft}
-          data-testid="engine-add"
-        >
-          Add engine
-        </button>
+        <>
+          {engines.length === 0 ? (
+            <div style={appsEmptyStyle}>No engines configured yet.</div>
+          ) : (
+            <ul style={appsListStyle}>
+              {engines.map((engine) => {
+                const isCatalog = (CATALOG_ENGINE_IDS as readonly string[]).includes(engine.id);
+                return (
+                  <li key={engine.id} style={appRowStyle} data-testid={`engine-row-${engine.id}`}>
+                    <span style={appIconPlaceholder}>✦</span>
+                    <div style={appLabelColumnStyle}>
+                      <span style={appLabelStyle}>{engine.name}</span>
+                      <span style={appMetaStyle}>{engineMetaSummary(engine)}</span>
+                      {isCatalog ? (
+                        <span style={catalogEngineNoteStyle}>
+                          Listed by AI-Lore; it cannot be removed, but you can edit its arguments.
+                        </span>
+                      ) : null}
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.4rem' }}>
+                      <button
+                        type="button"
+                        style={appRemoveStyle}
+                        onClick={() => setDraft(engine)}
+                        data-testid={`engine-edit-${engine.id}`}
+                      >
+                        Edit
+                      </button>
+                      {isCatalog ? null : (
+                        <button
+                          type="button"
+                          style={appRemoveStyle}
+                          onClick={() => removeEngine(engine.id)}
+                          data-testid={`engine-remove-${engine.id}`}
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <button
+            type="button"
+            style={shortcutAddBtnStyle}
+            onClick={startDraft}
+            data-testid="engine-add"
+          >
+            Add engine
+          </button>
+        </>
       )}
     </div>
   );

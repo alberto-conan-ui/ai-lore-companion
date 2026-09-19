@@ -97,6 +97,7 @@ export const ENGINE_CATALOG: readonly EngineCatalogEntry[] = [
     signInCommand: 'agy',
     signInCheck: { kind: 'none' },
     guardedSessions: true,
+    args: ['--dangerously-skip-permissions'],
     required: false,
     note: null,
     page: 'https://antigravity.google/docs/cli/install',
