@@ -7,7 +7,7 @@
 import type { IssueRef, LoreLayer, SessionMode, WriteTarget } from '@ai-lore-companion/core';
 
 /** Argument of `spaceSessionStart` and `spaceSessionReadiness`: an engine id of the registry. */
-export type SpaceSessionEngineArg = { engineId: string };
+export type SpaceSessionEngineArg = { engineId: string; flags?: string[] };
 
 /** Argument of `spaceSessionEnd`. */
 export type SpaceSessionEndArg = { sessionId: string };

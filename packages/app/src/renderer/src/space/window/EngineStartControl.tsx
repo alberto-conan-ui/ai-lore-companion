@@ -19,6 +19,8 @@ type Props = {
   noteTestId: string;
   /** 'dashboard-start-menu' / 'space-sessions-engine-menu'. */
   menuTestId: string;
+  flags?: string[];
+  onFlagsChange?: (flags: string[]) => void;
 };
 
 /** The note while `spaceSessionEngines` has not answered yet. */
@@ -45,7 +47,10 @@ export function EngineStartControl({
   buttonTestId,
   noteTestId,
   menuTestId,
+  flags = [],
+  onFlagsChange,
 }: Props): JSX.Element {
+  const [flagsOpen, setFlagsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [installingId, setInstallingId] = useState<string | null>(null);
@@ -197,6 +202,28 @@ export function EngineStartControl({
           </PopoverShell>
         ) : null}
       </span>
+      {onFlagsChange && (
+        <div style={flagsWrapperStyle}>
+          <button type="button" style={flagsToggleStyle} onClick={() => setFlagsOpen(!flagsOpen)}>
+            {flagsOpen ? '▾' : '▸'} Settings
+          </button>
+          {flagsOpen && (
+            <div style={flagsPanelStyle}>
+              <label style={flagLabelStyle}>
+                <input
+                  type="checkbox"
+                  checked={flags.includes('--dangerously-skip-permissions')}
+                  onChange={(e) => {
+                    if (e.target.checked) onFlagsChange([...flags, '--dangerously-skip-permissions']);
+                    else onFlagsChange(flags.filter((f) => f !== '--dangerously-skip-permissions'));
+                  }}
+                />
+                --dangerously-skip-permissions
+              </label>
+            </div>
+          )}
+        </div>
+      )}
 
       <p id={noteTestId} style={noteStyle} data-testid={noteTestId}>
         {noteText}
@@ -242,6 +269,11 @@ const rootStyle: React.CSSProperties = {
 };
 
 const splitStyle: React.CSSProperties = { display: 'inline-flex', gap: '0.3rem' };
+
+const flagsWrapperStyle: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: '0.2rem' };
+const flagsToggleStyle: React.CSSProperties = { background: 'transparent', border: 'none', color: 'var(--color-text-soft)', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left', padding: 0 };
+const flagsPanelStyle: React.CSSProperties = { padding: '0.4rem', background: 'var(--color-inset)', borderRadius: '4px', border: '1px solid var(--color-border-2)' };
+const flagLabelStyle: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.75rem', color: 'var(--color-text)' };
 
 const menuButtonStyle: React.CSSProperties = {
   padding: '0.4rem 0.6rem',

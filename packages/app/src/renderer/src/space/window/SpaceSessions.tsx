@@ -129,6 +129,8 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
     void window.cockpit.spaceSessionEnd({ sessionId });
   }, []);
 
+  const [executionFlags, setExecutionFlags] = useState<string[]>([]);
+
   const closeTab = useCallback(
     (tabId: string): void => {
       const tab = tabs.find((t) => t.id === tabId);
@@ -168,7 +170,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       start: async (engineId) => {
         console.log('TRACE: SpaceSessions spaceAi.start', tab.id, engineId);
         pendingStart.current.delete(tab.id);
-        const started = await window.cockpit.spaceSessionStart({ engineId });
+        const started = await window.cockpit.spaceSessionStart({ engineId, flags: executionFlags });
         if (!started.ok) {
           refresh();
           return { ok: false, message: started.error.message };
@@ -196,7 +198,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       sidebar: (ptyId, focusPty) => <SkillsColumn ptyId={ptyId} focusPty={focusPty} />,
       hint: AI_TAB_HINT,
     }),
-    [engineName, endSession, refresh, reportSessions],
+    [engineName, endSession, refresh, reportSessions, executionFlags],
   );
 
   const onDockApi = useCallback((api: DockviewApi): void => {
@@ -288,6 +290,8 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
           buttonTestId="new-ai"
           noteTestId={AI_NOTE_ID}
           menuTestId="space-sessions-engine-menu"
+          flags={executionFlags}
+          onFlagsChange={setExecutionFlags}
         />
         <p style={emptyTextStyle}>Other tabs:</p>
         <div style={emptyActionsStyle}>
@@ -325,6 +329,8 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
           buttonTestId="new-ai"
           noteTestId={AI_NOTE_ID}
           menuTestId="space-sessions-engine-menu"
+          flags={executionFlags}
+          onFlagsChange={setExecutionFlags}
         />
       </div>
       <DockWorkspace
