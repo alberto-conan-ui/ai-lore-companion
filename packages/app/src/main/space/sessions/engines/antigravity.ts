@@ -18,6 +18,11 @@ import { sessionToolNames } from '../files.js';
 import { SESSION_DENY_RULES, sessionAllowRules } from '../permissions.js';
 import type { EngineAdapter, LaunchFile, SessionLaunch, SessionLaunchInput } from './types.js';
 
+// Confirmed by a real run (M10.9, m10-engine-findings.md, "Antigravity CLI,
+// phase M10.9"): the write-guard hook still refuses a write with
+// --dangerously-skip-permissions on, the after-write hook still cannot report
+// a failure to the session, and the `PostToolUse` input matches the shape
+// this file assumed. The text is unchanged from the proposal of 3.6.
 const CAPABILITY: EngineAdapter['capability'] = {
   lore: {
     aspect: 'lore',

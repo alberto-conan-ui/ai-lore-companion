@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -58,6 +59,8 @@ type DashboardRun = {
   userData: string;
   stateFile: string;
   seeded: Seeded;
+  /** Where the stand-in `claude` script writes the arguments it was started with. */
+  argvFile: string;
   env: Record<string, string>;
   cleanup: () => void;
 };
@@ -120,12 +123,28 @@ function seedDashboardRun(): DashboardRun {
     const bin = join(temp, 'bin');
     mkdirSync(bin);
     const engine = join(bin, 'claude');
-    writeFileSync(engine, '#!/bin/sh\nexec sleep 600\n');
+    const argvFile = join(bin, 'argv.txt');
+    // M10.9 item 5: a parameter ticked on the start control must reach the
+    // engine's argument list. The stand-in writes what it was called with
+    // before it sleeps, so a test can read it back.
+    writeFileSync(
+      engine,
+      `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argvFile)}\nexec sleep 600\n`,
+    );
     chmodSync(engine, 0o755);
     writeFileSync(
       join(userData, 'engines.json'),
       JSON.stringify({
-        engines: [{ id: 'e2e.claude', name: 'Stand-in for Claude Code', binary: engine }],
+        engines: [
+          {
+            id: 'e2e.claude',
+            name: 'Stand-in for Claude Code',
+            binary: engine,
+            // Not ticked by default (M10.3 rule 3: Claude Code's seed is `[]`),
+            // so the two other tests of this file start exactly as before.
+            params: [{ text: '--dangerously-skip-permissions', defaultOn: false }],
+          },
+        ],
       }),
     );
 
@@ -135,6 +154,7 @@ function seedDashboardRun(): DashboardRun {
       userData,
       stateFile,
       seeded,
+      argvFile,
       env: { AI_LORE_FAKE_GITHUB: stateFile },
       cleanup: () => {
         rmSync(spaceDir, { recursive: true, force: true, maxRetries: 3 });
@@ -260,6 +280,12 @@ test.describe('the Dashboard', () => {
       // The Agents board has no session yet.
       await expect(page.getByTestId('agents-column-writing')).toContainText('No session.');
 
+      // The start control's readiness block (M10.9 item 6, 3.6): the stand-in Claude Code
+      // is installed and signed in, so it reads the Lore as Claude Code does.
+      await expect(page.getByTestId('dashboard-start-session-lore')).toHaveText(
+        'Reads the Lore as Claude Code does: yes',
+      );
+
       // Start a session from the Dashboard: the guarded start runs the stand-in engine.
       await startSession(page);
       let mcpFile: string | null = null;
@@ -378,6 +404,48 @@ test.describe('the Dashboard', () => {
       await expect
         .poll(() => sessionMcpFile(run.seeded.sessionsDir) !== null, { timeout: 10_000 })
         .toBe(true);
+    } finally {
+      await closeSpaceApp(app);
+      run.cleanup();
+    }
+  });
+
+  test('a guard-changing parameter ticked on the start control reaches the engine, and labels the session unguarded (M10.9 item 5)', async () => {
+    test.setTimeout(150_000);
+    const run = seedDashboardRun();
+    let app: ElectronApplication | undefined;
+    try {
+      const launched = await launchSpaceApp({
+        root: run.seeded.root,
+        userData: run.userData,
+        env: run.env,
+      });
+      app = launched.app;
+      const page = launched.page;
+      await showDashboard(page);
+
+      // Tick the one optional parameter (unticked by default) before starting.
+      const param = page.getByTestId('dashboard-start-session-param-0');
+      await expect(param).toBeVisible({ timeout: 15_000 });
+      await expect(param).not.toBeChecked();
+      await param.check();
+      await expect(page.getByTestId('dashboard-start-session-unguarded-note')).toContainText(
+        'This session will be unguarded',
+      );
+
+      await startSession(page);
+      await expect
+        .poll(() => sessionMcpFile(run.seeded.sessionsDir) !== null, { timeout: 10_000 })
+        .toBe(true);
+
+      // The ticked parameter reached the stand-in engine's argument list.
+      await expect.poll(() => existsSync(run.argvFile), { timeout: 10_000 }).toBe(true);
+      const argv = readFileSync(run.argvFile, 'utf8').split('\n');
+      expect(argv).toContain('--dangerously-skip-permissions');
+
+      // The tab and the session header say the session is unguarded.
+      await expect(page.getByTestId('tab-ai')).toContainText('· unguarded');
+      await expect(page.getByTestId('session-header-unguarded')).toHaveText('Unguarded');
     } finally {
       await closeSpaceApp(app);
       run.cleanup();

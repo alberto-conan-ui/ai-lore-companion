@@ -13,7 +13,9 @@ import type { SessionStartFailure } from '../../../src/main/space/sessions/prefl
 import type { SessionReadiness } from '../../../src/main/space/sessions/service.js';
 
 const CLAUDE: EngineEntry = { id: 'default.claude', name: 'Claude Code', binary: 'claude' };
-const CODEX: EngineEntry = { id: 'default.codex', name: 'Codex CLI', binary: 'codex' };
+// M10.9: Codex CLI's guardedSessions became true, so it no longer stands for a
+// non-guarded engine here; OpenCode stays false (the Human Lead did not sign in).
+const OPENCODE: EngineEntry = { id: 'default.opencode', name: 'OpenCode', binary: 'opencode' };
 const GEMINI: EngineEntry = { id: 'default.gemini', name: 'Gemini', binary: 'gemini' };
 const OTHER_CLAUDE: EngineEntry = { id: 'other.claude', name: 'My Claude', binary: 'claude' };
 
@@ -82,9 +84,9 @@ test('a non-guarded engine never has its readiness run', async () => {
     ran.push(id);
     return OK;
   };
-  const choice = await engineChoice([CODEX, CLAUDE], readiness, null);
+  const choice = await engineChoice([OPENCODE, CLAUDE], readiness, null);
   assert.deepEqual(ran, ['default.claude']);
-  assert.equal(choice.options[0]?.engineId, 'default.codex');
+  assert.equal(choice.options[0]?.engineId, 'default.opencode');
   assert.equal(choice.options[0]?.canStart, false);
 });
 

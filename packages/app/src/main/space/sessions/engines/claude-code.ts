@@ -10,6 +10,11 @@ import { CLAUDE_CODE_OPTIONS } from '../engine-options.js';
 import { buildSessionMcpConfig, buildSessionSettings, sessionToolNames } from '../files.js';
 import type { EngineAdapter, SessionLaunch, SessionLaunchInput } from './types.js';
 
+// Confirmed by a real run (M10.9 item 3, m10-engine-findings.md, "Claude
+// Code, phase M10.9"): the PreToolUse hook's `deny` still blocks a write with
+// --dangerously-skip-permissions on, so an unguarded Claude Code session's
+// guard line keeps the text 3.6 proposed (no "the write-guard does not run"
+// fallback).
 const CAPABILITY: EngineAdapter['capability'] = {
   lore: {
     aspect: 'lore',

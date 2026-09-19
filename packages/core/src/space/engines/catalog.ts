@@ -86,7 +86,13 @@ export const ENGINE_CATALOG: readonly EngineCatalogEntry[] = [
     signInCommand: 'codex login',
     signInCheck: { kind: 'codex-login-status' },
     seedParams: [],
-    guardedSessions: false,
+    // Real-engine checks 1 and 3 of M10.7 passed in a real run (M10.9,
+    // m10-engine-findings.md, "Codex CLI, phase M10.9"): the before-write hook
+    // fires and blocks a write into the Lore. Check 2 (the session-server
+    // round trip) could not complete end to end in headless `codex exec`
+    // (codex's own approval gate refuses an MCP tool call in that mode before
+    // it reaches the server); left as a manual check for a real session.
+    guardedSessions: true,
     required: false,
     note: null,
     page: 'https://learn.chatgpt.com/docs/codex/cli',
@@ -102,7 +108,11 @@ export const ENGINE_CATALOG: readonly EngineCatalogEntry[] = [
     signInCommand: 'agy',
     signInCheck: { kind: 'none' },
     seedParams: [{ text: '--dangerously-skip-permissions', defaultOn: true }],
-    guardedSessions: false,
+    // Re-confirmed in a real run (M10.9, m10-engine-findings.md, "Antigravity
+    // CLI, phase M10.9"): the before-write hook still refuses a write into the
+    // Lore with --dangerously-skip-permissions ticked, so the flag stays out
+    // of ANTIGRAVITY_OPTIONS.guardChanging and the session is guarded.
+    guardedSessions: true,
     required: false,
     note: null,
     page: 'https://antigravity.google/docs/cli/install',

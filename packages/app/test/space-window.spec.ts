@@ -45,17 +45,29 @@ test.describe('the Space window', () => {
       await expect(empty.getByTestId('space-sessions-ai-note')).toHaveText(AI_SENTENCE);
 
       // The engine menu lists every catalog engine; one that cannot run a guarded
-      // session at all (Codex CLI, here, whether or not it is installed) is greyed
-      // with its reason on the line.
+      // session at all (OpenCode, here: the Human Lead has not signed in, M10.9)
+      // is greyed with its still-not-guarded reason on the line (M10.9 item 5).
       await empty.getByRole('button', { name: 'Choose the engine' }).click();
       const engineMenu = page.getByTestId('space-sessions-engine-menu');
       await expect(engineMenu).toBeVisible();
+      const opencodeOption = engineMenu.getByTestId(
+        'space-sessions-engine-menu-option-default.opencode',
+      );
+      await expect(opencodeOption).toHaveAttribute('aria-disabled', 'true');
+      await expect(opencodeOption).toContainText('OpenCode');
+      await expect(opencodeOption).toContainText(
+        'guarded Space sessions are not available for this engine yet',
+      );
+
+      // Codex CLI is guarded now (M10.9), so its option is a normal readiness
+      // failure — "not installed" in this end-to-end run, never the
+      // still-not-guarded reason above.
       const codexOption = engineMenu.getByTestId('space-sessions-engine-menu-option-default.codex');
       await expect(codexOption).toHaveAttribute('aria-disabled', 'true');
       await expect(codexOption).toContainText('Codex CLI');
-      await expect(codexOption).toContainText(
-        'guarded Space sessions are not available for this engine yet',
-      );
+      await expect(codexOption).toContainText('not installed');
+      await expect(codexOption).not.toContainText('guarded Space sessions are not available');
+
       await page.keyboard.press('Escape');
       await expect(engineMenu).toHaveCount(0);
 

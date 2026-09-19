@@ -11,9 +11,25 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, test } from 'node:test';
-import { ENGINE_CATALOG } from '@ai-lore-companion/core';
+import { after, afterEach, before, beforeEach, test } from 'node:test';
+import {
+  type DeskPaths,
+  ENGINE_CATALOG,
+  type EngineEntry,
+  claudeCodeInstallPaths,
+  deskPaths,
+  installClaudeCode,
+  readLore,
+} from '@ai-lore-companion/core';
+import { type SpaceFixture, makeSpaceFixture } from '@ai-lore-companion/core/testing';
 import { loadEngines, saveEngines } from '../../../src/main/engines.js';
+import type { SessionConnection } from '../../../src/main/space/session-server/index.js';
+import { adapterFor } from '../../../src/main/space/sessions/engines/index.js';
+import { sessionInstructions } from '../../../src/main/space/sessions/engines/instructions.js';
+import { readInstalledSkills } from '../../../src/main/space/sessions/engines/skills.js';
+import { sessionFilePaths } from '../../../src/main/space/sessions/files.js';
+import { verifyInstall } from '../../../src/main/space/sessions/preflight.js';
+import { LORE_TEMPLATE_DIR } from './space-harness.js';
 
 let userDataDir: string;
 
@@ -84,4 +100,75 @@ test('saveEngines gives back a catalog entry missing from the list it was given'
     engines.map((e) => e.id),
     CATALOG_IDS,
   );
+});
+
+// M10.9 item 7: every catalog engine whose `guardedSessions` is true (set in this phase
+// once its real-engine checks passed) has an adapter whose `launch` does not throw for a
+// real fixture session.
+
+const CONNECTION: SessionConnection = {
+  sessionId: 's-catalog-launch',
+  serverName: 'ailore',
+  url: 'http://127.0.0.1:4242/mcp/s-catalog-launch',
+  header: { name: 'authorization', value: 'Bearer secret-token-for-the-test' },
+  tools: ['request_writing', 'request_gate', 'await_answer', 'leave_writing'],
+};
+
+let launchSpace: SpaceFixture;
+let launchBase: string;
+let launchPaths: DeskPaths;
+
+before(async () => {
+  launchSpace = await makeSpaceFixture({ templateDir: LORE_TEMPLATE_DIR, name: 'catalog-launch' });
+  launchBase = mkdtempSync(join(tmpdir(), 'm10-9-catalog-launch-'));
+  launchPaths = deskPaths(launchBase, launchSpace.root);
+  const lore = await readLore(launchSpace.root);
+  assert.ok(lore.ok);
+  const installed = await installClaudeCode(lore.value, launchPaths.install);
+  assert.ok(installed.ok, installed.ok ? '' : installed.error.message);
+});
+
+after(() => {
+  launchSpace.cleanup();
+  rmSync(launchBase, { recursive: true, force: true });
+});
+
+test('every catalog engine with guardedSessions: true has an adapter whose launch does not throw for a fixture input', async () => {
+  const verified = await verifyInstall(launchPaths.install);
+  assert.ok(verified.ok, verified.ok ? '' : verified.error.message);
+  const skills = await readInstalledSkills(launchPaths.install, launchSpace.root);
+  const install = {
+    pluginDir: claudeCodeInstallPaths(launchPaths.install).plugin,
+    beforeChecks: verified.value.beforeChecks,
+    afterChecks: verified.value.afterChecks,
+  };
+
+  for (const entry of ENGINE_CATALOG) {
+    if (!entry.guardedSessions) continue;
+    const engine: EngineEntry = { id: entry.engineId, name: entry.name, binary: entry.binary };
+    const adapter = adapterFor(engine);
+    assert.notEqual(adapter, null, entry.catalogId);
+    const sessionId = `s-catalog-${entry.catalogId}`;
+    const filePaths = sessionFilePaths(launchPaths.sessions, sessionId);
+    const instructions = sessionInstructions({
+      spaceRoot: launchSpace.root,
+      skills,
+      adapter: adapter as NonNullable<typeof adapter>,
+    });
+    assert.doesNotThrow(() => {
+      (adapter as NonNullable<typeof adapter>).launch({
+        sessionId,
+        spaceRoot: launchSpace.root,
+        deskDir: launchPaths.desk,
+        paths: filePaths,
+        python: '/usr/bin/python3',
+        install,
+        skills,
+        connection: { ...CONNECTION, sessionId },
+        repositories: [],
+        instructions,
+        paramArgv: [],
+      });
+    }, entry.catalogId);
+  }
 });

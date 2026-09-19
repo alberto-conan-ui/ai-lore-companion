@@ -32,7 +32,8 @@ test('ENGINE_CATALOG has the four engines, in order, with their ids and commands
   assert.equal(codex?.installNeeds, 'npm');
   assert.equal(codex?.signInCommand, 'codex login');
   assert.deepEqual(codex?.signInCheck, { kind: 'codex-login-status' });
-  assert.equal(codex?.guardedSessions, false);
+  // Real-engine checks 1 and 3 of M10.7 passed in a real run in M10.9.
+  assert.equal(codex?.guardedSessions, true);
   assert.equal(codex?.required, false);
 
   const antigravity = ENGINE_CATALOG[2];
@@ -45,7 +46,9 @@ test('ENGINE_CATALOG has the four engines, in order, with their ids and commands
   );
   assert.equal(antigravity?.signInCommand, 'agy');
   assert.deepEqual(antigravity?.signInCheck, { kind: 'none' });
-  assert.equal(antigravity?.guardedSessions, false);
+  // Re-confirmed in a real run in M10.9: the write-guard hook still blocks a write
+  // with --dangerously-skip-permissions on.
+  assert.equal(antigravity?.guardedSessions, true);
   assert.equal(antigravity?.required, false);
 
   const opencode = ENGINE_CATALOG[3];

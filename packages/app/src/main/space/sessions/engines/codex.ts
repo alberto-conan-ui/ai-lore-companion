@@ -16,6 +16,16 @@ import { CODEX_OPTIONS } from '../engine-options.js';
 import { sessionToolNames } from '../files.js';
 import type { EngineAdapter, SessionLaunch, SessionLaunchInput } from './types.js';
 
+// Checked against a real run (M10.9, m10-engine-findings.md, "Codex CLI,
+// phase M10.9"): the -c hooks.PreToolUse value fires and blocks a write into
+// the Lore (check 3 passed). Check 2, the session-server round trip, could
+// not complete end to end in headless `codex exec`: codex's own approval gate
+// refuses an MCP tool call in that mode before it reaches the server, so
+// whether an interactive session's own approval prompt asks the Human Lead
+// for a session-server call, beyond the companion's dialog, is Unverified —
+// left as a manual check (this phase's report). `sessionTools` is corrected
+// from the "yes" the 3.6 proposal carried to what was observed: the server is
+// configured and the model found its tools, but no call was seen completing.
 const CAPABILITY: EngineAdapter['capability'] = {
   lore: {
     aspect: 'lore',
@@ -24,8 +34,8 @@ const CAPABILITY: EngineAdapter['capability'] = {
   },
   sessionTools: {
     aspect: 'session-tools',
-    state: 'yes',
-    text: "Has the companion's session tools.",
+    state: 'partly',
+    text: "The session server is configured and its tools are found; a call completing in a real session was not confirmed (codex's own approval gate blocked it in headless testing).",
   },
   guard: {
     aspect: 'guard',
