@@ -50,6 +50,8 @@ export type RunGitOptions = {
   readOnly?: boolean;
   input?: string;
   timeoutMs?: number;
+  /** Variables added to the process's environment for this run. */
+  env?: Record<string, string>;
 };
 
 /** The git commands the 1.0 library uses. `dir` is a folder of the repository. */
@@ -102,6 +104,15 @@ export type GitPort = {
 const FIELD = '\x1f';
 const RECORD = '\x1e';
 
+/** The environment `clone` and `push` run with, so that git never waits for a password. */
+export const GIT_NETWORK_ENV = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' } as const;
+
+/** The time limit of `clone`, in milliseconds. */
+export const GIT_CLONE_TIMEOUT_MS = 600_000;
+
+/** The time limit of `push`, in milliseconds. */
+export const GIT_PUSH_TIMEOUT_MS = 120_000;
+
 /**
  * Run one git command in `dir` and return the raw `RunResult`. For a command
  * the port has no function for; the rules in this file's header apply to the
@@ -114,7 +125,12 @@ export function runGit(
   opts: RunGitOptions = {},
 ): Promise<RunResult> {
   const full = opts.readOnly === true ? ['--no-optional-locks', ...args] : [...args];
-  return runner.run('git', full, { cwd: dir, input: opts.input, timeoutMs: opts.timeoutMs });
+  return runner.run('git', full, {
+    cwd: dir,
+    input: opts.input,
+    timeoutMs: opts.timeoutMs,
+    env: opts.env,
+  });
 }
 
 function gitFailure(
@@ -152,8 +168,12 @@ function parseLog(stdout: string): GitLogEntry[] {
 /** Build the `GitPort` that runs its commands through `runner`. */
 export function createGitPort(runner: CommandRunner): GitPort {
   /** Run a command whose only answer is success. */
-  async function simple(dir: string, args: string[], input?: string): Promise<GitResult<void>> {
-    const result = await runGit(runner, dir, args, { input });
+  async function simple(
+    dir: string,
+    args: string[],
+    opts: { input?: string; env?: Record<string, string>; timeoutMs?: number } = {},
+  ): Promise<GitResult<void>> {
+    const result = await runGit(runner, dir, args, opts);
     return runSucceeded(result) ? ok(undefined) : gitFailure(args, result);
   }
 
@@ -243,7 +263,7 @@ export function createGitPort(runner: CommandRunner): GitPort {
         address,
         into,
       ];
-      return simple(parent, args);
+      return simple(parent, args, { env: { ...GIT_NETWORK_ENV }, timeoutMs: GIT_CLONE_TIMEOUT_MS });
     },
 
     async init(dir, opts = {}) {
@@ -285,7 +305,7 @@ export function createGitPort(runner: CommandRunner): GitPort {
         '--file',
         '-',
       ];
-      const done = await simple(dir, args, message);
+      const done = await simple(dir, args, { input: message });
       if (!done.ok) return done;
       return port.head(dir);
     },
@@ -303,14 +323,18 @@ export function createGitPort(runner: CommandRunner): GitPort {
       }
       const bad = optionLike('a remote name', remote) ?? optionLike('a branch name', branch);
       if (bad !== null) return bad;
-      return simple(dir, [
-        'push',
-        '--quiet',
-        ...(opts.setUpstream === true ? ['--set-upstream'] : []),
-        '--',
-        remote,
-        branch,
-      ]);
+      return simple(
+        dir,
+        [
+          'push',
+          '--quiet',
+          ...(opts.setUpstream === true ? ['--set-upstream'] : []),
+          '--',
+          remote,
+          branch,
+        ],
+        { env: { ...GIT_NETWORK_ENV }, timeoutMs: GIT_PUSH_TIMEOUT_MS },
+      );
     },
 
     async logForPath(dir, path, opts = {}) {

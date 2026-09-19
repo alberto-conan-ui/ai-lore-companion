@@ -429,6 +429,48 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
         return ok(info);
       }),
 
+    branchHeads: (fullName) =>
+      operate('branchHeads', false, async () => {
+        const repository = repositoryNamed(fullName);
+        if (repository === null) return ok(null);
+        const args = [
+          '--git-dir',
+          repository.info.cloneUrl,
+          'for-each-ref',
+          '--format=%(objectname)',
+          'refs/heads',
+        ];
+        const result = await runner.run('git', args, { cwd: state.reposDir ?? undefined });
+        if (!runSucceeded(result)) return err(failed(commandFailure('git', args, result).message));
+        return ok(
+          result.stdout
+            .split('\n')
+            .map((line) => line.trim())
+            .filter((line) => line !== ''),
+        );
+      }),
+
+    listSpaceRepositories: (owner) =>
+      operate('listSpaceRepositories', false, async () => {
+        const prefix = `${owner}/`;
+        const candidates = [...state.repositories]
+          .reverse()
+          .filter((repository) => repository.info.fullName.startsWith(prefix));
+        const found: RepositoryInfo[] = [];
+        for (const repository of candidates) {
+          const args = [
+            '--git-dir',
+            repository.info.cloneUrl,
+            'cat-file',
+            '-e',
+            'HEAD:lore/space.md',
+          ];
+          const result = await runner.run('git', args, { cwd: state.reposDir ?? undefined });
+          if (runSucceeded(result)) found.push({ ...repository.info });
+        }
+        return ok(found);
+      }),
+
     findProject: (arg) =>
       operate('findProject', false, () => {
         const found = state.projects.find(

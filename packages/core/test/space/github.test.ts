@@ -35,6 +35,7 @@ import {
   gitHubRateLimited,
   gitHubUnreachable,
   graphQlErrors,
+  graphqlOperationName,
   isBranchName,
   isIssueMarker,
   isRepositoryName,
@@ -254,9 +255,9 @@ test('createProject creates under the owner id', async () => {
   assert.deepEqual(result, { ok: true, value: PROJECT });
 });
 
-test('ensureSingleSelectField creates a missing field with its options in order', async () => {
+test('ensureSingleSelectField creates a field that GitHub reports as NOT_FOUND with exit 1', async () => {
   const { runner, port } = setup();
-  gql(runner, S.FIELD_MISSING_BODY);
+  gql(runner, S.FIELD_MISSING_BODY, { code: 1 });
   gql(runner, { data: { createProjectV2Field: { projectV2Field: S.STAGE_FIELD_NODE } } });
   const result = await port.ensureSingleSelectField({
     project: PROJECT,
@@ -833,6 +834,93 @@ test('readProject reads every page and sorts the issues into the snapshot', asyn
       updatedAt: '2026-09-18T11:30:00Z',
     },
   ]);
+});
+
+test('readProject reads a Project with no Stage field when GitHub reports NOT_FOUND with exit 1', async () => {
+  const { runner, port } = setup();
+  gql(
+    runner,
+    {
+      data: {
+        node: {
+          stage: null,
+          items: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+        },
+      },
+      errors: [
+        {
+          type: 'NOT_FOUND',
+          path: ['node', 'stage'],
+          message: 'Could not resolve to a ProjectV2Field with the name Stage.',
+        },
+      ],
+    },
+    { code: 1 },
+  );
+  const result = await port.readProject({ project: PROJECT });
+  assert.ok(result.ok);
+  assert.deepEqual(result.value.stageField, { id: '', options: [] });
+  assert.deepEqual(
+    [result.value.focuses, result.value.standalone, result.value.sessions],
+    [[], [], []],
+  );
+});
+
+test('an answer with a NOT_FOUND error and another error kind is a failure', async () => {
+  const { runner, port } = setup();
+  gql(
+    runner,
+    {
+      data: { repository: null },
+      errors: [
+        { type: 'NOT_FOUND', path: ['repository'], message: 'Could not resolve to a Repository.' },
+        { type: 'FORBIDDEN', message: 'Resource protected by organization SAML enforcement.' },
+      ],
+    },
+    { code: 1 },
+  );
+  const result = await port.findRepository('octo-human/my-space');
+  assert.equal(result.ok, false);
+});
+
+test('branchHeads builds its arguments and reads the commits, null for a missing repository', async () => {
+  const { runner, port } = setup();
+  gql(runner, S.BRANCH_HEADS_BODY);
+  const result = await port.branchHeads('octo-human/my-space');
+  assert.deepEqual(request(runner.calls[0]).variables, { owner: 'octo-human', name: 'my-space' });
+  assert.deepEqual(result, {
+    ok: true,
+    value: ['9eb4db2ba89017ea9dbcaed4f712dc4881f7f37b'],
+  });
+
+  gql(runner, S.BRANCH_HEADS_EMPTY_BODY);
+  assert.deepEqual(await port.branchHeads('octo-human/my-space'), { ok: true, value: [] });
+
+  gql(runner, { data: { repository: null } });
+  assert.deepEqual(await port.branchHeads('octo-human/no-such-repo'), { ok: true, value: null });
+});
+
+test('listSpaceRepositories keeps only the nodes with a manifest', async () => {
+  const { runner, port } = setup();
+  gql(runner, S.OWNER_SPACE_REPOSITORIES_BODY);
+  const result = await port.listSpaceRepositories('octo-human');
+  assert.deepEqual(request(runner.calls[0]).variables, { login: 'octo-human' });
+  assert.ok(result.ok);
+  assert.deepEqual(
+    result.value.map((repository) => repository.fullName),
+    ['octo-human/my-space'],
+  );
+
+  gql(runner, { data: { repositoryOwner: null } });
+  const error = errorOf(await port.listSpaceRepositories('no-such-owner'));
+  assert.deepEqual(error, gitHubNotFound('the account no-such-owner'));
+});
+
+test('graphqlOperationName names the query constant of queries.ts, or null', () => {
+  const sent = JSON.stringify({ query: Q.REPOSITORY_QUERY, variables: { owner: 'a', name: 'b' } });
+  assert.equal(graphqlOperationName(sent), 'REPOSITORY_QUERY');
+  assert.equal(graphqlOperationName(JSON.stringify({ query: 'query { viewer { id } }' })), null);
+  assert.equal(graphqlOperationName('not json'), null);
 });
 
 test('mergedPullRequests asks gh pr list for merged ones and orders them newest merge first', async () => {

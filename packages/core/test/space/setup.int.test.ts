@@ -24,7 +24,12 @@ import { join } from 'node:path';
 import { type TestContext, test } from 'node:test';
 import { closeDesk, listFirstSeen, openDesk } from '../../src/space/desk/index.js';
 import { detectFolder } from '../../src/space/detect/index.js';
-import { createGitPort, execFileRunner } from '../../src/space/exec/index.js';
+import {
+  type CommandRunner,
+  type RunOptions,
+  createGitPort,
+  execFileRunner,
+} from '../../src/space/exec/index.js';
 import { parseLoreFrontmatter } from '../../src/space/frontmatter/index.js';
 import { AGENTS_COLUMNS, DEFAULT_STAGES, type GitHubPort } from '../../src/space/github/index.js';
 import { claudeCodeInstallPaths } from '../../src/space/install/index.js';
@@ -76,6 +81,8 @@ function machine(ready: boolean): MachineCheck {
       { id: 'engine', binary: 'claude', state: fine, guidance: null, command: null },
       { id: 'python3', binary: 'python3', state: fine, guidance: null, command: null },
     ],
+    github: { account: null, organisations: [] },
+    tools: { brew: true, npm: true },
   };
 }
 
@@ -147,6 +154,20 @@ async function assertLoreIntegrity(space: string): Promise<void> {
   const run = await runPython(script, ['--space', space, '--when', 'after'], { cwd: space });
   assert.equal(run.code, 0, `${run.stdout}\n${run.stderr}`);
   assert.match(run.stdout, /passes the check/);
+}
+
+/** Wrap a runner and record every call, forwarding to it unchanged. */
+function recordingRunner(inner: CommandRunner): CommandRunner & {
+  calls: { args: readonly string[]; opts: RunOptions }[];
+} {
+  const calls: { args: readonly string[]; opts: RunOptions }[] = [];
+  return {
+    calls,
+    run(bin, args, opts = {}) {
+      calls.push({ args, opts });
+      return inner.run(bin, args, opts);
+    },
+  };
 }
 
 function firstSeenRoots(userDataDir: string, space: string): string[] {
@@ -856,6 +877,20 @@ test('adopt and open: stopped while each step runs, a second run finishes and th
     else assert.deepEqual(state, opened, `after a stop at ${stepId}`);
   }
   assert.ok(made.fake.calls.every((call) => !WRITES.has(call.operation)));
+});
+
+test('the plan and the run of "create" start no git ls-remote', async (t) => {
+  const { deps: baseDeps, form } = bench(t);
+  const recorder = recordingRunner(execFileRunner);
+  const deps: SetupDeps = { ...baseDeps, runner: recorder };
+  const plan = await planCreateSpace(form, deps);
+  assert.ok(plan.ok, plan.ok ? '' : plan.error.message);
+  const run = await createSpace(form, deps);
+  assert.ok(run.ok, run.ok ? '' : run.error.message);
+  assert.ok(
+    recorder.calls.every((call) => !call.args.includes('ls-remote')),
+    'no call names ls-remote',
+  );
 });
 
 // ---------- never destroy ----------

@@ -101,6 +101,22 @@ export const LINK_PROJECT_MUTATION = `mutation($input: LinkProjectV2ToRepository
   linkProjectV2ToRepository(input: $input) { repository { id } }
 }`;
 
+/** The commits of a repository's branches, at most 100. */
+export const BRANCH_HEADS_QUERY = `query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    refs(refPrefix: "refs/heads/", first: 100) { nodes { target { oid } } }
+  }
+}`;
+
+/** An owner's repositories, newest push first, each with its Space manifest when it has one. */
+export const OWNER_SPACE_REPOSITORIES_QUERY = `query($login: String!) {
+  repositoryOwner(login: $login) {
+    repositories(first: 100, orderBy: { field: PUSHED_AT, direction: DESC }) {
+      nodes { ${REPOSITORY_FIELDS} manifest: object(expression: "HEAD:lore/space.md") { id } }
+    }
+  }
+}`;
+
 /** One page of a repository's issues with their bodies, oldest first. */
 export const ISSUE_BODIES_QUERY = `query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {

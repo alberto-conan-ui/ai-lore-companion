@@ -181,6 +181,46 @@ export const CREATE_REPOSITORY_BODY = {
   data: { createRepository: { repository: REPOSITORY_BODY.data.repository } },
 };
 
+/** BY HAND (`BRANCH_HEADS_QUERY`): a repository with one branch. */
+export const BRANCH_HEADS_BODY = {
+  data: {
+    repository: {
+      refs: { nodes: [{ target: { oid: '9eb4db2ba89017ea9dbcaed4f712dc4881f7f37b' } }] },
+    },
+  },
+};
+
+/** BY HAND (`BRANCH_HEADS_QUERY`): a repository with no commit yet. */
+export const BRANCH_HEADS_EMPTY_BODY = {
+  data: { repository: { refs: { nodes: [] } } },
+};
+
+/** BY HAND (`OWNER_SPACE_REPOSITORIES_QUERY`): one repository with a Space manifest, one without. */
+export const OWNER_SPACE_REPOSITORIES_BODY = {
+  data: {
+    repositoryOwner: {
+      repositories: {
+        nodes: [
+          {
+            id: 'R_kgDOAAAAAB',
+            nameWithOwner: 'octo-human/my-space',
+            url: 'https://github.com/octo-human/my-space',
+            isPrivate: true,
+            manifest: { id: 'B_kwDOAAAAAA' },
+          },
+          {
+            id: 'R_kgDOAAAAAC',
+            nameWithOwner: 'octo-human/plain-repo',
+            url: 'https://github.com/octo-human/plain-repo',
+            isPrivate: false,
+            manifest: null,
+          },
+        ],
+      },
+    },
+  },
+};
+
 // ---------- the Project (all BY HAND) ----------
 
 export const PROJECT_NODE = {
@@ -219,7 +259,17 @@ export const STAGE_FIELD_NODE = {
   ],
 };
 
-export const FIELD_MISSING_BODY = { data: { node: { field: null } } };
+/** RECORDED shape: GitHub reports a missing Project field with `NOT_FOUND`, and `gh` exits 1 with it. */
+export const FIELD_MISSING_BODY = {
+  data: { node: { field: null } },
+  errors: [
+    {
+      type: 'NOT_FOUND',
+      path: ['node', 'field'],
+      message: 'Could not resolve to a ProjectV2Field with the name Stage.',
+    },
+  ],
+};
 export const FIELD_BODY = { data: { node: { field: STAGE_FIELD_NODE } } };
 export const FIELD_NOT_SINGLE_SELECT_BODY = {
   data: { node: { field: { __typename: 'ProjectV2Field' } } },

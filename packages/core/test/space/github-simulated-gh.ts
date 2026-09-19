@@ -283,9 +283,21 @@ export function createSimulatedGh(fake: FakeGitHub): SimulatedGh {
         const project = projectById(v.project);
         if (project === null) return notFound('a node with the global id', 'node');
         const field = project.fields.find((candidate) => candidate.name === v.name);
-        return {
-          body: { data: { node: { field: field === undefined ? null : fieldNode(field) } } },
-        };
+        if (field === undefined) {
+          return {
+            body: {
+              data: { node: { field: null } },
+              errors: [
+                {
+                  type: 'NOT_FOUND',
+                  path: ['node', 'field'],
+                  message: `Could not resolve to a ProjectV2Field with the name ${str(v.name)}.`,
+                },
+              ],
+            },
+          };
+        }
+        return { body: { data: { node: { field: fieldNode(field) } } } };
       }
       case Q.CREATE_FIELD_MUTATION:
       case Q.UPDATE_FIELD_MUTATION: {
@@ -558,8 +570,53 @@ export function createSimulatedGh(fake: FakeGitHub): SimulatedGh {
                 items: page(nodes, v.after, ITEMS_PAGE),
               },
             },
+            ...(stage === undefined
+              ? {
+                  errors: [
+                    {
+                      type: 'NOT_FOUND',
+                      path: ['node', 'stage'],
+                      message: `Could not resolve to a ProjectV2Field with the name ${str(v.stage)}.`,
+                    },
+                  ],
+                }
+              : {}),
           },
         };
+      }
+      case Q.BRANCH_HEADS_QUERY: {
+        const fullName = `${v.owner}/${v.name}`;
+        const repository = now.repositories.find(
+          (candidate) => candidate.info.fullName === fullName,
+        );
+        if (repository === undefined) {
+          return notFound(`a Repository with the name '${fullName}'`, 'repository');
+        }
+        const heads = await fake.branchHeads(fullName);
+        const commits = heads.ok ? (heads.value ?? []) : [];
+        return {
+          body: {
+            data: {
+              repository: { refs: { nodes: commits.map((oid) => ({ target: { oid } })) } },
+            },
+          },
+        };
+      }
+      case Q.OWNER_SPACE_REPOSITORIES_QUERY: {
+        const login = str(v.login);
+        if (!now.owners.includes(login)) {
+          return { body: { data: { repositoryOwner: null } } };
+        }
+        const listed = await fake.listSpaceRepositories(login);
+        const withManifest = new Set((listed.ok ? listed.value : []).map((repo) => repo.fullName));
+        const nodes = [...now.repositories]
+          .reverse()
+          .filter((repository) => repository.info.fullName.startsWith(`${login}/`))
+          .map((repository) => ({
+            ...repositoryNode(repository.info.fullName),
+            manifest: withManifest.has(repository.info.fullName) ? { id: 'manifest' } : null,
+          }));
+        return { body: { data: { repositoryOwner: { repositories: { nodes } } } } };
       }
     }
 

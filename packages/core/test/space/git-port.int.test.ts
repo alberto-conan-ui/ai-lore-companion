@@ -2,10 +2,33 @@ import { strict as assert } from 'node:assert';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { createGitPort, execFileRunner, runGit } from '../../src/index.js';
+import {
+  type CommandRunner,
+  GIT_CLONE_TIMEOUT_MS,
+  GIT_NETWORK_ENV,
+  GIT_PUSH_TIMEOUT_MS,
+  type RunOptions,
+  createGitPort,
+  execFileRunner,
+  runGit,
+} from '../../src/index.js';
 import { createScriptedRunner, openTempGitRepo } from '../../src/space/testing/index.js';
 import { useBareRemote, usePlainRepository } from '../support/git.js';
 import { useTempDir } from '../support/temp.js';
+
+/** Wrap a runner and record every call, forwarding to it unchanged. */
+function recordingRunner(inner: CommandRunner): CommandRunner & {
+  calls: { args: readonly string[]; opts: RunOptions }[];
+} {
+  const calls: { args: readonly string[]; opts: RunOptions }[] = [];
+  return {
+    calls,
+    run(bin, args, opts = {}) {
+      calls.push({ args, opts });
+      return inner.run(bin, args, opts);
+    },
+  };
+}
 
 const git = createGitPort(execFileRunner);
 
@@ -138,6 +161,32 @@ test('addRemote, originUrl, push and clone work against a bare remote in the tem
   const bare = join(useTempDir(t), 'mirror.git');
   unwrap(await git.clone(remote.dir, bare, { bare: true, branch: 'main' }));
   assert.equal(existsSync(join(bare, 'HEAD')), true);
+});
+
+test('clone and push pass GIT_TERMINAL_PROMPT=0, GCM_INTERACTIVE=never and their time limits to the runner', async (t) => {
+  const remote = await useBareRemote(t);
+  const repo = await usePlainRepository(t);
+  const recorder = recordingRunner(execFileRunner);
+  const recordingGit = createGitPort(recorder);
+
+  const into = join(useTempDir(t), 'clone');
+  unwrap(await recordingGit.clone(remote.dir, into));
+  unwrap(await recordingGit.addRemote(repo.dir, 'origin', remote.dir));
+  unwrap(await recordingGit.push(repo.dir, { setUpstream: true }));
+
+  const clone = recorder.calls.find((call) => call.args[0] === 'clone');
+  const push = recorder.calls.find((call) => call.args[0] === 'push');
+  assert.deepEqual(clone?.opts.env, { ...GIT_NETWORK_ENV });
+  assert.equal(clone?.opts.timeoutMs, GIT_CLONE_TIMEOUT_MS);
+  assert.deepEqual(push?.opts.env, { ...GIT_NETWORK_ENV });
+  assert.equal(push?.opts.timeoutMs, GIT_PUSH_TIMEOUT_MS);
+
+  const remoteConfig = recorder.calls.find((call) => call.args[0] === 'remote');
+  assert.equal(
+    remoteConfig?.opts.env,
+    undefined,
+    'a command that is not clone or push gets no env',
+  );
 });
 
 test('push names a branch, and fails from a detached HEAD with no branch given', async (t) => {

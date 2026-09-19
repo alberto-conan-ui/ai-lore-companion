@@ -74,6 +74,26 @@ export type GhCliOptions = {
 /** The arguments of every GraphQL run. The request is on standard input. */
 export const GRAPHQL_ARGS: readonly string[] = ['api', 'graphql', '-i', '--input', '-'];
 
+/** Built once, on first use: the query text of every exported constant of `queries.ts`, keyed by its name. */
+let queryNamesByText: Map<string, string> | null = null;
+
+/**
+ * The name of the exported constant of `queries.ts` (for example
+ * `REPOSITORY_QUERY`) whose text is `input`'s `query`, for `input` a JSON
+ * request as sent to `gh api graphql`. `null` when `input` is not such JSON or
+ * names no known query.
+ */
+export function graphqlOperationName(input: string): string | null {
+  queryNamesByText ??= new Map(
+    Object.entries(Q).flatMap(([name, value]) =>
+      typeof value === 'string' ? [[value, name] as const] : [],
+    ),
+  );
+  const parsed = parseJson(input);
+  const query = text(parsed, 'query');
+  return query === null ? null : (queryNamesByText.get(query) ?? null);
+}
+
 /** The colour a new single-select option gets. */
 const NEW_OPTION_COLOR = 'GRAY';
 
@@ -304,7 +324,11 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
     project: ProjectInfo,
     name: string,
   ): Promise<GitHubResult<{ field: FieldInfo; details: FieldOptionDetail[] } | null>> {
-    const data = await graphql(Q.PROJECT_FIELD_QUERY, { project: project.id, name });
+    const data = await graphql(
+      Q.PROJECT_FIELD_QUERY,
+      { project: project.id, name },
+      { missingIsNull: true },
+    );
     if (!data.ok) return data;
     const node = at(data.value, 'node', 'field');
     if (node === null || node === undefined) return ok(null);
@@ -337,6 +361,40 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
       const data = await graphql(Q.REPOSITORY_QUERY, parts.value, { missingIsNull: true });
       if (!data.ok) return data;
       return ok(parseRepository(at(data.value, 'repository')));
+    },
+
+    async branchHeads(fullName) {
+      const parts = splitRepositoryName(fullName);
+      if (!parts.ok) return parts;
+      const data = await graphql(Q.BRANCH_HEADS_QUERY, parts.value, { missingIsNull: true });
+      if (!data.ok) return data;
+      const repository = at(data.value, 'repository');
+      if (repository === null || repository === undefined) return ok(null);
+      return ok(
+        list(repository, 'refs', 'nodes').flatMap((node) => text(node, 'target', 'oid') ?? []),
+      );
+    },
+
+    async listSpaceRepositories(owner) {
+      const data = await graphql(
+        Q.OWNER_SPACE_REPOSITORIES_QUERY,
+        { login: owner },
+        {
+          missingIsNull: true,
+        },
+      );
+      if (!data.ok) return data;
+      const repositoryOwner = at(data.value, 'repositoryOwner');
+      if (repositoryOwner === null || repositoryOwner === undefined) {
+        return err(notFound(`the account ${owner}`));
+      }
+      return ok(
+        list(repositoryOwner, 'repositories', 'nodes').flatMap((node) => {
+          if (at(node, 'manifest') === null || at(node, 'manifest') === undefined) return [];
+          const repository = parseRepository(node);
+          return repository === null ? [] : [repository];
+        }),
+      );
     },
 
     async createRepository(arg) {
@@ -746,11 +804,15 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
       let stageField: FieldInfo | null = null;
       let after: string | null = null;
       for (;;) {
-        const data = await graphql(Q.READ_PROJECT_QUERY, {
-          project: arg.project.id,
-          stage: STAGE_FIELD,
-          after,
-        });
+        const data = await graphql(
+          Q.READ_PROJECT_QUERY,
+          {
+            project: arg.project.id,
+            stage: STAGE_FIELD,
+            after,
+          },
+          { missingIsNull: true },
+        );
         if (!data.ok) return data;
         const node = at(data.value, 'node');
         if (node === null || node === undefined) {

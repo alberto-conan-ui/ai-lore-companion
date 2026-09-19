@@ -23,12 +23,21 @@ import {
   formatIssueMarker,
   formatSessionBlock,
 } from '../../src/index.js';
+import { cloneTempRepo } from '../../src/space/testing/index.js';
 
 /** One implementation under test, on an empty GitHub. */
 export type ContractSubject = {
   port: GitHubPort;
   /** An account the port may create repositories and Projects for. */
   owner: string;
+  /**
+   * The real, locally clonable address of a repository the port already
+   * created. Not the same as the `cloneUrl` a `find…`/`create…` call answers
+   * with: the gh adapter answers what GitHub itself would (a `https://` URL,
+   * built from `nameWithOwner`), which a test cannot reach. This is the
+   * address a test pushes a real commit to.
+   */
+  realCloneAddress(fullName: string): string;
   /** How the suite makes GitHub fail on demand. */
   control: {
     setUnreachable(on: boolean): void;
@@ -108,6 +117,44 @@ export function gitHubPortContract(
         await port.createRepository({ owner, name: 'my-space', private: true }),
       );
       assert.equal(again.kind, 'failed');
+    },
+  );
+
+  run(
+    'branchHeads is null for a missing repository, empty for a new one, then the pushed commit',
+    async ({ port, owner, realCloneAddress }) => {
+      assert.equal(unwrap(await port.branchHeads(`${owner}/no-such-repo`)), null);
+      const repository = unwrap(
+        await port.createRepository({ owner, name: 'my-space', private: true }),
+      );
+      assert.deepEqual(unwrap(await port.branchHeads(repository.fullName)), []);
+      const clone = await cloneTempRepo(realCloneAddress(repository.fullName));
+      clone.write('README.md', '# My Space\n');
+      const head = await clone.commitAll('First commit');
+      await clone.git('push', 'origin', 'HEAD:main');
+      clone.cleanup();
+      assert.deepEqual(unwrap(await port.branchHeads(repository.fullName)), [head]);
+    },
+  );
+
+  run(
+    'listSpaceRepositories lists a repository only after a commit with lore/space.md is pushed',
+    async ({ port, owner, realCloneAddress }) => {
+      assert.deepEqual(unwrap(await port.listSpaceRepositories(owner)), []);
+      const repository = unwrap(
+        await port.createRepository({ owner, name: 'my-space', private: true }),
+      );
+      assert.deepEqual(unwrap(await port.listSpaceRepositories(owner)), []);
+      const clone = await cloneTempRepo(realCloneAddress(repository.fullName));
+      clone.write('lore/space.md', '# My Space\n');
+      await clone.commitAll('Scaffold the Space');
+      await clone.git('push', 'origin', 'HEAD:main');
+      clone.cleanup();
+      const listed = unwrap(await port.listSpaceRepositories(owner));
+      assert.deepEqual(
+        listed.map((found) => found.fullName),
+        [repository.fullName],
+      );
     },
   );
 

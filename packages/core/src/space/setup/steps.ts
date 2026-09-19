@@ -8,13 +8,13 @@
  */
 
 import { lstat, readdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { Desk } from '../desk/desk.js';
 import { closeDesk, openDesk } from '../desk/open.js';
 import { currentDeskInstance } from '../desk/owner.js';
 import { getFirstSeen, recordFirstSeen } from '../desk/root-commits.js';
 import { type GitPort, runGit } from '../exec/git-port.js';
-import { commandFailure, runSucceeded } from '../exec/runner.js';
+import { runSucceeded } from '../exec/runner.js';
 import { realpathNearest } from '../fs/paths.js';
 import type { GitHubError } from '../github/errors.js';
 import {
@@ -199,28 +199,6 @@ async function lookupProject(
  */
 export const FOREIGN_MATCH_KINDS: readonly string[] = ['repository-taken', 'project-taken'];
 
-/** The commits the branches of the repository at `address` are at. Reads only. */
-async function remoteHeads(
-  ctx: SetupContext,
-  address: string,
-): Promise<Result<string[], StepError>> {
-  if (address.startsWith('-')) {
-    return stepFail(
-      'invalid-argument',
-      'The clone address of the repository begins with a hyphen.',
-    );
-  }
-  const args = ['ls-remote', '--heads', '--', address];
-  const listed = await runGit(ctx.deps.runner, dirname(ctx.spaceRoot), args, { readOnly: true });
-  if (!runSucceeded(listed)) return err(commandFailure('git', args.slice(0, 2), listed));
-  return ok(
-    listed.stdout
-      .split('\n')
-      .map((line) => line.split('\t')[0]?.trim() ?? '')
-      .filter((commit) => commit !== ''),
-  );
-}
-
 /**
  * Whether the repository GitHub answered with is this Space's own. It is when
  * it has no commit, which is what a run that was killed leaves and holds
@@ -232,15 +210,16 @@ async function repositoryIsOwn(
   ctx: CreateSpaceContext,
   repository: RepositoryInfo,
 ): Promise<Result<boolean, StepError>> {
-  const heads = await remoteHeads(ctx, repository.cloneUrl);
-  if (!heads.ok) return heads;
-  if (heads.value.length === 0) return ok(true);
+  const heads = await ctx.deps.github.branchHeads(repository.fullName);
+  if (!heads.ok) return gitHubFail(heads.error);
+  const commits = heads.value ?? [];
+  if (commits.length === 0) return ok(true);
   if (!(await isOwnWorkTree(ctx.git, ctx.spaceRoot))) return ok(false);
   const origin = await ctx.git.originUrl(ctx.spaceRoot);
   if (!origin.ok || origin.value !== repository.cloneUrl) return ok(false);
   const head = await ctx.git.head(ctx.spaceRoot);
   if (!head.ok) return ok(false);
-  return ok(heads.value.includes(head.value) || (await isPushed(ctx)));
+  return ok(commits.includes(head.value) || (await isPushed(ctx)));
 }
 
 /**

@@ -75,4 +75,9 @@ export {
   parseSpecLink,
 } from './snapshot.js';
 export { describeViewByHand, viewStepsByHand } from './views.js';
-export { GRAPHQL_ARGS, type GhCliOptions, createGhCliGitHub } from './gh-cli.js';
+export {
+  GRAPHQL_ARGS,
+  type GhCliOptions,
+  createGhCliGitHub,
+  graphqlOperationName,
+} from './gh-cli.js';

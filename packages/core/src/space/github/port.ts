@@ -55,6 +55,10 @@ export type GitHubPort = {
     name: string;
     private: boolean;
   }): Promise<GitHubResult<RepositoryInfo>>;
+  /** The commits the repository's branches point at; `null` when GitHub has no such repository. */
+  branchHeads(fullName: string): Promise<GitHubResult<string[] | null>>;
+  /** The owner's repositories that hold a Space manifest (`lore/space.md`) on their default branch, at most 100. */
+  listSpaceRepositories(owner: string): Promise<GitHubResult<RepositoryInfo[]>>;
 
   // ---------- the Project ----------
 

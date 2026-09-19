@@ -24,6 +24,9 @@ export {
   execFileRunner,
 } from './exec-file-runner.js';
 export {
+  GIT_CLONE_TIMEOUT_MS,
+  GIT_NETWORK_ENV,
+  GIT_PUSH_TIMEOUT_MS,
   type GitBranch,
   type GitFailureKind,
   type GitLogEntry,

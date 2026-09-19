@@ -3,17 +3,31 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { type MergedPullRequest, createGhCliGitHub, gitHubFailed } from '../../src/index.js';
-import { type FakeGitHubState, createFakeGitHub } from '../../src/space/github/fake.js';
+import {
+  type FakeGitHub,
+  type FakeGitHubState,
+  createFakeGitHub,
+} from '../../src/space/github/fake.js';
 import { cloneTempRepo, createScriptedRunner } from '../../src/space/testing/index.js';
 import { useTempDir } from '../support/temp.js';
 import { gitHubPortContract } from './github-contract.js';
 import { createSimulatedGh } from './github-simulated-gh.js';
+
+/** The real, locally clonable address `FakeGitHub` gave a repository, by its `owner/name`. */
+function realCloneAddress(fake: FakeGitHub, fullName: string): string {
+  const found = fake
+    .state()
+    .repositories.find((repository) => repository.info.fullName === fullName);
+  if (found === undefined) throw new Error(`realCloneAddress: no repository ${fullName}`);
+  return found.info.cloneUrl;
+}
 
 gitHubPortContract('FakeGitHub', () => {
   const fake = createFakeGitHub({ account: 'fake-human' });
   return {
     port: fake,
     owner: 'fake-human',
+    realCloneAddress: (fullName) => realCloneAddress(fake, fullName),
     control: {
       setUnreachable: (on) => fake.setUnreachable(on),
       rateLimitNext: (count, seconds) => fake.rateLimitNext(count, seconds),
@@ -32,6 +46,7 @@ gitHubPortContract('GhCliGitHub over a simulated gh', () => {
   return {
     port: createGhCliGitHub(gh),
     owner: 'fake-human',
+    realCloneAddress: (fullName) => realCloneAddress(fake, fullName),
     control: gh,
     cleanup: () => fake.dispose(),
   };

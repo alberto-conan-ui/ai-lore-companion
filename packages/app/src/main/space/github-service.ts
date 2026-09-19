@@ -57,6 +57,8 @@ export function unreachableGitHub(message: string): GitHubPort {
     auth: answer,
     findRepository: answer,
     createRepository: answer,
+    branchHeads: answer,
+    listSpaceRepositories: answer,
     findProject: answer,
     createProject: answer,
     ensureSingleSelectField: answer,
