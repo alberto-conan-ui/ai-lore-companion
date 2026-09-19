@@ -65,4 +65,8 @@ export const SPACE_SESSIONS_CONTRACT = {
   spaceSessionReinstall: invoke<[arg: Record<string, never>], SpaceSessionEnginesResult>(
     'space:session-reinstall',
   ),
+  /** Install an engine. */
+  spaceSessionInstallEngine: invoke<[arg: SpaceSessionEngineArg], SpaceSessionEnginesResult>(
+    'space:session-install-engine',
+  ),
 } as const;
