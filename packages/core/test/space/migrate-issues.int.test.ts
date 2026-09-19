@@ -47,7 +47,13 @@ const SPACE = 'fixture-project-space';
 const REPOSITORY = `${OWNER}/${SPACE}`;
 
 function machine(): MachineCheck {
-  return { ready: true, engines: [], requirements: [] };
+  return {
+    ready: true,
+    engines: [],
+    requirements: [],
+    github: { account: null, organisations: [] },
+    tools: { brew: true, npm: true },
+  };
 }
 
 type Bench = {

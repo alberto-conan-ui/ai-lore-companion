@@ -22,6 +22,7 @@ import {
   checkEngine,
   checkGh,
   checkGit,
+  checkGitHub,
   checkMachine,
   checkPython3,
   compareToolVersions,
@@ -31,6 +32,7 @@ import {
   isClaudeEngine,
   parseClaudeAuthStatus,
   parseGhAuthStatus,
+  parseOpencodeAuthList,
   parseToolVersion,
   platformInstallCommand,
   probeEngineSignIn,
@@ -46,6 +48,13 @@ const LINUX: MachineCheckOptions = { platform: 'linux' };
 
 const CLAUDE: EngineEntry = { id: 'default.claude', name: 'Claude', binary: 'claude' };
 const GEMINI: EngineEntry = { id: 'default.gemini', name: 'Gemini', binary: 'gemini' };
+const CODEX: EngineEntry = { id: 'default.codex', name: 'Codex CLI', binary: 'codex' };
+const ANTIGRAVITY: EngineEntry = {
+  id: 'default.antigravity',
+  name: 'Antigravity CLI',
+  binary: 'agy',
+};
+const OPENCODE: EngineEntry = { id: 'default.opencode', name: 'OpenCode', binary: 'opencode' };
 
 const NOT_FOUND: Partial<RunResult> = { code: -1, stderr: 'not found', failure: 'not-found' };
 
@@ -71,7 +80,7 @@ function ghStatus(activeScopes: string, otherScopes = "'repo'"): string {
 const GH_NOT_LOGGED_IN =
   'You are not logged into any GitHub hosts. To log in, run: gh auth login\n';
 
-/** Rules for a machine where all four requirements are fine. */
+/** Rules for a machine where all four requirements are fine, GitHub, Homebrew and npm too. */
 function fineRules(): ScriptedRule[] {
   return [
     { bin: 'git', args: ['--version'], reply: { stdout: 'git version 2.39.3 (Apple Git-146)\n' } },
@@ -85,6 +94,7 @@ function fineRules(): ScriptedRule[] {
       args: ['auth', 'status'],
       reply: { stdout: ghStatus("'gist', 'project', 'read:org', 'repo'") },
     },
+    { bin: 'gh', args: ['api'], reply: { stdout: '' } },
     { bin: 'python3', args: ['--version'], reply: { stdout: 'Python 3.12.4\n' } },
     { bin: 'claude', args: ['--version'], reply: { stdout: '2.1.276 (Claude Code)\n' } },
     {
@@ -92,6 +102,8 @@ function fineRules(): ScriptedRule[] {
       args: ['auth', 'status', '--json'],
       reply: { stdout: '{"loggedIn": true, "authMethod": "claude.ai"}\n' },
     },
+    { bin: 'brew', args: ['--version'], reply: { stdout: 'Homebrew 4.6.0\n' } },
+    { bin: 'npm', args: ['--version'], reply: { stdout: '10.9.0\n' } },
   ];
 }
 
@@ -109,6 +121,29 @@ function assertGuided(check: { guidance: string | null }, pattern: RegExp): void
   assert.notEqual(check.guidance, null);
   assert.match(check.guidance ?? '', pattern);
   assert.match(check.guidance ?? '', /check again\.$/);
+}
+
+/** A full `EngineCheck` for a hand-added (non-catalog) engine, for `engineRequirement`'s unit tests. */
+function handAddedEntry(name: string, state: MachineCheckState): EngineCheck {
+  return {
+    engineId: name,
+    name,
+    binary: name,
+    state,
+    ...guidanceFor({ name, link: null, installCommand: null, signInCommand: null }, state),
+    catalogId: null,
+    maker: null,
+    required: false,
+    guardedSessions: false,
+    installed:
+      state.kind === 'missing' ? { kind: 'missing' } : { kind: 'installed', version: null },
+    signIn: state.kind === 'not-signed-in' ? { kind: 'not-signed-in' } : { kind: 'not-checked' },
+    installCommand: null,
+    installNeeds: null,
+    signInCommand: null,
+    note: null,
+    page: null,
+  };
 }
 
 // ---------- versions ----------
@@ -577,9 +612,47 @@ test('parseToolVersion on odd output: pre-releases, a localised word, commas, no
   assert.equal(parseToolVersion('version 1234567.1.1'), null);
 });
 
+// ---------- GitHub: the account and organisations ----------
+
+test('checkGitHub: the account and organisations of a signed-in gh; a failing orgs call gives []; not signed in asks no orgs', async () => {
+  const signedInRunner = runnerWith([
+    { bin: 'gh', args: ['api'], reply: { stdout: 'acme\nwidgets\n' } },
+  ]);
+  const signedIn = await checkGitHub(signedInRunner, LINUX);
+  assert.equal(signedIn.requirement.state.kind, 'fine');
+  assert.equal(signedIn.account, 'lead');
+  assert.deepEqual(signedIn.organisations, ['acme', 'widgets']);
+
+  const failingOrgs = await checkGitHub(
+    runnerWith([{ bin: 'gh', args: ['api'], reply: { code: 1, stderr: 'boom' } }]),
+    LINUX,
+  );
+  assert.equal(failingOrgs.account, 'lead');
+  assert.deepEqual(failingOrgs.organisations, []);
+
+  const notSignedInRunner = runnerWith([
+    { bin: 'gh', args: ['auth'], reply: { code: 1, stdout: GH_NOT_LOGGED_IN } },
+  ]);
+  const notSignedIn = await checkGitHub(notSignedInRunner, LINUX);
+  assert.equal(notSignedIn.account, null);
+  assert.deepEqual(notSignedIn.organisations, []);
+  assert.equal(
+    notSignedInRunner.calls.some((call) => call.args[0] === 'api'),
+    false,
+    'no organisations call when not signed in',
+  );
+});
+
+test('checkGitHub: a machine with gh missing gives no account, no organisations, and a missing requirement', async () => {
+  const check = await checkGitHub(runnerWith([{ bin: 'gh', reply: NOT_FOUND }]), LINUX);
+  assert.equal(check.requirement.state.kind, 'missing');
+  assert.equal(check.account, null);
+  assert.deepEqual(check.organisations, []);
+});
+
 // ---------- the engine ----------
 
-test('engine: present and signed in', async () => {
+test('engine: present and signed in, filled from its catalog entry', async () => {
   const runner = runnerWith([]);
   const check = await checkEngine(runner, CLAUDE, LINUX);
   assert.deepEqual(check, {
@@ -589,6 +662,17 @@ test('engine: present and signed in', async () => {
     state: { kind: 'fine', version: '2.1.276' },
     guidance: null,
     command: null,
+    catalogId: 'claude-code',
+    maker: 'Anthropic',
+    required: true,
+    guardedSessions: true,
+    installed: { kind: 'installed', version: '2.1.276' },
+    signIn: { kind: 'signed-in' },
+    installCommand: 'curl -fsSL https://claude.ai/install.sh | bash',
+    installNeeds: null,
+    signInCommand: 'claude auth login',
+    note: null,
+    page: 'https://code.claude.com/docs/en/setup',
   });
   assert.deepEqual(
     runner.calls.map((call) => [call.bin, ...call.args]),
@@ -604,11 +688,14 @@ test('engine: missing (ENOENT), by the binary of the registry entry', async () =
   const runner = runnerWith([{ bin: '/opt/tools/claude', reply: NOT_FOUND }]);
   const check = await checkEngine(runner, entry, LINUX);
   assert.deepEqual(check.state, { kind: 'missing' });
+  assert.deepEqual(check.installed, { kind: 'missing' });
+  assert.deepEqual(check.signIn, { kind: 'not-checked' });
   assertGuided(
     check,
     /Claude was not found on this machine\. Install it from https:\/\/docs\.claude/,
   );
   assert.deepEqual(runner.calls[0]?.args, ['--version']);
+  assert.equal(runner.calls.length, 1, 'sign-in is not asked when the engine is not installed');
 });
 
 test('engine: not signed in, with the literal sign-in command', async () => {
@@ -620,11 +707,12 @@ test('engine: not signed in, with the literal sign-in command', async () => {
     LINUX,
   );
   assert.deepEqual(check.state, { kind: 'not-signed-in' });
+  assert.deepEqual(check.signIn, { kind: 'not-signed-in' });
   assert.equal(check.command, CLAUDE_SIGN_IN_COMMAND);
   assertGuided(check, /Claude is installed and not signed in\. Run `claude auth login`/);
 });
 
-test('engine: undetermined when the engine does not say, never a guess', async () => {
+test('engine: a sign-in probe that cannot tell is undetermined but does not block: the state stays fine', async () => {
   for (const reply of [
     { code: 1, stderr: "error: unknown option '--json'\n" },
     { code: 0, stdout: 'Logged in\n' },
@@ -637,16 +725,25 @@ test('engine: undetermined when the engine does not say, never a guess', async (
       CLAUDE,
       LINUX,
     );
-    assert.equal(check.state.kind, 'undetermined', JSON.stringify(reply));
-    assertGuided(check, /The state of Claude could not be determined: `claude auth status --json`/);
+    assert.equal(check.signIn.kind, 'undetermined', JSON.stringify(reply));
+    assert.deepEqual(check.state, { kind: 'fine', version: '2.1.276' }, JSON.stringify(reply));
+    assert.equal(check.guidance, null, JSON.stringify(reply));
+    assert.match(
+      (check.signIn as { reason: string }).reason,
+      /^`claude auth status --json`/,
+      JSON.stringify(reply),
+    );
   }
 });
 
-test('engine: an engine the companion has no probe for is undetermined', async () => {
+test('engine: an engine the companion has no probe for is not-checked, and does not block', async () => {
   const runner = createScriptedRunner([{ bin: 'gemini', reply: { stdout: '0.9.0\n' } }]);
   const check = await checkEngine(runner, GEMINI, LINUX);
-  assert.equal(check.state.kind, 'undetermined');
-  assertGuided(check, /does not know how to ask Gemini whether it is signed in/);
+  assert.deepEqual(check.installed, { kind: 'installed', version: '0.9.0' });
+  assert.deepEqual(check.signIn, { kind: 'not-checked' });
+  assert.equal(check.catalogId, null);
+  assert.deepEqual(check.state, { kind: 'fine', version: '0.9.0' });
+  assert.equal(check.guidance, null);
   assert.equal(runner.calls.length, 1);
 });
 
@@ -659,11 +756,12 @@ test('engine: a version the engine does not print is accepted, no lowest version
   assert.deepEqual(check.state, { kind: 'fine', version: null });
 });
 
-test('engine: the sign-in probe is a parameter; one that throws or hangs is undetermined', async () => {
+test('engine: the sign-in probe is a parameter; a probe that throws or hangs is reported but does not block', async () => {
   const signedIn = await checkEngine(createScriptedRunner([{ bin: 'gemini' }]), GEMINI, {
     ...LINUX,
     signInProbe: async () => ({ kind: 'signed-in' }),
   });
+  assert.deepEqual(signedIn.signIn, { kind: 'signed-in' });
   assert.deepEqual(signedIn.state, { kind: 'fine', version: null });
 
   const throwing = await checkEngine(createScriptedRunner([{ bin: 'gemini' }]), GEMINI, {
@@ -672,20 +770,118 @@ test('engine: the sign-in probe is a parameter; one that throws or hangs is unde
       throw new Error('probe broke');
     },
   });
-  assert.deepEqual(throwing.state, {
+  assert.deepEqual(throwing.signIn, {
     kind: 'undetermined',
     reason: 'The sign-in probe of Gemini failed: probe broke.',
   });
+  assert.deepEqual(throwing.state, { kind: 'fine', version: null });
 
   const hanging = await checkEngine(createScriptedRunner([{ bin: 'gemini' }]), GEMINI, {
     ...LINUX,
     timeoutMs: 10,
     signInProbe: () => new Promise(() => undefined),
   });
-  assert.deepEqual(hanging.state, {
+  assert.deepEqual(hanging.signIn, {
     kind: 'undetermined',
     reason: 'The sign-in probe of Gemini did not answer in time.',
   });
+  assert.deepEqual(hanging.state, { kind: 'fine', version: null });
+});
+
+test('engine: codex login status exit code decides signed-in state', async () => {
+  const signedIn = await checkEngine(
+    runnerWith([
+      { bin: 'codex', args: ['--version'], reply: { stdout: 'codex-cli 0.5.0\n' } },
+      { bin: 'codex', args: ['login', 'status'], reply: { code: 0 } },
+    ]),
+    CODEX,
+    LINUX,
+  );
+  assert.deepEqual(signedIn.signIn, { kind: 'signed-in' });
+  assert.equal(signedIn.catalogId, 'codex');
+
+  const notSignedIn = await checkEngine(
+    runnerWith([
+      { bin: 'codex', args: ['--version'], reply: { stdout: 'codex-cli 0.5.0\n' } },
+      { bin: 'codex', args: ['login', 'status'], reply: { code: 1 } },
+    ]),
+    CODEX,
+    LINUX,
+  );
+  assert.deepEqual(notSignedIn.signIn, { kind: 'not-signed-in' });
+
+  const timedOut = await checkEngine(
+    runnerWith([
+      { bin: 'codex', args: ['--version'], reply: { stdout: 'codex-cli 0.5.0\n' } },
+      {
+        bin: 'codex',
+        args: ['login', 'status'],
+        reply: { code: -1, stderr: 'stopped', failure: 'timeout' },
+      },
+    ]),
+    CODEX,
+    LINUX,
+  );
+  assert.equal(timedOut.signIn.kind, 'undetermined');
+});
+
+test('engine: antigravity has no sign-in check and is always not-checked', async () => {
+  const check = await checkEngine(
+    runnerWith([{ bin: 'agy', args: ['--version'], reply: { stdout: 'agy 1.0.0\n' } }]),
+    ANTIGRAVITY,
+    LINUX,
+  );
+  assert.deepEqual(check.signIn, { kind: 'not-checked' });
+  assert.deepEqual(check.state, { kind: 'fine', version: '1.0.0' });
+});
+
+test('parseOpencodeAuthList reads the credentials count, falls back to a bullet line, else null', () => {
+  assert.equal(
+    parseOpencodeAuthList(
+      '┌  Credentials ~/.local/share/opencode/auth.json\n│\n●  Anthropic oauth\n│\n└  1 credentials\n',
+    ),
+    true,
+  );
+  assert.equal(parseOpencodeAuthList('└  0 credentials\n'), false);
+  assert.equal(parseOpencodeAuthList(''), null);
+  assert.equal(
+    parseOpencodeAuthList(
+      '\u001b[32m┌\u001b[0m  Credentials\n\u001b[32m└\u001b[0m  1 credentials\n',
+    ),
+    true,
+  );
+});
+
+test('engine: opencode is signed in by its credentials count', async () => {
+  const signedIn = await checkEngine(
+    runnerWith([
+      { bin: 'opencode', args: ['--version'], reply: { stdout: '0.4.0\n' } },
+      { bin: 'opencode', args: ['auth', 'list'], reply: { stdout: '└  1 credentials\n' } },
+    ]),
+    OPENCODE,
+    LINUX,
+  );
+  assert.deepEqual(signedIn.signIn, { kind: 'signed-in' });
+
+  const notSignedIn = await checkEngine(
+    runnerWith([
+      { bin: 'opencode', args: ['--version'], reply: { stdout: '0.4.0\n' } },
+      { bin: 'opencode', args: ['auth', 'list'], reply: { stdout: '└  0 credentials\n' } },
+    ]),
+    OPENCODE,
+    LINUX,
+  );
+  assert.deepEqual(notSignedIn.signIn, { kind: 'not-signed-in' });
+
+  const unclear = await checkEngine(
+    runnerWith([
+      { bin: 'opencode', args: ['--version'], reply: { stdout: '0.4.0\n' } },
+      { bin: 'opencode', args: ['auth', 'list'], reply: { stdout: 'nothing understood\n' } },
+    ]),
+    OPENCODE,
+    LINUX,
+  );
+  assert.equal(unclear.signIn.kind, 'undetermined');
 });
 
 test('probeEngineSignIn, isClaudeEngine and parseClaudeAuthStatus', async () => {
@@ -708,17 +904,10 @@ test('probeEngineSignIn, isClaudeEngine and parseClaudeAuthStatus', async () => 
 });
 
 test('engineRequirement takes the first fine engine, otherwise the one nearest to fine', () => {
-  const entry = (name: string, state: MachineCheckState): EngineCheck => ({
-    engineId: name,
-    name,
-    binary: name,
-    state,
-    ...guidanceFor({ name, link: null, installCommand: null, signInCommand: null }, state),
-  });
-  const missing = entry('a', { kind: 'missing' });
-  const signedOut = entry('b', { kind: 'not-signed-in' });
-  const fine = entry('c', { kind: 'fine', version: '1.0.0' });
-  const alsoFine = entry('d', { kind: 'fine', version: '2.0.0' });
+  const missing = handAddedEntry('a', { kind: 'missing' });
+  const signedOut = handAddedEntry('b', { kind: 'not-signed-in' });
+  const fine = handAddedEntry('c', { kind: 'fine', version: '1.0.0' });
+  const alsoFine = handAddedEntry('d', { kind: 'fine', version: '2.0.0' });
 
   assert.equal(engineRequirement([missing, signedOut, fine, alsoFine]).binary, 'c');
   const nearest = engineRequirement([missing, signedOut]);
@@ -730,6 +919,25 @@ test('engineRequirement takes the first fine engine, otherwise the one nearest t
   assert.deepEqual(empty.state, { kind: 'missing' });
   assert.equal(empty.binary, null);
   assertGuided(empty, /No AI engine is registered/);
+});
+
+test('engineRequirement prefers the catalog Claude Code entry, whatever its state', async () => {
+  const claudeMissing = await checkEngine(
+    runnerWith([{ bin: 'claude', reply: NOT_FOUND }]),
+    CLAUDE,
+    LINUX,
+  );
+  const codexFine = await checkEngine(
+    runnerWith([
+      { bin: 'codex', args: ['--version'], reply: { stdout: '0.5.0\n' } },
+      { bin: 'codex', args: ['login', 'status'], reply: { code: 0 } },
+    ]),
+    CODEX,
+    LINUX,
+  );
+  const requirement = engineRequirement([codexFine, claudeMissing]);
+  assert.equal(requirement.binary, 'claude');
+  assert.equal(requirement.state.kind, 'missing');
 });
 
 // ---------- guidance ----------
@@ -775,6 +983,8 @@ test('checkMachine: a machine with everything is ready; the four are in a fixed 
     ],
   );
   assert.equal(check.engines.length, 1);
+  assert.deepEqual(check.github, { account: 'lead', organisations: [] });
+  assert.deepEqual(check.tools, { brew: true, npm: true });
   for (const call of runner.calls) {
     assert.deepEqual(call.opts.env, { PATH: '/lead/bin' });
     assert.equal(call.opts.cwd, undefined);
@@ -782,14 +992,62 @@ test('checkMachine: a machine with everything is ready; the four are in a fixed 
   }
   // Only questions are asked: no command that installs, signs in or changes a setting.
   const asked = runner.calls.map((call) => [call.bin, ...call.args].join(' ')).sort();
-  assert.deepEqual(asked, [
-    'claude --version',
-    'claude auth status --json',
-    'gh --version',
-    'gh auth status --hostname github.com',
-    'git --version',
-    'python3 --version',
+  assert.deepEqual(
+    asked,
+    [
+      'claude --version',
+      'claude auth status --json',
+      'gh --version',
+      'gh api user/orgs --paginate --jq .[].login',
+      'gh auth status --hostname github.com',
+      'git --version',
+      'python3 --version',
+      'brew --version',
+      'npm --version',
+    ].sort(),
+  );
+});
+
+test('checkMachine: all four catalog engines checked; only Claude Code is installed and signed in', async () => {
+  const runner = runnerWith([
+    { bin: 'codex', reply: NOT_FOUND },
+    { bin: 'agy', reply: NOT_FOUND },
+    { bin: 'opencode', reply: NOT_FOUND },
   ]);
+  const check = await checkMachine(runner, [CLAUDE, CODEX, ANTIGRAVITY, OPENCODE], LINUX);
+  assert.equal(check.engines.length, 4);
+  const [claude, codex, antigravity, opencode] = check.engines;
+  assert.deepEqual(claude?.installed, { kind: 'installed', version: '2.1.276' });
+  assert.deepEqual(claude?.signIn, { kind: 'signed-in' });
+  for (const missing of [codex, antigravity, opencode]) {
+    assert.deepEqual(missing?.installed, { kind: 'missing' });
+    assert.deepEqual(missing?.signIn, { kind: 'not-checked' });
+  }
+  const engineReq = check.requirements.find((r) => r.id === 'engine');
+  assert.equal(engineReq?.state.kind, 'fine');
+});
+
+test('checkMachine: Claude Code missing and Codex installed and signed in still gives a missing engine requirement', async () => {
+  const runner = runnerWith([
+    { bin: 'claude', args: ['--version'], reply: NOT_FOUND },
+    { bin: 'codex', args: ['--version'], reply: { stdout: 'codex-cli 0.5.0\n' } },
+    { bin: 'codex', args: ['login', 'status'], reply: { code: 0 } },
+  ]);
+  const check = await checkMachine(runner, [CLAUDE, CODEX], LINUX);
+  const engineReq = check.requirements.find((r) => r.id === 'engine');
+  assert.equal(engineReq?.state.kind, 'missing');
+  const codex = check.engines.find((e) => e.engineId === 'default.codex');
+  assert.deepEqual(codex?.installed, { kind: 'installed', version: '0.5.0' });
+  assert.deepEqual(codex?.signIn, { kind: 'signed-in' });
+});
+
+test('checkMachine: tools.brew is false when brew is not found', async () => {
+  const check = await checkMachine(
+    runnerWith([{ bin: 'brew', reply: NOT_FOUND }]),
+    [CLAUDE],
+    LINUX,
+  );
+  assert.deepEqual(check.tools, { brew: false, npm: true });
 });
 
 test('checkMachine: the commands run in parallel', async () => {
@@ -846,6 +1104,8 @@ test('checkMachine: everything missing (ENOENT), and no engine registered', asyn
     { bin: 'git', reply: NOT_FOUND },
     { bin: 'gh', reply: NOT_FOUND },
     { bin: 'python3', reply: NOT_FOUND },
+    { bin: 'brew', reply: NOT_FOUND },
+    { bin: 'npm', reply: NOT_FOUND },
   ]);
   const check = await checkMachine(runner, [], LINUX);
   assert.equal(check.ready, false);
@@ -854,6 +1114,8 @@ test('checkMachine: everything missing (ENOENT), and no engine registered', asyn
     ['missing', 'missing', 'missing', 'missing'],
   );
   for (const one of check.requirements) assert.notEqual(one.guidance, null);
+  assert.deepEqual(check.github, { account: null, organisations: [] });
+  assert.deepEqual(check.tools, { brew: false, npm: false });
 });
 
 test('checkMachine never throws: a runner that throws, rejects, or answers nonsense', async () => {
@@ -872,12 +1134,28 @@ test('checkMachine never throws: a runner that throws, rejects, or answers nonse
   };
   const broken = { run: () => Promise.resolve(undefined) } as unknown as CommandRunner;
 
-  for (const runner of [throwing, rejecting, unscripted, nonsense, broken]) {
+  // The `engine` requirement is the exception: a runner that answers with
+  // success but garbled text (`nonsense`) gives a `fine` (unversioned) install
+  // and an ambiguous sign-in answer, which by design (A.4) does not block. A
+  // runner whose command does not run at all (the other four) still leaves it
+  // `undetermined`.
+  const cases: readonly [CommandRunner, boolean][] = [
+    [throwing, true],
+    [rejecting, true],
+    [unscripted, true],
+    [nonsense, false],
+    [broken, true],
+  ];
+  for (const [runner, engineUndetermined] of cases) {
     for (const platform of ['linux', 'darwin'] as const) {
       const check = await checkMachine(runner, [CLAUDE, GEMINI], { platform, timeoutMs: 50 });
       assert.equal(check.ready, false);
       assert.equal(check.requirements.length, 4);
       for (const one of check.requirements) {
+        if (one.id === 'engine' && !engineUndetermined) {
+          assert.equal(one.state.kind, 'fine');
+          continue;
+        }
         assert.equal(one.state.kind, 'undetermined');
         assert.notEqual(one.guidance, null);
       }

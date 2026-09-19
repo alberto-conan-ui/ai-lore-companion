@@ -6,6 +6,7 @@
  */
 
 import type { EngineEntry } from '../../engines/index.js';
+import type { EngineCatalogId } from '../engines/index.js';
 import type { RunResult } from '../exec/runner.js';
 
 /**
@@ -47,32 +48,66 @@ export type MachineRequirementCheck = {
   command: string | null;
 };
 
-/** The check of one engine of the registry. */
+/**
+ * Whether an engine's binary is on the machine, from `<binary> --version`
+ * exactly as `versionState` reads it (no lowest version is asked of an
+ * engine). `not-found` gives `missing`.
+ */
+export type EngineInstallState =
+  | { kind: 'installed'; version: string | null }
+  | { kind: 'missing' }
+  | { kind: 'undetermined'; reason: string };
+
+/** The check of one engine of the list given to `checkMachine`. */
 export type EngineCheck = {
   /** The `id` of the registry entry. */
   engineId: string;
   /** The `name` of the registry entry. */
   name: string;
   binary: string;
+  /** Kept for existing readers; see `checkEngine`'s doc comment for how it is derived. */
   state: MachineCheckState;
   guidance: string | null;
   command: string | null;
+  /** The catalog entry the engine was merged into, or `null` for a hand-added engine. */
+  catalogId: EngineCatalogId | null;
+  maker: string | null;
+  /** Whether Set up this computer is not ready without this engine. */
+  required: boolean;
+  /** Whether the companion can run a guarded Space session with it. */
+  guardedSessions: boolean;
+  installed: EngineInstallState;
+  /** `not-checked` also when the engine is not installed. */
+  signIn: EngineSignInState;
+  installCommand: string | null;
+  installNeeds: 'npm' | null;
+  signInCommand: string | null;
+  /** One line shown under the row, or `null`. */
+  note: string | null;
+  /** The maker's page, or `null`. */
+  page: string | null;
 };
 
 /** What `checkMachine` returns. */
 export type MachineCheck = {
   /** Always four, in the order `git`, `gh`, `engine`, `python3`. */
   requirements: MachineRequirementCheck[];
-  /** One entry per engine of the registry, in the registry's order. */
+  /** One entry per engine of the list given, in its order. */
   engines: EngineCheck[];
   /** Whether all four requirements are `fine`. */
   ready: boolean;
+  /** The GitHub account `gh` is signed in with, and its organisations. */
+  github: { account: string | null; organisations: string[] };
+  /** Whether Homebrew and npm are on the machine. */
+  tools: { brew: boolean; npm: boolean };
 };
 
 /** What a sign-in probe found. */
 export type EngineSignInState =
   | { kind: 'signed-in' }
   | { kind: 'not-signed-in' }
+  /** The engine has no sign-in check (catalog `signInCheck: { kind: 'none' }`, or an unknown hand-added engine). */
+  | { kind: 'not-checked' }
   | { kind: 'undetermined'; reason: string };
 
 /**

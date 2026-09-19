@@ -54,6 +54,8 @@ const READY_MACHINE: MachineCheck = {
     guidance: null,
     command: null,
   })),
+  github: { account: null, organisations: [] },
+  tools: { brew: true, npm: true },
 };
 
 let fake: FakeGitHub;

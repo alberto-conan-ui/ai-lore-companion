@@ -255,6 +255,15 @@ test('SETTINGS_REGISTRY carries the workspace.restoreLayout toggle, defaulting o
   assert.equal(def?.default, true);
 });
 
+test('SETTINGS_REGISTRY carries the spaces.folder setting, defaulting to not set', () => {
+  const def = SETTINGS_REGISTRY.find((d) => d.key === 'spaces.folder');
+  assert.ok(def, 'expected the spaces.folder setting');
+  assert.equal(def?.type, 'string');
+  assert.equal(def?.tier, 'global');
+  assert.equal(def?.default, '');
+  assert.equal(resolveSetting(def as SettingDef, emptySettingsFile(), null), '');
+});
+
 test('withLayout attaches a snapshot without mutating the input', () => {
   const before = emptySettingsFile();
   const after = withLayout(before, sampleLayout());

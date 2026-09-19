@@ -6,6 +6,7 @@
 
 export type {
   EngineCheck,
+  EngineInstallState,
   EngineSignInProbe,
   EngineSignInState,
   MachineCheck,
@@ -44,14 +45,25 @@ export {
   CLAUDE_SIGN_IN_COMMAND,
   isClaudeEngine,
   parseClaudeAuthStatus,
+  parseOpencodeAuthList,
   probeEngineSignIn,
 } from './engine-sign-in.js';
 export {
   DEFAULT_MACHINE_CHECK_TIMEOUT_MS,
+  type GitHubCheck,
   checkEngine,
   checkGh,
   checkGit,
+  checkGitHub,
   checkMachine,
   checkPython3,
   engineRequirement,
 } from './machine-check.js';
+export { type SetUpItemId, type SetUpReadiness, setUpReadiness } from './set-up.js';
+export {
+  GH_WEB_SIGN_IN_COMMAND,
+  type SetupCommandId,
+  parseDeviceCode,
+  setupCommandLine,
+  setupCommands,
+} from './commands.js';

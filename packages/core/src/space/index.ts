@@ -22,6 +22,7 @@ export * from './desk/index.js';
 export * from './roots/index.js';
 export * from './baseline/index.js';
 export * from './github/index.js';
+export * from './engines/index.js';
 export * from './machine/index.js';
 export * from './steps/index.js';
 export * from './setup/index.js';

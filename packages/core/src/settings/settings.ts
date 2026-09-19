@@ -72,6 +72,14 @@ export const SETTINGS_REGISTRY: readonly SettingDef[] = [
     tier: 'global',
     default: true,
   },
+  {
+    key: 'spaces.folder',
+    label: 'Spaces folder',
+    section: 'Spaces',
+    type: 'string',
+    tier: 'global',
+    default: '',
+  },
   // (The v0.5 `diff.externalCliPath` / `diff.externalArgvTemplate` settings
   // were replaced in v0.6 Phase A by an entry in the Apps catalog with
   // `role: 'diff'`. The catalog is the single source of "what app opens

@@ -11,10 +11,11 @@
  */
 
 import type { EngineEntry } from '../../engines/index.js';
+import { catalogEntryFor } from '../engines/catalog.js';
 import type { CommandRunner, RunResult } from '../exec/runner.js';
 import { errorMessage } from '../result.js';
 import { CLAUDE_SIGN_IN_COMMAND, isClaudeEngine, probeEngineSignIn } from './engine-sign-in.js';
-import { parseGhAuthStatus } from './gh-auth.js';
+import { type GhAuthReading, parseGhAuthStatus } from './gh-auth.js';
 import {
   GH_SIGN_IN_COMMAND,
   GITHUB_HOST,
@@ -26,6 +27,7 @@ import {
 } from './guidance.js';
 import type {
   EngineCheck,
+  EngineInstallState,
   EngineSignInState,
   MachineCheck,
   MachineCheckOptions,
@@ -268,38 +270,65 @@ export async function checkPython3(
   }
 }
 
-async function ghState(settings: Settings): Promise<MachineCheckState> {
+/** `gh`'s guidance subject, shared by `checkGh` and `checkGitHub`. */
+const GH_SUBJECT: GuidanceSubject = {
+  name: 'gh',
+  link: INSTALL_LINKS.gh,
+  installCommand: null,
+  signInCommand: GH_SIGN_IN_COMMAND,
+};
+
+/**
+ * `gh`'s state and, when it was read, the reading of `gh auth status`
+ * (`null` when the version check failed, or the command itself did not run).
+ * `checkGh` uses only the state; `checkGitHub` uses the reading too, for the
+ * account and to decide whether to ask for the organisations.
+ */
+async function ghStateAndReading(
+  settings: Settings,
+): Promise<{ state: MachineCheckState; reading: GhAuthReading | null }> {
   const version = await versionState(settings, 'gh', MIN_GH_VERSION);
-  if (version.kind !== 'fine') return version;
+  if (version.kind !== 'fine') return { state: version, reading: null };
   const args = ['auth', 'status', '--hostname', GITHUB_HOST];
   const command = `gh ${args.join(' ')}`;
   const result = await probeRun(settings)('gh', args);
-  if (result.failure !== undefined) return stateOfFailedRun(command, result, settings.timeoutMs);
+  if (result.failure !== undefined) {
+    return { state: stateOfFailedRun(command, result, settings.timeoutMs), reading: null };
+  }
   const reading = parseGhAuthStatus(`${result.stdout}\n${result.stderr}`);
   switch (reading.kind) {
     case 'not-signed-in':
-      return { kind: 'not-signed-in' };
+      return { state: { kind: 'not-signed-in' }, reading };
     case 'unreachable':
       return {
-        kind: 'undetermined',
-        reason: `\`${command}\` could not reach ${GITHUB_HOST} to check the token; ${quoteOutput(result)}.`,
+        state: {
+          kind: 'undetermined',
+          reason: `\`${command}\` could not reach ${GITHUB_HOST} to check the token; ${quoteOutput(result)}.`,
+        },
+        reading,
       };
     case 'unknown':
       return {
-        kind: 'undetermined',
-        reason: `\`${command}\` exited with code ${result.code} and its answer was not understood; ${quoteOutput(result)}.`,
+        state: {
+          kind: 'undetermined',
+          reason: `\`${command}\` exited with code ${result.code} and its answer was not understood; ${quoteOutput(result)}.`,
+        },
+        reading,
       };
     case 'signed-in':
       if (reading.scopes === null) {
         return {
-          kind: 'undetermined',
-          reason: `\`${command}\` did not list the scopes of the token, so the \`${REQUIRED_GH_SCOPE}\` scope could not be checked. gh lists scopes only for the token of \`gh auth login\` and for a classic personal token; a fine-grained token or an app's token, often given through GH_TOKEN or GITHUB_TOKEN, has none to list. Remove that variable, or run \`${GH_SIGN_IN_COMMAND}\`.`,
+          state: {
+            kind: 'undetermined',
+            reason: `\`${command}\` did not list the scopes of the token, so the \`${REQUIRED_GH_SCOPE}\` scope could not be checked. gh lists scopes only for the token of \`gh auth login\` and for a classic personal token; a fine-grained token or an app's token, often given through GH_TOKEN or GITHUB_TOKEN, has none to list. Remove that variable, or run \`${GH_SIGN_IN_COMMAND}\`.`,
+          },
+          reading,
         };
       }
       if (!reading.scopes.includes(REQUIRED_GH_SCOPE)) {
-        return { kind: 'missing-scope', scope: REQUIRED_GH_SCOPE };
+        return { state: { kind: 'missing-scope', scope: REQUIRED_GH_SCOPE }, reading };
       }
-      return version;
+      return { state: version, reading };
   }
 }
 
@@ -313,17 +342,91 @@ export async function checkGh(
   options: MachineCheckOptions = {},
 ): Promise<MachineRequirementCheck> {
   const settings = settingsOf(runner, options);
-  const subject: GuidanceSubject = {
-    name: 'gh',
-    link: INSTALL_LINKS.gh,
-    installCommand: null,
-    signInCommand: GH_SIGN_IN_COMMAND,
-  };
   try {
-    return requirement('gh', 'gh', subject, await ghState(settings));
+    const { state } = await ghStateAndReading(settings);
+    return requirement('gh', 'gh', GH_SUBJECT, state);
   } catch (caught) {
-    return requirement('gh', 'gh', subject, undeterminedBy(caught));
+    return requirement('gh', 'gh', GH_SUBJECT, undeterminedBy(caught));
   }
+}
+
+/** The organisations `gh api user/orgs` lists, in the order GitHub returns them. Any failure gives `[]`. */
+async function readOrganisations(settings: Settings): Promise<string[]> {
+  const args = ['api', 'user/orgs', '--paginate', '--jq', '.[].login'];
+  try {
+    const result = await probeRun(settings)('gh', args);
+    if (result.failure !== undefined || result.code !== 0) return [];
+    return result.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line !== '');
+  } catch {
+    return [];
+  }
+}
+
+/** What `checkGitHub` returns: the `gh` requirement, the signed-in account, and its organisations. */
+export type GitHubCheck = {
+  requirement: MachineRequirementCheck;
+  account: string | null;
+  organisations: string[];
+};
+
+/**
+ * Check GitHub through `gh`: the `gh` requirement (as `checkGh` gives it), the
+ * account `gh` is signed in with, and its organisations. The account and the
+ * organisations are read from the same `gh auth status` call `checkGh` makes,
+ * so signing in is asked for once; the organisations are asked for only when
+ * signed in.
+ */
+export async function checkGitHub(
+  runner: CommandRunner,
+  options: MachineCheckOptions = {},
+): Promise<GitHubCheck> {
+  const settings = settingsOf(runner, options);
+  try {
+    const { state, reading } = await ghStateAndReading(settings);
+    const requirementCheck = requirement('gh', 'gh', GH_SUBJECT, state);
+    if (reading?.kind !== 'signed-in') {
+      return { requirement: requirementCheck, account: null, organisations: [] };
+    }
+    return {
+      requirement: requirementCheck,
+      account: reading.account,
+      organisations: await readOrganisations(settings),
+    };
+  } catch (caught) {
+    return {
+      requirement: requirement('gh', 'gh', GH_SUBJECT, undeterminedBy(caught)),
+      account: null,
+      organisations: [],
+    };
+  }
+}
+
+/**
+ * `true` unless the probe's result says the binary was not found. `probeRun`
+ * itself never throws or rejects, but a runner that answers with something
+ * that is not a `RunResult` at all (a test's broken double) might still make
+ * reading `.failure` throw; that is read as present too, since nothing said
+ * otherwise.
+ */
+async function toolPresent(settings: Settings, bin: string): Promise<boolean> {
+  try {
+    const result = await probeRun(settings)(bin, ['--version']);
+    return result.failure !== 'not-found';
+  } catch {
+    return true;
+  }
+}
+
+/** Whether Homebrew and npm are on the machine. */
+async function checkTools(settings: Settings): Promise<{ brew: boolean; npm: boolean }> {
+  const [brew, npm] = await Promise.all([
+    toolPresent(settings, 'brew'),
+    toolPresent(settings, 'npm'),
+  ]);
+  return { brew, npm };
 }
 
 function engineSubject(engine: EngineEntry): GuidanceSubject {
@@ -336,15 +439,41 @@ function engineSubject(engine: EngineEntry): GuidanceSubject {
   };
 }
 
-async function engineState(settings: Settings, engine: EngineEntry): Promise<MachineCheckState> {
+/** `<binary> --version`, read as an `EngineInstallState` (no lowest version is asked of an engine). */
+async function engineInstallState(
+  settings: Settings,
+  engine: EngineEntry,
+): Promise<EngineInstallState> {
   const version = await versionState(settings, engine.binary, null);
-  if (version.kind !== 'fine') return version;
-  let signIn: EngineSignInState;
+  switch (version.kind) {
+    case 'fine':
+      return { kind: 'installed', version: version.version };
+    case 'missing':
+      return { kind: 'missing' };
+    case 'undetermined':
+      return { kind: 'undetermined', reason: version.reason };
+    default:
+      // `versionState` with no lowest version never gives `too-old`, `not-signed-in`
+      // or `missing-scope`; this is only a defensive fallback.
+      return { kind: 'undetermined', reason: 'the installed version could not be read' };
+  }
+}
+
+/**
+ * The sign-in probe's answer, bounded so that one that never answers cannot
+ * hold the check. Asked only when `installed.kind === 'installed'`.
+ */
+async function engineSignInState(
+  settings: Settings,
+  engine: EngineEntry,
+  installed: EngineInstallState,
+): Promise<EngineSignInState> {
+  if (installed.kind !== 'installed') return { kind: 'not-checked' };
   let timer: NodeJS.Timeout | undefined;
   // A probe runs at most a few commands; this bound only stops one that never answers.
   const bound = settings.timeoutMs * 3;
   try {
-    signIn = await Promise.race([
+    return await Promise.race([
       Promise.resolve().then(() => settings.signInProbe(engine, probeRun(settings))),
       new Promise<EngineSignInState>((resolve) => {
         timer = setTimeout(
@@ -358,21 +487,38 @@ async function engineState(settings: Settings, engine: EngineEntry): Promise<Mac
       }),
     ]);
   } catch (caught) {
-    signIn = {
+    return {
       kind: 'undetermined',
       reason: `The sign-in probe of ${engine.name} failed: ${errorMessage(caught)}.`,
     };
   } finally {
     clearTimeout(timer);
   }
-  if (signIn.kind === 'signed-in') return version;
-  if (signIn.kind === 'not-signed-in') return { kind: 'not-signed-in' };
-  return { kind: 'undetermined', reason: signIn.reason };
 }
 
 /**
- * Check one engine of the registry: its binary answers `--version`, and the
- * sign-in probe says it is signed in. No lowest version is asked of an engine.
+ * The legacy `MachineCheckState` kept for existing readers: `missing` when
+ * not installed, `undetermined` when the install state is undetermined,
+ * `not-signed-in` when `signIn` is `not-signed-in`, otherwise `fine` with the
+ * version. A sign-in that is `undetermined` or `not-checked` does not make
+ * this other than `fine`.
+ */
+function legacyEngineState(
+  installed: EngineInstallState,
+  signIn: EngineSignInState,
+): MachineCheckState {
+  if (installed.kind === 'missing') return { kind: 'missing' };
+  if (installed.kind === 'undetermined') return { kind: 'undetermined', reason: installed.reason };
+  if (signIn.kind === 'not-signed-in') return { kind: 'not-signed-in' };
+  return { kind: 'fine', version: installed.version };
+}
+
+/**
+ * Check one engine of the list given to `checkMachine`: its binary answers
+ * `--version`, and, once installed, the sign-in probe of its catalog entry
+ * (A.3) says whether it is signed in. No lowest version is asked of an
+ * engine. `state` is kept for readers written before phase M9.3, derived from
+ * `installed` and `signIn` by `legacyEngineState`.
  */
 export async function checkEngine(
   runner: CommandRunner,
@@ -380,18 +526,43 @@ export async function checkEngine(
   options: MachineCheckOptions = {},
 ): Promise<EngineCheck> {
   const settings = settingsOf(runner, options);
-  let state: MachineCheckState;
+  const catalog = catalogEntryFor(engine);
+  let installed: EngineInstallState;
   try {
-    state = await engineState(settings, engine);
+    installed = await engineInstallState(settings, engine);
   } catch (caught) {
-    state = undeterminedBy(caught);
+    installed = {
+      kind: 'undetermined',
+      reason: `The check itself failed: ${errorMessage(caught)}.`,
+    };
   }
+  let signIn: EngineSignInState;
+  try {
+    signIn = await engineSignInState(settings, engine, installed);
+  } catch (caught) {
+    signIn = {
+      kind: 'undetermined',
+      reason: `The sign-in probe of ${engine.name} failed: ${errorMessage(caught)}.`,
+    };
+  }
+  const state = legacyEngineState(installed, signIn);
   return {
     engineId: engine.id,
     name: engine.name,
     binary: engine.binary,
     state,
     ...guidanceFor(engineSubject(engine), state),
+    catalogId: catalog?.catalogId ?? null,
+    maker: catalog?.maker ?? null,
+    required: catalog?.required ?? false,
+    guardedSessions: catalog?.guardedSessions ?? isClaudeEngine(engine),
+    installed,
+    signIn,
+    installCommand: catalog?.installCommand ?? null,
+    installNeeds: catalog?.installNeeds ?? null,
+    signInCommand: catalog?.signInCommand ?? null,
+    note: catalog?.note ?? null,
+    page: catalog?.page ?? null,
   };
 }
 
@@ -406,12 +577,23 @@ const ENGINE_STATE_ORDER: readonly MachineCheckStateKind[] = [
 ];
 
 /**
- * The `engine` requirement from the checks of the registry's engines: the
- * first engine that is fine, otherwise the engine nearest to fine, the
- * registry's order deciding between equals. An empty registry is `missing`,
+ * The `engine` requirement: the check of the catalog's Claude Code engine
+ * when the list given has one. Otherwise (a caller that passes engines
+ * without it), the first engine that is fine, otherwise the engine nearest to
+ * fine, the list's order deciding between equals; an empty list is `missing`,
  * because the app lists an engine as soon as it finds its binary.
  */
 export function engineRequirement(engines: readonly EngineCheck[]): MachineRequirementCheck {
+  const claudeCode = engines.find((candidate) => candidate.catalogId === 'claude-code');
+  if (claudeCode !== undefined) {
+    return {
+      id: 'engine',
+      binary: claudeCode.binary,
+      state: claudeCode.state,
+      guidance: claudeCode.guidance,
+      command: claudeCode.command,
+    };
+  }
   let best: EngineCheck | undefined;
   for (const candidate of engines) {
     if (
@@ -450,16 +632,19 @@ export async function checkMachine(
   engines: readonly EngineEntry[],
   options: MachineCheckOptions = {},
 ): Promise<MachineCheck> {
-  const [git, gh, python3, engineChecks] = await Promise.all([
+  const [git, github, python3, engineChecks, tools] = await Promise.all([
     checkGit(runner, options),
-    checkGh(runner, options),
+    checkGitHub(runner, options),
     checkPython3(runner, options),
     Promise.all(engines.map((engine) => checkEngine(runner, engine, options))),
+    checkTools(settingsOf(runner, options)),
   ]);
-  const requirements = [git, gh, engineRequirement(engineChecks), python3];
+  const requirements = [git, github.requirement, engineRequirement(engineChecks), python3];
   return {
     requirements,
     engines: engineChecks,
     ready: requirements.every((check) => check.state.kind === 'fine'),
+    github: { account: github.account, organisations: github.organisations },
+    tools,
   };
 }

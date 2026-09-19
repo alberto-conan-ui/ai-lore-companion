@@ -61,6 +61,8 @@ function machine(): MachineCheck {
     ready: true,
     engines: [],
     requirements: [{ id: 'git', binary: 'git', state: fine, guidance: null, command: null }],
+    github: { account: null, organisations: [] },
+    tools: { brew: true, npm: true },
   };
 }
 
