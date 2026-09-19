@@ -63,7 +63,7 @@ function MigrationFlow(): JSX.Element {
         <p style={noticeStyle} data-testid="migration-interrupted">
           A migration into <span style={folderPathStyle}>{view.interrupted.spaceRoot}</span> stopped
           when its window closed. What it did is kept. Make the plan with the same fields and
-          confirm it: the steps that are done are skipped, and the run continues.
+          confirm it: the steps that are done are not repeated, and the run continues.
         </p>
       )}
       {view.runningElsewhere && (

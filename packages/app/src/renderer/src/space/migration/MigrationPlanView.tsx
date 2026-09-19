@@ -23,7 +23,7 @@ const TARGET_SENTENCES: Record<SetupTargetState, string> = {
   absent: 'The folder does not exist yet and is created.',
   empty: 'The folder exists and is empty.',
   'half-made':
-    'The folder holds this migration from an earlier run. What is done is kept, and the steps marked done are skipped.',
+    'The folder holds this migration from an earlier run. What is done is kept, and the steps marked done are not repeated.',
 };
 
 /**
@@ -466,7 +466,7 @@ function PlanBody({ plan }: { plan: MigrationPlan }): JSX.Element {
                 {step.number}. {step.title}
               </span>
               {step.done ? (
-                <span style={hintStyle}> — done already, skipped</span>
+                <span style={hintStyle}> — Already done</span>
               ) : (
                 <ul style={pathListStyle}>
                   {step.lines.map((line) => (

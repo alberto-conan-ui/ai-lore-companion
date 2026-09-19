@@ -1,11 +1,33 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+
+// `useXtermSession` is mocked as `machine-check.test.tsx` mocks it, so the command panel's own
+// `spaceCommandRun` call and PTY id are exercised without a real terminal.
+vi.mock('../../../src/renderer/src/components/useXtermSession.js', () => ({
+  useXtermSession: (config: { spawn?: () => Promise<string | null> }) => {
+    // biome-ignore lint/correctness/useExhaustiveDependencies: mounts once, like the real hook's spawn-on-mount effect.
+    useEffect(() => {
+      void config.spawn?.();
+    }, []);
+    return { hostRef: { current: null }, focus: () => {}, search: {} };
+  },
+}));
+
 import { SetupScreen } from '../../../src/renderer/src/space/setup/SetupScreen.js';
 import type {
   SetupReport,
   SetupStart,
+  SpaceCommandCode,
+  SpaceCommandExit,
+  SpaceCommandRunResult,
+  SpaceMachineCheckResult,
   SpaceSetupChooseFolderResult,
+  SpaceSetupChooseSourceResult,
   SpaceSetupFailure,
+  SpaceSetupListSpacesResult,
+  SpaceSetupOwners,
+  SpaceSetupPlanProgress,
   SpaceSetupPlanResult,
   SpaceSetupRunResult,
   SpaceSetupStateResult,
@@ -25,25 +47,74 @@ function deferred<T>(): Deferred<T> {
 }
 
 let progressListener: ((event: StepProgress) => void) | null = null;
+let planProgressListener: ((event: SpaceSetupPlanProgress) => void) | null = null;
+let commandExitListener: ((event: SpaceCommandExit) => void) | null = null;
+let commandCodeListener: ((event: SpaceCommandCode) => void) | null = null;
 
 const cockpit = {
   spaceSetupState: vi.fn<(arg: unknown) => Promise<SpaceSetupStateResult>>(),
   spaceSetupChooseFolder: vi.fn<(arg: unknown) => Promise<SpaceSetupChooseFolderResult>>(),
+  spaceSetupChooseSource: vi.fn<(arg: unknown) => Promise<SpaceSetupChooseSourceResult>>(),
+  spaceSetupListSpaces: vi.fn<(arg: unknown) => Promise<SpaceSetupListSpacesResult>>(),
+  spaceSetupOpenExisting: vi.fn<(arg: unknown) => Promise<SpaceWindowResult>>(),
   spaceSetupValidate: vi.fn<(arg: unknown) => Promise<SpaceSetupValidateResult>>(),
   spaceSetupPlan: vi.fn<(arg: unknown) => Promise<SpaceSetupPlanResult>>(),
   spaceSetupRun: vi.fn<(arg: unknown) => Promise<SpaceSetupRunResult>>(),
   spaceSetupStop: vi.fn<(arg: unknown) => Promise<SpaceSetupStopResult>>(),
   spaceSetupOpenSpace: vi.fn<(arg: unknown) => Promise<SpaceWindowResult>>(),
+  spaceMachineCheck: vi.fn<(arg: unknown) => Promise<SpaceMachineCheckResult>>(),
+  spaceCommandRun: vi.fn<(arg: unknown) => Promise<SpaceCommandRunResult>>(),
   spaceNavigate: vi.fn<(arg: unknown) => Promise<SpaceWindowResult>>(),
+  urlOpenExternal: vi.fn(),
   onSpaceSetupProgress: vi.fn((listener: (event: StepProgress) => void) => {
     progressListener = listener;
     return () => {
       progressListener = null;
     };
   }),
+  onSpaceSetupPlanProgress: vi.fn((listener: (event: SpaceSetupPlanProgress) => void) => {
+    planProgressListener = listener;
+    return () => {
+      planProgressListener = null;
+    };
+  }),
+  onSpaceCommandExit: vi.fn((listener: (event: SpaceCommandExit) => void) => {
+    commandExitListener = listener;
+    return () => {
+      commandExitListener = null;
+    };
+  }),
+  onSpaceCommandCode: vi.fn((listener: (event: SpaceCommandCode) => void) => {
+    commandCodeListener = listener;
+    return () => {
+      commandCodeListener = null;
+    };
+  }),
 };
 
 const PARENT = '/work/spaces';
+
+const OWNERS: SpaceSetupOwners = { account: 'me', organisations: ['acme'], defaultOwner: 'me' };
+
+function machineCheckResult(commands: Record<string, string>): SpaceMachineCheckResult {
+  return {
+    ok: true,
+    value: {
+      check: {
+        requirements: [],
+        engines: [],
+        ready: true,
+        github: { account: 'me', organisations: [] },
+        tools: { brew: true, npm: true },
+      },
+      checkedAt: 0,
+      pathSource: 'login-shell',
+      spacesFolder: { value: PARENT, proposed: PARENT },
+      setUp: { ready: true, left: [] },
+      commands,
+    },
+  };
+}
 
 const PLAN: SpaceSetupPlanResult = {
   ok: true,
@@ -52,13 +123,13 @@ const PLAN: SpaceSetupPlanResult = {
       flow: 'create',
       spaceRoot: `${PARENT}/demo`,
       target: 'absent',
+      complete: false,
+      repository: null,
+      project: null,
+      alreadyDone: [],
+      leftToDo: ['Create the Space repository', 'Create the Project'],
       steps: [
-        {
-          stepId: 'machine-check',
-          title: 'Check the machine',
-          done: false,
-          lines: [{ what: 'Check that git, gh, an AI engine and python3 are on the machine.' }],
-        },
+        { stepId: 'machine-check', title: 'Check the machine', done: true, lines: [] },
         {
           stepId: 'space-repository',
           title: 'Create the Space repository',
@@ -78,8 +149,10 @@ const PLAN: SpaceSetupPlanResult = {
       repository: 'me/demo',
       visibility: 'private',
       repositoryExists: false,
+      repositoryUrl: null,
       project: 'demo',
       projectExists: false,
+      projectUrl: null,
       labels: ['spec', 'plan'],
       views: ['Board'],
     },
@@ -90,7 +163,16 @@ const PLAN: SpaceSetupPlanResult = {
 function failure(kind: string, message: string, extra: Partial<SpaceSetupFailure> = {}) {
   return {
     ok: false as const,
-    error: { kind, message, stepId: null, title: null, problems: [], byHand: [], ...extra },
+    error: {
+      kind,
+      message,
+      stepId: null,
+      title: null,
+      problems: [],
+      byHand: [],
+      viewSettings: [],
+      ...extra,
+    },
   };
 }
 
@@ -100,9 +182,22 @@ function report(extra: Partial<SetupReport> = {}): SetupReport {
     spaceRoot: `${PARENT}/demo`,
     completed: ['machine-check', 'space-repository', 'project'],
     skipped: [],
-    repository: null,
-    project: null,
-    byHand: ['Set the Board view to group by the field Stage.'],
+    repository: {
+      id: '1',
+      fullName: 'me/demo',
+      url: 'https://github.com/me/demo',
+      cloneUrl: '',
+      private: true,
+    },
+    project: {
+      id: '2',
+      owner: 'me',
+      number: 1,
+      title: 'demo',
+      url: 'https://github.com/me/demo/projects/1',
+    },
+    byHand: [],
+    viewSettings: [],
     repositories: [],
     ...extra,
   };
@@ -114,12 +209,24 @@ function emit(
   state: StepProgress['state'],
   message: string | null = null,
 ): void {
-  const title = PLAN.ok ? (PLAN.value.plan.steps[index]?.title ?? stepId) : stepId;
+  const title = PLAN.value.plan.steps[index]?.title ?? stepId;
   act(() => progressListener?.({ stepId, title, index, total: 3, state, message }));
+}
+
+function emitCheck(
+  planId: number,
+  checkId: SpaceSetupPlanProgress['checkId'],
+  state: 'running' | 'done' | 'failed',
+  text: string,
+): void {
+  act(() => planProgressListener?.({ planId, checkId, state, text }));
 }
 
 beforeEach(() => {
   progressListener = null;
+  planProgressListener = null;
+  commandExitListener = null;
+  commandCodeListener = null;
   cockpit.spaceSetupState.mockReset().mockResolvedValue({
     ok: true,
     value: {
@@ -127,6 +234,9 @@ beforeEach(() => {
       parentDir: PARENT,
       sourceDir: null,
       originUrl: null,
+      source: null,
+      owners: OWNERS,
+      spacesFolder: PARENT,
       running: false,
       interrupted: null,
     },
@@ -134,15 +244,33 @@ beforeEach(() => {
   cockpit.spaceSetupChooseFolder
     .mockReset()
     .mockResolvedValue({ ok: true, value: { parentDir: PARENT } });
-  cockpit.spaceSetupValidate.mockReset().mockResolvedValue({ ok: true, value: { problems: [] } });
+  cockpit.spaceSetupChooseSource.mockReset();
+  cockpit.spaceSetupListSpaces
+    .mockReset()
+    .mockResolvedValue({ ok: true, value: { repositories: [] } });
+  cockpit.spaceSetupOpenExisting
+    .mockReset()
+    .mockResolvedValue({ ok: true, value: { mode: 'space' } });
+  cockpit.spaceSetupValidate
+    .mockReset()
+    .mockResolvedValue({ ok: true, value: { problems: [], target: null } });
   cockpit.spaceSetupPlan.mockReset().mockResolvedValue(PLAN);
   cockpit.spaceSetupRun.mockReset();
   cockpit.spaceSetupStop.mockReset().mockResolvedValue({ ok: true, value: { stopping: true } });
   cockpit.spaceSetupOpenSpace.mockReset().mockResolvedValue({ ok: true, value: { mode: 'space' } });
+  cockpit.spaceMachineCheck.mockReset().mockResolvedValue(
+    machineCheckResult({
+      'github-add-project-scope': 'gh auth refresh --hostname github.com --scopes project',
+      'github-sign-in': 'gh auth login --hostname github.com --web',
+    }),
+  );
+  cockpit.spaceCommandRun.mockReset().mockResolvedValue({ ok: true, value: { ptyId: 'pty-1' } });
   cockpit.spaceNavigate
     .mockReset()
     .mockResolvedValue({ ok: true, value: { mode: 'space-welcome' } });
+  cockpit.urlOpenExternal.mockReset();
   cockpit.onSpaceSetupProgress.mockClear();
+  cockpit.onSpaceSetupPlanProgress.mockClear();
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
 });
 
@@ -160,327 +288,260 @@ function type(testId: string, value: string): void {
 async function fillAndPlan(): Promise<void> {
   await renderFlow();
   type('setup-field-name', 'demo');
-  type('setup-field-owner', 'me');
-  fireEvent.click(screen.getByTestId('setup-show-plan'));
+  fireEvent.click(screen.getByTestId('setup-continue'));
   await screen.findByTestId('setup-plan');
 }
 
-test("live validation shows core's sentence beside the field that was changed", async () => {
+test('no on-screen text names an internal field', async () => {
+  await renderFlow();
   cockpit.spaceSetupValidate.mockResolvedValue({
     ok: true,
     value: {
       problems: [
-        { field: 'name', message: "The Space's name holds a space." },
-        { field: 'owner', message: 'The owner is empty.' },
+        { field: 'name', message: 'bad' },
+        { field: 'parentDir', message: 'also bad' },
       ],
+      target: null,
     },
   });
-  await renderFlow();
-  type('setup-field-name', 'bad name');
-  const problem = await screen.findByTestId('setup-problem-name');
-  expect(problem.textContent).toBe("The Space's name holds a space.");
-  const input = screen.getByTestId('setup-field-name');
-  expect(input.getAttribute('aria-invalid')).toBe('true');
-  expect(input.getAttribute('aria-describedby')).toBe(problem.id);
-  // The owner was not changed yet, so its problem waits.
-  expect(screen.queryByTestId('setup-problem-owner')).toBeNull();
-  expect(cockpit.spaceSetupValidate).toHaveBeenLastCalledWith({
-    flow: 'create',
-    name: 'bad name',
-    description: '',
-    owner: '',
-    private: true,
-    repositories: [],
-  });
+  type('setup-field-name', 'x');
+  await screen.findByTestId('setup-problem-name');
+  const text = document.body.textContent ?? '';
+  for (const banned of ['parentDir', 'folderName', 'sourceDir', 'repositoryName', 'github —']) {
+    expect(text).not.toContain(banned);
+  }
+  expect(text).not.toContain('skipped');
 });
 
-test('asking for the plan with problems shows them all, moves focus to the first, and asks no plan', async () => {
+test('the owner select lists the account then the organisations, with no text input', async () => {
+  await renderFlow();
+  const select = screen.getByTestId('setup-field-owner') as HTMLSelectElement;
+  expect(select.tagName).toBe('SELECT');
+  const options = within(select)
+    .getAllByRole('option')
+    .map((option) => option.textContent);
+  expect(options).toEqual(['me (you)', 'acme']);
+  expect(screen.queryByRole('textbox', { name: /owner/i })).toBeNull();
+});
+
+test('typing a name updates "What will be created", and the target state drives Continue', async () => {
+  await renderFlow();
   cockpit.spaceSetupValidate.mockResolvedValue({
     ok: true,
-    value: { problems: [{ field: 'owner', message: 'The owner is empty.' }] },
+    value: {
+      problems: [],
+      target: { spaceRoot: `${PARENT}/demo`, state: 'absent', message: null },
+    },
   });
-  await renderFlow();
-  fireEvent.click(screen.getByTestId('setup-show-plan'));
-  await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('setup-field-owner')));
-  expect(screen.getByTestId('setup-problem-owner').textContent).toBe('The owner is empty.');
-  expect(cockpit.spaceSetupPlan).not.toHaveBeenCalled();
-});
-
-test('a plan refused with invalid-input returns to the form with the problems', async () => {
-  cockpit.spaceSetupPlan.mockResolvedValue(
-    failure('invalid-input', 'The form has problems.', {
-      problems: [{ field: 'parentDir', message: '/work/spaces is not a folder.' }],
-    }),
-  );
-  await renderFlow();
-  fireEvent.click(screen.getByTestId('setup-show-plan'));
+  type('setup-field-name', 'demo');
   await waitFor(() =>
-    expect(document.activeElement).toBe(screen.getByTestId('setup-field-parentDir')),
+    expect(screen.getByTestId('setup-will-create').textContent).toContain('a new folder.'),
   );
-  expect(screen.getByTestId('setup-problem-parentDir').textContent).toBe(
-    '/work/spaces is not a folder.',
-  );
-});
+  expect(screen.getByTestId('setup-will-create').textContent).toContain(`${PARENT}/demo`);
 
-test("the folder is chosen in main's dialog; the renderer sends no path", async () => {
-  cockpit.spaceSetupState.mockResolvedValue({
+  cockpit.spaceSetupValidate.mockResolvedValue({
     ok: true,
     value: {
-      flow: 'create',
-      parentDir: null,
-      sourceDir: null,
-      originUrl: null,
-      running: false,
-      interrupted: null,
+      problems: [],
+      target: { spaceRoot: `${PARENT}/demo`, state: 'complete', message: null },
+    },
+  });
+  type('setup-field-name', 'demo2');
+  await waitFor(() => expect(screen.getByTestId('setup-open-existing')).toBeTruthy());
+  expect(screen.queryByTestId('setup-continue')).toBeNull();
+
+  cockpit.spaceSetupValidate.mockResolvedValue({
+    ok: true,
+    value: {
+      problems: [],
+      target: { spaceRoot: `${PARENT}/demo`, state: 'incomplete', message: null },
+    },
+  });
+  type('setup-field-name', 'demo3');
+  await waitFor(() =>
+    expect(screen.getByTestId('setup-continue').textContent).toBe('Finish setting it up'),
+  );
+  expect(screen.getByTestId('setup-open-existing')).toBeTruthy();
+
+  cockpit.spaceSetupValidate.mockResolvedValue({
+    ok: true,
+    value: {
+      problems: [],
+      target: { spaceRoot: `${PARENT}/demo`, state: 'other-content', message: null },
+    },
+  });
+  type('setup-field-name', 'demo4');
+  await waitFor(() =>
+    expect((screen.getByTestId('setup-continue') as HTMLButtonElement).disabled).toBe(true),
+  );
+});
+
+test('the plan progress pushes render as a list, drop a stale planId, show the slow line, and Cancel returns to the form', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    const plan = deferred<SpaceSetupPlanResult>();
+    cockpit.spaceSetupPlan.mockReturnValue(plan.promise);
+    await renderFlow();
+    type('setup-field-name', 'demo');
+    fireEvent.click(screen.getByTestId('setup-continue'));
+    await vi.waitFor(() => expect(screen.getByTestId('setup-checking')).toBeTruthy());
+
+    emitCheck(1, 'folder', 'done', `The folder ${PARENT}/demo does not exist yet`);
+    emitCheck(1, 'repository', 'running', 'Looking for the repository me/demo on GitHub');
+    expect(screen.getByTestId('setup-check-folder').textContent).toContain(
+      'The folder /work/spaces/demo does not exist yet',
+    );
+    expect(screen.getByTestId('setup-check-repository').textContent).toContain(
+      'Looking for the repository me/demo on GitHub',
+    );
+
+    // A push from an older plan is ignored.
+    emitCheck(2, 'project', 'running', 'Looking for a Project named demo');
+    emitCheck(1, 'project', 'done', 'stale, should be dropped');
+    expect(screen.getByTestId('setup-check-project').textContent).toContain(
+      'Looking for a Project named demo',
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(21_000);
+    });
+    expect(screen.getByTestId('setup-checking-slow')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('setup-check-cancel'));
+    expect(screen.getByTestId('setup-form')).toBeTruthy();
+    expect(screen.queryByTestId('setup-checking')).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('the confirmation has the question, three tagged rows, few lines, and the full plan only after "Show every step"', async () => {
+  await fillAndPlan();
+  expect(screen.getByTestId('setup-confirm-question').textContent).toBe('Create the Space demo?');
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('setup-confirm')));
+
+  const folder = screen.getByTestId('setup-confirm-folder');
+  expect(folder.textContent).toContain('New');
+  const repository = screen.getByTestId('setup-confirm-repository');
+  expect(repository.textContent).toContain('me/demo');
+  expect(repository.textContent).toContain('New');
+  const project = screen.getByTestId('setup-confirm-project');
+  expect(project.textContent).toContain('demo');
+  expect(project.textContent).toContain('New');
+
+  expect(screen.queryByTestId('setup-plan-steps')).toBeNull();
+  const section = screen.getByTestId('setup-plan');
+  const before = Array.from(
+    section.querySelectorAll('h2, p, [data-testid^="setup-confirm-"]'),
+  ).filter((el) => el.closest('[data-testid="setup-show-every-step-content"]') === null);
+  expect(before.length).toBeLessThanOrEqual(8);
+
+  fireEvent.click(screen.getByTestId('setup-show-every-step'));
+  expect(screen.getByTestId('setup-plan-steps')).toBeTruthy();
+});
+
+test('the plan answering complete: true shows the Space already exists and is complete', async () => {
+  cockpit.spaceSetupPlan.mockResolvedValue({
+    ok: true,
+    value: {
+      ...PLAN.value,
+      plan: { ...PLAN.value.plan, complete: true, target: 'half-made' },
     },
   });
   await renderFlow();
-  expect(screen.getByTestId('setup-parent-dir').textContent).toBe('No folder chosen.');
-  fireEvent.click(screen.getByTestId('setup-field-parentDir'));
-  await waitFor(() => expect(screen.getByTestId('setup-parent-dir').textContent).toBe(PARENT));
-  expect(cockpit.spaceSetupChooseFolder).toHaveBeenCalledWith({});
+  type('setup-field-name', 'demo');
+  fireEvent.click(screen.getByTestId('setup-continue'));
+  const complete = await screen.findByTestId('setup-complete');
+  expect(complete.textContent).toContain('already exists and is complete');
+  fireEvent.click(screen.getByTestId('setup-open-space'));
+  await waitFor(() => expect(cockpit.spaceSetupOpenSpace).toHaveBeenCalledWith({}));
 });
 
-test('the plan shows the names on GitHub and each step before anything runs', async () => {
-  await fillAndPlan();
-  expect(screen.getByTestId('setup-plan-github-repository').textContent).toContain('me/demo');
-  expect(screen.getByTestId('setup-plan-github-repository').textContent).toContain(
-    '(private) is created',
-  );
-  expect(screen.getByTestId('setup-plan-github-project').textContent).toContain('demo');
-  const steps = within(screen.getByTestId('setup-plan-steps')).getAllByRole('listitem');
-  expect(steps.length).toBeGreaterThanOrEqual(3);
-  expect(screen.getByTestId('setup-plan-step-space-repository').textContent).toContain(
-    'Create the private repository on GitHub. To: me/demo.',
-  );
-  expect(document.activeElement?.id).toBe('setup-plan-title');
-  expect(cockpit.spaceSetupRun).not.toHaveBeenCalled();
-  expect(screen.getByTestId('setup-confirm').textContent).toBe('Confirm: create on GitHub and run');
-});
-
-test('a double click on confirm starts one run', async () => {
+test('the run shows "Already done" for a skipped step, marked with the internal state', async () => {
   const run = deferred<SpaceSetupRunResult>();
-  cockpit.spaceSetupRun.mockReturnValue(run.promise);
-  await fillAndPlan();
-  const button = screen.getByTestId('setup-confirm');
-  fireEvent.click(button);
-  fireEvent.click(button);
-  await act(async () => run.resolve({ ok: true, value: report() }));
-  expect(cockpit.spaceSetupRun).toHaveBeenCalledTimes(1);
-});
-
-test.each([
-  ['target-not-empty', '/work/spaces/demo holds files that are not this Space.'],
-  ['repository-taken', 'me/demo exists on GitHub and is not this Space.'],
-  ['project-taken', "The Project demo exists and is not this Space's."],
-])('a plan refused with %s shows the message and offers no run', async (kind, message) => {
-  cockpit.spaceSetupPlan.mockResolvedValue(failure(kind, message));
-  await fillAndPlan();
-  const error = screen.getByTestId('setup-plan-error');
-  expect(error.dataset.kind).toBe(kind);
-  expect(error.textContent).toContain(message);
-  expect(screen.queryByTestId('setup-confirm')).toBeNull();
-});
-
-test('progress per step in words, a failed step with its sentence, and run again', async () => {
-  const first = deferred<SpaceSetupRunResult>();
-  cockpit.spaceSetupRun.mockReturnValueOnce(first.promise);
+  cockpit.spaceSetupRun.mockReturnValueOnce(run.promise);
   await fillAndPlan();
   fireEvent.click(screen.getByTestId('setup-confirm'));
-  await screen.findByTestId('setup-progress');
-  expect(screen.getByTestId('setup-step-state-project').textContent).toBe('· waiting');
-
-  emit('machine-check', 0, 'checking');
+  await screen.findByTestId('setup-running');
   emit('machine-check', 0, 'skipped');
-  emit('space-repository', 1, 'checking');
-  emit('space-repository', 1, 'running');
-  expect(screen.getByTestId('setup-step-state-machine-check').textContent).toBe('– skipped');
-  expect(screen.getByTestId('setup-step-state-space-repository').textContent).toBe('… running');
-  expect(screen.getByTestId('setup-status').textContent).toBe(
-    'Running: Create the Space repository — running.',
+  expect(screen.getByTestId('setup-step-machine-check').dataset.state).toBe('skipped');
+  expect(screen.getByTestId('setup-step-state-machine-check').textContent).toContain(
+    'Already done',
   );
-  emit('space-repository', 1, 'done');
-  emit('project', 2, 'running');
-  emit('project', 2, 'failed', 'gh is not signed in.');
-  expect(screen.getByTestId('setup-step-project').dataset.state).toBe('failed');
-  expect(screen.getByTestId('setup-step-message-project').textContent).toBe('gh is not signed in.');
+  await act(async () => run.resolve({ ok: true, value: report() }));
+});
 
+test('the finished screen opens with "The Space demo is ready.", focuses Open the Space, and each view setting opens its link', async () => {
+  const run = deferred<SpaceSetupRunResult>();
+  cockpit.spaceSetupRun.mockReturnValueOnce(run.promise);
+  await fillAndPlan();
+  fireEvent.click(screen.getByTestId('setup-confirm'));
+  await screen.findByTestId('setup-running');
   await act(async () =>
-    first.resolve(
-      failure('not-signed-in', 'gh is not signed in.', {
+    run.resolve({
+      ok: true,
+      value: report({
+        viewSettings: [
+          {
+            view: 'Board',
+            setting: 'Column by Stage',
+            url: 'https://github.com/me/demo/projects/1/views/1',
+          },
+        ],
+      }),
+    }),
+  );
+  const finished = await screen.findByTestId('setup-finished');
+  expect(finished.textContent).toContain('The Space demo is ready.');
+  await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('setup-open-space')));
+
+  fireEvent.click(screen.getByTestId('setup-by-hand-open-0'));
+  expect(cockpit.urlOpenExternal).toHaveBeenCalledWith(
+    'https://github.com/me/demo/projects/1/views/1',
+  );
+});
+
+test('a failure of kind github-missing-scope offers "Fix and run again", mounts the command panel, and an exit 0 asks for the plan again', async () => {
+  const run = deferred<SpaceSetupRunResult>();
+  cockpit.spaceSetupRun.mockReturnValueOnce(run.promise);
+  await fillAndPlan();
+  fireEvent.click(screen.getByTestId('setup-confirm'));
+  await screen.findByTestId('setup-running');
+  await act(async () =>
+    run.resolve(
+      failure('github-missing-scope', 'GitHub Projects need one more permission.', {
         stepId: 'project',
         title: 'Create the Project',
       }),
     ),
   );
-  const error = await screen.findByTestId('setup-run-error');
-  expect(error.textContent).toContain('Failed at: Create the Project');
-  expect(error.textContent).toContain('gh is not signed in.');
+  await screen.findByTestId('setup-failed');
+  const fixButton = screen.getByTestId('setup-fix-and-run-again');
+  expect(fixButton.textContent).toBe('Fix and run again');
+  fireEvent.click(fixButton);
+  const panel = await screen.findByTestId('command-panel-command');
+  expect(panel.textContent).toContain('gh auth refresh --hostname github.com --scopes project');
 
-  const second = deferred<SpaceSetupRunResult>();
-  cockpit.spaceSetupRun.mockReturnValueOnce(second.promise);
-  fireEvent.click(screen.getByTestId('setup-run-again'));
-  await waitFor(() => expect(cockpit.spaceSetupRun).toHaveBeenCalledTimes(2));
-  expect(cockpit.spaceSetupRun.mock.calls[0]?.[0]).toEqual({ token: 'plan-token-1' });
-  expect(cockpit.spaceSetupRun.mock.calls[1]?.[0]).toEqual(
-    cockpit.spaceSetupRun.mock.calls[0]?.[0],
-  );
-  // The new run starts with every step waiting again.
-  expect(screen.getByTestId('setup-step-state-project').textContent).toBe('· waiting');
-  emit('space-repository', 1, 'skipped');
-  emit('project', 2, 'done');
-  await act(async () => second.resolve({ ok: true, value: report() }));
-
-  const byHand = await screen.findByTestId('setup-by-hand');
-  expect(byHand.textContent).toContain('Set the Board view to group by the field Stage.');
-  fireEvent.click(screen.getByTestId('setup-open-space'));
-  await waitFor(() => expect(cockpit.spaceSetupOpenSpace).toHaveBeenCalledWith({}));
+  cockpit.spaceSetupPlan.mockClear();
+  act(() => commandExitListener?.({ ptyId: 'pty-1', exitCode: 0 }));
+  await waitFor(() => expect(cockpit.spaceSetupPlan).toHaveBeenCalled());
 });
 
-test('stop asks main to stop after the current step, and a stopped run can be run again', async () => {
-  const run = deferred<SpaceSetupRunResult>();
-  cockpit.spaceSetupRun.mockReturnValueOnce(run.promise);
-  await fillAndPlan();
-  fireEvent.click(screen.getByTestId('setup-confirm'));
-  emit('machine-check', 0, 'running');
-  fireEvent.click(await screen.findByTestId('setup-stop'));
-  await waitFor(() =>
-    expect(screen.getByTestId('setup-stop').textContent).toBe('Stopping after this step…'),
-  );
-  expect(cockpit.spaceSetupStop).toHaveBeenCalledWith({});
-  await act(async () =>
-    run.resolve(
-      failure('stopped', 'The run was stopped before this step.', {
-        stepId: 'space-repository',
-        title: 'Create the Space repository',
-      }),
-    ),
-  );
-  expect((await screen.findByTestId('setup-status')).textContent).toBe(
-    'Stopped. Run again to continue.',
-  );
-  expect(screen.getByTestId('setup-run-error').textContent).toContain(
-    'Stopped before: Create the Space repository',
-  );
-  expect(screen.getByTestId('setup-run-again')).toBeTruthy();
-});
-
-test('open by address runs twice: the second run carries the confirmed repositories', async () => {
-  cockpit.spaceSetupState.mockResolvedValue({
+test('"Space from a repository on this computer": Choose… fills the source, defaults the name, and says the folder is not changed', async () => {
+  cockpit.spaceSetupChooseSource.mockResolvedValue({
     ok: true,
     value: {
-      flow: 'open',
-      parentDir: PARENT,
-      sourceDir: null,
-      originUrl: null,
-      running: false,
-      interrupted: null,
-    },
-  });
-  cockpit.spaceSetupPlan.mockResolvedValue({
-    ok: true,
-    value: {
-      plan: {
-        flow: 'open',
-        spaceRoot: `${PARENT}/demo`,
-        target: 'absent',
-        steps: [{ stepId: 'clone-space', title: 'Clone the Space', done: false, lines: [] }],
-      },
-      github: null,
-      token: 'plan-token-open',
-    },
-  });
-  cockpit.spaceSetupRun
-    .mockResolvedValueOnce({
-      ok: true,
-      value: report({
-        flow: 'open',
-        byHand: [],
-        repositories: [
-          { name: 'app', github: 'me/app', cloned: false },
-          { name: 'docs', github: 'me/docs', cloned: false },
-        ],
-      }),
-    })
-    .mockResolvedValueOnce({
-      ok: true,
-      value: report({
-        flow: 'open',
-        byHand: [],
-        repositories: [
-          { name: 'app', github: 'me/app', cloned: true },
-          { name: 'docs', github: 'me/docs', cloned: false },
-        ],
-      }),
-    });
-  await renderFlow({ kind: 'from-address' });
-  type('setup-field-address', 'me/demo');
-  fireEvent.click(screen.getByTestId('setup-show-plan'));
-  await screen.findByTestId('setup-plan');
-  expect(screen.queryByTestId('setup-plan-github')).toBeNull();
-  fireEvent.click(screen.getByTestId('setup-confirm'));
-  await screen.findByTestId('setup-repositories-found');
-  expect(cockpit.spaceSetupRun).toHaveBeenLastCalledWith({
-    token: 'plan-token-open',
-    repositories: [],
-  });
-  fireEvent.click(screen.getByTestId('setup-found-docs'));
-  fireEvent.click(screen.getByTestId('setup-clone-confirmed'));
-  await waitFor(() =>
-    expect(cockpit.spaceSetupRun).toHaveBeenLastCalledWith({
-      token: 'plan-token-open',
-      repositories: ['app'],
-    }),
-  );
-  await waitFor(() =>
-    expect((screen.getByTestId('setup-found-docs') as HTMLInputElement).checked).toBe(true),
-  );
-});
-
-test('adopt shows the folder main opened and its origin, and sends neither', async () => {
-  cockpit.spaceSetupState.mockResolvedValue({
-    ok: true,
-    value: {
-      flow: 'adopt',
-      parentDir: PARENT,
       sourceDir: '/work/app',
-      originUrl: 'https://github.com/me/app.git',
-      running: false,
-      interrupted: null,
+      originUrl: 'https://github.com/me/app',
+      github: 'me/app',
+      name: 'app',
     },
   });
-  await renderFlow({
-    kind: 'about-repository',
-    folder: '/work/app',
-    originUrl: 'https://github.com/me/app.git',
-  });
-  expect(screen.getByTestId('setup-about-folder').textContent).toBe('/work/app');
-  expect(screen.getByTestId('setup-origin').textContent).toContain('https://github.com/me/app.git');
-  type('setup-field-name', 'demo');
+  await renderFlow({ kind: 'from-repository' });
+  fireEvent.click(screen.getByTestId('setup-choose-source'));
+  await waitFor(() => expect(cockpit.spaceSetupChooseSource).toHaveBeenCalledWith({}));
   await waitFor(() =>
-    expect(cockpit.spaceSetupValidate).toHaveBeenLastCalledWith({
-      flow: 'adopt',
-      name: 'demo',
-      description: '',
-      owner: '',
-      private: true,
-    }),
+    expect((screen.getByTestId('setup-field-name') as HTMLInputElement).value).toBe('app-space'),
   );
-});
-
-test('a run stopped by a closed window is announced, with how to continue it', async () => {
-  cockpit.spaceSetupState.mockResolvedValue({
-    ok: true,
-    value: {
-      flow: 'create',
-      parentDir: PARENT,
-      sourceDir: null,
-      originUrl: null,
-      running: false,
-      interrupted: { flow: 'create', spaceRoot: `${PARENT}/demo` },
-    },
-  });
-  await renderFlow();
-  expect(screen.getByTestId('setup-interrupted').textContent).toContain(`${PARENT}/demo`);
-  expect(screen.getByTestId('setup-interrupted').textContent).toContain('run again');
+  expect(screen.getByTestId('setup-source').textContent).toContain('This folder is not changed.');
 });

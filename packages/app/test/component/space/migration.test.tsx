@@ -52,6 +52,8 @@ const cockpit = {
       issueListener = null;
     };
   }),
+  // Every screen is now shown beside `<SpaceSettings />` (M9.10), which listens for it.
+  onSettingsOpen: vi.fn(() => () => {}),
 };
 
 const FOLDER = '/work/old-project';
@@ -521,7 +523,7 @@ test('a run interrupted by a closed window is recognised when the folder is open
   expect(target).toContain('An earlier run did part of this migration');
   expect(target).not.toContain('Nothing has been done yet.');
   expect(screen.getByTestId('migration-plan-step-record-source').textContent).toContain(
-    'done already, skipped',
+    'Already done',
   );
 });
 

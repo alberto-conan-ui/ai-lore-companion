@@ -1,32 +1,41 @@
 import type { JSX } from 'react';
 import type { SetupFlow, SpaceInitOf } from '../../../../shared/ipc.js';
-import { errorAreaStyle, folderPathStyle, secondaryButtonStyle } from '../styles.js';
+import { StepIndicator } from '../common/StepIndicator.js';
+import { errorAreaStyle } from '../styles.js';
+import { SetupChecking } from './SetupChecking.js';
 import { SetupForm } from './SetupForm.js';
-import { SetupPlanView } from './SetupPlanView.js';
+import { SetupCompleteView, SetupPlanView } from './SetupPlanView.js';
 import { SetupProgressView } from './SetupProgressView.js';
-import { useSetupFlow } from './useSetupFlow.js';
+import { type SetupStage, basenameOf, useSetupFlow } from './useSetupFlow.js';
 
 type Props = { init: SpaceInitOf<'setup'> };
 
 const TITLES: Record<SetupFlow, string> = {
-  create: 'Create a Space',
-  adopt: 'Create a Space about this repository',
-  open: 'Open a Space by GitHub address',
+  create: 'New Space',
+  adopt: 'Space from a repository on this computer',
+  open: 'Space from GitHub',
 };
 
 const SENTENCES: Record<SetupFlow, string> = {
-  create:
-    "The companion creates the Space repository and its Project on GitHub, makes the Space's folder from the Lore template and clones the repositories you list into repos/. A session writes the rest.",
-  adopt:
-    "The companion creates the Space repository and its Project on GitHub, makes the Space's folder from the Lore template, and clones the repository fresh from its origin into repos/.",
-  open: 'The companion clones the Space repository, creates the Workbench and installs into Claude Code. Then it lists the repositories of the Space for you to confirm.',
+  create: 'A Space is a GitHub repository with a Project, and a folder on this computer.',
+  open: 'Copies a Space that already exists on GitHub into a folder on this computer.',
+  adopt: 'A new Space whose repositories include one you already have on this computer.',
 };
 
+function stepOf(stage: SetupStage): 1 | 2 | 3 {
+  if (stage === 'plan' || stage === 'complete') return 2;
+  if (stage === 'running' || stage === 'stopped' || stage === 'failed' || stage === 'finished') {
+    return 3;
+  }
+  return 1;
+}
+
 /**
- * The create-a-Space screens, for the flow `init.start` names: the form, the
- * plan with an explicit confirmation, the progress of the steps, a failed step
- * with "Run again", and the end. Every folder, every command and every call to
- * GitHub is main's; this screen sends the form's texts.
+ * The create-a-Space screens, for the flow `init.start` names: the form with
+ * its live "What will be created" block, the checking list, the
+ * confirmation, the run with state words, and the result. Every folder, every
+ * command and every call to GitHub is main's; this screen sends the form's
+ * texts.
  */
 export function SetupScreen({ init }: Props): JSX.Element {
   const view = useSetupFlow(init.start);
@@ -41,36 +50,26 @@ export function SetupScreen({ init }: Props): JSX.Element {
       aria-labelledby="setup-title"
     >
       <div style={columnStyle}>
+        <StepIndicator current={stepOf(stage)} />
         <header style={headerStyle}>
-          <div style={headerTextStyle}>
-            <h1 id="setup-title" style={titleStyle}>
-              {TITLES[flow]}
-            </h1>
-            <p style={sentenceStyle}>{SENTENCES[flow]}</p>
-          </div>
-          {(stage === 'form' || stage === 'plan' || stage === 'loading') && (
-            <button
-              type="button"
-              style={secondaryButtonStyle}
-              data-testid="setup-to-welcome"
-              onClick={() => void window.cockpit.spaceNavigate({ to: 'space-welcome' })}
-            >
-              Back to the welcome screen
-            </button>
-          )}
+          <h1 id="setup-title" style={titleStyle}>
+            {TITLES[flow]}
+          </h1>
+          <p style={sentenceStyle}>{SENTENCES[flow]}</p>
         </header>
 
         {view.interrupted !== null && stage === 'form' && (
           <p style={noticeStyle} data-testid="setup-interrupted">
-            A run for <span style={folderPathStyle}>{view.interrupted.spaceRoot}</span> stopped when
-            its window closed. To run again, fill in the same form, ask for the plan and confirm it:
-            what was done is kept, and the run continues.
+            Creating {basenameOf(view.interrupted.spaceRoot)} stopped when its window closed. The
+            form is filled in again; Continue finishes it.
           </p>
         )}
 
         {stage === 'loading' && <p style={sentenceStyle}>Loading…</p>}
-        {(stage === 'form' || stage === 'planning') && <SetupForm view={view} />}
+        {(stage === 'form' || stage === 'checking') && <SetupForm view={view} />}
+        {stage === 'checking' && <SetupChecking view={view} />}
         {stage === 'plan' && <SetupPlanView view={view} />}
+        {stage === 'complete' && <SetupCompleteView view={view} />}
         {(stage === 'running' ||
           stage === 'stopped' ||
           stage === 'failed' ||
@@ -111,16 +110,8 @@ const columnStyle: React.CSSProperties = {
 
 const headerStyle: React.CSSProperties = {
   display: 'flex',
-  alignItems: 'flex-start',
-  justifyContent: 'space-between',
-  gap: '1rem',
-};
-
-const headerTextStyle: React.CSSProperties = {
-  display: 'flex',
   flexDirection: 'column',
   gap: '0.3rem',
-  minWidth: 0,
 };
 
 const titleStyle: React.CSSProperties = { margin: 0, fontSize: '1.1rem', fontWeight: 600 };

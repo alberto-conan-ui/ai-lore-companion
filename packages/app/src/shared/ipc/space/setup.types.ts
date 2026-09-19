@@ -58,6 +58,9 @@ export const SETUP_STEP_STATES = [
 /** The kind of the failure of a run that was stopped. Mirrors core's `STEPS_STOPPED`. */
 export const SETUP_STOPPED_KIND = 'stopped';
 
+/** The step ids that always run, whichever the Space's state. Mirrors core's `ALWAYS_RUN_STEP_IDS`. */
+export const ALWAYS_RUN_STEP_IDS: readonly string[] = ['machine-check', 'project-layout'];
+
 /** One repository of the form of "create a Space", given by its address. */
 export type SpaceSetupRepositoryEntry = {
   /** `owner/name`, or an `https://github.com/…` or `git@github.com:…` address. */

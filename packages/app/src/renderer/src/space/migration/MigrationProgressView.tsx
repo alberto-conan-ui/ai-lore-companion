@@ -22,10 +22,20 @@ type RowState = StepState | 'waiting';
 const MARKS: Record<RowState, string> = {
   waiting: '·',
   checking: '…',
-  skipped: '–',
+  skipped: '✓',
   running: '…',
   done: '✓',
   failed: '✗',
+};
+
+/** The word shown beside the mark. Every other state is its own name. */
+const WORDS: Record<RowState, string> = {
+  waiting: 'waiting',
+  checking: 'checking',
+  skipped: 'Already done',
+  running: 'running',
+  done: 'done',
+  failed: 'failed',
 };
 
 const COLOURS: Record<RowState, string> = {
@@ -105,7 +115,7 @@ export function MigrationProgressView({ view }: Props): JSX.Element {
               style={{ ...stateStyle, color: COLOURS[row.state] }}
               data-testid={`migration-step-state-${row.stepId}`}
             >
-              {MARKS[row.state]} {row.state}
+              {MARKS[row.state]} {WORDS[row.state]}
             </span>
             <span>{row.title}</span>
             {row.state === 'failed' && row.message !== null && (
