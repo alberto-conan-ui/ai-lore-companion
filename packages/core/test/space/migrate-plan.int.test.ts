@@ -167,10 +167,12 @@ test('the plan of the fixture: thirteen steps, the mapping with its counts and d
     assert.ok(step.lines.length > 0, `${step.stepId} has lines`);
   }
 
-  // The archive: every file under memory/ and references/, ignored files and the inside link included.
+  // The archive: every file under memory/ and references/, and ai_readme.md, ignored files and the inside link included.
   const archivedFiles = b.fixture.loreFiles.filter(
-    (path) => path.startsWith('memory/') || path.startsWith('references/'),
+    (path) =>
+      path.startsWith('memory/') || path.startsWith('references/') || path === 'ai_readme.md',
   );
+  assert.ok(archivedFiles.includes('ai_readme.md'));
   const archive = row(plan, 'archive');
   assert.equal(archive.count, archivedFiles.length);
   assert.equal(archive.destination, 'publish/archive/v0.8/, copied as it is');
@@ -196,7 +198,7 @@ test('the plan of the fixture: thirteen steps, the mapping with its counts and d
   assert.equal(mirror.count, c.mirrorNodes.length);
   assert.ok(mirror.items.every((item) => item.to === 'lore/mirrors/fixture-project.md'));
 
-  // The in-progress focus and its stages, the paused focuses, the backlog files.
+  // The in-progress focus and its stages, the paused focuses, one issue per backlog item.
   const focus = row(plan, 'in-progress-focus');
   assert.equal(focus.count, 1);
   assert.equal(focus.items.length, 1 + c.stages.length);
@@ -206,12 +208,12 @@ test('the plan of the fixture: thirteen steps, the mapping with its counts and d
   assert.equal(paused.count, c.pausedFocuses.length);
   assert.ok(paused.items.every((item) => item.to.includes('labelled paused')));
   const backlog = row(plan, 'backlog');
-  assert.equal(backlog.count, c.backlogFiles.length + c.backlogItems.length);
+  assert.equal(backlog.count, c.backlogEntryCount);
 
   const issues = plan.issues;
   assert.equal(
     issues.length,
-    1 + c.stages.length + c.pausedFocuses.length + c.backlogFiles.length + c.backlogItems.length,
+    1 + c.stages.length + c.pausedFocuses.length + c.backlogEntryCount,
   );
   for (const issue of issues) {
     assert.equal(issue.marker, formatIssueMarker('migrated', issue.key));
@@ -223,6 +225,20 @@ test('the plan of the fixture: thirteen steps, the mapping with its counts and d
   assert.ok(
     issues.filter((i) => i.kind === 'paused-focus').every((i) => i.labels.includes('paused')),
   );
+  // One issue per backlog item: an entry of a backlog file is keyed `<path>#<n>` and
+  // carries its text; an item file is one issue keyed by its path.
+  const backlogIssues = issues.filter((i) => i.kind === 'backlog');
+  const parked = backlogIssues.filter((i) => i.key.startsWith(at(c.backlogFiles[0] ?? '')));
+  assert.deepEqual(
+    parked.map((i) => [i.key, i.title, i.text]),
+    [
+      [`${at(c.backlogFiles[0] ?? '')}#1`, 'A first parked item', 'Text of the first item.'],
+      [`${at(c.backlogFiles[0] ?? '')}#2`, 'A second parked item', 'Text of the second item.'],
+    ],
+  );
+  assert.ok(parked.every((i) => i.archived === `publish/archive/v0.8/${c.backlogFiles[0]}`));
+  const itemFile = backlogIssues.find((i) => i.key === at(c.backlogItems[0] ?? ''));
+  assert.equal(itemFile?.title, 'Richer history in the browser tab');
 
   // The Workbench: the newest handover, the product document, its images and the critique note.
   const handover = row(plan, 'handover');
@@ -407,6 +423,7 @@ test('a half-done migration: the plan says which steps are done, from the ledger
       filter: (path) => !path.split(/[\\/]/).includes('.git'),
     });
   }
+  cpSync(join(b.fixture.lorePath, 'ai_readme.md'), join(archive, 'ai_readme.md'));
 
   // What step 6 leaves: one card per contract file, each listed in the part's index.
   const contractsDir = join(ctx.spaceRoot, 'lore', 'contracts');

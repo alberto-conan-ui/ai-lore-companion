@@ -192,12 +192,28 @@ const FIRST_LINES: Record<MigrationIssueKind, string> = {
 export function issueBody(issue: MigrationIssuePlan, repositoryUrl: string): string {
   const address = archiveAddress(repositoryUrl, issue.archived);
   const words = isFilePath(issue.archived) ? 'Archived file' : 'Archived folder';
+  const text = issue.text?.trim() ?? '';
   return [
     FIRST_LINES[issue.kind],
     '',
+    ...(text === '' ? [] : [cutText(text), '']),
     `${words}: [${issue.archived}](${address})`,
     '',
     issue.marker,
     '',
   ].join('\n');
+}
+
+/** The most of an item's text an issue body carries; GitHub refuses a body over 65,536 characters. */
+export const ISSUE_TEXT_MAX = 60_000;
+
+/** An item's text, cut on a whole character to at most `ISSUE_TEXT_MAX`, with a line saying so. */
+function cutText(text: string): string {
+  if (text.length <= ISSUE_TEXT_MAX) return text;
+  let cut = '';
+  for (const character of Array.from(text)) {
+    if (cut.length + character.length > ISSUE_TEXT_MAX) break;
+    cut += character;
+  }
+  return `${cut}\n\n(Cut here; the whole text is in the archived file.)`;
 }

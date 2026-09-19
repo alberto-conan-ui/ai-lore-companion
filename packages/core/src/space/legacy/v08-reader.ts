@@ -89,6 +89,9 @@ export const V08_READ_DEFAULTS = {
 /** The two folders of the Lore folder that the archive copy takes. */
 export const V08_ARCHIVE_ROOTS = ['memory', 'references'] as const;
 
+/** The files at the top of the Lore folder that the archive copy also takes: the v0.8 floor. */
+export const V08_ARCHIVE_TOP_FILES = ['ai_readme.md'] as const;
+
 type Settings = Required<Omit<V08ReadOptions, 'productDocumentPath' | 'critiqueNotePath'>> &
   Pick<V08ReadOptions, 'productDocumentPath' | 'critiqueNotePath'>;
 
@@ -441,7 +444,10 @@ function titleOf(parsed: V08ParsedDocument | null): string | null {
 }
 
 function isArchived(rel: string): boolean {
-  return V08_ARCHIVE_ROOTS.some((top) => rel.startsWith(`${top}/`));
+  return (
+    V08_ARCHIVE_ROOTS.some((top) => rel.startsWith(`${top}/`)) ||
+    (V08_ARCHIVE_TOP_FILES as readonly string[]).includes(rel)
+  );
 }
 
 // ----------------------------------------------------------------------------

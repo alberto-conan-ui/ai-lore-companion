@@ -147,7 +147,7 @@ test('step 11 creates the expected issues, labels, sub-issues and Project items,
   const b = await bench(t);
   const { ctx, step } = await prepared(b);
   const c = b.fixture.contents;
-  const backlog = c.backlogFiles.length + c.backlogItems.length;
+  const backlog = c.backlogEntryCount;
   assert.equal(ctx.issues.length, 1 + c.stages.length + c.pausedFocuses.length + backlog);
   assert.equal(await step.isDone(ctx), false);
 
@@ -169,6 +169,8 @@ test('step 11 creates the expected issues, labels, sub-issues and Project items,
       issue.body,
     );
     assert.deepEqual(issue.labels, planned.kind === 'paused-focus' ? [PAUSED_LABEL] : []);
+    // A backlog item's text is carried into its body.
+    if (planned.text !== undefined) assert.ok(issue.body.includes(planned.text), issue.body);
   }
 
   // The paused label is made by this step; setup does not make it.

@@ -1,5 +1,6 @@
 /**
- * Step 4: copy `memory/` and `references/` as they are into
+ * Step 4: copy `memory/` and `references/`, and the Lore folder's
+ * `ai_readme.md` (the v0.8 floor), as they are into
  * `publish/archive/v0.8/`, without the Lore repository's `.git` folder. Every
  * file of the working tree is copied, ignored files included (section 10.1,
  * question 3); links that point outside their folder, at a folder or at
@@ -7,12 +8,13 @@
  * with the same SHA-256. Phase M6.3 builds `run`.
  */
 
-import { stat } from 'node:fs/promises';
+import { copyFile, mkdir, stat } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { copyTree } from '../../fs/copy-tree.js';
 import { inSource, inSpace, sameContent } from '../checks.js';
 import type { MigrationStep } from '../context.js';
 import { recordStepDone, removeLeftoverTemps, stepStopped } from '../local/record.js';
-import { ARCHIVE_DIR, archivedPath } from '../targets.js';
+import { ARCHIVE_DIR, archivedPath, loreRelative } from '../targets.js';
 
 const TITLE = 'Copy the v0.8 Lore into the archive';
 
@@ -27,7 +29,7 @@ export function archiveStep(): MigrationStep {
       const bytes = archived.reduce((sum, file) => sum + file.size, 0);
       const lines = [
         {
-          what: `Copy every file of memory/ and references/ as it is (${bytes} bytes), ignored files included, without the .git folder of the Lore repository.`,
+          what: `Copy every file of memory/ and references/, and ai_readme.md, as it is (${bytes} bytes), ignored files included, without the .git folder of the Lore repository.`,
           from: ctx.source.archive.roots.join(', '),
           to: ARCHIVE_DIR,
           count: archived.length,
@@ -65,6 +67,23 @@ export function archiveStep(): MigrationStep {
           onConflict: 'overwrite',
         });
         if (!copied.ok) return stepStopped('archive-failed', TITLE, copied.error.message);
+      }
+      // The files at the top of the Lore folder that the copy takes, outside the two folders.
+      const roots = ctx.source.archive.roots.map((root) => `${root}/`);
+      for (const file of ctx.targets.archived) {
+        if (roots.some((root) => file.from.startsWith(root))) continue;
+        if (await sameContent(ctx, file.from, file.to, file.sha256)) continue;
+        const to = inSpace(ctx, file.to);
+        try {
+          await mkdir(dirname(to), { recursive: true });
+          await copyFile(inSource(ctx, file.from), to);
+        } catch (caught) {
+          return stepStopped(
+            'archive-failed',
+            TITLE,
+            `${loreRelative(ctx.source, file.from)} could not be copied: ${caught instanceof Error ? caught.message : String(caught)}`,
+          );
+        }
       }
       for (const file of ctx.targets.archived) {
         if (!(await sameContent(ctx, file.from, file.to, file.sha256))) {

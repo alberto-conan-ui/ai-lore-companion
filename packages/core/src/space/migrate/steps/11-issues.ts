@@ -2,10 +2,11 @@
  * Step 11: the issues, created one at a time and paced. The in-progress focus
  * becomes a focus issue at the Stage the Human Lead chose, with its stages as
  * sub-issues linking to their archived files; each paused focus one issue
- * labelled `paused`, linking to its archived subtree; each backlog file one
- * issue. Every issue carries the marker `formatIssueMarker('migrated', key)`
- * as a whole line of its body, the key being the source-relative path it
- * stands for, and `findIssuesByMarkers` is asked before creating.
+ * labelled `paused`, linking to its archived subtree; each backlog item one
+ * issue with its text. Every issue carries the marker
+ * `formatIssueMarker('migrated', key)` as a whole line of its body, the key
+ * being the source-relative path it stands for (with `#<n>` for an entry of a
+ * backlog file), and `findIssuesByMarkers` is asked before creating.
  *
  * Done when the ledger says so, or when every planned issue is recorded in
  * the ledger or found on GitHub by its marker and placed on the Project.
@@ -49,7 +50,7 @@ const KIND_WORDS: Record<MigrationIssueKind, string> = {
   focus: 'focus issue for the in-progress focus, at the chosen Stage',
   stage: 'sub-issue for a stage of the in-progress focus, linking to its archived file',
   'paused-focus': 'issue labelled paused for a paused focus, linking to its archived subtree',
-  backlog: 'issue for a backlog file, linking to the archived file',
+  backlog: 'issue for a backlog item, with its text, linking to the archived file',
 };
 
 const ISSUE_KINDS: readonly MigrationIssueKind[] = ['focus', 'stage', 'paused-focus', 'backlog'];

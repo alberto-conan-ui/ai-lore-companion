@@ -227,6 +227,11 @@ test('the local steps make the Space: archive, pointer, contracts, mirror, Workb
   }
   assert.ok(existsSync(join(ctx.spaceRoot, 'publish/archive/v0.8/memory/.DS_Store')));
   assert.ok(!existsSync(join(ctx.spaceRoot, 'publish/archive/v0.8/memory/.git')));
+  // The v0.8 floor, at the top of the Lore folder, is archived too.
+  assert.equal(
+    sha(join(ctx.spaceRoot, 'publish/archive/v0.8/ai_readme.md')),
+    sha(join(fixture.lorePath, 'ai_readme.md')),
+  );
 
   // The pointer, outside v0.8/.
   const pointer = read(ctx, 'publish/archive/index.md');

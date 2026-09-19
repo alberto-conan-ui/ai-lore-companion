@@ -68,6 +68,8 @@ export type V08FixtureContents = {
   backlogFiles: string[];
   /** Backlog items in the v0.8 shape: one `*.item.md` file each, in a folder under `backlog/`. */
   backlogItems: string[];
+  /** The entries of all backlog files and item files: one migrated issue each. */
+  backlogEntryCount: number;
   /** Oldest first. The last one has a `## Handover` section. */
   journalEntries: string[];
   /** The contracts outside `core/` that are one file each (`*.contract.md`). */
@@ -795,6 +797,8 @@ function v08Tree(
     doneFocusFoldersWithoutFile: ['memory/status/archive/first-prototype'],
     backlogFiles: under('memory/status/backlog/', '.backlog.md'),
     backlogItems: under('memory/status/backlog/', '.item.md'),
+    // Two sections in parked-work, two list items in upgrade-findings, one item file.
+    backlogEntryCount: 5,
     journalEntries: under('memory/journal/live/', '.md').filter(
       (path) => !path.endsWith('.index.md'),
     ),
@@ -903,6 +907,7 @@ function olderTree(
     doneFocusFoldersWithoutFile: [],
     backlogFiles: [],
     backlogItems: [],
+    backlogEntryCount: 0,
     journalEntries: [],
     projectContracts: [],
     contractSpecFiles: [],

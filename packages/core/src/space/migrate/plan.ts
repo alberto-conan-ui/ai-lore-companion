@@ -18,7 +18,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { createGitPort } from '../exec/git-port.js';
 import { isPathInside } from '../fs/paths.js';
 import { DEFAULT_STAGES } from '../github/types.js';
-import { readV08Project } from '../legacy/v08-reader.js';
+import { readV08Project, V08_ARCHIVE_TOP_FILES } from '../legacy/v08-reader.js';
 import type { V08Description, V08Problem } from '../legacy/v08-types.js';
 import { readSpaceManifest } from '../manifest/space-manifest.js';
 import { type Result, err, errorMessage, ok } from '../result.js';
@@ -412,7 +412,11 @@ function problemPaths(problems: V08Problem[], kinds: readonly string[]): string[
 
 function underArchive(source: V08Description, path: string): boolean {
   const rel = loreRelative(source, path);
-  return rel.startsWith('memory/') || rel.startsWith('references/');
+  return (
+    rel.startsWith('memory/') ||
+    rel.startsWith('references/') ||
+    (V08_ARCHIVE_TOP_FILES as readonly string[]).includes(rel)
+  );
 }
 
 /** What is copied to the archive and carried nowhere else, kind by kind. */
@@ -470,7 +474,7 @@ function mapping(ctx: MigrationContext, left: MigrationNotCarried[]): MigrationM
   return [
     {
       id: 'archive',
-      source: 'The whole memory/ tree and references/',
+      source: 'The whole memory/ tree, references/ and ai_readme.md',
       destination: `${ARCHIVE_DIR}/, copied as it is`,
       count: targets.archived.length,
       items: [],
@@ -511,7 +515,7 @@ function mapping(ctx: MigrationContext, left: MigrationNotCarried[]): MigrationM
     {
       id: 'backlog',
       source: 'Backlog items',
-      destination: `One standalone issue per backlog file in ${repositoryName}`,
+      destination: `One standalone issue per backlog item in ${repositoryName}, linking to the archived file`,
       count: backlog.length,
       items: backlog.map((issue) => issueItem(issue, 'issue')),
     },
@@ -602,7 +606,7 @@ function warnings(ctx: MigrationContext): MigrationWarning[] {
   if (outside.length > 0) {
     found.push({
       kind: 'not-copied',
-      message: `${outside.length} file${outside.length === 1 ? ' is' : 's are'} in the Lore folder outside memory/ and references/, and ${outside.length === 1 ? 'is' : 'are'} not carried.`,
+      message: `${outside.length} file${outside.length === 1 ? ' is' : 's are'} in the Lore folder outside memory/, references/ and ai_readme.md, and ${outside.length === 1 ? 'is' : 'are'} not carried.`,
       paths: outside,
     });
   }

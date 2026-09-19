@@ -278,9 +278,10 @@ test('readV08Project describes every kind of content of the v0.8 fixture', async
     shown(fixture.loreFiles),
   );
 
-  // The archive copy: memory/ and references/, counts, size, hashes, the link inside, the empty folder.
+  // The archive copy: memory/ and references/, and ai_readme.md, counts, size, hashes, the link inside, the empty folder.
   const archived = fixture.loreFiles.filter(
-    (path) => path.startsWith('memory/') || path.startsWith('references/'),
+    (path) =>
+      path.startsWith('memory/') || path.startsWith('references/') || path === 'ai_readme.md',
   );
   assert.deepEqual(d.archive.roots, shown(['memory', 'references']));
   assert.equal(d.archive.fileCount, archived.length);

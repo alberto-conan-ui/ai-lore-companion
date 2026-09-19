@@ -191,6 +191,8 @@ export type MigrationIssuePlan = {
   parentKey: string | null;
   /** For the focus issue, its Stage; otherwise `null`. */
   stage: MigrationFocusStage | null;
+  /** For a backlog item, its text in the v0.8 file, carried into the issue's body. */
+  text?: string;
 };
 
 /**

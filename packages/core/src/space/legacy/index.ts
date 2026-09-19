@@ -2,6 +2,7 @@
 
 export {
   V08_ARCHIVE_ROOTS,
+  V08_ARCHIVE_TOP_FILES,
   V08_READ_DEFAULTS,
   type V08ReadDeps,
   categoryOf as v08CategoryOf,

@@ -224,9 +224,10 @@ function issue(
 /**
  * The issues of step 11, in the order they are created: each in-progress
  * focus as a focus issue at `focusStage`, followed by one sub-issue per stage;
- * each paused focus as one issue labelled `paused`; one issue per backlog file
- * (section 10.1, question 6). Each is keyed by the source-relative path it
- * stands for.
+ * each paused focus as one issue labelled `paused`; one issue per backlog item
+ * (HL, 2026-09-20): per entry of a backlog file, keyed `<path>#<n>` from 1, or
+ * one for a file with no entries or an item file. Each other issue is keyed by
+ * the source-relative path it stands for.
  */
 export function migrationIssues(
   source: V08Description,
@@ -275,17 +276,37 @@ export function migrationIssues(
     );
   }
   for (const file of source.backlog) {
-    issues.push(
-      issue(source, {
-        kind: 'backlog',
-        title: titleOf(file.title, file.path),
-        labels: [],
-        key: file.path,
-        archivedFrom: file.path,
-        parentKey: null,
-        stage: null,
-      }),
-    );
+    const whole = file.entriesFrom === 'whole-file' || file.entries.length === 0;
+    if (whole) {
+      const entry = file.entries[0];
+      issues.push(
+        issue(source, {
+          kind: 'backlog',
+          title: titleOf(file.title, file.path),
+          labels: [],
+          key: file.path,
+          archivedFrom: file.path,
+          parentKey: null,
+          stage: null,
+          ...(entry === undefined || entry.text === '' ? {} : { text: entry.text }),
+        }),
+      );
+      continue;
+    }
+    file.entries.forEach((entry, index) => {
+      issues.push(
+        issue(source, {
+          kind: 'backlog',
+          title: titleOf(entry.title, file.path),
+          labels: [],
+          key: `${file.path}#${index + 1}`,
+          archivedFrom: file.path,
+          parentKey: null,
+          stage: null,
+          ...(entry.text === '' ? {} : { text: entry.text }),
+        }),
+      );
+    });
   }
   return issues;
 }
