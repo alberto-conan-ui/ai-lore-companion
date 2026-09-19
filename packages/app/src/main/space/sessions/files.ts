@@ -1,19 +1,27 @@
 /**
- * The generated files of one guarded session (phase M4.4), in
+ * The generated files of one guarded session (phase M4.4; M10.5 moves what is
+ * Claude Code-only behind the adapter), in
  * `<userData>/spaces/<key>/sessions/<session id>/`:
  *
- *   settings.json        permissions, the two hooks, `env`
- *   mcp.json             the session server's address and the session's token
- *   hooks/pre-write.py   the before-write adapter
- *   hooks/post-write.py  the after-write adapter
+ *   hooks/pre-write.py    the before-write adapter (every engine)
+ *   hooks/post-write.py   the after-write adapter (every engine)
+ *   settings.json         Claude Code: permissions, the two hooks, `env`
+ *   mcp.json              Claude Code: the session server's address and the session's token
+ *   <an adapter's own>    whatever else that engine's adapter's `launch` names in its `LaunchFile`s
  *
- * The folder and `hooks/` have mode 0700 and every file 0600 (architecture
- * document, section 5.14): the folder is outside the Space, and `mcp.json`
- * holds the token. The folder is removed when the session ends.
+ * `writeSessionFiles` writes the two adapters, then each `LaunchFile` of the
+ * engine's `SessionLaunch` (`engines/types.ts`); `buildSessionSettings` and
+ * `buildSessionMcpConfig` build `settings.json` and `mcp.json`'s content for
+ * the Claude Code adapter (`engines/claude-code.ts`), which is the only
+ * adapter that uses them today.
+ *
+ * The folder and every folder inside it have mode 0700 and every file 0600
+ * (architecture document, section 5.14): the folder is outside the Space, and
+ * `mcp.json` holds the token. The folder is removed when the session ends.
  */
 
 import { chmod, lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import type { SessionConnection } from '../session-server/index.js';
 import { POST_WRITE_ADAPTER, PRE_WRITE_ADAPTER } from './adapters.js';
 import { hookArgv, shellCommandLine } from './command-line.js';
@@ -26,6 +34,7 @@ import {
   SESSION_FILE_MODE,
   SESSION_ID_ENV,
 } from './constants.js';
+import type { SessionLaunch } from './engines/types.js';
 import { sessionPermissions } from './permissions.js';
 
 /** The absolute paths of one session's files. */
@@ -106,6 +115,7 @@ export function buildSessionSettings(
       checks: input.beforeChecks,
       childSeconds: PRE_WRITE_TIMEOUTS.childSeconds,
       adapterSeconds: PRE_WRITE_TIMEOUTS.adapterSeconds,
+      dialect: 'claude',
       ...(requestTool !== undefined ? { requestTool } : {}),
       refusalsFile: paths.refusals,
     }),
@@ -117,6 +127,7 @@ export function buildSessionSettings(
       checks: input.afterChecks,
       childSeconds: POST_WRITE_TIMEOUTS.childSeconds,
       adapterSeconds: POST_WRITE_TIMEOUTS.adapterSeconds,
+      dialect: 'claude',
     }),
   );
   return {
@@ -173,12 +184,26 @@ async function writePrivateFile(path: string, content: string): Promise<void> {
 }
 
 /**
- * Write the files of one session. The session's folder must not exist yet. On
- * a failure the folder is removed again and the error is thrown.
+ * A `LaunchFile` path, joined to the session's folder. Refuses a path that is
+ * absolute, holds `..` as a segment, or a NUL character (M10.5).
+ */
+function launchFilePath(dir: string, relative: string): string {
+  if (isAbsolute(relative) || relative.includes('\0') || relative.split('/').includes('..')) {
+    throw new Error(`an adapter named a file outside the session folder: ${relative}`);
+  }
+  return join(dir, ...relative.split('/'));
+}
+
+/**
+ * Write the files of one session: the two Python adapters, then each file of
+ * `launch` (M10.5, `engines/types.ts` `LaunchFile`). The session's folder must
+ * not exist yet. On a failure the folder is removed again and the error is
+ * thrown.
  */
 export async function writeSessionFiles(
   sessionsDir: string,
-  input: SessionFilesInput,
+  input: { sessionId: string },
+  launch: SessionLaunch,
 ): Promise<SessionFilePaths> {
   const paths = sessionFilePaths(sessionsDir, input.sessionId);
   await makePrivateDir(dirname(paths.dir));
@@ -189,14 +214,11 @@ export async function writeSessionFiles(
     await makePrivateDir(paths.hooksDir);
     await writePrivateFile(paths.preWrite, PRE_WRITE_ADAPTER);
     await writePrivateFile(paths.postWrite, POST_WRITE_ADAPTER);
-    await writePrivateFile(
-      paths.mcp,
-      `${JSON.stringify(buildSessionMcpConfig(input.connection), null, 2)}\n`,
-    );
-    await writePrivateFile(
-      paths.settings,
-      `${JSON.stringify(buildSessionSettings(input, paths), null, 2)}\n`,
-    );
+    for (const file of launch.files) {
+      const target = launchFilePath(paths.dir, file.path);
+      await makePrivateDir(dirname(target));
+      await writePrivateFile(target, file.content);
+    }
   } catch (caught) {
     await removeSessionFiles(sessionsDir, input.sessionId);
     throw caught;

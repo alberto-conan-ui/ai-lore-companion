@@ -21,8 +21,33 @@ import type {
   SpaceCommandExit,
   SpaceCommandRunResult,
   SpaceEngineChoice,
+  SpaceEngineLore,
   SpaceWindowResult,
 } from '../../../src/shared/ipc.js';
+
+/** A Lore readiness report with every line `yes` (M10.5). */
+const ALL_YES_LORE: SpaceEngineLore = {
+  lines: [
+    {
+      aspect: 'lore',
+      state: 'yes',
+      text: "Reads the Lore's instructions, and its verbs as skills.",
+    },
+    { aspect: 'session-tools', state: 'yes', text: "Has the companion's session tools." },
+    { aspect: 'guard', state: 'yes', text: 'File edits are checked by the write-guard.' },
+  ],
+  asClaudeCode: true,
+};
+
+/** A Lore readiness report with the lore and guard lines `partly` (M10.5). */
+const PARTLY_LORE: SpaceEngineLore = {
+  lines: [
+    { aspect: 'lore', state: 'partly', text: 'The verbs are listed in the instructions.' },
+    { aspect: 'session-tools', state: 'yes', text: "Has the companion's session tools." },
+    { aspect: 'guard', state: 'partly', text: 'Shell commands run in a sandbox.' },
+  ],
+  asClaudeCode: false,
+};
 
 const cockpit = {
   spaceNavigate: vi.fn<(arg: unknown) => Promise<SpaceWindowResult>>(),
@@ -64,6 +89,7 @@ const readyOption = (
   engineId: string,
   name: string,
   params: SpaceEngineChoice['options'][number]['params'] = [],
+  lore: SpaceEngineLore = ALL_YES_LORE,
 ) => ({
   engineId,
   name,
@@ -71,6 +97,7 @@ const readyOption = (
   reason: null,
   fix: null,
   params,
+  lore,
 });
 
 test('the button names the engine of the choice', () => {
@@ -398,4 +425,100 @@ test('no parameters shows the Edit parameters link', () => {
   expect(screen.getByTestId('dashboard-start-session-params-edit').textContent).toBe(
     'Edit parameters',
   );
+});
+
+// ---------- M10.5: the Lore readiness report ----------
+
+test('the readiness block shows the overall state and three lines, each Yes —', () => {
+  const choice: SpaceEngineChoice = {
+    options: [readyOption('default.claude', 'Claude Code')],
+    engineId: 'default.claude',
+    buttonName: 'Claude Code',
+    refusal: null,
+  };
+  render(<EngineStartControl {...props(choice)} />);
+  expect(screen.getByTestId('dashboard-start-session-lore').textContent).toBe(
+    'Reads the Lore as Claude Code does: yes',
+  );
+  expect(screen.getByTestId('dashboard-start-session-lore').dataset.state).toBe('yes');
+  for (const aspect of ['lore', 'session-tools', 'guard']) {
+    const line = screen.getByTestId(`dashboard-start-session-lore-${aspect}`);
+    expect(line.textContent?.startsWith('Yes —')).toBe(true);
+    expect(line.dataset.state).toBe('yes');
+  }
+});
+
+test('a Codex option with a partly report shows partly overall', () => {
+  const choice: SpaceEngineChoice = {
+    options: [readyOption('default.codex', 'Codex CLI', [], PARTLY_LORE)],
+    engineId: 'default.codex',
+    buttonName: 'Codex CLI',
+    refusal: null,
+  };
+  render(<EngineStartControl {...props(choice)} />);
+  expect(screen.getByTestId('dashboard-start-session-lore').textContent).toBe(
+    'Reads the Lore as Claude Code does: partly',
+  );
+  expect(screen.getByTestId('dashboard-start-session-lore-lore').textContent).toContain('Partly —');
+  expect(screen.getByTestId('dashboard-start-session-lore-guard').textContent).toContain(
+    'Partly —',
+  );
+});
+
+test('ticking an unguarded parameter turns the guard line to No — Unguarded: …', () => {
+  const choice: SpaceEngineChoice = {
+    options: [
+      readyOption('default.claude', 'Claude Code', [
+        {
+          text: '--dangerously-skip-permissions',
+          defaultOn: false,
+          effect: 'unguarded',
+          options: ['--dangerously-skip-permissions'],
+        },
+      ]),
+    ],
+    engineId: 'default.claude',
+    buttonName: 'Claude Code',
+    refusal: null,
+  };
+
+  function Harness() {
+    const [ticked, setTicked] = useState<string[] | null>(null);
+    return (
+      <EngineStartControl
+        {...props(choice, {
+          ticked,
+          onTickedChange: (_engineId: string, texts: string[]) => setTicked(texts),
+        })}
+      />
+    );
+  }
+  render(<Harness />);
+  expect(screen.getByTestId('dashboard-start-session-lore-guard').dataset.state).toBe('yes');
+  fireEvent.click(screen.getByTestId('dashboard-start-session-param-0'));
+  const guard = screen.getByTestId('dashboard-start-session-lore-guard');
+  expect(guard.dataset.state).toBe('no');
+  expect(guard.textContent).toContain('No — Unguarded:');
+  expect(guard.textContent).toContain('--dangerously-skip-permissions changes the guard.');
+  expect(screen.getByTestId('dashboard-start-session-lore').textContent).toBe(
+    'Reads the Lore as Claude Code does: partly',
+  );
+});
+
+test('the menu suffixes a startable option with whether it reads the Lore as Claude Code does', async () => {
+  const choice: SpaceEngineChoice = {
+    options: [
+      readyOption('default.claude', 'Claude Code'),
+      readyOption('default.codex', 'Codex CLI', [], PARTLY_LORE),
+    ],
+    engineId: 'default.claude',
+    buttonName: 'Claude Code',
+    refusal: null,
+  };
+  render(<EngineStartControl {...props(choice, { menu: 'always' })} />);
+  fireEvent.click(screen.getByLabelText('Choose the engine'));
+  const claudeItem = await screen.findByTestId('dashboard-start-menu-option-default.claude');
+  expect(claudeItem.textContent).toContain('reads the Lore as Claude Code does');
+  const codexItem = screen.getByTestId('dashboard-start-menu-option-default.codex');
+  expect(codexItem.textContent).toContain('reads the Lore partly');
 });

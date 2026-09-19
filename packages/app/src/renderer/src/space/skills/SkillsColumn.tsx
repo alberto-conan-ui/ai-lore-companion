@@ -6,6 +6,8 @@ type Props = {
   ptyId: string;
   /** Give the keyboard back to the terminal after a skill is inserted. */
   focusPty: () => void;
+  /** The tab's engine, whose adapter decides each skill's `invocation` (M10.5); `null` uses `/lore:<name>`. */
+  engineId: string | null;
 };
 
 const PARTS: readonly SpaceSkill['part'][] = ['processes', 'verbs'];
@@ -20,14 +22,14 @@ const PARTS: readonly SpaceSkill['part'][] = ['processes', 'verbs'];
  * keyboard back to the terminal. The list is read when the column mounts and
  * again when the window regains focus (after an install, for example).
  */
-export function SkillsColumn({ ptyId, focusPty }: Props): JSX.Element {
+export function SkillsColumn({ ptyId, focusPty, engineId }: Props): JSX.Element {
   const [list, setList] = useState<SpaceSkillsList | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
     const read = (): void => {
-      void window.cockpit.spaceSkillsList({}).then((result) => {
+      void window.cockpit.spaceSkillsList(engineId !== null ? { engineId } : {}).then((result) => {
         if (!live) return;
         if (result.ok) {
           setList(result.value);
@@ -43,10 +45,10 @@ export function SkillsColumn({ ptyId, focusPty }: Props): JSX.Element {
       live = false;
       window.removeEventListener('focus', read);
     };
-  }, []);
+  }, [engineId]);
 
-  const insert = (name: string): void => {
-    window.cockpit.sendTerminalInput({ id: ptyId, data: `/lore:${name}` });
+  const insert = (invocation: string): void => {
+    window.cockpit.sendTerminalInput({ id: ptyId, data: invocation });
     focusPty();
   };
 
@@ -77,8 +79,8 @@ export function SkillsColumn({ ptyId, focusPty }: Props): JSX.Element {
                     key={skill.name}
                     type="button"
                     style={rowStyle}
-                    onClick={() => insert(skill.name)}
-                    title={`Insert /lore:${skill.name}`}
+                    onClick={() => insert(skill.invocation)}
+                    title={`Insert ${skill.invocation}`}
                     data-testid={`skill-row-${skill.name}`}
                   >
                     <span style={nameLineStyle}>

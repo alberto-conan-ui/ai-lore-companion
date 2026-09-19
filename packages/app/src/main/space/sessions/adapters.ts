@@ -1,5 +1,15 @@
 /**
- * The text of the two Claude Code hook adapters (phase M4.4).
+ * The text of the two hook adapters (phase M4.4; M10.5 gives each a
+ * `--dialect` argument so the same two scripts serve every engine).
+ *
+ * The dialect (`claude`, `antigravity`, `codex` or `opencode`; default
+ * `claude`) decides only how the hook's input is read (`written_paths`, which
+ * paths a call writes; `shell_command`, whether it is a shell command a
+ * dialect's adapter judges) and how the decision is printed (`emit_pre`,
+ * `emit_post`). Running the check scripts, the alarm, the refusal note and the
+ * scrub of the desk path are shared. Only `claude` is built in this phase; the
+ * other three raise a `Fault` that says so, in a block marked
+ * `# dialect: <name>` for the phase that replaces it.
  *
  * The adapters are Python 3, standard library only, as the check scripts are.
  * Their text is kept here as constants and written into each session's folder
@@ -61,9 +71,12 @@ class Refused(Exception):
     """A check script refused. The message is what it wrote on standard error."""
 
 
+DIALECTS = ('claude', 'antigravity', 'codex', 'opencode')
+
+
 def parse_arguments(argv):
     single = ('--space', '--desk', '--session', '--request-tool', '--refusals',
-              '--child-seconds', '--adapter-seconds')
+              '--child-seconds', '--adapter-seconds', '--dialect')
     found = {'--check': []}
     index = 0
     while index < len(argv):
@@ -90,6 +103,9 @@ def parse_arguments(argv):
     found['--adapter-seconds'] = int(found['--adapter-seconds'])
     if found['--child-seconds'] <= 0 or found['--adapter-seconds'] <= 0:
         raise Fault('the command line of the adapter is wrong (a time limit is not positive)')
+    found.setdefault('--dialect', 'claude')
+    if found['--dialect'] not in DIALECTS:
+        raise Fault('the command line of the adapter is wrong (--dialect %s is not known)' % found['--dialect'])
     return found
 
 
@@ -105,7 +121,7 @@ def tool_name(data):
     return name if isinstance(name, str) and name else 'an unknown tool'
 
 
-def written_path(data):
+def written_path_claude(data):
     """The absolute path the tool call writes. Raises Fault when the input does not give one."""
     tool_input = data.get('tool_input')
     if not isinstance(tool_input, dict):
@@ -126,6 +142,34 @@ def written_path(data):
     if not isinstance(cwd, str) or not os.path.isabs(cwd) or '\x00' in cwd:
         raise Fault('the path in the input of the hook is relative and the input gives no working folder')
     return os.path.join(cwd, raw)
+
+
+def written_paths(data, dialect):
+    """The absolute paths the tool call writes, dialect by dialect. An empty list for a
+    call that writes no file. Raises Fault when a file tool's input names no path."""
+    # dialect: claude
+    if dialect == 'claude':
+        return [written_path_claude(data)]
+    # dialect: antigravity
+    # dialect: codex
+    # dialect: opencode
+    if dialect in DIALECTS:
+        raise Fault('the %s dialect is not built yet' % dialect)
+    raise Fault('the dialect "%s" is not known' % dialect)
+
+
+def shell_command(data, dialect):
+    """(command, cwd) for a shell call of a dialect whose adapter judges the shell
+    (Antigravity), else None."""
+    # dialect: claude
+    if dialect == 'claude':
+        return None
+    # dialect: antigravity
+    # dialect: codex
+    # dialect: opencode
+    if dialect in DIALECTS:
+        raise Fault('the %s dialect is not built yet' % dialect)
+    raise Fault('the dialect "%s" is not known' % dialect)
 
 
 def kill_child():
@@ -238,6 +282,21 @@ STATE = {'refusals': None, 'tool': 'an unknown tool', 'path': None}
 
 
 def emit(decision, reason):
+    dialect = (ARGUMENTS[0] or {}).get('--dialect', 'claude')
+    try:
+        emit_pre(decision, reason, dialect)
+    except Fault:
+        # A dialect whose own decision form is not built yet must still fail
+        # closed: fall back to the claude form rather than leave the adapter
+        # without a decision.
+        emit_pre(decision, reason, 'claude')
+
+
+def emit_pre(decision, reason, dialect):
+    """Print the hook's decision, dialect by dialect. claude prints Claude Code's JSON form."""
+    # dialect: claude
+    if dialect != 'claude':
+        raise Fault('the %s dialect is not built yet' % dialect)
     if FINISHING[0]:
         return  # a signal arrived while the decision was being written; that decision stands
     FINISHING[0] = True
@@ -336,7 +395,7 @@ def main():
     start_alarm(arguments['--adapter-seconds'], on_alarm)
     data = read_hook_input()
     STATE['tool'] = tool_name(data)
-    path = written_path(data)
+    path = written_paths(data, arguments['--dialect'])[0]
     STATE['path'] = path
     allowed = []
     for script in arguments['--check']:
@@ -381,10 +440,28 @@ EVENT = 'PostToolUse'
 
 
 def report(reason):
+    dialect = (ARGUMENTS[0] or {}).get('--dialect', 'claude')
+    try:
+        emit_post(reason, dialect)
+    except Fault:
+        # A dialect whose own report form is not built yet must not crash the
+        # session: fall back to the claude form rather than leave an
+        # uncaught exception.
+        emit_post(reason, 'claude')
+
+
+def emit_post(problem, dialect):
+    """Report a problem found after the write, dialect by dialect, or do nothing for None.
+    claude prints Claude Code's PostToolUse block form."""
+    # dialect: claude
+    if dialect != 'claude':
+        raise Fault('the %s dialect is not built yet' % dialect)
+    if problem is None:
+        return
     if FINISHING[0]:
         return
     FINISHING[0] = True
-    reason = clip(reason)
+    reason = clip(problem)
     out = {'decision': 'block', 'reason': reason,
            'hookSpecificOutput': {'hookEventName': EVENT, 'additionalContext': reason}}
     try:
@@ -431,7 +508,7 @@ def main():
 
     start_alarm(arguments['--adapter-seconds'], on_alarm)
     data = read_hook_input()
-    path = written_path(data)
+    path = written_paths(data, arguments['--dialect'])[0]
     if not in_lore(arguments['--space'], path):
         os._exit(0)
     failures = []

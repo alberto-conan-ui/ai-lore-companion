@@ -41,6 +41,12 @@ export type HookCommandParts = {
   checks: readonly string[];
   childSeconds: number;
   adapterSeconds: number;
+  /**
+   * Which engine's input and output the adapter reads and writes (M10.5):
+   * `claude`, `antigravity`, `codex` or `opencode`. The Claude Code adapter
+   * passes `claude`.
+   */
+  dialect: string;
   /** Before-write only: the full name of the tool a session asks for Writing with. */
   requestTool?: string;
   /** Before-write only: the file the adapter notes its refusals in. */
@@ -62,6 +68,8 @@ export function hookArgv(parts: HookCommandParts): string[] {
     String(parts.childSeconds),
     '--adapter-seconds',
     String(parts.adapterSeconds),
+    '--dialect',
+    parts.dialect,
     ...(parts.requestTool !== undefined ? ['--request-tool', parts.requestTool] : []),
     ...(parts.refusalsFile !== undefined ? ['--refusals', parts.refusalsFile] : []),
     ...parts.checks.flatMap((check) => ['--check', check]),
@@ -77,6 +85,8 @@ export type EngineArgvParts = {
   pluginDir: string;
   /** The full names of the session server's tools (`mcp__<server>__<tool>`). */
   tools: readonly string[];
+  /** The session instructions of section 3.3 (M10.5, the Human Lead's answer 8). */
+  appendSystemPrompt: string;
 };
 
 /**
@@ -107,6 +117,8 @@ export function engineArgv(parts: EngineArgvParts): string[] {
     '--strict-mcp-config',
     '--plugin-dir',
     parts.pluginDir,
+    '--append-system-prompt',
+    parts.appendSystemPrompt,
     ...(parts.tools.length > 0 ? ['--allowedTools', ...parts.tools] : []),
   ];
 }

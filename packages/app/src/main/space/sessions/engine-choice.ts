@@ -20,11 +20,23 @@ import type {
   SpaceEngineOption,
   SpaceEngineParam,
 } from '../../../shared/ipc.js';
-import { optionsFor, paramEffect } from './engine-options.js';
+import { paramEffect } from './engine-options.js';
+import { adapterFor, optionsFor } from './engines/index.js';
+import { loreReadiness } from './engines/lore-readiness.js';
 import type { SessionStartFailure } from './preflight.js';
 import type { SessionReadiness } from './service.js';
 
 const NOT_GUARDED_REASON = 'guarded Space sessions are not available for this engine yet';
+
+/**
+ * The `readiness` `loreReadiness` is given for an engine that cannot run a
+ * guarded session at all: unused (the `null` adapter decides), so its shape
+ * only needs to satisfy the type.
+ */
+const NOT_GUARDED_READINESS: SessionReadiness = {
+  ok: false,
+  error: { kind: 'engine-not-supported', message: NOT_GUARDED_REASON },
+};
 
 /** The menu's `reason` for a readiness failure (the table of A.9). */
 function reasonFor(failure: SessionStartFailure): string {
@@ -76,14 +88,21 @@ export function fixFor(
         section: 'engines',
       };
     }
-    case 'engine-not-signed-in':
+    case 'engine-not-signed-in': {
+      // The engine's own catalog id names its sign-in command; a hand-added Claude Code uses
+      // `claude-code` (M10.5).
+      const catalog = engine ? catalogEntryFor(engine) : null;
+      const catalogId = catalog?.catalogId ?? 'claude-code';
+      const name = catalog?.name ?? 'Claude Code';
+      const commandId = `engine-sign-in:${catalogId}`;
       return {
         kind: 'sign-in',
-        label: 'Sign in to Claude Code',
-        commandId: 'engine-sign-in:claude-code',
-        commandLine: setupCommandLine('engine-sign-in:claude-code'),
+        label: `Sign in to ${name}`,
+        commandId,
+        commandLine: setupCommandLine(commandId),
         section: null,
       };
+    }
     case 'python3-missing':
       return {
         kind: 'set-up-python3',
@@ -152,10 +171,12 @@ export async function engineChoice(
         reason: NOT_GUARDED_REASON,
         fix: null,
         params,
+        lore: loreReadiness(null, NOT_GUARDED_READINESS, null),
       });
       continue;
     }
     const ready = await readiness(engine.id);
+    const lore = loreReadiness(adapterFor(engine), ready, ready.ok ? ready.value.skillCount : null);
     if (ready.ok) {
       options.push({
         engineId: engine.id,
@@ -164,6 +185,7 @@ export async function engineChoice(
         reason: null,
         fix: null,
         params,
+        lore,
       });
     } else {
       failures.set(engine.id, ready.error);
@@ -174,6 +196,7 @@ export async function engineChoice(
         reason: reasonFor(ready.error),
         fix: fixFor(ready.error, engine),
         params,
+        lore,
       });
     }
   }

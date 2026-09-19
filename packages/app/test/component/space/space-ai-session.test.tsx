@@ -121,9 +121,27 @@ const cockpit = {
     ok: true,
     value: {
       skills: [
-        { name: 'start-work', part: 'processes', layer: 'core', description: 'From intention.' },
-        { name: 'orient', part: 'verbs', layer: 'core', description: 'Open a session.' },
-        { name: 'my-verb', part: 'verbs', layer: 'own', description: 'Our own verb.' },
+        {
+          name: 'start-work',
+          part: 'processes',
+          layer: 'core',
+          description: 'From intention.',
+          invocation: '/lore:start-work',
+        },
+        {
+          name: 'orient',
+          part: 'verbs',
+          layer: 'core',
+          description: 'Open a session.',
+          invocation: '/lore:orient',
+        },
+        {
+          name: 'my-verb',
+          part: 'verbs',
+          layer: 'own',
+          description: 'Our own verb.',
+          invocation: '/lore:my-verb',
+        },
       ],
       notInstalled: [],
     },

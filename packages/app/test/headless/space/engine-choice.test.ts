@@ -23,6 +23,7 @@ const OK: SessionReadiness = {
     engine: CLAUDE,
     python: '/usr/bin/python3',
     install: { pluginDir: '', beforeChecks: [], afterChecks: [] },
+    skillCount: 3,
   },
 };
 
@@ -154,4 +155,31 @@ test('set-up-claude-code opens Set up this computer at engines, set-up-python3 a
   assert.equal(fixFor({ kind: 'python3-missing', message: 'x' }, CLAUDE)?.section, 'tools');
   assert.equal(fixFor({ kind: 'engine-not-signed-in', message: 'x' }, CLAUDE)?.section, null);
   assert.equal(fixFor({ kind: 'not-installed', message: 'x' }, CLAUDE)?.section, null);
+});
+
+test('M10.5: every option carries a lore readiness report', async () => {
+  const choice = await engineChoice([GEMINI, CLAUDE], readinessOf({}), null);
+  const gemini = choice.options.find((o) => o.engineId === 'default.gemini');
+  assert.ok(
+    gemini?.lore.lines.every((line) => line.state === 'no'),
+    'not guarded: three no',
+  );
+  assert.equal(gemini?.lore.asClaudeCode, false);
+  const claude = choice.options.find((o) => o.engineId === 'default.claude');
+  assert.ok(
+    claude?.lore.lines.every((line) => line.state === 'yes'),
+    'ready Claude Code: three yes',
+  );
+  assert.equal(claude?.lore.asClaudeCode, true);
+});
+
+test('M10.5: the sign-in fix of a Codex option is engine-sign-in:codex with the label Sign in to Codex CLI', () => {
+  const fix = fixFor(
+    { kind: 'engine-not-signed-in', message: 'x' },
+    { id: 'default.codex', name: 'Codex CLI', binary: 'codex' },
+  );
+  assert.equal(fix?.kind, 'sign-in');
+  assert.equal(fix?.commandId, 'engine-sign-in:codex');
+  assert.equal(fix?.label, 'Sign in to Codex CLI');
+  assert.equal(fix?.commandLine, 'codex login');
 });

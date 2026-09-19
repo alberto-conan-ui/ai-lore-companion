@@ -12,9 +12,9 @@ import {
   CODEX_OPTIONS,
   type EngineOptions,
   OPENCODE_OPTIONS,
-  optionsFor,
   paramEffect,
 } from '../../../src/main/space/sessions/engine-options.js';
+import { optionsFor } from '../../../src/main/space/sessions/engines/index.js';
 
 const CONSTANTS: readonly [string, EngineOptions][] = [
   ['CLAUDE_CODE_OPTIONS', CLAUDE_CODE_OPTIONS],

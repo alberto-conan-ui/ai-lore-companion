@@ -135,6 +135,26 @@ test('the header follows the desk, Leave Writing releases the claims, and the sk
       reread.value.skills.find((skill) => skill.name === first.name)?.description,
       'As installed.',
     );
+    // M10.5: `invocation` is `/lore:<name>` with no engine, or Claude Code's own; a Codex
+    // engine id gives Codex's sentence.
+    assert.ok(skills.value.skills.every((skill) => skill.invocation === `/lore:${skill.name}`));
+    const claudeInvocation = (await h.invoke('spaceSkillsList', spaceWindow, {
+      engineId: 'default.claude',
+    })) as SpaceSkillsResult;
+    assert.ok(claudeInvocation.ok);
+    assert.ok(
+      claudeInvocation.value.skills.every((skill) => skill.invocation === `/lore:${skill.name}`),
+    );
+    const codexInvocation = (await h.invoke('spaceSkillsList', spaceWindow, {
+      engineId: 'default.codex',
+    })) as SpaceSkillsResult;
+    assert.ok(codexInvocation.ok);
+    assert.ok(
+      codexInvocation.value.skills.every(
+        (skill) =>
+          skill.invocation === `Run the Lore's ${skill.name}: read its card and follow it.`,
+      ),
+    );
     // A window that is not a 1.0 window of this Space gets neither the skills nor a header.
     const v08 = { webContentsId: 424_242 };
     const v08Skills = (await h.invoke('spaceSkillsList', v08, {})) as { error?: { kind: string } };

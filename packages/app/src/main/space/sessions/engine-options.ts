@@ -1,11 +1,13 @@
 /**
  * The reserved and guard-changing options of each engine (M10.3,
- * `m10-architecture.md` 3.5). The adapters do not exist yet (M10.5 adds
- * them), so this file holds the four constants directly; `optionsFor` looks
- * them up by the engine's catalog id.
+ * `m10-architecture.md` 3.5). This file holds the four constants; each
+ * adapter of `engines/` sets its engine's constant as its own `options`, and
+ * `engines/index.ts` exports `optionsFor`, which looks an engine's options up
+ * through its adapter (`adapterFor(engine)?.options ?? null`). `optionsFor`
+ * does not live here: an adapter file needs a constant of this file at its own
+ * module's load time, so this file cannot also import from `engines/` without
+ * a circular ES module dependency (see the comment of `engines/index.ts`).
  */
-
-import { type EngineEntry, catalogEntryFor, isClaudeEngine } from '@ai-lore-companion/core';
 
 /**
  * The options of one engine: set by the companion (a parameter holding one is
@@ -70,29 +72,6 @@ export const OPENCODE_OPTIONS: EngineOptions = {
   reserved: ['run', 'serve', 'web'],
   guardChanging: ['--auto', '--agent', '--pure'],
 };
-
-/**
- * The options of `engine`: by its catalog id, or `CLAUDE_CODE_OPTIONS` for a
- * hand-added Claude Code (`isClaudeEngine`); `null` for any other engine.
- * M10.5 replaces the body with `adapterFor(engine)?.options ?? null`.
- */
-export function optionsFor(engine: EngineEntry): EngineOptions | null {
-  const catalog = catalogEntryFor(engine);
-  if (catalog !== null) {
-    switch (catalog.catalogId) {
-      case 'claude-code':
-        return CLAUDE_CODE_OPTIONS;
-      case 'antigravity':
-        return ANTIGRAVITY_OPTIONS;
-      case 'codex':
-        return CODEX_OPTIONS;
-      case 'opencode':
-        return OPENCODE_OPTIONS;
-    }
-  }
-  if (isClaudeEngine(engine)) return CLAUDE_CODE_OPTIONS;
-  return null;
-}
 
 export type ParamEffect = { effect: 'none' | 'unguarded' | 'refused'; options: string[] };
 

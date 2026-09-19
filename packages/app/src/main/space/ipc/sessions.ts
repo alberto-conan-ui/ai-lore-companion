@@ -28,6 +28,7 @@ import { probeEngineOfApp } from '../e2e-machine.js';
 import type { SpaceIpcEvent } from '../host.js';
 import { sessionServer } from '../session-server/index.js';
 import { engineChoice } from '../sessions/engine-choice.js';
+import { adapterFor } from '../sessions/engines/index.js';
 import { pushHeadersOnChange, readSessionHeader, readSpaceSkills } from '../sessions/header.js';
 import {
   type SpaceSessionParts,
@@ -51,6 +52,10 @@ const endSchema = z.strictObject({
 });
 
 const emptySchema = z.strictObject({});
+
+const skillsSchema = z.strictObject({
+  engineId: z.string().min(1).max(256).optional(),
+});
 
 const reinstallFailed = (message: string): { ok: false; error: SpaceSessionFailure } => ({
   ok: false,
@@ -285,9 +290,16 @@ export function createSpaceSessionsRegister(
     reg.handle('spaceSkillsList', async (event, arg): Promise<SpaceSkillsResult> => {
       const context = spaceWindowContext(deps, event);
       if (!context) return notASpaceWindow;
-      const parsed = parseArg(emptySchema, arg);
+      const parsed = parseArg(skillsSchema, arg);
       if (!parsed.ok) return parsed;
-      return readSpaceSkills(context.root, context.desk.install);
+      const engineId = parsed.value.engineId;
+      const engine =
+        engineId !== undefined
+          ? (loadEngines(deps.space.userDataDir()).find((candidate) => candidate.id === engineId) ??
+            null)
+          : null;
+      const adapter = engine !== null ? adapterFor(engine) : null;
+      return readSpaceSkills(context.root, context.desk.install, adapter);
     });
 
     reg.handle('spaceSessionEnd', async (event, arg): Promise<SpaceSessionEndResult> => {

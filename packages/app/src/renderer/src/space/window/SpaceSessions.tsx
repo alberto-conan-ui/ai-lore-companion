@@ -203,7 +203,9 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       header: (sessionId) => (
         <SessionHeader sessionId={sessionId} engineName={engineName(tab.engine ?? '')} />
       ),
-      sidebar: (ptyId, focusPty) => <SkillsColumn ptyId={ptyId} focusPty={focusPty} />,
+      sidebar: (ptyId, focusPty) => (
+        <SkillsColumn ptyId={ptyId} focusPty={focusPty} engineId={tab.engine ?? null} />
+      ),
       hint: AI_TAB_HINT,
     }),
     [engineName, endSession, refresh, reportSessions, choice, tickedParams],

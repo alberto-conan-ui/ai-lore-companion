@@ -52,6 +52,7 @@ import {
   shellCommandLine,
 } from '../../../src/main/space/sessions/command-line.js';
 import { PRE_WRITE_TIMEOUTS, SESSION_ID_ENV } from '../../../src/main/space/sessions/constants.js';
+import { claudeCodeAdapter } from '../../../src/main/space/sessions/engines/claude-code.js';
 import {
   type SessionFilePaths,
   removeSessionFiles,
@@ -161,17 +162,26 @@ function argvThroughShell(command: string): string[] {
 
 async function sessionFiles(sessionId: string): Promise<SessionFilePaths> {
   await removeSessionFiles(paths.sessions, sessionId);
-  return writeSessionFiles(paths.sessions, {
+  const filePaths = sessionFilePaths(paths.sessions, sessionId);
+  const launch = claudeCodeAdapter.launch({
     sessionId,
     spaceRoot: space.root,
     deskDir: paths.desk,
+    paths: filePaths,
     python,
-    beforeChecks: before_,
-    afterChecks: after_,
+    install: {
+      pluginDir: claudeCodeInstallPaths(paths.install).plugin,
+      beforeChecks: before_,
+      afterChecks: after_,
+    },
+    skills: [],
+    connection: { ...CONNECTION, sessionId },
     // A name that is not a manifest name is never put into a rule.
     repositories: ['app', '../x', 'a b*'],
-    connection: { ...CONNECTION, sessionId },
+    instructions: 'Session instructions, for the test.\n',
+    paramArgv: [],
   });
+  return writeSessionFiles(paths.sessions, { sessionId }, launch);
 }
 
 type Settings = {
@@ -252,6 +262,7 @@ test('the command lines survive a shell for a userData path with a space and a s
     checks: [join(userData, 'a "double" $HOME `tick` \\ back\nnew line.py')],
     childSeconds: 1,
     adapterSeconds: 2,
+    dialect: 'claude',
   });
   assert.deepEqual(argvThroughShell(shellCommandLine(argv)), argv);
 
@@ -262,6 +273,7 @@ test('the command lines survive a shell for a userData path with a space and a s
     mcpFile: files.mcp,
     pluginDir: join(paths.install, 'claude-code', 'plugin'),
     tools: ['mcp__ailore__request_writing', 'mcp__ailore__await_answer'],
+    appendSystemPrompt: 'Session instructions.',
   });
   assert.deepEqual(
     engine.slice(0, 2),
@@ -271,6 +283,15 @@ test('the command lines survive a shell for a userData path with a space and a s
   assert.equal(engine[engine.indexOf('--settings') + 1], files.settings);
   assert.equal(engine[engine.indexOf('--mcp-config') + 1], files.mcp);
   assert.ok(engine.includes('--strict-mcp-config'));
+  assert.equal(
+    engine[engine.indexOf('--append-system-prompt') + 1],
+    'Session instructions.',
+    'the session instructions are appended',
+  );
+  assert.ok(
+    engine.indexOf('--append-system-prompt') < engine.indexOf('--allowedTools'),
+    '--append-system-prompt comes before --allowedTools',
+  );
   assert.equal(engine[engine.length - 3], '--allowedTools', 'the variadic option is last');
   assert.deepEqual(argvThroughShell(engine.map(quoteForShell).join(' ')), engine);
   assert.ok(!engine.join(' ').includes('secret-token'), 'no token in the arguments');
@@ -283,6 +304,40 @@ test('the command lines survive a shell for a userData path with a space and a s
     assert.deepEqual(argvThroughShell(quoteForShell(path)), [path], JSON.stringify(odd));
   }
   assert.deepEqual(argvThroughShell(quoteForShell('')), ['']);
+});
+
+test('M10.5: --dialect claude behaves as today, and an unknown --dialect refuses with a fault', async () => {
+  const files = await sessionFiles('s-dialect');
+  const command = preCommand(files);
+  // The dialect the Claude Code adapter's launch used: unchanged behaviour.
+  assert.match(command, /'--dialect' 'claude'/);
+  const allowed = preDecision(
+    runHook(
+      command,
+      hookInput('Edit', { file_path: join(space.root, 'workbench', 'scratch', 'a.md') }),
+    ),
+  );
+  assert.equal(allowed.decision, 'allow', allowed.reason);
+
+  const nonsense = shellCommandLine(
+    hookArgv({
+      python,
+      adapter: files.preWrite,
+      spaceRoot: space.root,
+      deskDir: paths.desk,
+      sessionId: 's-dialect',
+      checks: before_,
+      childSeconds: 5,
+      adapterSeconds: 10,
+      dialect: 'nonsense',
+    }),
+  );
+  const refused = preDecision(
+    runHook(nonsense, hookInput('Write', { file_path: join(space.root, 'workbench', 'a.md') })),
+  );
+  assert.equal(refused.decision, 'deny');
+  assert.match(refused.reason, /could not be made/);
+  assert.match(refused.reason, /--dialect nonsense is not known/);
 });
 
 test('checkStartParams: a ticked parameter is checked against the engine options of M10.3', () => {
@@ -501,6 +556,7 @@ test('the before-write adapter refuses on every fault', async () => {
             checks,
             childSeconds,
             adapterSeconds,
+            dialect: 'claude',
           }),
         ),
         hookInput('Write', { file_path: join(space.root, 'workbench', 'a.md') }),
@@ -536,6 +592,7 @@ test('the before-write adapter refuses on every fault', async () => {
           checks: before_,
           childSeconds: 5,
           adapterSeconds: 1,
+          dialect: 'claude',
         }),
       )}`,
       '',
@@ -586,6 +643,7 @@ test('the before-write adapter refuses on every fault', async () => {
           checks: before_,
           childSeconds: 20,
           adapterSeconds: 25,
+          dialect: 'claude',
         }),
       ),
       hookInput('Write', { file_path: join(space.root, 'workbench', 'a.md') }),
@@ -608,6 +666,7 @@ test('the before-write adapter refuses on every fault', async () => {
       checks: [slow],
       childSeconds: 20,
       adapterSeconds: 25,
+      dialect: 'claude',
     }).slice(1),
     { cwd: hookCwd, stdio: ['pipe', 'pipe', 'pipe'] },
   );
@@ -808,6 +867,10 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
       args[args.indexOf('--plugin-dir') + 1],
       claudeCodeInstallPaths(context.desk.install).plugin,
     );
+    // M10.5: the session instructions are appended.
+    const appended = args[args.indexOf('--append-system-prompt') + 1];
+    assert.match(appended ?? '', /Read .*\/ai_readme\.md first and follow it/);
+    assert.match(appended ?? '', /session-orient/);
     assert.equal(call.opts.cwd, context.root);
     assert.deepEqual(call.opts.env, { [SESSION_ID_ENV]: sessionId });
     assert.equal(statSync(files.mcp).mode & 0o777, 0o600);

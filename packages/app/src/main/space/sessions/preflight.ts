@@ -25,7 +25,8 @@ import {
   splitParamText,
 } from '@ai-lore-companion/core';
 import { PYTHON_PROBE_TIMEOUT_MS, REQUIRED_CHECKS } from './constants.js';
-import { optionsFor, paramEffect } from './engine-options.js';
+import { paramEffect } from './engine-options.js';
+import { optionsFor } from './engines/index.js';
 
 /** Why a session was not started. `message` can be shown to the Human Lead as it is. */
 export type SessionStartFailureKind =

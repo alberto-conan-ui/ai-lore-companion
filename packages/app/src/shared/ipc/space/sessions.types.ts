@@ -10,6 +10,21 @@ import type { IssueRef, LoreLayer, SessionMode, WriteTarget } from '@ai-lore-com
 export type SpaceSessionEngineArg = { engineId: string };
 
 /**
+ * One line of the Lore readiness report (M10.5, `m10-architecture.md` 3.6):
+ * whether the engine has one aspect of what a Claude Code session has.
+ * `yes`: as a Claude Code session has it. `partly`: some of it, `text` says
+ * what. `no`: none.
+ */
+export type SpaceLoreLine = {
+  aspect: 'lore' | 'session-tools' | 'guard';
+  state: 'yes' | 'partly' | 'no';
+  text: string;
+};
+
+/** The Lore readiness report of one engine option. `lines` is always three, in the order lore, session-tools, guard. */
+export type SpaceEngineLore = { lines: SpaceLoreLine[]; asClaudeCode: boolean };
+
+/**
  * Argument of `spaceSessionStart` (M10.3): the engine id, and the ticked
  * parameters' texts. Every text must be a parameter of that engine now.
  */
@@ -101,15 +116,18 @@ export type SpaceSessionLeaveWritingResult =
   | { ok: false; error: SpaceSessionFailure };
 
 /**
- * One skill of the Space's install into Claude Code: a verb or a process of
- * the Lore in use, which Claude Code shows as `/lore:<name>`. `description` is
- * the sentence of the card's index line.
+ * One skill of the Space's install: a verb or a process of the Lore in use.
+ * `description` is the sentence of the card's index line, as installed.
+ * `invocation` is the text the Skills column types for it (M10.5): `/lore:<name>`
+ * for Claude Code, and each other engine's own form; `/lore:<name>` when the
+ * call named no engine or an engine with no adapter.
  */
 export type SpaceSkill = {
   name: string;
   part: 'verbs' | 'processes';
   layer: LoreLayer;
   description: string | null;
+  invocation: string;
 };
 
 /**
@@ -118,8 +136,8 @@ export type SpaceSkill = {
  */
 export type SpaceSkillsList = { skills: SpaceSkill[]; notInstalled: string[] };
 
-/** Argument of `spaceSkillsList`: an empty object. */
-export type SpaceSkillsArg = Record<string, never>;
+/** Argument of `spaceSkillsList`: the engine the invocations are for, or none (M10.5). */
+export type SpaceSkillsArg = { engineId?: string };
 
 export type SpaceSkillsResult =
   | { ok: true; value: SpaceSkillsList }
@@ -173,6 +191,8 @@ export type SpaceEngineOption = {
   fix: SpaceEngineFix | null;
   /** The engine's parameters, each with its effect (M10.3). */
   params: SpaceEngineParam[];
+  /** The Lore readiness report of this engine (M10.5). */
+  lore: SpaceEngineLore;
 };
 
 /** The engine choice of A.9: every engine of the list, and which one a session starts with. */

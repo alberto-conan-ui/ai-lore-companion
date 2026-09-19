@@ -37,14 +37,16 @@ import { spaceDesk } from '../desk-service.js';
 import { boardWithin, sessionBoard } from '../session-server/board.js';
 import { BOARD_UPDATE_WAIT_MS } from '../session-server/constants.js';
 import { sessionCloseCommits, sessionServer } from '../session-server/index.js';
-import { engineArgv } from './command-line.js';
 import { MAX_LOGGED_REFUSALS, REQUIRED_CHECKS, SESSION_ID_ENV } from './constants.js';
+import { adapterFor } from './engines/index.js';
+import { sessionInstructions } from './engines/instructions.js';
+import { readInstalledSkills } from './engines/skills.js';
 import {
   type SessionFilePaths,
   readNotedRefusals,
   removeSessionFiles,
   removeSessionFoldersExcept,
-  sessionToolNames,
+  sessionFilePaths,
   writeSessionFiles,
 } from './files.js';
 import {
@@ -69,7 +71,16 @@ type Started = { ok: true; value: StartedSession } | { ok: false; error: Session
 
 /** What is ready for a start: the engine, `python3` and the install. */
 export type SessionReadiness =
-  | { ok: true; value: { engine: EngineEntry; python: string; install: VerifiedInstall } }
+  | {
+      ok: true;
+      value: {
+        engine: EngineEntry;
+        python: string;
+        install: VerifiedInstall;
+        /** The count of `readInstalledSkills`, for the Lore readiness report (M10.5). */
+        skillCount: number;
+      };
+    }
   | { ok: false; error: SessionStartFailure };
 
 export type SpaceSessions = {
@@ -178,9 +189,15 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         },
       };
     }
+    const skills = await readInstalledSkills(context.desk.install, context.root);
     return {
       ok: true,
-      value: { engine: engine.value, python: python.value, install: install.value },
+      value: {
+        engine: engine.value,
+        python: python.value,
+        install: install.value,
+        skillCount: skills.length,
+      },
     };
   }
 
@@ -260,6 +277,12 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
       return checked;
     }
     const { argv: engineArgs, unguarded } = checked.value;
+    const adapter = adapterFor(engine);
+    if (adapter === null) {
+      const message = `No AI session was started: a guarded session in a Space is started with Claude Code only, and "${engine.name}" is not Claude Code.`;
+      context.log.warn('session-not-started', { space: context.key, kind: 'engine-not-supported' });
+      return { ok: false, error: { kind: 'engine-not-supported', message } };
+    }
     const opened = desk.open();
     if (!opened.ok || !opened.value.writable) {
       return {
@@ -307,18 +330,38 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         },
       };
     }
-    let paths: SessionFilePaths;
+    const paths = sessionFilePaths(context.desk.sessions, sessionId);
+    const repositories = context.manifest.repositories.map((repository) => repository.name);
+    const skills = await readInstalledSkills(context.desk.install, context.root);
+    const instructions = sessionInstructions({ spaceRoot: context.root, skills, adapter });
+    let launch: ReturnType<typeof adapter.launch>;
     try {
-      paths = await writeSessionFiles(context.desk.sessions, {
+      launch = adapter.launch({
         sessionId,
         spaceRoot: context.root,
         deskDir: context.desk.desk,
+        paths,
         python,
-        beforeChecks: install.beforeChecks,
-        afterChecks: install.afterChecks,
-        repositories: context.manifest.repositories.map((repository) => repository.name),
+        install,
+        skills,
         connection: connection.value,
+        repositories,
+        instructions,
+        paramArgv: engineArgs,
       });
+    } catch (caught) {
+      await server.unregisterSession(sessionId);
+      undoRecord();
+      return {
+        ok: false,
+        error: {
+          kind: 'session-files-failed',
+          message: `No AI session was started: its files could not be written (${describe(caught)}).`,
+        },
+      };
+    }
+    try {
+      await writeSessionFiles(context.desk.sessions, { sessionId }, launch);
     } catch (caught) {
       await server.unregisterSession(sessionId);
       undoRecord();
@@ -334,19 +377,10 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
     live.set(sessionId, entry);
     try {
       entry.ptyId = pty.spawn(
-        {
-          binary: engine.binary,
-          args: engineArgv({
-            engineArgs,
-            settingsFile: paths.settings,
-            mcpFile: paths.mcp,
-            pluginDir: install.pluginDir,
-            tools: sessionToolNames(connection.value),
-          }),
-        },
+        { binary: engine.binary, args: launch.args },
         {
           cwd: context.root,
-          env: { [SESSION_ID_ENV]: sessionId },
+          env: { ...launch.env, [SESSION_ID_ENV]: sessionId },
           onExit: () => void ended(sessionId),
         },
       );

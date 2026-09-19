@@ -3,6 +3,7 @@ import type {
   SpaceEngineChoice,
   SpaceEngineFix,
   SpaceEngineParam,
+  SpaceLoreLine,
 } from '../../../../shared/ipc.js';
 import { PopoverShell } from '../../components/overlay/PopoverShell.js';
 import { useSpaceSettings } from '../SpaceSettings.js';
@@ -38,6 +39,18 @@ function engineName(choice: SpaceEngineChoice | null, engineId: string): string 
 /** The texts of the parameters ticked by default: ticked on and not set by the companion. */
 export function defaultParamTexts(params: readonly SpaceEngineParam[]): string[] {
   return params.filter((param) => param.defaultOn && param.effect !== 'refused').map((p) => p.text);
+}
+
+/** `Yes`, `Partly` or `No`, written out (M10.5, `m10-architecture.md` 3.6): the word is never colour alone. */
+function loreWord(state: SpaceLoreLine['state']): string {
+  return state === 'yes' ? 'Yes' : state === 'partly' ? 'Partly' : 'No';
+}
+
+/** `yes` when every line is `yes`; `no` when every line is `no`; `partly` otherwise. */
+function overallLoreState(lines: readonly SpaceLoreLine[]): SpaceLoreLine['state'] {
+  if (lines.every((line) => line.state === 'yes')) return 'yes';
+  if (lines.every((line) => line.state === 'no')) return 'no';
+  return 'partly';
 }
 
 /**
@@ -92,6 +105,21 @@ export function EngineStartControl({
     ),
   ];
   const isUnguarded = unguardedOptions.length > 0;
+
+  // The readiness block (M10.5): the chosen option's `lore`, defensively — some fixtures
+  // built before M10.5 give no `lore`, as some give no `params` (`?? []` above).
+  const loreLines: SpaceLoreLine[] | null = chosenOption?.lore
+    ? chosenOption.lore.lines.map((line) =>
+        line.aspect === 'guard' && isUnguarded
+          ? {
+              aspect: line.aspect,
+              state: 'no',
+              text: `Unguarded: ${unguardedOptions.join(', ')} changes the guard.`,
+            }
+          : line,
+      )
+    : null;
+  const overallLore = loreLines !== null ? overallLoreState(loreLines) : null;
 
   const buttonLabel =
     startingId !== null
@@ -184,6 +212,11 @@ export function EngineStartControl({
                 >
                   {option.engineId === engineId ? '✓ ' : ''}
                   {option.name}
+                  {option.lore
+                    ? option.lore.asClaudeCode
+                      ? ' — reads the Lore as Claude Code does'
+                      : ' — reads the Lore partly'
+                    : null}
                 </button>
               ) : (
                 <div
@@ -271,6 +304,26 @@ export function EngineStartControl({
       <p id={noteTestId} style={noteStyle} data-testid={noteTestId}>
         {noteText}
       </p>
+
+      {loreLines !== null && overallLore !== null ? (
+        <div style={loreWrapperStyle}>
+          <p data-testid={`${buttonTestId}-lore`} data-state={overallLore} style={loreLineStyle}>
+            Reads the Lore as Claude Code does: {overallLore}
+          </p>
+          <ul style={loreListStyle}>
+            {loreLines.map((line) => (
+              <li
+                key={line.aspect}
+                data-testid={`${buttonTestId}-lore-${line.aspect}`}
+                data-state={line.state}
+                style={loreLineStyle}
+              >
+                {loreWord(line.state)} — {line.text}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {engineId === null && choice !== null && choice.refusal !== null ? (
         <div style={bannerStyle('warn')} data-testid={`${buttonTestId}-refusal`}>
@@ -437,6 +490,27 @@ const linkButtonStyle: React.CSSProperties = {
 const noteStyle: React.CSSProperties = {
   margin: 0,
   fontSize: '0.8rem',
+  color: 'var(--color-text-secondary)',
+};
+
+const loreWrapperStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.2rem',
+};
+
+const loreListStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.1rem',
+  margin: 0,
+  padding: 0,
+  listStyle: 'none',
+};
+
+const loreLineStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: '0.76rem',
   color: 'var(--color-text-secondary)',
 };
 
