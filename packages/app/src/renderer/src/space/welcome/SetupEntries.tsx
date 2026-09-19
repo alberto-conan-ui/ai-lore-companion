@@ -1,13 +1,12 @@
 import type { JSX } from 'react';
 import type { SpaceWindowResult } from '../../../../shared/ipc.js';
-import type { SetupReadiness } from '../machine/useMachineCheck.js';
-import { secondaryButtonStyle } from '../styles.js';
+import { primaryButtonStyle, secondaryButtonStyle } from '../styles.js';
 
 type Props = {
-  /** Used in every `data-testid` and element id: `space-welcome`, `machine-check`. */
-  idPrefix: string;
-  /** Whether the machine check is ready, and the sentence that says why not. */
-  readiness: SetupReadiness;
+  /** Whether Set up this computer is ready; while it is not, the entries do nothing. */
+  ready: boolean;
+  /** True on a first launch with no recent Spaces: New Space then uses the primary style. */
+  primaryFirst: boolean;
   /** True while a window request runs. */
   busy: boolean;
   /** Runs a window channel and keeps its error; `run` of `useWindowRequest`. */
@@ -15,85 +14,85 @@ type Props = {
 };
 
 type Entry = {
-  id: 'create' | 'adopt' | 'open-by-address';
+  id: 'create' | 'open-address' | 'from-repository';
   label: string;
   description: string;
-  request: () => Promise<SpaceWindowResult>;
+  start: 'new' | 'from-address' | 'from-repository';
 };
 
 const ENTRIES: readonly Entry[] = [
   {
     id: 'create',
-    label: 'Create a Space',
-    description:
-      'A new Space: its repository and Project on GitHub, and its folder on this machine.',
-    request: () => window.cockpit.spaceNavigate({ to: 'setup', start: 'new' }),
+    label: 'New Space',
+    description: 'Creates a Space on GitHub and in a folder on this computer.',
+    start: 'new',
   },
   {
-    id: 'adopt',
-    label: 'Adopt a repository…',
-    description:
-      'Choose the folder of a git repository. Its screen offers to create a Space about it. The repository is cloned into the new Space, and the folder is left as it is.',
-    request: () => window.cockpit.spaceOpenFolder({}),
+    id: 'open-address',
+    label: 'Space from GitHub',
+    description: 'Copies an existing Space from GitHub to this computer.',
+    start: 'from-address',
   },
   {
-    id: 'open-by-address',
-    label: 'Open a Space by GitHub address',
-    description: 'Clone a Space that exists on GitHub onto this machine, with its repositories.',
-    request: () => window.cockpit.spaceNavigate({ to: 'setup', start: 'from-address' }),
+    id: 'from-repository',
+    label: 'Space from a repository on this computer',
+    description:
+      "Creates a new Space that includes a repository you already have. The repository's folder is left as it is.",
+    start: 'from-repository',
   },
 ];
 
 /**
- * The three entries that lead to setup: create a Space, adopt a repository,
- * open a Space by its GitHub address. The welcome screen and the machine check
- * screen both show them.
- *
- * While the machine check is not ready the entries do nothing, and the reason
- * is written below them. They are marked with `aria-disabled` and not with
- * `disabled`, so that the keyboard still reaches them and a screen reader
- * reads the reason, which each entry names with `aria-describedby`.
- *
- * Adopting starts from a folder, and main opens no path on this screen's word.
- * The entry asks main for the folder dialog; detection then shows the screen
- * of a plain git repository, which carries the offer to create a Space about it.
+ * The three entries the welcome screen offers to start a Space: New Space,
+ * Space from GitHub, and Space from a repository on this computer. Each
+ * navigates to the setup screen with the matching start. While Set up this
+ * computer is not ready, the entries are marked `aria-disabled` (reachable by
+ * keyboard, so a screen reader reads the reason) and a line under them leads
+ * to setup.
  */
-export function SetupEntries({ idPrefix, readiness, busy, run }: Props): JSX.Element {
-  const reasonId = `${idPrefix}-setup-reason`;
-  const unavailable = !readiness.ready || busy;
+export function SetupEntries({ ready, primaryFirst, busy, run }: Props): JSX.Element {
+  const unavailable = !ready || busy;
   return (
-    <section style={sectionStyle} aria-labelledby={`${idPrefix}-setup-heading`}>
-      <h2 id={`${idPrefix}-setup-heading`} style={headingStyle}>
-        Set up a Space
+    <section style={sectionStyle} aria-labelledby="space-welcome-start-heading">
+      <h2 id="space-welcome-start-heading" style={headingStyle}>
+        Start
       </h2>
       <ul style={listStyle}>
         {ENTRIES.map((entry) => (
           <li key={entry.id} style={itemStyle}>
             <button
               type="button"
-              style={unavailable ? unavailableButtonStyle : entryButtonStyle}
-              aria-disabled={unavailable}
-              aria-describedby={
-                readiness.ready
-                  ? `${idPrefix}-${entry.id}-description`
-                  : `${idPrefix}-${entry.id}-description ${reasonId}`
+              style={
+                entry.id === 'create' && primaryFirst
+                  ? primaryButtonStyle
+                  : unavailable
+                    ? unavailableButtonStyle
+                    : secondaryButtonStyle
               }
-              data-testid={`${idPrefix}-${entry.id}`}
+              aria-disabled={unavailable}
+              data-testid={`space-welcome-${entry.id}`}
               onClick={() => {
-                if (!unavailable) void run(entry.request);
+                if (unavailable) return;
+                void run(() => window.cockpit.spaceNavigate({ to: 'setup', start: entry.start }));
               }}
             >
               {entry.label}
             </button>
-            <span id={`${idPrefix}-${entry.id}-description`} style={descriptionStyle}>
-              {entry.description}
-            </span>
+            <span style={descriptionStyle}>{entry.description}</span>
           </li>
         ))}
       </ul>
-      {readiness.reason !== null && (
-        <p id={reasonId} style={reasonStyle} data-testid={reasonId}>
-          {readiness.reason}
+      {!ready && (
+        <p style={reasonStyle} data-testid="space-welcome-setup-reason">
+          Finish setting up this computer first.{' '}
+          <button
+            type="button"
+            style={linkButtonStyle}
+            data-testid="space-welcome-setup-reason-continue"
+            onClick={() => void run(() => window.cockpit.spaceNavigate({ to: 'machine-check' }))}
+          >
+            Continue setup
+          </button>
         </p>
       )}
     </section>
@@ -132,8 +131,6 @@ const itemStyle: React.CSSProperties = {
   gap: '0.2rem',
 };
 
-const entryButtonStyle: React.CSSProperties = { ...secondaryButtonStyle };
-
 const unavailableButtonStyle: React.CSSProperties = {
   ...secondaryButtonStyle,
   color: 'var(--color-text-muted)',
@@ -150,4 +147,14 @@ const reasonStyle: React.CSSProperties = {
   margin: 0,
   fontSize: '0.8rem',
   color: 'var(--color-warn-fg)',
+};
+
+const linkButtonStyle: React.CSSProperties = {
+  padding: 0,
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--color-link)',
+  fontSize: '0.8rem',
+  fontWeight: 600,
+  cursor: 'pointer',
 };

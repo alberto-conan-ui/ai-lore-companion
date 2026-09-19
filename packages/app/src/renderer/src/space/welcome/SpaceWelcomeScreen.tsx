@@ -1,7 +1,13 @@
-import { type JSX, useState } from 'react';
-import type { RecentSpace, SpaceInitOf } from '../../../../shared/ipc.js';
-import { setupReadiness, useMachineCheck } from '../machine/useMachineCheck.js';
+import { type JSX, useEffect, useRef, useState } from 'react';
+import type {
+  MachineCheckReport,
+  RecentSpace,
+  SetUpReadiness,
+  SpaceInitOf,
+} from '../../../../shared/ipc.js';
+import { useMachineCheck } from '../machine/useMachineCheck.js';
 import {
+  cardStyle,
   errorAreaStyle,
   folderPathStyle,
   primaryButtonStyle,
@@ -12,27 +18,43 @@ import { SetupEntries } from './SetupEntries.js';
 
 type Props = { init: SpaceInitOf<'space-welcome'> };
 
+/** "5 minus the number of distinct item groups in `left`", counting `gh` and `github` as one. */
+function readyCount(setUp: SetUpReadiness): number {
+  const groups = new Set(setUp.left.map((item) => (item.id === 'gh' ? 'github' : item.id)));
+  return 5 - groups.size;
+}
+
+/** "✓ This computer is set up: GitHub …" once ready; empty until then. */
+function readySentence(report: MachineCheckReport | null): string {
+  if (report === null || !report.setUp.ready) return '';
+  return `✓ This computer is set up: GitHub ${report.check.github.account ?? ''}, Claude Code signed in, Spaces in ${report.spacesFolder.value ?? ''}.`;
+}
+
 /**
  * The 1.0 welcome screen: open a folder, the three entries that lead to setup
- * (create a Space, adopt a repository, open a Space by its GitHub address),
- * the state of the machine check, and the recents of Spaces.
+ * (New Space, Space from GitHub, Space from a repository on this computer),
+ * the state of this computer's setup, and the recents of Spaces.
  *
- * "Open a folder…" asks main for the system's folder dialog. Main runs
- * detection on the chosen folder and shows what it is: a Space opens in the
- * Space window, an AI-Lore project of v0.8 or older opens the migration
- * screen, and any other folder opens the not-a-Space screen. This screen sends
- * no path except that of a recent Space, which main checks against its own list.
- *
- * The three setup entries do nothing while the machine check is not ready, and
- * the reason is written below them. `init.notice` is the reason a launch
- * folder was not opened.
+ * At launch (`init.checkOnLaunch`), a report that is not ready moves the
+ * window to Set up this computer once; going Back to this screen does not
+ * move again. "Open a folder…" asks main for the system's folder dialog and
+ * sends no path except that of a recent Space, which main checks against its
+ * own list.
  */
 export function SpaceWelcomeScreen({ init }: Props): JSX.Element {
   const { run, busy, error } = useWindowRequest();
   const view = useMachineCheck({ freshOnMount: false });
   const [recents, setRecents] = useState<RecentSpace[]>(init.recents);
   const message = error ?? init.notice ?? null;
-  const { report, checking } = view;
+  const { report } = view;
+
+  const movedOnLaunch = useRef(false);
+  useEffect(() => {
+    if (!init.checkOnLaunch || movedOnLaunch.current || report === null) return;
+    if (report.setUp.ready) return;
+    movedOnLaunch.current = true;
+    void run(() => window.cockpit.spaceNavigate({ to: 'machine-check' }));
+  }, [init.checkOnLaunch, report, run]);
 
   const removeRecent = async (path: string): Promise<void> => {
     try {
@@ -42,13 +64,14 @@ export function SpaceWelcomeScreen({ init }: Props): JSX.Element {
     }
   };
 
+  const ready = report?.setUp.ready ?? false;
+
   return (
     <main style={screenStyle} data-testid="space-welcome" aria-labelledby="space-welcome-title">
       <div style={columnStyle}>
         <h1 id="space-welcome-title" style={titleStyle}>
           AI-Lore
         </h1>
-        <p style={sentenceStyle}>Open a Space, or set one up.</p>
 
         {message !== null && (
           <p style={errorAreaStyle} role="alert" data-testid="space-welcome-error">
@@ -56,59 +79,33 @@ export function SpaceWelcomeScreen({ init }: Props): JSX.Element {
           </p>
         )}
 
-        <div style={openRowStyle}>
-          <button
-            type="button"
-            style={primaryButtonStyle}
-            disabled={busy}
-            aria-describedby="space-welcome-open-description"
-            data-testid="space-welcome-open"
-            onClick={() => void run(() => window.cockpit.spaceOpenFolder({}))}
-          >
-            Open a folder…
-          </button>
-          <span id="space-welcome-open-description" style={descriptionStyle}>
-            A Space opens in its window. An AI-Lore project of v0.8 or older opens the migration
-            screen. Any other folder opens a screen that says what it is.
-          </span>
-        </div>
-
-        <SetupEntries
-          idPrefix="space-welcome"
-          readiness={setupReadiness(view)}
-          busy={busy}
-          run={run}
-        />
-
-        <section style={sectionStyle} aria-labelledby="space-welcome-machine-heading">
-          <h2 id="space-welcome-machine-heading" style={headingStyle}>
-            Machine check
-          </h2>
-          <div style={machineRowStyle}>
-            <output
-              style={machineStatusStyle}
-              data-testid="space-welcome-machine-status"
-              data-ready={report === null ? 'unknown' : String(report.check.ready)}
-            >
-              {report === null
-                ? checking
-                  ? 'Checking the machine…'
-                  : 'Machine check: not run.'
-                : report.check.ready
-                  ? '✓ Machine check: ready.'
-                  : '✗ Machine check: not ready.'}
-            </output>
-            <button
-              type="button"
-              style={secondaryButtonStyle}
-              disabled={busy}
-              data-testid="space-welcome-machine-check"
-              onClick={() => void run(() => window.cockpit.spaceNavigate({ to: 'machine-check' }))}
-            >
-              Open the machine check
-            </button>
+        {report === null ? (
+          <div style={cardStyle} data-testid="space-welcome-setup-card">
+            <h2 style={cardHeadingStyle}>Set up this computer</h2>
+            <p style={cardTextStyle}>Checking this computer…</p>
           </div>
-        </section>
+        ) : (
+          !report.setUp.ready && (
+            <div style={cardStyle} data-testid="space-welcome-setup-card">
+              <h2 style={cardHeadingStyle}>Set up this computer</h2>
+              <p style={cardTextStyle}>
+                AI-Lore needs Git, Python 3, a GitHub sign-in, Claude Code and a Spaces folder
+                before it can create a Space. {readyCount(report.setUp)} of 5 are ready.
+              </p>
+              <button
+                type="button"
+                style={primaryButtonStyle}
+                disabled={busy}
+                data-testid="space-welcome-continue-setup"
+                onClick={() =>
+                  void run(() => window.cockpit.spaceNavigate({ to: 'machine-check' }))
+                }
+              >
+                Continue setup
+              </button>
+            </div>
+          )
+        )}
 
         {recents.length > 0 && (
           <section style={sectionStyle} aria-labelledby="space-welcome-recents-heading">
@@ -144,6 +141,43 @@ export function SpaceWelcomeScreen({ init }: Props): JSX.Element {
             </ul>
           </section>
         )}
+
+        <SetupEntries ready={ready} primaryFirst={recents.length === 0} busy={busy} run={run} />
+
+        <output
+          style={machineStatusStyle}
+          data-testid="space-welcome-machine-status"
+          data-ready={report === null ? 'unknown' : String(report.setUp.ready)}
+        >
+          {readySentence(report)}
+        </output>
+        {ready && (
+          <button
+            type="button"
+            style={linkButtonStyle}
+            data-testid="space-welcome-change-setup"
+            onClick={() => void run(() => window.cockpit.spaceNavigate({ to: 'machine-check' }))}
+          >
+            Change…
+          </button>
+        )}
+
+        <div style={openRowStyle}>
+          <button
+            type="button"
+            style={secondaryButtonStyle}
+            disabled={busy}
+            aria-describedby="space-welcome-open-description"
+            data-testid="space-welcome-open"
+            onClick={() => void run(() => window.cockpit.spaceOpenFolder({}))}
+          >
+            Open a folder…
+          </button>
+          <span id="space-welcome-open-description" style={descriptionStyle}>
+            A Space opens in its window. An AI-Lore project of v0.8 or older opens the migration
+            screen. Any other folder opens a screen that says what it is.
+          </span>
+        </div>
       </div>
     </main>
   );
@@ -174,9 +208,11 @@ const columnStyle: React.CSSProperties = {
 
 const titleStyle: React.CSSProperties = { margin: 0, fontSize: '1.3rem', fontWeight: 600 };
 
-const sentenceStyle: React.CSSProperties = {
+const cardHeadingStyle: React.CSSProperties = { margin: 0, fontSize: '0.95rem', fontWeight: 600 };
+
+const cardTextStyle: React.CSSProperties = {
   margin: 0,
-  fontSize: '0.9rem',
+  fontSize: '0.85rem',
   color: 'var(--color-text-secondary)',
 };
 
@@ -208,15 +244,18 @@ const headingStyle: React.CSSProperties = {
   color: 'var(--color-text-muted)',
 };
 
-const machineRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '0.8rem',
-  flexWrap: 'wrap',
-};
-
 const machineStatusStyle: React.CSSProperties = { fontSize: '0.85rem' };
+
+const linkButtonStyle: React.CSSProperties = {
+  alignSelf: 'flex-start',
+  padding: 0,
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--color-link)',
+  fontSize: '0.8rem',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
 
 const recentsListStyle: React.CSSProperties = {
   display: 'flex',

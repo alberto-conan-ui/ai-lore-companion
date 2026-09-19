@@ -13,39 +13,20 @@ export type MachineCheckView = {
   checkAgain: () => void;
 };
 
-/**
- * Whether create, adopt and open by address may be started, and the sentence
- * that says why not. `reason` is `null` only when `ready` is true.
- */
-export type SetupReadiness = { ready: boolean; reason: string | null };
-
-/** The readiness the screens derive from the state of the machine check. */
-export function setupReadiness(view: MachineCheckView): SetupReadiness {
-  if (view.report === null) {
-    if (view.error !== null) {
-      return {
-        ready: false,
-        reason: `Not available: the machine check did not run. ${view.error}`,
-      };
-    }
-    return { ready: false, reason: 'Not available: the machine check is running.' };
-  }
-  if (view.report.check.ready) return { ready: true, reason: null };
-  const notFine = view.report.check.requirements
-    .filter((requirement) => requirement.state.kind !== 'fine')
-    .map((requirement) => `${requirement.id} is ${requirement.state.kind}`);
-  return {
-    ready: false,
-    reason: `Not available: the machine check is not ready. ${notFine.join(', ')}.`,
-  };
-}
+/** How often the window's own focus may trigger a fresh check. */
+const FOCUS_RECHECK_MIN_INTERVAL_MS = 3_000;
 
 /**
  * Asks main for the machine check when the screen mounts, and again on
- * `checkAgain`. On mount `fresh` decides whether main may answer with the last
- * check of this run of the app. The channel returns a result and does not
- * reject; a rejection is still caught, so that the screen shows it. An answer
- * that arrives after a later request, or after the screen is gone, is dropped.
+ * `checkAgain`. On mount `freshOnMount` decides whether main may answer with
+ * the last check of this run of the app. The channel returns a result and
+ * does not reject; a rejection is still caught, so that the screen shows it.
+ * An answer that arrives after a later request, or after the screen is gone,
+ * is dropped.
+ *
+ * The screen also asks again, fresh, when the window regains focus (a fix was
+ * likely run outside the app, or in another window's command panel), at most
+ * once every `FOCUS_RECHECK_MIN_INTERVAL_MS`.
  */
 export function useMachineCheck(options: { freshOnMount: boolean }): MachineCheckView {
   const [checking, setChecking] = useState(true);
@@ -53,6 +34,7 @@ export function useMachineCheck(options: { freshOnMount: boolean }): MachineChec
   const [error, setError] = useState<string | null>(null);
   const latest = useRef(0);
   const mounted = useRef(true);
+  const lastFocusCheck = useRef(0);
 
   const request = useCallback(async (fresh: boolean): Promise<void> => {
     latest.current += 1;
@@ -82,6 +64,17 @@ export function useMachineCheck(options: { freshOnMount: boolean }): MachineChec
       mounted.current = false;
     };
   }, [request, freshOnMount]);
+
+  useEffect(() => {
+    const onFocus = (): void => {
+      const now = Date.now();
+      if (now - lastFocusCheck.current < FOCUS_RECHECK_MIN_INTERVAL_MS) return;
+      lastFocusCheck.current = now;
+      void request(true);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [request]);
 
   const checkAgain = useCallback((): void => {
     void request(true);

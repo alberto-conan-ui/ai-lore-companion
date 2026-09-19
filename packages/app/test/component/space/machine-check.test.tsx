@@ -1,87 +1,134 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+
+// Phase M9.8: Set up this computer, with the command panel. `useXtermSession` is mocked as
+// `dashboard-agents.test.tsx` mocks it; this mock also calls the `spawn` config once on mount, as
+// the real hook does, so the panel's own `spaceCommandRun` call and PTY id are exercised.
+vi.mock('../../../src/renderer/src/components/useXtermSession.js', () => ({
+  useXtermSession: (config: { spawn?: () => Promise<string | null> }) => {
+    // biome-ignore lint/correctness/useExhaustiveDependencies: mounts once, like the real hook's spawn-on-mount effect.
+    useEffect(() => {
+      void config.spawn?.();
+    }, []);
+    return { hostRef: { current: null }, focus: () => {}, search: {} };
+  },
+}));
+
 import { MachineCheckScreen } from '../../../src/renderer/src/space/machine/MachineCheckScreen.js';
-import {
-  MACHINE_CHECK_STATE_KINDS,
-  type MachineCheckReport,
-  type MachineCheckState,
-  type MachineRequirementCheck,
-  type MachineRequirementId,
-  type SpaceMachineCheckResult,
-  type SpaceWindowResult,
+import type {
+  EngineCheck,
+  MachineCheck,
+  MachineCheckReport,
+  MachineRequirementCheck,
+  SpaceCommandCode,
+  SpaceCommandExit,
+  SpaceCommandRunResult,
+  SpaceMachineCheckResult,
+  SpaceSpacesFolderResult,
+  SpaceWindowResult,
 } from '../../../src/shared/ipc.js';
 
 const cockpit = {
   spaceMachineCheck: vi.fn<(arg: unknown) => Promise<SpaceMachineCheckResult>>(),
   spaceNavigate: vi.fn<(arg: unknown) => Promise<SpaceWindowResult>>(),
-  spaceOpenFolder: vi.fn<(arg: unknown) => Promise<SpaceWindowResult>>(),
-  copyText: vi.fn<(text: string) => void>(),
+  spaceSpacesFolderUse: vi.fn<(arg: unknown) => Promise<SpaceSpacesFolderResult>>(),
+  spaceSpacesFolderChoose: vi.fn<(arg: unknown) => Promise<SpaceSpacesFolderResult>>(),
+  spaceCommandRun: vi.fn<(arg: unknown) => Promise<SpaceCommandRunResult>>(),
+  onSpaceCommandCode: vi.fn<(cb: (p: SpaceCommandCode) => void) => () => void>(),
+  onSpaceCommandExit: vi.fn<(cb: (p: SpaceCommandExit) => void) => () => void>(),
+  urlOpenExternal: vi.fn(),
 };
 
-const GH_SCOPE_COMMAND = 'gh auth refresh --hostname github.com --scopes project';
-
-/** One state of each kind, with the sentence and the command core would give for `gh`. */
-const STATES: Record<
-  MachineCheckState['kind'],
-  { state: MachineCheckState; guidance: string | null; command: string | null }
-> = {
-  fine: { state: { kind: 'fine', version: '2.60.1' }, guidance: null, command: null },
-  missing: {
-    state: { kind: 'missing' },
-    guidance:
-      'gh was not found on this machine. Install it from https://cli.github.com. Then check again.',
-    command: null,
-  },
-  'too-old': {
-    state: { kind: 'too-old', version: '2.10.0', minimum: '2.40.0' },
-    guidance: 'gh 2.10.0 is installed, and the companion needs 2.40.0 or later.',
-    command: null,
-  },
-  'not-signed-in': {
-    state: { kind: 'not-signed-in' },
-    guidance: 'gh is installed and not signed in. Run the command in the terminal.',
-    command: 'gh auth login --hostname github.com --scopes project',
-  },
-  'missing-scope': {
-    state: { kind: 'missing-scope', scope: 'project' },
-    guidance: 'gh is signed in, and its token lacks the `project` scope.',
-    command: GH_SCOPE_COMMAND,
-  },
-  undetermined: {
-    state: { kind: 'undetermined', reason: '`gh auth status` did not answer in 10 seconds.' },
-    guidance: 'The state of gh could not be determined: `gh auth status` did not answer.',
-    command: null,
-  },
-};
-
-function fine(id: MachineRequirementId, binary: string, version: string): MachineRequirementCheck {
-  return { id, binary, state: { kind: 'fine', version }, guidance: null, command: null };
+function requirement(
+  id: MachineRequirementCheck['id'],
+  state: MachineRequirementCheck['state'],
+): MachineRequirementCheck {
+  return { id, binary: id, state, guidance: null, command: null };
 }
 
-function reportWithGh(kind: MachineCheckState['kind']): MachineCheckReport {
-  const gh = STATES[kind];
+function claudeEngine(overrides: Partial<EngineCheck> = {}): EngineCheck {
   return {
-    check: {
-      requirements: [
-        fine('git', 'git', '2.43.0'),
-        { id: 'gh', binary: 'gh', ...gh },
-        fine('engine', 'claude', '2.1.0'),
-        fine('python3', 'python3', '3.12.1'),
-      ],
-      engines: [
-        {
-          engineId: 'default.claude',
-          name: 'Claude',
-          binary: 'claude',
-          state: { kind: 'fine', version: '2.1.0' },
-          guidance: null,
-          command: null,
-        },
-      ],
-      ready: kind === 'fine',
-    },
+    engineId: 'default.claude',
+    name: 'Claude Code',
+    binary: 'claude',
+    state: { kind: 'fine', version: '2.1.0' },
+    guidance: null,
+    command: null,
+    catalogId: 'claude-code',
+    maker: 'Anthropic',
+    required: true,
+    guardedSessions: true,
+    installed: { kind: 'installed', version: '2.1.0' },
+    signIn: { kind: 'signed-in' },
+    installCommand: 'curl -fsSL https://claude.ai/install.sh | bash',
+    installNeeds: null,
+    signInCommand: 'claude auth login',
+    note: null,
+    page: 'https://code.claude.com/docs/en/setup',
+    ...overrides,
+  };
+}
+
+function fineCheck(): MachineCheck {
+  return {
+    requirements: [
+      requirement('git', { kind: 'fine', version: '2.43.0' }),
+      requirement('gh', { kind: 'fine', version: '2.60.1' }),
+      requirement('engine', { kind: 'fine', version: '2.1.0' }),
+      requirement('python3', { kind: 'fine', version: '3.12.1' }),
+    ],
+    engines: [claudeEngine()],
+    ready: true,
+    github: { account: 'alberto-conan-ui', organisations: ['conan-ui'] },
+    tools: { brew: true, npm: true },
+  };
+}
+
+function reportOf(
+  check: MachineCheck,
+  spacesFolder: string | null = '/Users/alberto/Spaces',
+): MachineCheckReport {
+  return {
+    check,
     checkedAt: 1_789_000_000_000,
     pathSource: 'login-shell',
+    spacesFolder: { value: spacesFolder, proposed: '/Users/alberto/Spaces' },
+    setUp: (() => {
+      const left: {
+        id: 'git' | 'python3' | 'gh' | 'github' | 'claude-code' | 'spaces-folder';
+        text: string;
+      }[] = [];
+      const git = check.requirements.find((r) => r.id === 'git');
+      if (git?.state.kind !== 'fine') left.push({ id: 'git', text: 'install Git' });
+      const python3 = check.requirements.find((r) => r.id === 'python3');
+      if (python3?.state.kind !== 'fine') left.push({ id: 'python3', text: 'install Python 3' });
+      const gh = check.requirements.find((r) => r.id === 'gh');
+      if (gh?.state.kind === 'missing') left.push({ id: 'gh', text: 'install the GitHub CLI' });
+      else if (gh?.state.kind === 'not-signed-in')
+        left.push({ id: 'github', text: 'sign in to GitHub' });
+      else if (gh?.state.kind === 'missing-scope')
+        left.push({ id: 'github', text: 'give GitHub access to Projects' });
+      else if (gh?.state.kind === 'undetermined')
+        left.push({ id: 'github', text: 'check the GitHub sign-in' });
+      const claude = check.engines.find((e) => e.catalogId === 'claude-code');
+      if (claude?.installed.kind === 'missing')
+        left.push({ id: 'claude-code', text: 'install Claude Code' });
+      else if (claude?.signIn.kind === 'not-signed-in')
+        left.push({ id: 'claude-code', text: 'sign in to Claude Code' });
+      if (spacesFolder === null) left.push({ id: 'spaces-folder', text: 'choose a Spaces folder' });
+      return { ready: left.length === 0, left };
+    })(),
+    commands: {
+      'install-command-line-tools': 'xcode-select --install',
+      'install-gh': 'brew install gh',
+      'update-gh': 'brew upgrade gh',
+      'github-sign-in':
+        'gh auth login --hostname github.com --web --clipboard --git-protocol https --scopes project && gh auth setup-git',
+      'github-add-project-scope': 'gh auth refresh --hostname github.com --scopes project',
+      'engine-install:claude-code': 'curl -fsSL https://claude.ai/install.sh | bash',
+      'engine-sign-in:claude-code': 'claude auth login',
+    },
   };
 }
 
@@ -91,165 +138,417 @@ function answerWith(report: MachineCheckReport): void {
 
 beforeEach(() => {
   cockpit.spaceMachineCheck.mockReset();
-  cockpit.spaceNavigate.mockReset().mockResolvedValue({ ok: true, value: { mode: 'setup' } });
-  cockpit.spaceOpenFolder.mockReset().mockResolvedValue({ ok: true, value: { mode: 'space' } });
-  cockpit.copyText.mockReset();
+  cockpit.spaceNavigate
+    .mockReset()
+    .mockResolvedValue({ ok: true, value: { mode: 'space-welcome' } });
+  cockpit.spaceSpacesFolderUse.mockReset();
+  cockpit.spaceSpacesFolderChoose.mockReset();
+  cockpit.spaceCommandRun.mockReset().mockResolvedValue({
+    ok: true,
+    value: { ptyId: 'pty-default', commandId: 'noop', commandLine: '' },
+  });
+  cockpit.onSpaceCommandCode.mockReset().mockReturnValue(() => {});
+  cockpit.onSpaceCommandExit.mockReset().mockReturnValue(() => {});
+  cockpit.urlOpenExternal.mockReset();
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
 });
 
 afterEach(() => cleanup());
 
-test.each(MACHINE_CHECK_STATE_KINDS)(
-  'state %s: the row shows the state by name and mark, the sentence, and the command when there is one',
-  async (kind) => {
-    answerWith(reportWithGh(kind));
-    render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-    const row = await screen.findByTestId('machine-check-row-gh');
-    expect(row.dataset.state).toBe(kind);
-    // The state is written with its own name, and a mark that is not only a colour.
-    const mark = kind === 'fine' ? '✓' : kind === 'undetermined' ? '?' : '✗';
-    expect(screen.getByTestId('machine-check-state-gh').textContent).toBe(`${mark} ${kind}`);
-
-    const { guidance, command } = STATES[kind];
-    if (guidance === null) expect(screen.queryByTestId('machine-check-guidance-gh')).toBeNull();
-    else expect(screen.getByTestId('machine-check-guidance-gh').textContent).toBe(guidance);
-    if (command === null) {
-      expect(screen.queryByTestId('machine-check-command-gh')).toBeNull();
-      expect(screen.queryByTestId('machine-check-copy-gh')).toBeNull();
-    } else {
-      expect(screen.getByTestId('machine-check-command-gh').textContent).toBe(command);
-      expect(screen.getByTestId('machine-check-copy-gh')).toBeTruthy();
-    }
-
-    const overall = screen.getByTestId('machine-check-overall');
-    // An `output` element has the status role, so the result is read out when it changes.
-    expect(screen.getAllByRole('status')).toContain(overall);
-    expect(overall.dataset.ready).toBe(String(kind === 'fine'));
-    expect(overall.textContent).toContain(
-      kind === 'fine' ? 'Machine check: ready.' : `Machine check: not ready. gh is ${kind}.`,
-    );
-  },
-);
-
-test('the four requirements are listed in fixed order, whatever order the report has', async () => {
-  const report = reportWithGh('fine');
-  report.check.requirements.reverse();
-  answerWith(report);
+test('ready: the overall line says so, and Continue leads to the welcome screen', async () => {
+  answerWith(reportOf(fineCheck()));
   render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  const list = await screen.findByTestId('machine-check-requirements');
-  const names = within(list)
-    .getAllByRole('heading', { level: 2 })
-    .map((heading) => heading.textContent);
-  expect(names).toEqual(['git', 'gh', 'engine', 'python3']);
-  expect(screen.getByTestId('machine-check-binary-engine').textContent).toBe('command claude');
+  const overall = await screen.findByTestId('machine-check-overall');
+  await waitFor(() => expect(overall.textContent).toBe('This computer is ready.'));
+  expect(overall.dataset.ready).toBe('true');
+  const continueButton = screen.getByTestId('machine-check-continue') as HTMLButtonElement;
+  expect(continueButton.disabled).toBe(false);
+  fireEvent.click(continueButton);
+  await waitFor(() => expect(cockpit.spaceNavigate).toHaveBeenCalledWith({ to: 'space-welcome' }));
 });
 
-test('the version found is shown for fine and for too-old; the scope for missing-scope', async () => {
-  answerWith(reportWithGh('too-old'));
-  const first = render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  expect((await screen.findByTestId('machine-check-found-gh')).textContent).toBe(
-    'version 2.10.0, lowest accepted 2.40.0',
+test('all sections fine: each collapses to its one line, with a Show button', async () => {
+  answerWith(reportOf(fineCheck()));
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  await screen.findByTestId('machine-section-tools');
+  expect(screen.getByTestId('machine-section-tools').textContent).toContain(
+    '✓ Tools — Git 2.43.0, Python 3 3.12.1, GitHub CLI 2.60.1',
   );
-  expect(screen.getByTestId('machine-check-found-git').textContent).toBe('version 2.43.0');
-  first.unmount();
+  expect(screen.getByTestId('machine-section-github').textContent).toContain(
+    '✓ GitHub — signed in as alberto-conan-ui, with access to Projects',
+  );
+  expect(screen.getByTestId('machine-section-engines').textContent).toContain(
+    '✓ AI engines — Claude Code can run Space sessions',
+  );
+  expect(screen.getByTestId('machine-section-spaces-folder').textContent).toContain(
+    '✓ Spaces folder — /Users/alberto/Spaces',
+  );
+  expect(screen.queryByTestId('machine-row-git')).toBeNull();
 
-  answerWith(reportWithGh('missing-scope'));
-  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  expect((await screen.findByTestId('machine-check-found-gh')).textContent).toBe('scope project');
+  fireEvent.click(screen.getByTestId('machine-section-tools-toggle'));
+  expect(await screen.findByTestId('machine-row-git')).toBeTruthy();
 });
 
-test('the copy button puts the literal command on the clipboard and says so', async () => {
-  answerWith(reportWithGh('missing-scope'));
+test('not ready: Git missing shows Install, and the section stays open', async () => {
+  const check = fineCheck();
+  check.requirements[0] = requirement('git', { kind: 'missing' });
+  check.ready = false;
+  answerWith(reportOf(check));
   render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  const copy = await screen.findByTestId('machine-check-copy-gh');
-  expect(copy.getAttribute('aria-label')).toBe(`Copy the command ${GH_SCOPE_COMMAND}`);
-  fireEvent.click(copy);
-  expect(cockpit.copyText).toHaveBeenCalledWith(GH_SCOPE_COMMAND);
-  expect(screen.getByTestId('machine-check-row-gh').textContent).toContain('Copied.');
-});
-
-test('check again: the screen checks on mount, and the button runs the check again and shows the new result', async () => {
-  answerWith(reportWithGh('not-signed-in'));
-  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  await screen.findByTestId('machine-check-row-gh');
-  expect(cockpit.spaceMachineCheck).toHaveBeenCalledTimes(1);
-  expect(cockpit.spaceMachineCheck).toHaveBeenLastCalledWith({ fresh: true });
-  expect(screen.getByTestId('machine-check-overall').dataset.ready).toBe('false');
-
-  let finish: (result: SpaceMachineCheckResult) => void = () => {};
-  cockpit.spaceMachineCheck.mockReturnValue(
-    new Promise<SpaceMachineCheckResult>((resolve) => {
-      finish = resolve;
+  const row = await screen.findByTestId('machine-row-git');
+  expect(within(row).getByTestId('machine-row-git-state').textContent).toBe('! Not installed');
+  const action = within(row).getByTestId('machine-row-git-action') as HTMLButtonElement;
+  expect(action.textContent).toBe('Install');
+  fireEvent.click(action);
+  await waitFor(() =>
+    expect(cockpit.spaceCommandRun).toHaveBeenCalledWith({
+      commandId: 'install-command-line-tools',
     }),
   );
-  const again = screen.getByTestId('machine-check-again') as HTMLButtonElement;
-  expect(again.textContent).toBe('Check again');
-  fireEvent.click(again);
-  expect(cockpit.spaceMachineCheck).toHaveBeenCalledTimes(2);
-  expect(cockpit.spaceMachineCheck).toHaveBeenLastCalledWith({ fresh: true });
-  // While the check runs the button says so, and the earlier result stays on the screen.
-  expect(again.disabled).toBe(true);
-  expect(again.textContent).toBe('Checking…');
-  expect(screen.getByTestId('machine-check-state-gh').textContent).toBe('✗ not-signed-in');
-
-  finish({ ok: true, value: reportWithGh('fine') });
-  await waitFor(() =>
-    expect(screen.getByTestId('machine-check-overall').dataset.ready).toBe('true'),
+  expect((await screen.findByTestId('command-panel-command')).textContent).toContain(
+    'Running: xcode-select --install',
   );
-  expect(screen.getByTestId('machine-check-state-gh').textContent).toBe('✓ fine');
-  expect(again.disabled).toBe(false);
+
+  const left = screen.getByTestId('machine-check-left');
+  expect(left.textContent).toBe('Left to do: install Git.');
+  expect(
+    (screen.getByTestId('machine-check-continue') as HTMLButtonElement).getAttribute(
+      'aria-describedby',
+    ),
+  ).toBe('machine-check-left');
 });
 
-test('not ready: create, adopt and open by address do nothing, and the reason is stated', async () => {
-  answerWith(reportWithGh('missing'));
+test('Git too old: the download page opens in the browser, no command runs', async () => {
+  const check = fineCheck();
+  check.requirements[0] = requirement('git', {
+    kind: 'too-old',
+    version: '2.10.0',
+    minimum: '2.40.0',
+  });
+  check.ready = false;
+  answerWith(reportOf(check));
   render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  await screen.findByTestId('machine-check-row-gh');
-  const reason = screen.getByTestId('machine-check-setup-reason');
-  expect(reason.textContent).toBe('Not available: the machine check is not ready. gh is missing.');
-  for (const id of ['create', 'adopt', 'open-by-address']) {
-    const entry = screen.getByTestId(`machine-check-${id}`);
-    expect(entry.getAttribute('aria-disabled')).toBe('true');
-    expect(entry.getAttribute('aria-describedby')).toContain(reason.id);
-    fireEvent.click(entry);
-  }
-  expect(cockpit.spaceNavigate).not.toHaveBeenCalled();
-  expect(cockpit.spaceOpenFolder).not.toHaveBeenCalled();
+  const row = await screen.findByTestId('machine-row-git');
+  expect(within(row).getByTestId('machine-row-git-state').textContent).toBe(
+    '! Too old: 2.10.0 is installed and 2.40.0 or later is needed',
+  );
+  fireEvent.click(within(row).getByTestId('machine-row-git-action'));
+  expect(cockpit.urlOpenExternal).toHaveBeenCalledWith('https://git-scm.com/downloads');
+  expect(cockpit.spaceCommandRun).not.toHaveBeenCalled();
 });
 
-test('ready: the three entries lead to setup, and adopt asks main for the folder dialog', async () => {
-  answerWith(reportWithGh('fine'));
+test('GitHub CLI missing without Homebrew: opens the download page and notes why', async () => {
+  const check = fineCheck();
+  check.requirements[1] = requirement('gh', { kind: 'missing' });
+  check.tools.brew = false;
+  check.ready = false;
+  answerWith(reportOf(check));
   render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  await screen.findByTestId('machine-check-row-gh');
-  expect(screen.queryByTestId('machine-check-setup-reason')).toBeNull();
-  const create = screen.getByTestId('machine-check-create');
-  expect(create.getAttribute('aria-disabled')).toBe('false');
-  fireEvent.click(create);
-  await waitFor(() =>
-    expect(cockpit.spaceNavigate).toHaveBeenCalledWith({ to: 'setup', start: 'new' }),
+  const row = await screen.findByTestId('machine-row-gh');
+  expect(within(row).getByTestId('machine-row-gh-note').textContent).toBe(
+    'Homebrew was not found, so the GitHub CLI is installed from its download page.',
   );
-  await waitFor(() => expect(create.getAttribute('aria-disabled')).toBe('false'));
-  fireEvent.click(screen.getByTestId('machine-check-open-by-address'));
-  await waitFor(() =>
-    expect(cockpit.spaceNavigate).toHaveBeenCalledWith({ to: 'setup', start: 'from-address' }),
-  );
-  await waitFor(() => expect(create.getAttribute('aria-disabled')).toBe('false'));
-  fireEvent.click(screen.getByTestId('machine-check-adopt'));
-  await waitFor(() => expect(cockpit.spaceOpenFolder).toHaveBeenCalledWith({}));
+  fireEvent.click(within(row).getByTestId('machine-row-gh-action'));
+  expect(cockpit.urlOpenExternal).toHaveBeenCalledWith('https://cli.github.com');
 });
 
-test('while the first check runs: the screen says so and the entries are not available', () => {
-  cockpit.spaceMachineCheck.mockReturnValue(new Promise<SpaceMachineCheckResult>(() => {}));
+test('GitHub CLI signed out or missing a scope: the Tools row reads Ready, never the raw state name', async () => {
+  const check = fineCheck();
+  check.requirements[1] = requirement('gh', { kind: 'not-signed-in' });
+  check.ready = false;
+  answerWith(reportOf(check));
   render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  expect(screen.getByTestId('machine-check-overall').textContent).toBe('Checking the machine…');
-  expect(screen.getByTestId('machine-check-overall').dataset.ready).toBe('unknown');
-  expect(screen.queryByTestId('machine-check-requirements')).toBeNull();
-  expect(screen.getByTestId('machine-check-setup-reason').textContent).toBe(
-    'Not available: the machine check is running.',
-  );
-  expect(screen.getByTestId('machine-check-create').getAttribute('aria-disabled')).toBe('true');
+  const row = await screen.findByTestId('machine-row-gh');
+  expect(within(row).getByTestId('machine-row-gh-state').textContent).toBe('✓ Ready');
+  expect(within(row).queryByTestId('machine-row-gh-action')).toBeNull();
+  expect(row.textContent).not.toContain('not-signed-in');
+
+  cleanup();
+  const scopeCheck = fineCheck();
+  scopeCheck.requirements[1] = requirement('gh', { kind: 'missing-scope', scope: 'project' });
+  scopeCheck.ready = false;
+  answerWith(reportOf(scopeCheck));
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  const scopeRow = await screen.findByTestId('machine-row-gh');
+  expect(within(scopeRow).getByTestId('machine-row-gh-state').textContent).toBe('✓ Ready');
+  expect(scopeRow.textContent).not.toContain('missing-scope');
 });
 
-test('error state: a check that main refused is shown, and check again is offered', async () => {
+test('GitHub section: not signed in offers the browser sign-in with its full command', async () => {
+  const check = fineCheck();
+  check.requirements[1] = requirement('gh', { kind: 'not-signed-in' });
+  check.ready = false;
+  answerWith(reportOf(check));
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  const row = await screen.findByTestId('machine-row-github');
+  expect(row.textContent).toContain(
+    'Sign in to GitHub in your browser. AI-Lore never sees your password or token; the GitHub CLI keeps them.',
+  );
+  fireEvent.click(within(row).getByTestId('machine-row-github-action'));
+  await waitFor(() =>
+    expect(cockpit.spaceCommandRun).toHaveBeenCalledWith({ commandId: 'github-sign-in' }),
+  );
+  expect((await screen.findByTestId('command-panel-command')).textContent).toContain(
+    'gh auth login --hostname github.com --web --clipboard --git-protocol https --scopes project && gh auth setup-git',
+  );
+});
+
+test('GitHub section: fine names the account and organisations, with a secondary Use another account', async () => {
+  answerWith(reportOf(fineCheck()));
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  fireEvent.click(await screen.findByTestId('machine-section-github-toggle'));
+  const row = await screen.findByTestId('machine-row-github');
+  expect(row.textContent).toContain('Signed in as alberto-conan-ui, with access to Projects.');
+  expect(within(row).getByTestId('machine-row-github-orgs').textContent).toBe(
+    'Organisations: conan-ui.',
+  );
+  expect(within(row).getByTestId('machine-row-github-action').textContent).toBe(
+    'Use another account…',
+  );
+});
+
+test('GitHub section: undetermined offers Check again, which asks main fresh, not a command', async () => {
+  const check = fineCheck();
+  check.requirements[1] = requirement('gh', {
+    kind: 'undetermined',
+    reason: '`gh auth status` did not answer in 10 seconds.',
+  });
+  check.ready = false;
+  answerWith(reportOf(check));
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  const row = await screen.findByTestId('machine-row-github');
+  expect(row.textContent).toContain(
+    'Could not check the GitHub sign-in: `gh auth status` did not answer in 10 seconds.',
+  );
+  cockpit.spaceMachineCheck.mockClear();
+  fireEvent.click(within(row).getByTestId('machine-row-github-action'));
+  await waitFor(() => expect(cockpit.spaceMachineCheck).toHaveBeenCalledWith({ fresh: true }));
+  expect(cockpit.spaceCommandRun).not.toHaveBeenCalled();
+});
+
+test('engines: four catalog engines listed with their tags, and Claude Code not signed in offers Sign in', async () => {
+  const check = fineCheck();
+  check.engines = [
+    claudeEngine({ signIn: { kind: 'not-signed-in' } }),
+    {
+      engineId: 'default.codex',
+      name: 'Codex CLI',
+      binary: 'codex',
+      state: { kind: 'missing' },
+      guidance: null,
+      command: null,
+      catalogId: 'codex',
+      maker: 'OpenAI',
+      required: false,
+      guardedSessions: false,
+      installed: { kind: 'missing' },
+      signIn: { kind: 'not-checked' },
+      installCommand: 'npm install -g @openai/codex',
+      installNeeds: 'npm',
+      signInCommand: 'codex login',
+      note: null,
+      page: 'https://learn.chatgpt.com/docs/codex/cli',
+    },
+    {
+      engineId: 'default.antigravity',
+      name: 'Antigravity CLI',
+      binary: 'agy',
+      state: { kind: 'fine', version: null },
+      guidance: null,
+      command: null,
+      catalogId: 'antigravity',
+      maker: 'Google',
+      required: false,
+      guardedSessions: false,
+      installed: { kind: 'installed', version: null },
+      signIn: { kind: 'not-checked' },
+      installCommand: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+      installNeeds: null,
+      signInCommand: 'agy',
+      note: null,
+      page: 'https://antigravity.google/docs/cli/install',
+    },
+    {
+      engineId: 'default.opencode',
+      name: 'OpenCode',
+      binary: 'opencode',
+      state: { kind: 'missing' },
+      guidance: null,
+      command: null,
+      catalogId: 'opencode',
+      maker: null,
+      required: false,
+      guardedSessions: false,
+      installed: { kind: 'missing' },
+      signIn: { kind: 'not-checked' },
+      installCommand: 'curl -fsSL https://opencode.ai/install | bash',
+      installNeeds: null,
+      signInCommand: 'opencode auth login',
+      note: 'Also runs DeepSeek models: choose DeepSeek when signing in.',
+      page: 'https://opencode.ai/docs',
+    },
+  ];
+  check.requirements[2] = requirement('engine', { kind: 'not-signed-in' });
+  check.ready = false;
+  answerWith(reportOf(check));
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  expect((await screen.findByTestId('machine-engines-overall')).textContent).toContain(
+    '! Needs Claude Code',
+  );
+  const claudeRow = screen.getByTestId('machine-row-engine-default.claude');
+  expect(claudeRow.textContent).toContain('Required');
+  expect(
+    within(claudeRow).getByTestId('machine-row-engine-default.claude-installed').textContent,
+  ).toBe('Installed 2.1.0');
+  expect(
+    within(claudeRow).getByTestId('machine-row-engine-default.claude-signed-in').textContent,
+  ).toBe('Not signed in');
+  fireEvent.click(within(claudeRow).getByTestId('machine-row-engine-default.claude-action'));
+  await waitFor(() =>
+    expect(cockpit.spaceCommandRun).toHaveBeenCalledWith({
+      commandId: 'engine-sign-in:claude-code',
+    }),
+  );
+
+  const codexRow = screen.getByTestId('machine-row-engine-default.codex');
+  expect(codexRow.textContent).toContain('Optional');
+  expect(codexRow.textContent).toContain(
+    'Installed and ready for AI tabs outside Spaces. Guarded Space sessions run on Claude Code only, for now.',
+  );
+  expect(within(codexRow).getByTestId('machine-row-engine-default.codex-action').textContent).toBe(
+    'Install',
+  );
+
+  const antigravityRow = screen.getByTestId('machine-row-engine-default.antigravity');
+  expect(antigravityRow.textContent).toContain('Optional');
+  expect(
+    within(antigravityRow).getByTestId('machine-row-engine-default.antigravity-signed-in')
+      .textContent,
+  ).toBe('Not checked');
+  expect(screen.queryByTestId('machine-row-engine-default.antigravity-action')).toBeNull();
+
+  const opencodeRow = screen.getByTestId('machine-row-engine-default.opencode');
+  expect(opencodeRow.textContent).toContain(
+    'Also runs DeepSeek models: choose DeepSeek when signing in.',
+  );
+});
+
+test('Spaces folder: not set offers Use this folder and Choose, and re-checks after either', async () => {
+  const check = fineCheck();
+  check.ready = true;
+  const report = reportOf(check, null);
+  answerWith(report);
+  cockpit.spaceSpacesFolderUse.mockResolvedValue({
+    ok: true,
+    value: { folder: '/Users/alberto/Spaces' },
+  });
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  const row = await screen.findByTestId('machine-row-spaces-folder');
+  expect(within(row).getByTestId('machine-spaces-folder-path').textContent).toBe(
+    '/Users/alberto/Spaces',
+  );
+  expect(within(row).getByTestId('machine-spaces-folder-use')).toBeTruthy();
+  cockpit.spaceMachineCheck.mockClear();
+  fireEvent.click(within(row).getByTestId('machine-spaces-folder-use'));
+  await waitFor(() => expect(cockpit.spaceSpacesFolderUse).toHaveBeenCalledWith({}));
+  await waitFor(() => expect(cockpit.spaceMachineCheck).toHaveBeenCalledWith({ fresh: true }));
+});
+
+test('while a command is active, other command buttons are disabled until Close', async () => {
+  const check = fineCheck();
+  check.requirements[0] = requirement('git', { kind: 'missing' });
+  check.requirements[1] = requirement('gh', { kind: 'not-signed-in' });
+  check.ready = false;
+  answerWith(reportOf(check));
+  cockpit.spaceCommandRun.mockResolvedValue({
+    ok: true,
+    value: {
+      ptyId: 'pty-1',
+      commandId: 'install-command-line-tools',
+      commandLine: 'xcode-select --install',
+    },
+  });
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  const gitAction = await screen.findByTestId('machine-row-git-action');
+  fireEvent.click(gitAction);
+  await screen.findByTestId('command-panel');
+  const githubAction = screen.getByTestId('machine-row-github-action') as HTMLButtonElement;
+  expect(githubAction.disabled).toBe(true);
+  fireEvent.click(screen.getByTestId('command-panel-close'));
+  await waitFor(() => expect(screen.queryByTestId('command-panel')).toBeNull());
+  expect((screen.getByTestId('machine-row-github-action') as HTMLButtonElement).disabled).toBe(
+    false,
+  );
+});
+
+test('command exit re-checks the machine, fresh', async () => {
+  const check = fineCheck();
+  check.requirements[0] = requirement('git', { kind: 'missing' });
+  check.ready = false;
+  answerWith(reportOf(check));
+  cockpit.spaceCommandRun.mockResolvedValue({
+    ok: true,
+    value: {
+      ptyId: 'pty-1',
+      commandId: 'install-command-line-tools',
+      commandLine: 'xcode-select --install',
+    },
+  });
+  let exitHandler: ((p: SpaceCommandExit) => void) | null = null;
+  cockpit.onSpaceCommandExit.mockImplementation((cb) => {
+    exitHandler = cb;
+    return () => {};
+  });
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  fireEvent.click(await screen.findByTestId('machine-row-git-action'));
+  await screen.findByTestId('command-panel');
+  cockpit.spaceMachineCheck.mockClear();
+  act(() => {
+    exitHandler?.({ ptyId: 'pty-1', commandId: 'install-command-line-tools', exitCode: 0 });
+  });
+  await waitFor(() => expect(cockpit.spaceMachineCheck).toHaveBeenCalledWith({ fresh: true }));
+  expect((await screen.findByTestId('command-panel-status')).textContent).toContain('Finished.');
+});
+
+test('Check all again and Back', async () => {
+  answerWith(reportOf(fineCheck()));
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  await screen.findByTestId('machine-check-overall');
+  cockpit.spaceMachineCheck.mockClear();
+  fireEvent.click(screen.getByTestId('machine-check-again'));
+  await waitFor(() => expect(cockpit.spaceMachineCheck).toHaveBeenCalledWith({ fresh: true }));
+  fireEvent.click(screen.getByTestId('machine-check-back'));
+  await waitFor(() => expect(cockpit.spaceNavigate).toHaveBeenCalledWith({ to: 'space-welcome' }));
+});
+
+test('the PATH note shows only when something was not found, and names its source', async () => {
+  const readyReport = reportOf(fineCheck());
+  answerWith(readyReport);
+  const first = render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  await screen.findByTestId('machine-check-overall');
+  expect(screen.queryByTestId('machine-check-path-source')).toBeNull();
+  first.unmount();
+
+  const check = fineCheck();
+  check.requirements[0] = requirement('git', { kind: 'missing' });
+  check.ready = false;
+  const report = reportOf(check);
+  report.pathSource = 'app-environment';
+  answerWith(report);
+  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
+  expect((await screen.findByTestId('machine-check-path-source')).textContent).toBe(
+    "The login shell's PATH could not be read, so the search used the app's own PATH.",
+  );
+});
+
+test('init.section opens that section even when it is fine', async () => {
+  answerWith(reportOf(fineCheck()));
+  render(<MachineCheckScreen init={{ mode: 'machine-check', section: 'engines' }} />);
+  expect(await screen.findByTestId('machine-row-engine-default.claude')).toBeTruthy();
+  expect(screen.queryByTestId('machine-row-git')).toBeNull();
+});
+
+test('a check main refused is shown as an error', async () => {
   cockpit.spaceMachineCheck.mockResolvedValue({
     ok: false,
     error: { kind: 'check-failed', message: 'The machine check did not run: no registry.' },
@@ -258,58 +557,4 @@ test('error state: a check that main refused is shown, and check again is offere
   const error = await screen.findByTestId('machine-check-error');
   expect(error.getAttribute('role')).toBe('alert');
   expect(error.textContent).toContain('no registry.');
-  expect(screen.getByTestId('machine-check-overall').textContent).toBe('Machine check: not run.');
-  expect(screen.getByTestId('machine-check-setup-reason').textContent).toContain(
-    'the machine check did not run',
-  );
-  expect((screen.getByTestId('machine-check-again') as HTMLButtonElement).disabled).toBe(false);
-});
-
-test('more than one engine in the registry: each is listed with its state under the engine row', async () => {
-  const report = reportWithGh('fine');
-  report.check.engines.push({
-    engineId: 'default.gemini',
-    name: 'Gemini',
-    binary: 'gemini',
-    state: { kind: 'missing' },
-    guidance: 'Gemini was not found on this machine.',
-    command: null,
-  });
-  answerWith(report);
-  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  const gemini = await screen.findByTestId('machine-check-engine-default.gemini');
-  expect(gemini.textContent).toBe('Gemini, command gemini: ✗ missing');
-  expect(screen.getByTestId('machine-check-engine-default.claude').textContent).toBe(
-    'Claude, command claude: ✓ fine',
-  );
-});
-
-test('an empty registry: the engine row says there is no engine', async () => {
-  const report = reportWithGh('fine');
-  report.check.requirements[2] = {
-    id: 'engine',
-    binary: null,
-    state: { kind: 'missing' },
-    guidance: 'No engine is in the registry.',
-    command: null,
-  };
-  report.check.engines = [];
-  report.check.ready = false;
-  answerWith(report);
-  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  expect((await screen.findByTestId('machine-check-binary-engine')).textContent).toBe(
-    'no engine in the registry',
-  );
-});
-
-test('the screen says which PATH the commands ran with, and leads back to welcome', async () => {
-  const report = reportWithGh('fine');
-  report.pathSource = 'app-environment';
-  answerWith(report);
-  render(<MachineCheckScreen init={{ mode: 'machine-check' }} />);
-  expect((await screen.findByTestId('machine-check-path-source')).textContent).toContain(
-    'The PATH of the login shell could not be read.',
-  );
-  fireEvent.click(screen.getByTestId('machine-check-back'));
-  await waitFor(() => expect(cockpit.spaceNavigate).toHaveBeenCalledWith({ to: 'space-welcome' }));
 });
