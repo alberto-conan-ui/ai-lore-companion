@@ -1196,7 +1196,15 @@ function EnginesSection(): JSX.Element {
       binary: draft.binary.trim(),
     };
     if (draft.args && draft.args.length > 0) entry.args = draft.args;
-    persist([...engines, entry]);
+    
+    const index = engines.findIndex((e) => e.id === entry.id);
+    if (index >= 0) {
+      const next = [...engines];
+      next[index] = entry;
+      persist(next);
+    } else {
+      persist([...engines, entry]);
+    }
     setDraft(null);
   };
 
@@ -1222,20 +1230,30 @@ function EnginesSection(): JSX.Element {
                   <span style={appMetaStyle}>{engineMetaSummary(engine)}</span>
                   {isCatalog ? (
                     <span style={catalogEngineNoteStyle}>
-                      Listed by AI-Lore; it cannot be removed.
+                      Listed by AI-Lore; it cannot be removed, but you can edit its arguments.
                     </span>
                   ) : null}
                 </div>
-                {isCatalog ? null : (
+                <div style={{ display: 'flex', gap: '0.4rem' }}>
                   <button
                     type="button"
                     style={appRemoveStyle}
-                    onClick={() => removeEngine(engine.id)}
-                    data-testid={`engine-remove-${engine.id}`}
+                    onClick={() => setDraft(engine)}
+                    data-testid={`engine-edit-${engine.id}`}
                   >
-                    Remove
+                    Edit
                   </button>
-                )}
+                  {isCatalog ? null : (
+                    <button
+                      type="button"
+                      style={appRemoveStyle}
+                      onClick={() => removeEngine(engine.id)}
+                      data-testid={`engine-remove-${engine.id}`}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
               </li>
             );
           })}
