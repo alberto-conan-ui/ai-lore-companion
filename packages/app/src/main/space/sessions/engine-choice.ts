@@ -50,7 +50,18 @@ export function fixFor(
   void engine; // Reserved for a future catalog engine whose fix depends on it (A.9 note).
   switch (failure.kind) {
     case 'engine-not-found':
-    case 'engine-not-installed':
+    case 'engine-not-installed': {
+      const catalog = engine ? catalogEntryFor(engine) : null;
+      if (catalog && catalog.installCommand) {
+        return {
+          kind: 'install-engine',
+          engineId: engine?.id,
+          label: 'Install',
+          commandId: null,
+          commandLine: null,
+          section: null,
+        };
+      }
       return {
         kind: 'set-up-claude-code',
         label: 'Set up Claude Code',
@@ -58,6 +69,7 @@ export function fixFor(
         commandLine: null,
         section: 'engines',
       };
+    }
     case 'engine-not-signed-in':
       return {
         kind: 'sign-in',

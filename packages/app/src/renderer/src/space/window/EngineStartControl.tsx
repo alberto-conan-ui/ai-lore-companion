@@ -48,6 +48,7 @@ export function EngineStartControl({
 }: Props): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
+  const [installingId, setInstallingId] = useState<string | null>(null);
   const [running, setRunning] = useState<SpaceEngineFix | null>(null);
 
   // A new choice (mount, window focus, the registry changing, or an explicit refresh) is the
@@ -61,6 +62,18 @@ export function EngineStartControl({
   const engineId = choice?.engineId ?? null;
   const startable = choice !== null && engineId !== null;
   const startableCount = choice?.options.filter((option) => option.canStart).length ?? 0;
+  
+  if (installingId !== null) {
+      return (
+          <div style={rootStyle}>
+              <span style={splitStyle}>
+                  <button type="button" style={primaryButtonStyle} disabled>
+                      Installing...
+                  </button>
+              </span>
+          </div>
+      );
+  }
   const showMenu = choice !== null && (menu === 'always' || startableCount >= 2);
 
   const buttonLabel =
@@ -92,6 +105,17 @@ export function EngineStartControl({
         return;
       case 'edit-engine':
         useSpaceSettings.getState().open('engines');
+        return;
+      case 'install-engine':
+        if (fix.engineId) {
+          setInstallingId(fix.engineId);
+          window.cockpit.spaceSessionInstallEngine({ engineId: fix.engineId }).then((result) => {
+             setInstallingId(null);
+             if (result.ok) {
+                 useSpaceSessions.getState().setChoice(result.value);
+             }
+          });
+        }
         return;
     }
   };
