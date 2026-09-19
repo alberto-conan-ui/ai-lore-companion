@@ -154,6 +154,7 @@ test('the header follows the desk, Leave Writing releases the claims, and the sk
 
     const started = (await h.invoke('spaceSessionStart', spaceWindow, {
       engineId: 'claude-code',
+      params: [],
     })) as SpaceSessionStartResult;
     assert.ok(started.ok, JSON.stringify(started));
     const { sessionId } = started.value;

@@ -22,9 +22,10 @@ import {
   claudeCodeInstallPaths,
   readInstallRecord,
   sha256File,
+  splitParamText,
 } from '@ai-lore-companion/core';
-import { guardChangingEngineOption } from './command-line.js';
 import { PYTHON_PROBE_TIMEOUT_MS, REQUIRED_CHECKS } from './constants.js';
+import { optionsFor, paramEffect } from './engine-options.js';
 
 /** Why a session was not started. `message` can be shown to the Human Lead as it is. */
 export type SessionStartFailureKind =
@@ -74,14 +75,51 @@ export function checkSessionEngine(
       `No AI session was started: a guarded session in a Space is started with Claude Code only, and "${engine.name}" is not Claude Code.`,
     );
   }
-  const changing = guardChangingEngineOption(engine.args ?? []);
-  if (changing !== undefined) {
-    return failed(
-      'engine-not-supported',
-      `No AI session was started: the engine "${engine.name}" is set up with the option ${changing.split('=')[0]}, which would change the permissions or the settings of a guarded session. Remove it from the engine's arguments.`,
-    );
-  }
   return { ok: true, value: engine };
+}
+
+/**
+ * The ticked parameters of a start (M10.3, `m10-architecture.md` 3.5 and 3.7
+ * item 9): every text must be a parameter of `engine`. `argv` is the texts'
+ * arguments in the order of `engine.params`; `unguarded` is the union of the
+ * guard-changing option names, in first-seen order.
+ */
+export function checkStartParams(
+  engine: EngineEntry,
+  texts: readonly string[],
+): Checked<{ argv: string[]; unguarded: string[] }> {
+  const params = engine.params ?? [];
+  const options = optionsFor(engine);
+  const unguarded: string[] = [];
+  const seenUnguarded = new Set<string>();
+  for (const text of texts) {
+    const param = params.find((candidate) => candidate.text === text);
+    if (param === undefined) {
+      return failed(
+        'invalid-argument',
+        `No AI session was started: the parameter "${text}" is not one of the parameters of ${engine.name}.`,
+      );
+    }
+    const effect = paramEffect(options, splitParamText(text));
+    if (effect.effect === 'refused') {
+      const option = effect.options[0] ?? text;
+      return failed(
+        'engine-not-supported',
+        `No AI session was started: the parameter ${option} of ${engine.name} is set by the companion for every session. Untick it, or remove it in Settings.`,
+      );
+    }
+    for (const option of effect.options) {
+      if (!seenUnguarded.has(option)) {
+        seenUnguarded.add(option);
+        unguarded.push(option);
+      }
+    }
+  }
+  // `argv` follows the order of `engine.params`, not the order `texts` was given in.
+  const argv = params
+    .filter((param) => texts.includes(param.text))
+    .flatMap((param) => splitParamText(param.text));
+  return { ok: true, value: { argv, unguarded } };
 }
 
 /**

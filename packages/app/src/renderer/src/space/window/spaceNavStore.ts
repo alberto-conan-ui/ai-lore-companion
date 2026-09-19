@@ -45,9 +45,9 @@ type SpaceNavState = {
   showSessionTab: (sessionId: string) => void;
   sessionsRequestHandled: (id: number) => void;
   setSessionsWithTab: (sessionIds: readonly string[]) => void;
-  /** The execution flags (e.g. --dangerously) shared across start session components. */
-  executionFlags: string[];
-  setExecutionFlags: (flags: string[]) => void;
+  /** The ticked parameter texts per engine id, for this window. Absent: the engine's defaults. */
+  tickedParams: Record<string, string[]>;
+  setTickedParams: (engineId: string, texts: string[]) => void;
 };
 
 let lastRequestId = 0;
@@ -79,6 +79,7 @@ export const useSpaceNavStore = create<SpaceNavState>((set) => ({
   sessionsRequestHandled: (id) =>
     set((state) => (state.sessionsRequest?.id === id ? { sessionsRequest: null } : {})),
   setSessionsWithTab: (sessionIds) => set({ sessionsWithTab: sessionIds }),
-  executionFlags: [],
-  setExecutionFlags: (flags) => set({ executionFlags: flags }),
+  tickedParams: {},
+  setTickedParams: (engineId, texts) =>
+    set((state) => ({ tickedParams: { ...state.tickedParams, [engineId]: texts } })),
 }));

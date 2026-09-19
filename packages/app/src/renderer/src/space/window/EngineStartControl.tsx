@@ -1,5 +1,9 @@
 import { type JSX, useEffect, useState } from 'react';
-import type { SpaceEngineChoice, SpaceEngineFix } from '../../../../shared/ipc.js';
+import type {
+  SpaceEngineChoice,
+  SpaceEngineFix,
+  SpaceEngineParam,
+} from '../../../../shared/ipc.js';
 import { PopoverShell } from '../../components/overlay/PopoverShell.js';
 import { useSpaceSettings } from '../SpaceSettings.js';
 import { CommandPanel } from '../common/CommandPanel.js';
@@ -19,8 +23,9 @@ type Props = {
   noteTestId: string;
   /** 'dashboard-start-menu' / 'space-sessions-engine-menu'. */
   menuTestId: string;
-  flags?: string[];
-  onFlagsChange?: (flags: string[]) => void;
+  /** The ticked parameter texts of the chosen engine; `null` uses the defaults. */
+  ticked: string[] | null;
+  onTickedChange: (engineId: string, texts: string[]) => void;
 };
 
 /** The note while `spaceSessionEngines` has not answered yet. */
@@ -28,6 +33,11 @@ export const AI_READINESS_CHECKING = 'Checking whether an AI session can start i
 
 function engineName(choice: SpaceEngineChoice | null, engineId: string): string {
   return choice?.options.find((option) => option.engineId === engineId)?.name ?? engineId;
+}
+
+/** The texts of the parameters ticked by default: ticked on and not set by the companion. */
+export function defaultParamTexts(params: readonly SpaceEngineParam[]): string[] {
+  return params.filter((param) => param.defaultOn && param.effect !== 'refused').map((p) => p.text);
 }
 
 /**
@@ -47,10 +57,9 @@ export function EngineStartControl({
   buttonTestId,
   noteTestId,
   menuTestId,
-  flags = [],
-  onFlagsChange,
+  ticked,
+  onTickedChange,
 }: Props): JSX.Element {
-  const [flagsOpen, setFlagsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [running, setRunning] = useState<SpaceEngineFix | null>(null);
@@ -69,10 +78,35 @@ export function EngineStartControl({
 
   const showMenu = choice !== null && (menu === 'always' || startableCount >= 2);
 
+  const chosenOption = choice?.options.find((option) => option.engineId === engineId) ?? null;
+  const params = chosenOption?.params ?? [];
+  const defaults = defaultParamTexts(params);
+  const tickedTexts = ticked ?? defaults;
+  const isTicked = (param: SpaceEngineParam): boolean =>
+    param.effect !== 'refused' && tickedTexts.includes(param.text);
+  const unguardedOptions = [
+    ...new Set(
+      params
+        .filter((param) => isTicked(param) && param.effect === 'unguarded')
+        .flatMap((p) => p.options),
+    ),
+  ];
+  const isUnguarded = unguardedOptions.length > 0;
+
   const buttonLabel =
     startingId !== null
       ? `Starting ${engineName(choice, startingId)}…`
-      : `Start a ${choice?.buttonName ?? ''} session`;
+      : isUnguarded
+        ? `Start an unguarded ${choice?.buttonName ?? ''} session`
+        : `Start a ${choice?.buttonName ?? ''} session`;
+
+  const toggleParam = (param: SpaceEngineParam): void => {
+    if (param.effect === 'refused' || engineId === null) return;
+    const next = isTicked(param)
+      ? tickedTexts.filter((text) => text !== param.text)
+      : [...tickedTexts, param.text];
+    onTickedChange(engineId, next);
+  };
 
   const noteText =
     choice === null
@@ -179,37 +213,60 @@ export function EngineStartControl({
           </PopoverShell>
         ) : null}
       </span>
-      {onFlagsChange && (
-        <div style={flagsWrapperStyle}>
-          <button type="button" style={flagsToggleStyle} onClick={() => setFlagsOpen(!flagsOpen)}>
-            {flagsOpen ? '▾' : '▸'} Settings
-          </button>
-          {flagsOpen && (
-            <div style={flagsPanelStyle}>
-              <label style={flagLabelStyle}>
-                Parameters:
-                <input
-                  type="text"
-                  placeholder="e.g. --dangerously"
-                  value={flags.join(' ')}
-                  onChange={(e) => {
-                    const newFlags = e.target.value.split(' ').filter(Boolean);
-                    onFlagsChange(newFlags);
-                  }}
-                  style={{
-                    flex: 1,
-                    padding: '0.2rem',
-                    fontSize: '0.75rem',
-                    background: 'var(--color-bg)',
-                    border: '1px solid var(--color-border)',
-                    color: 'var(--color-text)',
-                  }}
-                />
-              </label>
-            </div>
+      {chosenOption !== null ? (
+        <div style={paramsWrapperStyle}>
+          <h3 style={paramsHeadingStyle} data-testid={`${buttonTestId}-params`}>
+            Parameters of {chosenOption.name}
+          </h3>
+          {params.length === 0 ? (
+            <>
+              <p style={paramsEmptyStyle}>
+                {chosenOption.name} has no parameters. Add them in Settings, Engines.
+              </p>
+              <button
+                type="button"
+                style={linkButtonStyle}
+                data-testid={`${buttonTestId}-params-edit`}
+                onClick={() => useSpaceSettings.getState().open('engines')}
+              >
+                Edit parameters
+              </button>
+            </>
+          ) : (
+            <ul style={paramsListStyle}>
+              {params.map((param, index) => (
+                <li key={param.text} style={paramItemStyle}>
+                  <label style={paramLabelStyle}>
+                    <input
+                      type="checkbox"
+                      data-testid={`${buttonTestId}-param-${index}`}
+                      checked={isTicked(param)}
+                      disabled={param.effect === 'refused'}
+                      onChange={() => toggleParam(param)}
+                    />
+                    <span style={paramTextStyle}>{param.text}</span>
+                    {param.effect === 'unguarded' ? (
+                      <span style={paramMutedStyle}> — changes the guard</span>
+                    ) : null}
+                    {param.effect === 'refused' ? (
+                      <span style={paramMutedStyle}>
+                        {' '}
+                        — set by the companion; remove it in Settings
+                      </span>
+                    ) : null}
+                  </label>
+                </li>
+              ))}
+            </ul>
           )}
+          {isUnguarded ? (
+            <p style={unguardedNoteStyle} data-testid={`${buttonTestId}-unguarded-note`}>
+              This session will be unguarded: {unguardedOptions.join(', ')} changes what it may do
+              without asking you. Its tab and its Dashboard entry will say so.
+            </p>
+          ) : null}
         </div>
-      )}
+      ) : null}
 
       <p id={noteTestId} style={noteStyle} data-testid={noteTestId}>
         {noteText}
@@ -256,32 +313,60 @@ const rootStyle: React.CSSProperties = {
 
 const splitStyle: React.CSSProperties = { display: 'inline-flex', gap: '0.3rem' };
 
-const flagsWrapperStyle: React.CSSProperties = {
+const paramsWrapperStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: '0.2rem',
-};
-const flagsToggleStyle: React.CSSProperties = {
-  background: 'transparent',
-  border: 'none',
-  color: 'var(--color-text-soft)',
-  fontSize: '0.75rem',
-  cursor: 'pointer',
-  textAlign: 'left',
-  padding: 0,
-};
-const flagsPanelStyle: React.CSSProperties = {
+  gap: '0.3rem',
   padding: '0.4rem',
   background: 'var(--color-inset)',
   borderRadius: '4px',
   border: '1px solid var(--color-border-2)',
 };
-const flagLabelStyle: React.CSSProperties = {
+
+const paramsHeadingStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: '0.78rem',
+  fontWeight: 600,
+  color: 'var(--color-text)',
+};
+
+const paramsEmptyStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: '0.78rem',
+  color: 'var(--color-text-secondary)',
+};
+
+const paramsListStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.2rem',
+  margin: 0,
+  padding: 0,
+  listStyle: 'none',
+};
+
+const paramItemStyle: React.CSSProperties = { display: 'block' };
+
+const paramLabelStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: '0.4rem',
-  fontSize: '0.75rem',
+  gap: '0.35rem',
+  fontSize: '0.78rem',
   color: 'var(--color-text)',
+};
+
+const paramTextStyle: React.CSSProperties = {
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+};
+
+const paramMutedStyle: React.CSSProperties = {
+  color: 'var(--color-text-secondary)',
+};
+
+const unguardedNoteStyle: React.CSSProperties = {
+  margin: 0,
+  fontSize: '0.78rem',
+  color: 'var(--color-warn-fg)',
 };
 
 const menuButtonStyle: React.CSSProperties = {

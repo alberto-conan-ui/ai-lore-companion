@@ -49,6 +49,8 @@ export type SessionRecord = {
   item?: IssueRef;
   /** The session's own issue, created when it first enters Writing. */
   issue?: IssueRef;
+  /** The options that changed the guard when the session started. Absent when none. */
+  unguarded?: string[];
 };
 
 /** The fields of a session that change after it starts. */

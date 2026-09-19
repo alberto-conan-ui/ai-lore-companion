@@ -58,7 +58,7 @@ import type {
 /** A ready `SpaceEngineChoice`: one engine, startable. */
 function readyChoice(engineId = 'claude-code', name = 'Claude Code'): SpaceEngineChoice {
   return {
-    options: [{ engineId, name, canStart: true, reason: null, fix: null }],
+    options: [{ engineId, name, canStart: true, reason: null, fix: null, params: [] }],
     engineId,
     buttonName: name,
     refusal: null,
@@ -87,6 +87,21 @@ function row(number: number, column: BoardRow['column'], extra: Partial<BoardRow
     stale: false,
     local: null,
     gateTicket: null,
+    ...extra,
+  };
+}
+
+/** A `BoardRow.local` fixture, `unguarded: []` unless given. */
+function local(
+  extra: Partial<NonNullable<BoardRow['local']>> = {},
+): NonNullable<BoardRow['local']> {
+  return {
+    sessionId: 's-1',
+    engine: 'claude-code',
+    startedAt: '2026-09-18T01:00:00.000Z',
+    closed: false,
+    item: null,
+    unguarded: [],
     ...extra,
   };
 }
@@ -146,6 +161,7 @@ const cockpit = {
       targets: [],
       item: null,
       closed: false,
+      unguarded: [],
     },
   })),
   onSpaceSessionHeader: vi.fn(() => () => {}),
@@ -157,7 +173,7 @@ beforeEach(() => {
   cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: readyChoice() });
   cockpit.spaceSessionStart.mockResolvedValue({
     ok: true,
-    value: { sessionId: 's-1', ptyId: 'pty-1', engineId: 'claude-code' },
+    value: { sessionId: 's-1', ptyId: 'pty-1', engineId: 'claude-code', unguarded: [] },
   });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
   useSpaceNavStore.setState({ screen: 'dashboard', sessionsRequest: null, sessionsWithTab: [] });
@@ -172,13 +188,7 @@ test('the Agents board has the four columns, a row per session, stale in words a
         row(1, 'Writing', {
           stale: true,
           idleMs: 2 * DAY,
-          local: {
-            sessionId: 's-1',
-            engine: 'claude-code',
-            startedAt: '2026-09-18T01:00:00.000Z',
-            closed: false,
-            item: ref(12),
-          },
+          local: local({ item: ref(12) }),
           gateTicket: GATE_TICKET,
         }),
         row(2, 'Read only'),
@@ -284,6 +294,7 @@ test('Start a session is disabled with the reason while a session cannot start',
           canStart: false,
           reason: 'Python 3 was not found.',
           fix: null,
+          params: [],
         },
       ],
       engineId: null,
@@ -323,7 +334,22 @@ test('Start a session shows Sessions, opens an AI tab there and starts its guard
   expect(tabs.map((tab) => tab.getAttribute('data-kind'))).toEqual(['ai']);
   expect(useSpaceNavStore.getState().sessionsRequest).toBeNull();
   await waitFor(() =>
-    expect(cockpit.spaceSessionStart).toHaveBeenCalledWith({ engineId: 'claude-code' }),
+    expect(cockpit.spaceSessionStart).toHaveBeenCalledWith({ engineId: 'claude-code', params: [] }),
   );
   await waitFor(() => expect(useSpaceNavStore.getState().sessionsWithTab).toEqual(['s-1']));
+});
+
+test('a row whose local session is unguarded shows the Unguarded line', () => {
+  render(
+    <AgentsBoard
+      board={[
+        row(1, 'Writing', {
+          local: local({ unguarded: ['--dangerously-skip-permissions'] }),
+        }),
+      ]}
+    />,
+  );
+  expect(screen.getByTestId('agents-row-unguarded-1').textContent).toBe(
+    'Unguarded: started with --dangerously-skip-permissions.',
+  );
 });

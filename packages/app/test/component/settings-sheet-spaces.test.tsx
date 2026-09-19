@@ -93,9 +93,53 @@ test('the Engines section has no Remove for default.claude and has one for a han
   render(<SettingsSheetModal onClose={() => {}} initialSection="engines" />);
   const claudeRow = await screen.findByTestId('engine-row-default.claude');
   expect(within(claudeRow).queryByTestId('engine-remove-default.claude')).toBeNull();
-  expect(claudeRow.textContent).toContain('Listed by AI-Lore; it cannot be removed, but you can edit its arguments.');
+  expect(claudeRow.textContent).toContain(
+    'Listed by AI-Lore; it cannot be removed. Its parameters can be edited.',
+  );
 
   const ownRow = screen.getByTestId('engine-row-my-own-cli');
   expect(within(ownRow).getByTestId('engine-remove-my-own-cli')).toBeTruthy();
-  expect(ownRow.textContent).not.toContain('Listed by AI-Lore; it cannot be removed, but you can edit its arguments.');
+  expect(ownRow.textContent).not.toContain(
+    'Listed by AI-Lore; it cannot be removed. Its parameters can be edited.',
+  );
+});
+
+test('editing an engine adds a parameter, ticks it by default and saves params through enginesSave', async () => {
+  cockpit.enginesSave.mockImplementation(async (next: EngineEntry[]) => next);
+  render(<SettingsSheetModal onClose={() => {}} initialSection="engines" />);
+  const ownRow = await screen.findByTestId('engine-row-my-own-cli');
+  fireEvent.click(within(ownRow).getByTestId('engine-edit-my-own-cli'));
+
+  fireEvent.click(screen.getByTestId('engine-draft-param-add'));
+  fireEvent.change(screen.getByTestId('engine-draft-param-0'), {
+    target: { value: '--dangerously-skip-permissions' },
+  });
+  fireEvent.click(screen.getByTestId('engine-draft-param-default-0'));
+  fireEvent.click(screen.getByTestId('engine-draft-save'));
+
+  await waitFor(() => expect(cockpit.enginesSave).toHaveBeenCalled());
+  const saved = cockpit.enginesSave.mock.calls[0]?.[0] as EngineEntry[];
+  const own = saved.find((e) => e.id === 'my-own-cli');
+  expect(own?.params).toEqual([{ text: '--dangerously-skip-permissions', defaultOn: true }]);
+});
+
+test("helperModel survives an edit that only changes the engine's name", async () => {
+  cockpit.enginesList.mockResolvedValue([
+    { id: 'default.claude', name: 'Claude Code', binary: 'claude' },
+    { id: 'my-own-cli', name: 'My CLI', binary: 'my-cli', helperModel: 'opus' },
+  ]);
+  cockpit.enginesSave.mockImplementation(async (next: EngineEntry[]) => next);
+  render(<SettingsSheetModal onClose={() => {}} initialSection="engines" />);
+  const ownRow = await screen.findByTestId('engine-row-my-own-cli');
+  fireEvent.click(within(ownRow).getByTestId('engine-edit-my-own-cli'));
+  fireEvent.change(screen.getByTestId('engine-draft-name'), {
+    target: { value: 'My CLI, renamed' },
+  });
+  fireEvent.click(screen.getByTestId('engine-draft-save'));
+
+  await waitFor(() => expect(cockpit.enginesSave).toHaveBeenCalled());
+  const saved = cockpit.enginesSave.mock.calls[0]?.[0] as EngineEntry[];
+  const own = saved.find((e) => e.id === 'my-own-cli');
+  expect(own?.helperModel).toBe('opus');
+  expect(own?.name).toBe('My CLI, renamed');
 });

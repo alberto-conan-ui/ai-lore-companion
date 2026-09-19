@@ -98,6 +98,15 @@ export function SessionHeader({ sessionId, engineName }: Props): JSX.Element {
           {MODE_LABEL[header.mode]}
         </span>
       ) : null}
+      {header && header.unguarded.length > 0 ? (
+        <span
+          style={unguardedPillStyle}
+          data-testid="session-header-unguarded"
+          title={`Started with ${header.unguarded.join(', ')}: the companion's guard does not hold for this session.`}
+        >
+          Unguarded
+        </span>
+      ) : null}
       {writing && header ? (
         <ul style={chipsStyle} aria-label="Claimed targets" data-testid="session-header-targets">
           {header.targets.map((target) => (
@@ -170,6 +179,13 @@ const writingPillStyle: CSSProperties = {
   color: 'var(--color-warn-fg)',
   background: 'var(--color-warn-bg)',
   border: '1px solid var(--color-warn)',
+};
+
+const unguardedPillStyle: CSSProperties = {
+  ...pillBase,
+  color: 'var(--color-danger-fg)',
+  background: 'var(--color-danger-bg)',
+  border: '1px solid var(--color-danger)',
 };
 
 const chipsStyle: CSSProperties = {

@@ -41,7 +41,10 @@ import { parseArg } from './validate.js';
 
 const engineSchema = z.strictObject({
   engineId: z.string().min(1).max(256),
-  flags: z.array(z.string()).optional(),
+});
+const startSchema = z.strictObject({
+  engineId: z.string().min(1).max(256),
+  params: z.array(z.string().min(1).max(1024)).max(32),
 });
 const endSchema = z.strictObject({
   sessionId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
@@ -165,12 +168,12 @@ export function createSpaceSessionsRegister(
     reg.handle('spaceSessionStart', async (event, arg): Promise<SpaceSessionStartResult> => {
       const context = spaceWindowContext(deps, event);
       if (!context) return notASpaceWindow;
-      const parsed = parseArg(engineSchema, arg);
+      const parsed = parseArg(startSchema, arg);
       if (!parsed.ok) return parsed;
       watchHeaders(context);
       const started = await context
         .service(spaceSessions)
-        .start(parsed.value.engineId, parsed.value.flags);
+        .start(parsed.value.engineId, parsed.value.params);
       if (started.ok) rememberEngine(context, parsed.value.engineId);
       return started;
     });

@@ -46,6 +46,7 @@ export function readSessionHeader(
         .map((claim) => claim.target),
       item: record.value.item ?? null,
       closed: record.value.closedAt !== undefined,
+      unguarded: record.value.unguarded ?? [],
     },
   };
 }

@@ -6,8 +6,14 @@
 
 import type { IssueRef, LoreLayer, SessionMode, WriteTarget } from '@ai-lore-companion/core';
 
-/** Argument of `spaceSessionStart` and `spaceSessionReadiness`: an engine id of the registry. */
-export type SpaceSessionEngineArg = { engineId: string; flags?: string[] };
+/** Argument of `spaceSessionReadiness`: an engine id of the registry. */
+export type SpaceSessionEngineArg = { engineId: string };
+
+/**
+ * Argument of `spaceSessionStart` (M10.3): the engine id, and the ticked
+ * parameters' texts. Every text must be a parameter of that engine now.
+ */
+export type SpaceSessionStartArg = { engineId: string; params: string[] };
 
 /** Argument of `spaceSessionEnd`. */
 export type SpaceSessionEndArg = { sessionId: string };
@@ -43,8 +49,15 @@ export type SpaceSessionFailure = {
 /**
  * A started session. `ptyId` is a terminal of the window's terminal service:
  * the existing terminal channels write to it, resize it and receive its exit.
+ * `unguarded` names the guard-changing options this start's parameters held;
+ * empty when the session is guarded.
  */
-export type SpaceSessionStarted = { sessionId: string; ptyId: string; engineId: string };
+export type SpaceSessionStarted = {
+  sessionId: string;
+  ptyId: string;
+  engineId: string;
+  unguarded: string[];
+};
 
 export type SpaceSessionStartResult =
   | { ok: true; value: SpaceSessionStarted }
@@ -72,6 +85,8 @@ export type SpaceSessionHeader = {
   item: IssueRef | null;
   /** True once the desk records the session's end. */
   closed: boolean;
+  /** The guard-changing options this session started with, by name; empty when guarded. */
+  unguarded: string[];
 };
 
 export type SpaceSessionHeaderResult =
@@ -135,6 +150,19 @@ export type SpaceEngineFix = {
   section: 'tools' | 'engines' | null;
 };
 
+/**
+ * One parameter of an engine, as the start control shows it (M10.3).
+ * `effect`: `none` changes nothing; `unguarded` starts an unguarded session;
+ * `refused` is set by the companion and cannot be ticked. `options` are the
+ * reserved or guard-changing option names the parameter's argument list holds.
+ */
+export type SpaceEngineParam = {
+  text: string;
+  defaultOn: boolean;
+  effect: 'none' | 'unguarded' | 'refused';
+  options: string[];
+};
+
 /** One engine of the list `spaceSessionEngines` answers with. */
 export type SpaceEngineOption = {
   engineId: string;
@@ -143,6 +171,8 @@ export type SpaceEngineOption = {
   /** `null` when `canStart`. */
   reason: string | null;
   fix: SpaceEngineFix | null;
+  /** The engine's parameters, each with its effect (M10.3). */
+  params: SpaceEngineParam[];
 };
 
 /** The engine choice of A.9: every engine of the list, and which one a session starts with. */

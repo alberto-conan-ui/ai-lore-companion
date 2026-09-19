@@ -51,12 +51,19 @@ import {
   type SessionStartFailure,
   type VerifiedInstall,
   checkSessionEngine,
+  checkStartParams,
   findPython3,
   verifyInstall,
 } from './preflight.js';
 
 /** A started session, as the window receives it. */
-export type StartedSession = { sessionId: string; ptyId: string; engineId: string };
+export type StartedSession = {
+  sessionId: string;
+  ptyId: string;
+  engineId: string;
+  /** The guard-changing options this start's parameters held, by name. Empty when none. */
+  unguarded: string[];
+};
 
 type Started = { ok: true; value: StartedSession } | { ok: false; error: SessionStartFailure };
 
@@ -68,7 +75,8 @@ export type SessionReadiness =
 export type SpaceSessions = {
   /** Check what a start needs, without starting. */
   readiness(engineId: string): Promise<SessionReadiness>;
-  start(engineId: string, flags?: string[]): Promise<Started>;
+  /** `params` are the ticked parameters' texts; every one must be a parameter of the engine now. */
+  start(engineId: string, params: readonly string[]): Promise<Started>;
   /** End a session of this service. `false` when it has no such session. The engine is stopped. */
   end(sessionId: string): Promise<boolean>;
   /** The ids of the sessions running now. */
@@ -228,7 +236,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
     return entry.ending;
   }
 
-  async function start(engineId: string, flags?: string[]): Promise<Started> {
+  async function start(engineId: string, params: readonly string[]): Promise<Started> {
     await cleanup;
     const pty = context.ptyService;
     if (!pty) {
@@ -246,6 +254,12 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
       return ready;
     }
     const { engine, python, install } = ready.value;
+    const checked = checkStartParams(engine, params);
+    if (!checked.ok) {
+      context.log.warn('session-not-started', { space: context.key, kind: checked.error.kind });
+      return checked;
+    }
+    const { argv: engineArgs, unguarded } = checked.value;
     const opened = desk.open();
     if (!opened.ok || !opened.value.writable) {
       return {
@@ -259,7 +273,11 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
       };
     }
     const sessionId = use.newId();
-    const recorded = startSession(opened.value, { id: sessionId, engine: engine.id });
+    const recorded = startSession(opened.value, {
+      id: sessionId,
+      engine: engine.id,
+      ...(unguarded.length > 0 ? { unguarded } : {}),
+    });
     if (!recorded.ok) {
       return {
         ok: false,
@@ -319,12 +337,11 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         {
           binary: engine.binary,
           args: engineArgv({
-            engineArgs: engine.args ?? [],
+            engineArgs,
             settingsFile: paths.settings,
             mcpFile: paths.mcp,
             pluginDir: install.pluginDir,
             tools: sessionToolNames(connection.value),
-            flags,
           }),
         },
         {
@@ -343,13 +360,17 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         },
       };
     }
-    // The token is not logged; the session id and the engine are.
+    // The token is not logged; the session id, the engine and any unguarded options are.
     context.log.info('session-started', {
       space: context.key,
       session: sessionId,
       engine: engine.id,
+      unguarded,
     });
-    return { ok: true, value: { sessionId, ptyId: entry.ptyId, engineId: engine.id } };
+    return {
+      ok: true,
+      value: { sessionId, ptyId: entry.ptyId, engineId: engine.id, unguarded },
+    };
   }
 
   return {

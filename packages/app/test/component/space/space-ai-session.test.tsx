@@ -36,7 +36,7 @@ vi.mock('../../../src/renderer/src/components/DockWorkspace.js', async () => {
       <div data-testid="dock-workspace">
         {Object.values(props.panels).flatMap((panel) =>
           panel.tabs.map((tab) => (
-            <div key={tab.id} data-testid="dock-tab" data-kind={tab.kind}>
+            <div key={tab.id} data-testid="dock-tab" data-kind={tab.kind} data-title={tab.title}>
               <button
                 type="button"
                 data-testid="dock-tab-close"
@@ -68,7 +68,14 @@ const ENGINE = { id: 'claude-code', name: 'Claude Code', binary: 'claude' };
 /** A ready `SpaceEngineChoice`: Claude Code, startable. */
 const READY_CHOICE: SpaceEngineChoice = {
   options: [
-    { engineId: 'claude-code', name: 'Claude Code', canStart: true, reason: null, fix: null },
+    {
+      engineId: 'claude-code',
+      name: 'Claude Code',
+      canStart: true,
+      reason: null,
+      fix: null,
+      params: [],
+    },
   ],
   engineId: 'claude-code',
   buttonName: 'Claude Code',
@@ -84,6 +91,7 @@ const readOnly: SpaceSessionHeader = {
   targets: [],
   item: null,
   closed: false,
+  unguarded: [],
 };
 
 const cockpit = {
@@ -127,9 +135,10 @@ beforeEach(() => {
   cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: READY_CHOICE });
   cockpit.spaceSessionStart.mockResolvedValue({
     ok: true,
-    value: { sessionId: 's-1', ptyId: 'pty-1', engineId: 'claude-code' },
+    value: { sessionId: 's-1', ptyId: 'pty-1', engineId: 'claude-code', unguarded: [] },
   });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
+  useSpaceNavStore.setState({ tickedParams: {} });
 });
 
 afterEach(() => cleanup());
@@ -146,7 +155,7 @@ async function startFromNewAi(): Promise<void> {
 test('+ AI starts the guarded session through spaceSessionStart and never the unguarded engine spawn', async () => {
   await startFromNewAi();
   expect(cockpit.spaceSessionStart).toHaveBeenCalledTimes(1);
-  expect(cockpit.spaceSessionStart).toHaveBeenCalledWith({ engineId: 'claude-code' });
+  expect(cockpit.spaceSessionStart).toHaveBeenCalledWith({ engineId: 'claude-code', params: [] });
   expect(cockpit.spawnTerminalEngine).not.toHaveBeenCalled();
   // No width is read from or saved to the v0.8 settings file.
   expect(cockpit.aiPromptsWidthGet).not.toHaveBeenCalled();
@@ -167,7 +176,7 @@ test('Start a session on the Dashboard starts the guarded session and never the 
   await screen.findByTestId('session-header');
   expect(useSpaceNavStore.getState().screen).toBe('sessions');
   expect(cockpit.spaceSessionStart).toHaveBeenCalledTimes(1);
-  expect(cockpit.spaceSessionStart).toHaveBeenCalledWith({ engineId: 'claude-code' });
+  expect(cockpit.spaceSessionStart).toHaveBeenCalledWith({ engineId: 'claude-code', params: [] });
   expect(cockpit.spawnTerminalEngine).not.toHaveBeenCalled();
 });
 
@@ -305,4 +314,31 @@ test('a restored AI tab in a Space window stays dormant: no engine starts until 
   await screen.findByTestId('session-header');
   expect(cockpit.spaceSessionStart).toHaveBeenCalledTimes(1);
   expect(cockpit.spawnTerminalEngine).not.toHaveBeenCalled();
+});
+
+test('a start sends the ticked parameter texts, and an unguarded start suffixes the tab title and shows the header pill', async () => {
+  useSpaceNavStore.setState({
+    tickedParams: { 'claude-code': ['--dangerously-skip-permissions'] },
+  });
+  cockpit.spaceSessionStart.mockResolvedValueOnce({
+    ok: true,
+    value: {
+      sessionId: 's-1',
+      ptyId: 'pty-1',
+      engineId: 'claude-code',
+      unguarded: ['--dangerously-skip-permissions'],
+    },
+  });
+  cockpit.spaceSessionHeader.mockResolvedValueOnce({
+    ok: true,
+    value: { ...readOnly, unguarded: ['--dangerously-skip-permissions'] },
+  });
+  await startFromNewAi();
+  expect(cockpit.spaceSessionStart).toHaveBeenCalledWith({
+    engineId: 'claude-code',
+    params: ['--dangerously-skip-permissions'],
+  });
+  const header = screen.getByTestId('session-header');
+  expect(within(header).getByTestId('session-header-unguarded').textContent).toBe('Unguarded');
+  expect(screen.getByTestId('dock-tab').dataset.title).toContain('· unguarded');
 });

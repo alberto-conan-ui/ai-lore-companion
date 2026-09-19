@@ -82,8 +82,20 @@ export type SpaceWindowInitPayload =
   | { mode: 'setup'; start: SetupStart }
   | { mode: 'migration'; folder: string; legacy: LegacySummary }
   | { mode: 'not-a-space'; folder: string; plainRepository: boolean; reason: string }
-  | { mode: 'space'; space: SpaceSummary; justCreated?: boolean; colorScheme?: string; spaceTitle?: string }
-  | { mode: 'space-files'; space: SpaceSummary; open?: OpenInFiles; colorScheme?: string; spaceTitle?: string };
+  | {
+      mode: 'space';
+      space: SpaceSummary;
+      justCreated?: boolean;
+      colorScheme?: string;
+      spaceTitle?: string;
+    }
+  | {
+      mode: 'space-files';
+      space: SpaceSummary;
+      open?: OpenInFiles;
+      colorScheme?: string;
+      spaceTitle?: string;
+    };
 
 /** The name of a 1.0 window mode. */
 export type SpaceWindowMode = SpaceWindowInitPayload['mode'];

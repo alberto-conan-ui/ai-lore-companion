@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 // The engine start control's sign-in fix mounts `CommandPanel`, which uses `useXtermSession`;
@@ -54,16 +54,23 @@ function props(
     buttonTestId: 'dashboard-start-session',
     noteTestId: 'dashboard-start-session-note',
     menuTestId: 'dashboard-start-menu',
+    ticked: null,
+    onTickedChange: vi.fn(),
     ...extra,
   };
 }
 
-const readyOption = (engineId: string, name: string) => ({
+const readyOption = (
+  engineId: string,
+  name: string,
+  params: SpaceEngineChoice['options'][number]['params'] = [],
+) => ({
   engineId,
   name,
   canStart: true,
   reason: null,
   fix: null,
+  params,
 });
 
 test('the button names the engine of the choice', () => {
@@ -112,6 +119,7 @@ test('menu: always shows Codex CLI aria-disabled with its reason, even with one 
         canStart: false,
         reason: 'guarded Space sessions are not available for this engine yet',
         fix: null,
+        params: [],
       },
     ],
     engineId: 'default.claude',
@@ -168,6 +176,7 @@ test('a sign-in refusal shows the fix, its command line, and mounts the command 
           commandLine: 'claude auth login',
           section: null,
         },
+        params: [],
       },
     ],
     engineId: null,
@@ -220,6 +229,7 @@ test('set-up-claude-code navigates to Set up this computer at the engines sectio
           commandLine: null,
           section: 'engines',
         },
+        params: [],
       },
     ],
     engineId: null,
@@ -261,4 +271,131 @@ test('a click starts the engine and shows "Starting <name>…" until a new choic
   fireEvent.click(screen.getByTestId('dashboard-start-session'));
   expect(onStart).toHaveBeenCalledWith('default.claude');
   expect(screen.getByTestId('dashboard-start-session').textContent).toBe('Starting Claude Code…');
+});
+
+// ---------- M10.3: parameters ----------
+
+test("the chosen engine's parameters are listed with the default ones ticked", () => {
+  const choice: SpaceEngineChoice = {
+    options: [
+      readyOption('default.claude', 'Claude Code', [
+        { text: '--model opus', defaultOn: true, effect: 'none', options: [] },
+        { text: '--verbose', defaultOn: false, effect: 'none', options: [] },
+      ]),
+    ],
+    engineId: 'default.claude',
+    buttonName: 'Claude Code',
+    refusal: null,
+  };
+  render(<EngineStartControl {...props(choice)} />);
+  expect(screen.getByTestId('dashboard-start-session-params').textContent).toBe(
+    'Parameters of Claude Code',
+  );
+  expect((screen.getByTestId('dashboard-start-session-param-0') as HTMLInputElement).checked).toBe(
+    true,
+  );
+  expect((screen.getByTestId('dashboard-start-session-param-1') as HTMLInputElement).checked).toBe(
+    false,
+  );
+});
+
+test("an Antigravity parameter whose effect is 'none' shows it ticked, no unguarded note, and the plain start button", () => {
+  const choice: SpaceEngineChoice = {
+    options: [
+      readyOption('default.antigravity', 'Antigravity CLI', [
+        { text: '--dangerously-skip-permissions', defaultOn: true, effect: 'none', options: [] },
+      ]),
+    ],
+    engineId: 'default.antigravity',
+    buttonName: 'Antigravity CLI',
+    refusal: null,
+  };
+  render(<EngineStartControl {...props(choice)} />);
+  expect((screen.getByTestId('dashboard-start-session-param-0') as HTMLInputElement).checked).toBe(
+    true,
+  );
+  expect(screen.queryByTestId('dashboard-start-session-unguarded-note')).toBeNull();
+  expect(screen.getByTestId('dashboard-start-session').textContent).toBe(
+    'Start a Antigravity CLI session',
+  );
+});
+
+test('ticking a guard-changing parameter shows the unguarded note and the unguarded start button', () => {
+  const choice: SpaceEngineChoice = {
+    options: [
+      readyOption('default.claude', 'Claude Code', [
+        {
+          text: '--dangerously-skip-permissions',
+          defaultOn: false,
+          effect: 'unguarded',
+          options: ['--dangerously-skip-permissions'],
+        },
+      ]),
+    ],
+    engineId: 'default.claude',
+    buttonName: 'Claude Code',
+    refusal: null,
+  };
+
+  function Harness() {
+    const [ticked, setTicked] = useState<string[] | null>(null);
+    return (
+      <EngineStartControl
+        {...props(choice, {
+          ticked,
+          onTickedChange: (_engineId: string, texts: string[]) => setTicked(texts),
+        })}
+      />
+    );
+  }
+  render(<Harness />);
+  expect(screen.queryByTestId('dashboard-start-session-unguarded-note')).toBeNull();
+  fireEvent.click(screen.getByTestId('dashboard-start-session-param-0'));
+  expect(screen.getByTestId('dashboard-start-session-unguarded-note').textContent).toContain(
+    'This session will be unguarded: --dangerously-skip-permissions changes what it may do',
+  );
+  expect(screen.getByTestId('dashboard-start-session').textContent).toBe(
+    'Start an unguarded Claude Code session',
+  );
+});
+
+test('a refused parameter is disabled', () => {
+  const choice: SpaceEngineChoice = {
+    options: [
+      readyOption('default.claude', 'Claude Code', [
+        {
+          text: '--settings /tmp/x.json',
+          defaultOn: false,
+          effect: 'refused',
+          options: ['--settings'],
+        },
+      ]),
+    ],
+    engineId: 'default.claude',
+    buttonName: 'Claude Code',
+    refusal: null,
+  };
+  render(<EngineStartControl {...props(choice)} />);
+  const box = screen.getByTestId('dashboard-start-session-param-0') as HTMLInputElement;
+  expect(box.disabled).toBe(true);
+  expect(box.checked).toBe(false);
+});
+
+test('no parameters shows the Edit parameters link', () => {
+  const choice: SpaceEngineChoice = {
+    options: [readyOption('default.claude', 'Claude Code', [])],
+    engineId: 'default.claude',
+    buttonName: 'Claude Code',
+    refusal: null,
+  };
+  render(<EngineStartControl {...props(choice)} />);
+  expect(screen.getByTestId('dashboard-start-session-params').textContent).toBe(
+    'Parameters of Claude Code',
+  );
+  expect(
+    screen.getByText('Claude Code has no parameters. Add them in Settings, Engines.'),
+  ).toBeTruthy();
+  expect(screen.getByTestId('dashboard-start-session-params-edit').textContent).toBe(
+    'Edit parameters',
+  );
 });

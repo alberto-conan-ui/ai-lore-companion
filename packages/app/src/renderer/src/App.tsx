@@ -462,10 +462,16 @@ export function App(): JSX.Element {
         // routing on; it may send another one later to change the screen.
         useSpaceWindowStore.getState().setInit(payload);
         if ('colorScheme' in payload && payload.colorScheme) {
-          const hue = parseInt(payload.colorScheme, 10);
-          document.documentElement.style.setProperty('--color-space-accent', `hsl(${hue}, 70%, 58%)`);
+          const hue = Number.parseInt(payload.colorScheme, 10);
+          document.documentElement.style.setProperty(
+            '--color-space-accent',
+            `hsl(${hue}, 70%, 58%)`,
+          );
           document.documentElement.style.setProperty('--color-space-tint', `hsl(${hue}, 32%, 12%)`);
-          document.documentElement.style.setProperty('--color-space-tint-light', `hsl(${hue}, 52%, 91%)`);
+          document.documentElement.style.setProperty(
+            '--color-space-tint-light',
+            `hsl(${hue}, 52%, 91%)`,
+          );
         }
         setMode('space');
         return;

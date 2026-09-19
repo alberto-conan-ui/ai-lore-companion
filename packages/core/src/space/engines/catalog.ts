@@ -9,7 +9,7 @@
  */
 
 import { basename } from 'node:path';
-import type { EngineEntry } from '../../engines/index.js';
+import type { EngineEntry, EngineParam } from '../../engines/index.js';
 
 /** The command name of Claude Code, the one engine of the MVP. */
 export const CLAUDE_BINARY_NAME = 'claude';
@@ -44,6 +44,8 @@ export type EngineCatalogEntry = {
   installNeeds: 'npm' | null;
   signInCommand: string;
   signInCheck: EngineSignInCheck;
+  /** The parameters a catalog entry gets when the stored entry has none (3.4 rule 3). */
+  seedParams: readonly EngineParam[];
   /** Whether the companion can run a guarded Space session with it. */
   guardedSessions: boolean;
   /** Whether Set up this computer is not ready without it. */
@@ -66,6 +68,7 @@ export const ENGINE_CATALOG: readonly EngineCatalogEntry[] = [
     installNeeds: null,
     signInCommand: 'claude auth login',
     signInCheck: { kind: 'claude-auth-status' },
+    seedParams: [],
     guardedSessions: true,
     required: true,
     note: null,
@@ -81,6 +84,7 @@ export const ENGINE_CATALOG: readonly EngineCatalogEntry[] = [
     installNeeds: 'npm',
     signInCommand: 'codex login',
     signInCheck: { kind: 'exit-code', args: ['login', 'status'] },
+    seedParams: [],
     guardedSessions: false,
     required: false,
     note: null,
@@ -96,6 +100,7 @@ export const ENGINE_CATALOG: readonly EngineCatalogEntry[] = [
     installNeeds: null,
     signInCommand: 'agy',
     signInCheck: { kind: 'none' },
+    seedParams: [{ text: '--dangerously-skip-permissions', defaultOn: true }],
     guardedSessions: false,
     required: false,
     note: null,
@@ -111,6 +116,7 @@ export const ENGINE_CATALOG: readonly EngineCatalogEntry[] = [
     installNeeds: null,
     signInCommand: 'opencode auth login',
     signInCheck: { kind: 'opencode-auth-list' },
+    seedParams: [],
     guardedSessions: false,
     required: false,
     note: 'Also runs DeepSeek models: choose DeepSeek when signing in.',

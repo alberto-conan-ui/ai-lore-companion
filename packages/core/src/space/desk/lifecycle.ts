@@ -70,6 +70,8 @@ export type SessionStart = {
   engine: string;
   /** The item or focus the session is on, when it is on one. */
   item?: IssueRef;
+  /** The options that changed the guard, by name. Written only when non-empty. */
+  unguarded?: string[];
 };
 
 /** What `repairSessionRecords` changed. Both lists are empty on a desk that follows the rule. */
@@ -147,6 +149,9 @@ export function startSession(desk: Desk, start: SessionStart): Result<SessionRec
     mode: 'read-only',
     startedAt: desk.now().toISOString(),
     ...(start.item !== undefined ? { item: start.item } : {}),
+    ...(start.unguarded !== undefined && start.unguarded.length > 0
+      ? { unguarded: start.unguarded }
+      : {}),
   });
 }
 

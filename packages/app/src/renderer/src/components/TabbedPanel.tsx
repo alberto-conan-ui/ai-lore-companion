@@ -26,6 +26,8 @@ export type WorkspaceTab = {
   status?: TerminalForegroundStatus;
   /** For `kind === 'ai'`: the engine chosen when the tab was opened. */
   engine?: string;
+  /** For an AI tab of a Space: its session started unguarded (M10.3). */
+  unguarded?: boolean;
   /**
    * Set only on a tab **restored from a previous session's layout snapshot**.
    * It records what the tab was running last session and marks the tab

@@ -8,11 +8,16 @@ import { type NewTabContext, TAB_KINDS, type TabRenderContext } from '../../comp
 import { SessionHeader } from '../session-header/SessionHeader.js';
 import { SkillsColumn } from '../skills/SkillsColumn.js';
 import { secondaryButtonStyle } from '../styles.js';
-import { AI_READINESS_CHECKING, EngineStartControl } from './EngineStartControl.js';
+import {
+  AI_READINESS_CHECKING,
+  EngineStartControl,
+  defaultParamTexts,
+} from './EngineStartControl.js';
 import {
   nextIndexOf,
   withAiEngine,
   withAiRunning,
+  withAiUnguarded,
   withTabRenamed,
   withTerminalStatus,
   withoutLastSession,
@@ -128,8 +133,9 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
     void window.cockpit.spaceSessionEnd({ sessionId });
   }, []);
 
-  const executionFlags = useSpaceNavStore((state) => state.executionFlags);
-  const setExecutionFlags = useSpaceNavStore((state) => state.setExecutionFlags);
+  const tickedParams = useSpaceNavStore((state) => state.tickedParams);
+  const setTickedParams = useSpaceNavStore((state) => state.setTickedParams);
+  const ticked = engineId !== null ? (tickedParams[engineId] ?? null) : null;
   const closeTab = useCallback(
     (tabId: string): void => {
       const tab = tabs.find((t) => t.id === tabId);
@@ -167,13 +173,15 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
     (tab: WorkspaceTab): AiTabSpace => ({
       start: async (engineId) => {
         pendingStart.current.delete(tab.id);
-        const started = await window.cockpit.spaceSessionStart({
-          engineId,
-          ...(executionFlags.length > 0 ? { flags: executionFlags } : {}),
-        });
+        const option = choice?.options.find((candidate) => candidate.engineId === engineId);
+        const params = tickedParams[engineId] ?? defaultParamTexts(option?.params ?? []);
+        const started = await window.cockpit.spaceSessionStart({ engineId, params });
         if (!started.ok) {
           refresh();
           return { ok: false, message: started.error.message };
+        }
+        if (started.value.unguarded.length > 0) {
+          setTabs((prev) => withAiUnguarded(prev, tab.id));
         }
         return { ok: true, sessionId: started.value.sessionId, ptyId: started.value.ptyId };
       },
@@ -198,7 +206,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       sidebar: (ptyId, focusPty) => <SkillsColumn ptyId={ptyId} focusPty={focusPty} />,
       hint: AI_TAB_HINT,
     }),
-    [engineName, endSession, refresh, reportSessions, executionFlags],
+    [engineName, endSession, refresh, reportSessions, choice, tickedParams],
   );
 
   const onDockApi = useCallback((api: DockviewApi): void => {
@@ -290,8 +298,8 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
           buttonTestId="new-ai"
           noteTestId={AI_NOTE_ID}
           menuTestId="space-sessions-engine-menu"
-          flags={executionFlags}
-          onFlagsChange={setExecutionFlags}
+          ticked={ticked}
+          onTickedChange={setTickedParams}
         />
         <p style={emptyTextStyle}>Other tabs:</p>
         <div style={emptyActionsStyle}>
@@ -329,8 +337,8 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
           buttonTestId="new-ai"
           noteTestId={AI_NOTE_ID}
           menuTestId="space-sessions-engine-menu"
-          flags={executionFlags}
-          onFlagsChange={setExecutionFlags}
+          ticked={ticked}
+          onTickedChange={setTickedParams}
         />
       </div>
       <DockWorkspace

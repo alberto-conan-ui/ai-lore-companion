@@ -74,6 +74,11 @@ function BoardRowItem({ row }: { row: BoardRow }): JSX.Element {
           Stale: no change on GitHub for {durationText(row.idleMs ?? 0)}.
         </span>
       ) : null}
+      {row.local !== null && row.local.unguarded.length > 0 ? (
+        <span style={unguardedStyle} data-testid={`agents-row-unguarded-${row.issue.number}`}>
+          Unguarded: started with {row.local.unguarded.join(', ')}.
+        </span>
+      ) : null}
       {row.gateTicket !== null ? (
         <span style={lineStyle}>
           A gate waits for your answer.{' '}
@@ -159,6 +164,11 @@ const lineStyle: React.CSSProperties = { color: 'var(--color-text-secondary)' };
 const staleStyle: React.CSSProperties = {
   fontWeight: 600,
   color: 'var(--color-amber-tag-fg)',
+};
+
+const unguardedStyle: React.CSSProperties = {
+  fontWeight: 600,
+  color: 'var(--color-danger-fg)',
 };
 
 const smallButtonStyle: React.CSSProperties = {

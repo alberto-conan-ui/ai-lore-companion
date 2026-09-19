@@ -38,6 +38,9 @@ export function withoutTab(tabs: WorkspaceTab[], tabId: string): WorkspaceTab[] 
   return tabs.some((tab) => tab.id === tabId) ? tabs.filter((tab) => tab.id !== tabId) : tabs;
 }
 
+/** Appended to an unguarded AI tab's automatic title (M10.3). */
+export const UNGUARDED_TITLE_SUFFIX = ' · unguarded';
+
 /** A name set by hand is kept and stops the automatic title; an empty name returns to the automatic title. */
 export function withTabRenamed(tabs: WorkspaceTab[], tabId: string, raw: string): WorkspaceTab[] {
   const name = raw.trim();
@@ -62,7 +65,7 @@ export function withTerminalStatus(
   return replaceTab(tabs, tabId, (tab) => {
     const automatic =
       tab.kind === 'ai'
-        ? `${tab.engine ? engineName(tab.engine) : 'AI'} · ${status}`
+        ? `${tab.engine ? engineName(tab.engine) : 'AI'} · ${status}${tab.unguarded ? UNGUARDED_TITLE_SUFFIX : ''}`
         : status === 'running' && command
           ? command
           : (tab.baseTitle ?? tab.title);
@@ -80,7 +83,7 @@ export function withAiEngine(
 ): WorkspaceTab[] {
   return replaceTab(tabs, tabId, (tab) => {
     if (tab.kind !== 'ai' || tab.engine === engineId) return tab;
-    const baseTitle = `AI (${engineName(engineId)})`;
+    const baseTitle = `AI (${engineName(engineId)})${tab.unguarded ? UNGUARDED_TITLE_SUFFIX : ''}`;
     return {
       ...tab,
       engine: engineId,
@@ -100,9 +103,27 @@ export function withAiRunning(
   return replaceTab(tabs, tabId, (tab) => {
     if (tab.kind !== 'ai') return tab;
     const name = tab.engine ? engineName(tab.engine) : '';
-    const baseTitle = running ? name : `AI (${name})`;
+    const suffix = tab.unguarded ? UNGUARDED_TITLE_SUFFIX : '';
+    const baseTitle = running ? `${name}${suffix}` : `AI (${name})${suffix}`;
     if (tab.baseTitle === baseTitle && (tab.manualTitle || tab.title === baseTitle)) return tab;
     return { ...tab, baseTitle, title: tab.manualTitle ? tab.title : baseTitle };
+  });
+}
+
+/**
+ * A session started unguarded (M10.3): the AI tab's title ends with
+ * `UNGUARDED_TITLE_SUFFIX`, unless it was renamed by hand.
+ */
+export function withAiUnguarded(tabs: WorkspaceTab[], tabId: string): WorkspaceTab[] {
+  return replaceTab(tabs, tabId, (tab) => {
+    if (tab.kind !== 'ai' || tab.unguarded) return tab;
+    const baseTitle = `${tab.baseTitle ?? tab.title}${UNGUARDED_TITLE_SUFFIX}`;
+    return {
+      ...tab,
+      unguarded: true,
+      baseTitle,
+      title: tab.manualTitle ? tab.title : baseTitle,
+    };
   });
 }
 

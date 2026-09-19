@@ -200,12 +200,26 @@ test('session issues are board rows and never focuses or items', () => {
   assert.equal(model.board[0]?.local?.engine, 'claude-code');
   assert.equal(model.board[0]?.title, `The claude-code session that started at ${NOW}`);
   assert.equal(model.board[0]?.local?.item, null);
+  assert.deepEqual(model.board[0]?.local?.unguarded, []);
   assert.equal(model.board[1]?.local, null, 'a session of another desk');
   const numbers = [
     ...model.columns.flatMap((column) => column.focuses.map((card) => card.issue.number)),
     ...model.standalone.map((card) => card.issue.number),
   ];
   assert.ok(!numbers.includes(20) && !numbers.includes(21));
+});
+
+test('a board row carries the unguarded options of its local session record', () => {
+  const model = dashboardModel({
+    snapshot: snapshot({
+      focuses: [],
+      sessions: [sessionIssue(20)],
+    }),
+    sessions: [record('s-1', { issue: ref(20), unguarded: ['--dangerously-skip-permissions'] })],
+    gates: [],
+    now: NOW,
+  });
+  assert.deepEqual(model.board[0]?.local?.unguarded, ['--dangerously-skip-permissions']);
 });
 
 test('a session in Writing or Blocked without change for the threshold is stale; Done never is', () => {

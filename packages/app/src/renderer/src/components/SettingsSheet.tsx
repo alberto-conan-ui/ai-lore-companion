@@ -1,6 +1,7 @@
 import type {
   AppEntry,
   EngineEntry,
+  EngineParam,
   IgnoreLevel,
   IgnoreRule,
   SettingDef,
@@ -1185,7 +1186,7 @@ function EnginesSection(): JSX.Element {
   };
 
   const startDraft = (): void => {
-    setDraft({ id: crypto.randomUUID(), name: '', binary: '', args: [] });
+    setDraft({ id: crypto.randomUUID(), name: '', binary: '', params: [] });
   };
 
   const commitDraft = (): void => {
@@ -1194,9 +1195,10 @@ function EnginesSection(): JSX.Element {
       id: draft.id,
       name: draft.name.trim(),
       binary: draft.binary.trim(),
+      params: (draft.params ?? []).filter((param) => param.text.trim().length > 0),
     };
-    if (draft.args && draft.args.length > 0) entry.args = draft.args;
-    
+    if (draft.helperModel !== undefined) entry.helperModel = draft.helperModel;
+
     const index = engines.findIndex((e) => e.id === entry.id);
     if (index >= 0) {
       const next = [...engines];
@@ -1232,21 +1234,59 @@ function EnginesSection(): JSX.Element {
             onChange={(e) => setDraft({ ...draft, binary: e.target.value })}
             data-testid="engine-draft-binary"
           />
-          <input
-            style={engineInputStyle}
-            placeholder="Args, space-separated (optional)"
-            value={(draft.args ?? []).join(' ')}
-            onChange={(e) =>
-              setDraft({
-                ...draft,
-                args: e.target.value
-                  .split(/\s+/)
-                  .map((s) => s.trim())
-                  .filter((s) => s.length > 0),
-              })
-            }
-            data-testid="engine-draft-args"
-          />
+          <div style={engineParamsListStyle} data-testid="engine-draft-params">
+            {(draft.params ?? []).map((param, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: the list has no other stable key while being edited.
+              <div key={index} style={engineParamRowStyle}>
+                <input
+                  style={engineInputStyle}
+                  placeholder="Parameter (e.g. --dangerously-skip-permissions)"
+                  value={param.text}
+                  onChange={(e) => {
+                    const params = [...(draft.params ?? [])];
+                    params[index] = { ...param, text: e.target.value };
+                    setDraft({ ...draft, params });
+                  }}
+                  data-testid={`engine-draft-param-${index}`}
+                />
+                <label style={engineParamDefaultLabelStyle}>
+                  <input
+                    type="checkbox"
+                    checked={param.defaultOn}
+                    onChange={(e) => {
+                      const params = [...(draft.params ?? [])];
+                      params[index] = { ...param, defaultOn: e.target.checked };
+                      setDraft({ ...draft, params });
+                    }}
+                    data-testid={`engine-draft-param-default-${index}`}
+                  />
+                  Ticked by default
+                </label>
+                <button
+                  type="button"
+                  style={appRemoveStyle}
+                  onClick={() => {
+                    const params = (draft.params ?? []).filter((_, i) => i !== index);
+                    setDraft({ ...draft, params });
+                  }}
+                  data-testid={`engine-draft-param-remove-${index}`}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+          <button
+            type="button"
+            style={appRemoveStyle}
+            onClick={() => {
+              const param: EngineParam = { text: '', defaultOn: false };
+              setDraft({ ...draft, params: [...(draft.params ?? []), param] });
+            }}
+            data-testid="engine-draft-param-add"
+          >
+            Add parameter
+          </button>
           <div style={engineDraftButtonRow}>
             <button
               type="button"
@@ -1283,7 +1323,7 @@ function EnginesSection(): JSX.Element {
                       <span style={appMetaStyle}>{engineMetaSummary(engine)}</span>
                       {isCatalog ? (
                         <span style={catalogEngineNoteStyle}>
-                          Listed by AI-Lore; it cannot be removed, but you can edit its arguments.
+                          Listed by AI-Lore; it cannot be removed. Its parameters can be edited.
                         </span>
                       ) : null}
                     </div>
@@ -1327,8 +1367,10 @@ function EnginesSection(): JSX.Element {
 }
 
 function engineMetaSummary(engine: EngineEntry): string {
-  const args = engine.args && engine.args.length > 0 ? ` ${engine.args.join(' ')}` : '';
-  return `${engine.binary}${args}`;
+  const params = (engine.params ?? [])
+    .map((param) => (param.defaultOn ? `${param.text} (default)` : param.text))
+    .join(' ');
+  return params.length > 0 ? `${engine.binary} ${params}` : engine.binary;
 }
 
 const engineDraftStyle: React.CSSProperties = {
@@ -1355,6 +1397,27 @@ const engineDraftButtonRow: React.CSSProperties = {
   display: 'flex',
   gap: '0.4rem',
   alignItems: 'center',
+};
+
+const engineParamsListStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.35rem',
+};
+
+const engineParamRowStyle: React.CSSProperties = {
+  display: 'flex',
+  gap: '0.4rem',
+  alignItems: 'center',
+};
+
+const engineParamDefaultLabelStyle: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.3rem',
+  fontSize: '0.78rem',
+  color: 'var(--color-text-secondary)',
+  whiteSpace: 'nowrap',
 };
 
 const spacesFolderStyle: React.CSSProperties = {

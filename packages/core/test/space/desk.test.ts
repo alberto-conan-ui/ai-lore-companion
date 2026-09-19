@@ -738,6 +738,8 @@ test('the guards accept the record shapes with extra fields and refuse anything 
   assert.equal(isSessionRecord({ ...session('s1'), extra: 1 }), true);
   assert.equal(isSessionRecord({ ...session('s1'), startedAt: 'yesterday' }), false);
   assert.equal(isSessionRecord({ ...session('s1'), item: { number: 1 } }), false);
+  assert.equal(isSessionRecord({ ...session('s1'), unguarded: ['--x'] }), true);
+  assert.equal(isSessionRecord({ ...session('s1'), unguarded: [1] }), false);
   assert.equal(isClaim({ sessionId: 's1', target: REPO, claimedAt: FIXED }), true);
   assert.equal(
     isClaim({ sessionId: 's1', target: { kind: 'repository' }, claimedAt: FIXED }),

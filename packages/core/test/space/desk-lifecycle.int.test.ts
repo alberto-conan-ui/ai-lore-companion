@@ -207,6 +207,24 @@ test('a session starts in Read only and holds nothing', async (t) => {
     }),
   );
   assert.equal(onItem.item?.number, 12);
+
+  // `unguarded: []` writes no field (M10.3).
+  const noUnguarded = must(
+    startSession(f.desk, { id: 's3', engine: 'claude-code', unguarded: [] }),
+  );
+  assert.equal(noUnguarded.unguarded, undefined);
+  const onDiskS3 = records(f, 'sessions').find((r) => r.id === 's3');
+  assert.ok(onDiskS3);
+  assert.equal('unguarded' in onDiskS3, false);
+
+  const unguarded = must(
+    startSession(f.desk, {
+      id: 's4',
+      engine: 'claude-code',
+      unguarded: ['--dangerously-skip-permissions'],
+    }),
+  );
+  assert.deepEqual(unguarded.unguarded, ['--dangerously-skip-permissions']);
 });
 
 test('after entering Writing a session writes the claimed repository on the claimed branch and nothing else', async (t) => {

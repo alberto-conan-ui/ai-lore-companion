@@ -205,6 +205,7 @@ type Session = { id: string; files: SessionFilePaths; client: Client };
 async function startGuardedSession(): Promise<Session> {
   const started = (await harness.invoke('spaceSessionStart', spaceWindow, {
     engineId: 'claude-code',
+    params: [],
   })) as SpaceSessionStartResult;
   assert.ok(started.ok, JSON.stringify(started));
   const id = started.value.sessionId;

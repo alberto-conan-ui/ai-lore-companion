@@ -126,6 +126,8 @@ export type BoardRow = {
     closed: boolean;
     /** The item or focus the session is on, from the desk, or `null`. */
     item: IssueRef | null;
+    /** The options that changed the guard when the session started, from the desk; `[]` when none. */
+    unguarded: string[];
   } | null;
   /** The ticket of a pending gate of the local session, or `null`. */
   gateTicket: string | null;
@@ -263,6 +265,7 @@ export function dashboardModel(input: DashboardInput): DashboardModel {
               startedAt: record.startedAt,
               closed: record.closedAt !== undefined,
               item: record.item ?? null,
+              unguarded: record.unguarded ?? [],
             },
       gateTicket: gate?.ticket ?? null,
     };

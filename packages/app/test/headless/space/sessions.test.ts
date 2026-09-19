@@ -59,7 +59,7 @@ import {
   writeSessionFiles,
 } from '../../../src/main/space/sessions/files.js';
 import {
-  checkSessionEngine,
+  checkStartParams,
   findPython3,
   verifyInstall,
 } from '../../../src/main/space/sessions/preflight.js';
@@ -285,24 +285,39 @@ test('the command lines survive a shell for a userData path with a space and a s
   assert.deepEqual(argvThroughShell(quoteForShell('')), ['']);
 });
 
-test('an engine entry with an option that changes the guard is not started', () => {
-  const entry = (args: string[]): EngineEntry => ({
+test('checkStartParams: a ticked parameter is checked against the engine options of M10.3', () => {
+  const engine: EngineEntry = {
     id: 'c',
     name: 'Claude Code',
     binary: 'claude',
-    args,
-  });
-  assert.equal(checkSessionEngine([entry(['--model', 'opus'])], 'c').ok, true);
-  for (const args of [
-    ['--dangerously-skip-permissions'],
-    ['--permission-mode=bypassPermissions'],
-    ['--model', 'opus', '--allowedTools', 'Bash'],
-    ['--settings', '/tmp/other.json'],
-    ['--bare'],
-  ]) {
-    const checked = checkSessionEngine([entry(args)], 'c');
-    assert.equal(checked.ok ? '' : checked.error.kind, 'engine-not-supported', args.join(' '));
+    params: [
+      { text: '--model opus', defaultOn: true },
+      { text: '--dangerously-skip-permissions', defaultOn: false },
+      { text: '--permission-mode=bypassPermissions', defaultOn: false },
+      { text: '--settings /tmp/other.json', defaultOn: false },
+      { text: '--bare', defaultOn: false },
+    ],
+  };
+
+  const modelOnly = checkStartParams(engine, ['--model opus']);
+  assert.equal(modelOnly.ok, true);
+  if (modelOnly.ok) assert.deepEqual(modelOnly.value.unguarded, []);
+
+  const skip = checkStartParams(engine, ['--dangerously-skip-permissions']);
+  assert.equal(skip.ok, true);
+  if (skip.ok) assert.deepEqual(skip.value.unguarded, ['--dangerously-skip-permissions']);
+
+  const permissionMode = checkStartParams(engine, ['--permission-mode=bypassPermissions']);
+  assert.equal(permissionMode.ok, true);
+  if (permissionMode.ok) assert.deepEqual(permissionMode.value.unguarded, ['--permission-mode']);
+
+  for (const text of ['--settings /tmp/other.json', '--bare']) {
+    const refused = checkStartParams(engine, [text]);
+    assert.equal(refused.ok ? '' : refused.error.kind, 'engine-not-supported', text);
   }
+
+  const unknown = checkStartParams(engine, ['--not-a-parameter']);
+  assert.equal(unknown.ok ? '' : unknown.error.kind, 'invalid-argument');
 });
 
 test('a session folder is 0700, every file 0600, and the settings hold the guard', async () => {
@@ -693,7 +708,10 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
       id: 'claude-code',
       name: 'Claude Code',
       binary: '/opt/nowhere/claude',
-      args: ['--model', 'opus'],
+      params: [
+        { text: '--model opus', defaultOn: true },
+        { text: '--dangerously-skip-permissions', defaultOn: false },
+      ],
     },
     { id: 'gemini', name: 'Gemini', binary: 'gemini' },
   ];
@@ -735,6 +753,7 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
     // Not installed yet: refused, and nothing is spawned.
     const refused = (await h.invoke('spaceSessionStart', spaceWindow, {
       engineId: 'claude-code',
+      params: ['--model opus'],
     })) as {
       ok: boolean;
       error?: { kind: string };
@@ -761,12 +780,14 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
 
     const started = (await h.invoke('spaceSessionStart', spaceWindow, {
       engineId: 'claude-code',
+      params: ['--model opus'],
     })) as {
       ok: boolean;
-      value: { sessionId: string; ptyId: string };
+      value: { sessionId: string; ptyId: string; unguarded: string[] };
     };
     assert.equal(started.ok, true, JSON.stringify(started));
     const { sessionId } = started.value;
+    assert.deepEqual(started.value.unguarded, [], 'a guarded start answers no unguarded option');
     assert.equal(
       existsSync(join(context.desk.sessions, 's-stale')),
       false,
@@ -776,6 +797,11 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
     assert.ok(call?.engine && call.opts);
     assert.equal(call.engine.binary, '/opt/nowhere/claude');
     const args = call.engine.args ?? [];
+    assert.deepEqual(
+      args.slice(0, 2),
+      ['--model', 'opus'],
+      "the ticked parameter's arguments come first",
+    );
     const files = sessionFilePaths(context.desk.sessions, sessionId);
     assert.equal(args[args.indexOf('--settings') + 1], files.settings);
     assert.equal(
@@ -832,6 +858,7 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
     // The engine exits by itself: the session ends the same way.
     const second = (await h.invoke('spaceSessionStart', spaceWindow, {
       engineId: 'claude-code',
+      params: ['--model opus'],
     })) as { ok: boolean; value: { sessionId: string } };
     assert.equal(second.ok, true, JSON.stringify(second));
     spawned[1]?.opts?.onExit?.(0);
@@ -839,8 +866,34 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
     // A session still running when its Space window closes (and at app quit) is ended too.
     const third = (await h.invoke('spaceSessionStart', spaceWindow, {
       engineId: 'claude-code',
+      params: ['--model opus'],
     })) as { ok: boolean; value: { sessionId: string } };
     assert.equal(third.ok, true, JSON.stringify(third));
+
+    // M10.3: a start with a guard-changing parameter is allowed, and records `unguarded` on
+    // the desk, in `SpaceSessionStarted` and in the header.
+    const unguardedStart = (await h.invoke('spaceSessionStart', spaceWindow, {
+      engineId: 'claude-code',
+      params: ['--dangerously-skip-permissions'],
+    })) as { ok: boolean; value: { sessionId: string; unguarded: string[] } };
+    assert.equal(unguardedStart.ok, true, JSON.stringify(unguardedStart));
+    assert.deepEqual(unguardedStart.value.unguarded, ['--dangerously-skip-permissions']);
+    const unguardedRecord = getSession(opened.value, unguardedStart.value.sessionId);
+    assert.ok(unguardedRecord.ok);
+    assert.deepEqual(unguardedRecord.value?.unguarded, ['--dangerously-skip-permissions']);
+    const unguardedHeader = (await h.invoke('spaceSessionHeader', spaceWindow, {
+      sessionId: unguardedStart.value.sessionId,
+    })) as { ok: boolean; value: { unguarded: string[] } };
+    assert.deepEqual(unguardedHeader.value.unguarded, ['--dangerously-skip-permissions']);
+    await h.invoke('spaceSessionEnd', spaceWindow, { sessionId: unguardedStart.value.sessionId });
+
+    // A start with `params` holding a text that is not one of the engine's parameters is refused.
+    const unknownParam = (await h.invoke('spaceSessionStart', spaceWindow, {
+      engineId: 'claude-code',
+      params: ['--not-a-parameter'],
+    })) as { ok: boolean; error?: { kind: string } };
+    assert.equal(unknownParam.error?.kind, 'invalid-argument');
+    assert.equal(spawned.length, 4);
 
     // A check script altered after the install refuses the next start.
     const check = join(claudeCodeInstallPaths(context.desk.install).checks, 'lore-integrity.py');
@@ -848,12 +901,13 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
     writeFileSync(check, '# altered\n', { flag: 'a' });
     const altered = (await h.invoke('spaceSessionStart', spaceWindow, {
       engineId: 'claude-code',
+      params: ['--model opus'],
     })) as {
       error?: { kind: string; message: string };
     };
     assert.equal(altered.error?.kind, 'check-altered');
     assert.match(altered.error?.message ?? '', /lore-integrity\.py/);
-    assert.equal(spawned.length, 3);
+    assert.equal(spawned.length, 4);
 
     await h.space.host.windowClosed(filesWindow.id);
     await h.space.host.windowClosed(spaceWindow.id);

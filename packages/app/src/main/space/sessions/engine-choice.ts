@@ -12,8 +12,15 @@ import {
   canRunGuardedSession,
   catalogEntryFor,
   setupCommandLine,
+  splitParamText,
 } from '@ai-lore-companion/core';
-import type { SpaceEngineChoice, SpaceEngineFix, SpaceEngineOption } from '../../../shared/ipc.js';
+import type {
+  SpaceEngineChoice,
+  SpaceEngineFix,
+  SpaceEngineOption,
+  SpaceEngineParam,
+} from '../../../shared/ipc.js';
+import { optionsFor, paramEffect } from './engine-options.js';
 import type { SessionStartFailure } from './preflight.js';
 import type { SessionReadiness } from './service.js';
 
@@ -112,6 +119,20 @@ export function fixFor(
   }
 }
 
+/** The parameters of `engine`, each with what its argument list would do (M10.3). */
+function paramsOf(engine: EngineEntry): SpaceEngineParam[] {
+  const options = optionsFor(engine);
+  return (engine.params ?? []).map((param) => {
+    const effect = paramEffect(options, splitParamText(param.text));
+    return {
+      text: param.text,
+      defaultOn: param.defaultOn,
+      effect: effect.effect,
+      options: effect.options,
+    };
+  });
+}
+
 /** The engine choice of A.9 for `context`. `remembered` is the engine id of the `session-engine` concern, or null. */
 export async function engineChoice(
   engines: readonly EngineEntry[],
@@ -122,6 +143,7 @@ export async function engineChoice(
   const failures = new Map<string, SessionStartFailure>();
 
   for (const engine of engines) {
+    const params = paramsOf(engine);
     if (!canRunGuardedSession(engine)) {
       options.push({
         engineId: engine.id,
@@ -129,6 +151,7 @@ export async function engineChoice(
         canStart: false,
         reason: NOT_GUARDED_REASON,
         fix: null,
+        params,
       });
       continue;
     }
@@ -140,6 +163,7 @@ export async function engineChoice(
         canStart: true,
         reason: null,
         fix: null,
+        params,
       });
     } else {
       failures.set(engine.id, ready.error);
@@ -149,6 +173,7 @@ export async function engineChoice(
         canStart: false,
         reason: reasonFor(ready.error),
         fix: fixFor(ready.error, engine),
+        params,
       });
     }
   }

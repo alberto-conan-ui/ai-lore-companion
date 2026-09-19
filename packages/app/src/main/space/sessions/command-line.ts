@@ -70,15 +70,13 @@ export function hookArgv(parts: HookCommandParts): string[] {
 
 /** What the engine's arguments are made from. Every path is absolute and made by the companion. */
 export type EngineArgvParts = {
-  /** The arguments of the engine's registry entry, which come first. */
+  /** The arguments of the ticked parameters, which come first. */
   engineArgs: readonly string[];
   settingsFile: string;
   mcpFile: string;
   pluginDir: string;
   /** The full names of the session server's tools (`mcp__<server>__<tool>`). */
   tools: readonly string[];
-  /** Additional execution flags (e.g. --dangerously-skip-permissions) */
-  flags?: readonly string[];
 };
 
 /**
@@ -94,39 +92,6 @@ export type EngineArgvParts = {
 export const SETTING_SOURCES_ARGS: readonly string[] = ['--setting-sources', ''];
 
 /**
- * The options of a registry entry that would change what a guarded session
- * may do, or where its settings come from. An entry that holds one is not
- * started as a guarded session (`preflight.ts`). An option is matched as it is
- * and in its `--name=value` form.
- */
-export const GUARD_CHANGING_ENGINE_OPTIONS: readonly string[] = [
-  '--dangerously-skip-permissions',
-  '--allow-dangerously-skip-permissions',
-  '--permission-mode',
-  '--permission-prompt-tool',
-  '--allowedTools',
-  '--allowed-tools',
-  '--tools',
-  '--add-dir',
-  '--settings',
-  '--setting-sources',
-  '--mcp-config',
-  '--strict-mcp-config',
-  '--plugin-dir',
-  '--bare',
-  '--safe-mode',
-];
-
-/** The first argument of `args` that is a guard-changing option, or `undefined`. */
-export function guardChangingEngineOption(args: readonly string[]): string | undefined {
-  return args.find((argument) =>
-    GUARD_CHANGING_ENGINE_OPTIONS.some(
-      (option) => argument === option || argument.startsWith(`${option}=`),
-    ),
-  );
-}
-
-/**
  * The arguments of the engine (architecture document, section 5.6).
  * `--allowedTools` takes several values, so it is the last option and nothing
  * follows it.
@@ -134,7 +99,6 @@ export function guardChangingEngineOption(args: readonly string[]): string | und
 export function engineArgv(parts: EngineArgvParts): string[] {
   return [
     ...parts.engineArgs,
-    ...(parts.flags ?? []),
     ...SETTING_SOURCES_ARGS,
     '--settings',
     parts.settingsFile,

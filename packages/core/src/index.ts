@@ -119,10 +119,14 @@ export {
 
 export {
   type EngineEntry,
+  type EngineParam,
   dedupEngines,
   isEngineEntry,
   parseEngineEntries,
   parseEngineEntry,
+  defaultParamArgv,
+  paramsFromArgs,
+  splitParamText,
 } from './engines/index.js';
 
 export {

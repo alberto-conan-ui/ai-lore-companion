@@ -17,8 +17,10 @@ type Props = {
 export function StartSession({ justCreated }: Props): JSX.Element {
   const { choice, pick, reinstall, refresh } = useEngineChoice();
   const startAiSession = useSpaceNavStore((state) => state.startAiSession);
-  const executionFlags = useSpaceNavStore((state) => state.executionFlags);
-  const setExecutionFlags = useSpaceNavStore((state) => state.setExecutionFlags);
+  const tickedParams = useSpaceNavStore((state) => state.tickedParams);
+  const setTickedParams = useSpaceNavStore((state) => state.setTickedParams);
+  const chosenEngineId = choice?.engineId ?? null;
+  const ticked = chosenEngineId !== null ? (tickedParams[chosenEngineId] ?? null) : null;
 
   return (
     <section style={sectionStyle} aria-label="Start a session" data-testid="dashboard-start">
@@ -37,8 +39,8 @@ export function StartSession({ justCreated }: Props): JSX.Element {
         buttonTestId="dashboard-start-session"
         noteTestId="dashboard-start-session-note"
         menuTestId="dashboard-start-menu"
-        flags={executionFlags}
-        onFlagsChange={setExecutionFlags}
+        ticked={ticked}
+        onTickedChange={setTickedParams}
       />
     </section>
   );

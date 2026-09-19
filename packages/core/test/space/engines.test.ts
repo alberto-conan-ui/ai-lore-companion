@@ -125,6 +125,41 @@ test('mergeEnginesWithCatalog: a second stored Claude Code stays a hand-added en
   assert.deepEqual(handAdded[0], { id: 'b.claude', name: 'Claude B', binary: '/two/claude' });
 });
 
+test('mergeEnginesWithCatalog: a stored list without Antigravity gets its seed parameter ticked', () => {
+  const { engines } = mergeEnginesWithCatalog([]);
+  const antigravity = engines.find((e) => e.id === 'default.antigravity');
+  assert.deepEqual(antigravity?.params, [
+    { text: '--dangerously-skip-permissions', defaultOn: true },
+  ]);
+  assert.deepEqual(antigravity?.args, ['--dangerously-skip-permissions']);
+});
+
+test('mergeEnginesWithCatalog: a stored Antigravity with params: [] keeps []', () => {
+  const stored: EngineEntry[] = [
+    { id: 'default.antigravity', name: 'Antigravity CLI', binary: 'agy', params: [] },
+  ];
+  const { engines } = mergeEnginesWithCatalog(stored);
+  const antigravity = engines.find((e) => e.id === 'default.antigravity');
+  assert.deepEqual(antigravity?.params, []);
+  assert.equal(antigravity && 'args' in antigravity, false);
+});
+
+test('mergeEnginesWithCatalog: a stored Claude Code with args keeps its migrated parameter', () => {
+  const stored: EngineEntry[] = [
+    {
+      id: 'default.claude',
+      name: 'Claude Code',
+      binary: 'claude',
+      params: [{ text: '--model opus', defaultOn: true }],
+      args: ['--model', 'opus'],
+    },
+  ];
+  const { engines } = mergeEnginesWithCatalog(stored);
+  const claude = engines.find((e) => e.id === 'default.claude');
+  assert.deepEqual(claude?.params, [{ text: '--model opus', defaultOn: true }]);
+  assert.deepEqual(claude?.args, ['--model', 'opus']);
+});
+
 test('mergeEnginesWithCatalog: a list already merged gives changed: false', () => {
   const first = mergeEnginesWithCatalog([
     { id: 'default.gemini', name: 'Gemini', binary: 'gemini' },

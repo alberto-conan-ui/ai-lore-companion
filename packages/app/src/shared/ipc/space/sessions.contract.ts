@@ -15,6 +15,7 @@ import type {
   SpaceSessionHeaderResult,
   SpaceSessionLeaveWritingResult,
   SpaceSessionReadinessResult,
+  SpaceSessionStartArg,
   SpaceSessionStartResult,
   SpaceSkillsArg,
   SpaceSkillsResult,
@@ -33,7 +34,7 @@ export const SPACE_SESSIONS_CONTRACT = {
    * the Space's Lore as a plugin, the session server. The engine runs in a
    * terminal of the window, in the Space's folder.
    */
-  spaceSessionStart: invoke<[arg: SpaceSessionEngineArg], SpaceSessionStartResult>(
+  spaceSessionStart: invoke<[arg: SpaceSessionStartArg], SpaceSessionStartResult>(
     'space:session-start',
   ),
   /** End a session of the Space: its engine is stopped and its end is recorded. */

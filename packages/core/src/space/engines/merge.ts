@@ -6,7 +6,8 @@
  */
 
 import { basename, isAbsolute } from 'node:path';
-import type { EngineEntry } from '../../engines/index.js';
+import { defaultParamArgv } from '../../engines/index.js';
+import type { EngineEntry, EngineParam } from '../../engines/index.js';
 import { ENGINE_CATALOG, type EngineCatalogEntry } from './catalog.js';
 
 /** `basename(binary)`, `.exe` removed, lower case — how a binary is matched to a catalog entry. */
@@ -26,10 +27,25 @@ function mergedEntry(slot: Slot): EngineEntry {
     binary: slot.entry.binary,
   };
   const taken = slot.taken;
-  if (taken === null) return out;
-  if (isAbsolute(taken.binary)) out.binary = taken.binary;
-  if (taken.args !== undefined) out.args = taken.args;
-  if (taken.helperModel !== undefined) out.helperModel = taken.helperModel;
+  if (taken !== null) {
+    if (isAbsolute(taken.binary)) out.binary = taken.binary;
+    if (taken.helperModel !== undefined) out.helperModel = taken.helperModel;
+  }
+  // Rule 3 (3.4): a catalog entry gets the seed parameters when the stored entry it merges
+  // has no `params` field (a new install, or an entry from before M10).
+  const params: EngineParam[] | undefined =
+    taken?.params !== undefined
+      ? taken.params
+      : slot.entry.seedParams.length > 0
+        ? [...slot.entry.seedParams]
+        : undefined;
+  if (params !== undefined) {
+    out.params = params;
+    const argv = defaultParamArgv(params);
+    if (argv.length > 0) out.args = argv;
+  } else if (taken?.args !== undefined) {
+    out.args = taken.args;
+  }
   return out;
 }
 
@@ -43,9 +59,12 @@ function mergedEntry(slot: Slot): EngineEntry {
  *    removed, lower case) equals a catalog `binary` whose entry has not taken
  *    a stored entry yet, it is merged there; otherwise it is appended after
  *    the catalog entries as a hand-added engine, unchanged.
- * 3. Merging keeps the stored `args` and `helperModel`, and keeps the stored
+ * 3. Merging keeps the stored `params` and `helperModel`, and keeps the stored
  *    `binary` when it is an absolute path; the `id` and `name` are the
- *    catalog's.
+ *    catalog's. A stored entry with no `params` field gets the catalog
+ *    entry's `seedParams` when they are non-empty (M10.3). `args` is then
+ *    derived from `params` (the arguments of the parameters ticked by
+ *    default), or, when there is no `params`, kept from the stored entry.
  * 4. `changed` is true when the result, written as JSON, differs from
  *    `stored` written as JSON.
  */

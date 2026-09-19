@@ -47,6 +47,34 @@ test('finding 8: Gemini first in the list does not stop Claude Code from being c
   assert.equal(claude?.reason, null);
 });
 
+test("M10.3: an option's params carry the effect of each parameter", async () => {
+  const claudeWithParams: EngineEntry = {
+    ...CLAUDE,
+    params: [
+      { text: '--model opus', defaultOn: true },
+      { text: '--dangerously-skip-permissions', defaultOn: false },
+      { text: '--settings /tmp/x.json', defaultOn: false },
+    ],
+  };
+  const choice = await engineChoice([claudeWithParams], readinessOf({}), null);
+  const claude = choice.options.find((o) => o.engineId === 'default.claude');
+  assert.deepEqual(claude?.params, [
+    { text: '--model opus', defaultOn: true, effect: 'none', options: [] },
+    {
+      text: '--dangerously-skip-permissions',
+      defaultOn: false,
+      effect: 'unguarded',
+      options: ['--dangerously-skip-permissions'],
+    },
+    {
+      text: '--settings /tmp/x.json',
+      defaultOn: false,
+      effect: 'refused',
+      options: ['--settings'],
+    },
+  ]);
+});
+
 test('a non-guarded engine never has its readiness run', async () => {
   const ran: string[] = [];
   const readiness = async (id: string): Promise<SessionReadiness> => {

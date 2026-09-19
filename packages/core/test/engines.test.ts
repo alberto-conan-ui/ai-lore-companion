@@ -6,6 +6,7 @@ import {
   isEngineEntry,
   parseEngineEntries,
   parseEngineEntry,
+  splitParamText,
 } from '../src/index.js';
 
 const claude: EngineEntry = {
@@ -68,5 +69,73 @@ test('dedupEngines collapses identical entries, preserving order', () => {
 
 test('dedupEngines keeps entries that differ in any identity field', () => {
   const list = dedupEngines([claude, { ...claude, binary: '/usr/local/bin/claude' }]);
+  assert.equal(list.length, 2);
+});
+
+// ---------- M10.3: the parameter model ----------
+
+test('splitParamText splits on white space and drops empty parts', () => {
+  assert.deepEqual(splitParamText('  --model   opus '), ['--model', 'opus']);
+});
+
+test('parseEngineEntry migrates a plain args entry into one default parameter, args unchanged', () => {
+  const parsed = parseEngineEntry({
+    id: 'gemini',
+    name: 'Gemini',
+    binary: 'gemini',
+    args: ['--model', 'opus'],
+  });
+  assert.deepEqual(parsed?.params, [{ text: '--model opus', defaultOn: true }]);
+  assert.deepEqual(parsed?.args, ['--model', 'opus']);
+});
+
+test('parseEngineEntry with two parameters, one ticked, derives args from the ticked one only', () => {
+  const parsed = parseEngineEntry({
+    id: 'c',
+    name: 'Claude',
+    binary: 'claude',
+    params: [
+      { text: '--model opus', defaultOn: false },
+      { text: '--dangerously-skip-permissions', defaultOn: true },
+    ],
+  });
+  assert.deepEqual(parsed?.params, [
+    { text: '--model opus', defaultOn: false },
+    { text: '--dangerously-skip-permissions', defaultOn: true },
+  ]);
+  assert.deepEqual(parsed?.args, ['--dangerously-skip-permissions']);
+});
+
+test('parseEngineEntry with params: [] keeps [] and has no args', () => {
+  const parsed = parseEngineEntry({ id: 'c', name: 'Claude', binary: 'claude', params: [] });
+  assert.deepEqual(parsed?.params, []);
+  assert.equal(parsed && 'args' in parsed, false);
+});
+
+test('parseEngineEntry drops a parameter with an empty text', () => {
+  const parsed = parseEngineEntry({
+    id: 'c',
+    name: 'Claude',
+    binary: 'claude',
+    params: [
+      { text: '   ', defaultOn: true },
+      { text: '--model opus', defaultOn: false },
+    ],
+  });
+  assert.deepEqual(parsed?.params, [{ text: '--model opus', defaultOn: false }]);
+});
+
+test('dedupEngines: identity differs when only a default tick differs', () => {
+  const ticked: EngineEntry = {
+    id: 'c',
+    name: 'Claude',
+    binary: 'claude',
+    params: [{ text: '--dangerously-skip-permissions', defaultOn: true }],
+  };
+  const unticked: EngineEntry = {
+    ...ticked,
+    params: [{ text: '--dangerously-skip-permissions', defaultOn: false }],
+  };
+  const list = dedupEngines([ticked, unticked]);
   assert.equal(list.length, 2);
 });

@@ -35,6 +35,11 @@ function isOptional(value: unknown, check: (value: unknown) => boolean): boolean
   return value === undefined || check(value);
 }
 
+/** Whether `value` is an array of non-empty strings. */
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => isText(entry));
+}
+
 /** Whether `value` is a date and time that `Date` can read. */
 function isTimestamp(value: unknown): value is string {
   return isText(value) && !Number.isNaN(Date.parse(value));
@@ -75,7 +80,8 @@ export function isSessionRecord(value: unknown): value is SessionRecord {
     isTimestamp(value.startedAt) &&
     isOptional(value.closedAt, isTimestamp) &&
     isOptional(value.item, isIssueRef) &&
-    isOptional(value.issue, isIssueRef)
+    isOptional(value.issue, isIssueRef) &&
+    isOptional(value.unguarded, isStringArray)
   );
 }
 
