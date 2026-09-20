@@ -45,6 +45,12 @@ export type SessionLaunchInput = {
   instructions: string;
   /** The argument list of the ticked parameters, in the order of the engine's parameters. */
   paramArgv: readonly string[];
+  /**
+   * A user turn the interactive CLI owns from launch. The CLI must keep this
+   * queued behind any of its own trust, authentication or startup UI; the
+   * companion never types it into the PTY.
+   */
+  initialPrompt?: string;
 };
 
 /** A file an adapter writes, relative to the session's folder, with `/`. Mode 0600; folders 0700. */
@@ -64,6 +70,8 @@ export type ReadSpendInput = { sessionId: string; paths: SessionFilePaths };
 export type EngineAdapter = {
   catalogId: EngineCatalogId;
   capability: LoreCapability;
+  /** Whether this CLI has a verified native interactive initial-prompt form. */
+  supportsInitialPrompt: boolean;
   /** The engine's own reserved and guard-changing options (3.5). */
   options: EngineOptions;
   /** The arguments that pin a configured model, or none for the engine default. */

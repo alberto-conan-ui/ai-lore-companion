@@ -87,6 +87,8 @@ export type EngineArgvParts = {
   tools: readonly string[];
   /** The session instructions of section 3.3 (M10.5, the Human Lead's answer 8). */
   appendSystemPrompt: string;
+  /** An optional first user turn for the interactive session. */
+  initialPrompt?: string;
 };
 
 /**
@@ -119,6 +121,9 @@ export function engineArgv(parts: EngineArgvParts): string[] {
     parts.pluginDir,
     '--append-system-prompt',
     parts.appendSystemPrompt,
+    // `--allowedTools` is variadic and must remain last. Claude's positional
+    // prompt therefore comes immediately before it.
+    ...(parts.initialPrompt !== undefined ? [parts.initialPrompt] : []),
     ...(parts.tools.length > 0 ? ['--allowedTools', ...parts.tools] : []),
   ];
 }

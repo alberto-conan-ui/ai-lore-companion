@@ -53,6 +53,8 @@ import {
 } from '../../../src/main/space/sessions/command-line.js';
 import { PRE_WRITE_TIMEOUTS, SESSION_ID_ENV } from '../../../src/main/space/sessions/constants.js';
 import { claudeCodeAdapter } from '../../../src/main/space/sessions/engines/claude-code.js';
+import { codexAdapter } from '../../../src/main/space/sessions/engines/codex.js';
+import { opencodeAdapter } from '../../../src/main/space/sessions/engines/opencode.js';
 import {
   type SessionFilePaths,
   removeSessionFiles,
@@ -64,6 +66,10 @@ import {
   findPython3,
   verifyInstall,
 } from '../../../src/main/space/sessions/preflight.js';
+import {
+  PM_INITIAL_PROMPT,
+  pmInitialPromptParamConflict,
+} from '../../../src/main/space/sessions/service.js';
 import { UI_FILES, spaceUi } from '../../../src/main/space/ui-store.js';
 import { LORE_TEMPLATE_DIR, spaceHarnessFor } from './space-harness.js';
 
@@ -274,6 +280,7 @@ test('the command lines survive a shell for a userData path with a space and a s
     pluginDir: join(paths.install, 'claude-code', 'plugin'),
     tools: ['mcp__ailore__request_writing', 'mcp__ailore__await_answer'],
     appendSystemPrompt: 'Session instructions.',
+    initialPrompt: PM_INITIAL_PROMPT,
   });
   assert.deepEqual(
     engine.slice(0, 2),
@@ -292,6 +299,10 @@ test('the command lines survive a shell for a userData path with a space and a s
     engine.indexOf('--append-system-prompt') < engine.indexOf('--allowedTools'),
     '--append-system-prompt comes before --allowedTools',
   );
+  assert.ok(
+    engine.indexOf(PM_INITIAL_PROMPT) < engine.indexOf('--allowedTools'),
+    'the positional prompt comes before the final variadic option',
+  );
   assert.equal(engine[engine.length - 3], '--allowedTools', 'the variadic option is last');
   assert.deepEqual(argvThroughShell(engine.map(quoteForShell).join(' ')), engine);
   assert.ok(!engine.join(' ').includes('secret-token'), 'no token in the arguments');
@@ -304,6 +315,34 @@ test('the command lines survive a shell for a userData path with a space and a s
     assert.deepEqual(argvThroughShell(quoteForShell(path)), [path], JSON.stringify(odd));
   }
   assert.deepEqual(argvThroughShell(quoteForShell('')), ['']);
+});
+
+test('PM initial-prompt parameters accept narrow model/display forms and refuse commands, separators and variadics', () => {
+  for (const text of ['--model sonnet', '--model=sonnet', '--effort high', '--no-chrome']) {
+    assert.equal(pmInitialPromptParamConflict(claudeCodeAdapter, [text]), null, text);
+  }
+  for (const text of ['mcp', '--', '--allowedTools Read', '--fallback-model opus']) {
+    assert.equal(pmInitialPromptParamConflict(claudeCodeAdapter, [text]), text, text);
+  }
+  for (const text of [
+    '--model gpt-5',
+    '-mgpt-5',
+    '-c model=gpt-5',
+    '-c=model=gpt-5',
+    '-cmodel=gpt-5',
+    '-cmodel_reasoning_effort=high',
+    '-c model_reasoning_effort=high',
+    '--no-alt-screen',
+  ]) {
+    assert.equal(pmInitialPromptParamConflict(codexAdapter, [text]), null, text);
+  }
+  for (const text of ['review', 'login', '--', '--image a.png', '-i a.png']) {
+    assert.equal(pmInitialPromptParamConflict(codexAdapter, [text]), text, text);
+  }
+  assert.equal(pmInitialPromptParamConflict(opencodeAdapter, ['--model openai/gpt-5']), null);
+  for (const text of ['run', 'attach http://localhost', '--', '--prompt duplicate']) {
+    assert.equal(pmInitialPromptParamConflict(opencodeAdapter, [text]), text, text);
+  }
 });
 
 test('M10.5: --dialect claude behaves as today, and an unknown --dialect refuses with a fault', async () => {
@@ -1166,9 +1205,16 @@ test('PM ensure is deduplicated, records its narrow purpose and configured model
     model: 'opus',
     params: [{ text: '--model sonnet', defaultOn: false }],
   };
+  const unsupportedPmEngine: EngineEntry = {
+    id: 'default.antigravity',
+    name: 'Antigravity CLI',
+    binary: '/opt/nowhere/agy',
+  };
   const h = spaceHarnessFor(
     createSpaceSessionsRegister(() => ({
-      engines: () => [engine],
+      // An unbound PM skips a ready engine that cannot safely take an
+      // interactive initial prompt, then chooses the first compatible one.
+      engines: () => [unsupportedPmEngine, engine],
       loginPath: async () => null,
       runner: () => execFileRunner,
       newId: () => `s-pm-${Math.random().toString(16).slice(2, 8)}`,
@@ -1182,12 +1228,13 @@ test('PM ensure is deduplicated, records its narrow purpose and configured model
     const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
     assert.ok(context);
     const spawned: { engine?: PtySpawnEngine; opts?: PtySpawnOpts }[] = [];
+    const written: { id: string; data: string }[] = [];
     context.ptyService = {
       spawn: (spawnedEngine, opts) => {
         spawned.push({ engine: spawnedEngine, opts });
         return `pty-pm-${spawned.length}`;
       },
-      write: () => {},
+      write: (id, data) => written.push({ id, data }),
       resize: () => {},
       kill: () => {},
       killAll: () => {},
@@ -1218,6 +1265,10 @@ test('PM ensure is deduplicated, records its narrow purpose and configured model
     assert.equal(first.value.engineId, engine.id);
     assert.deepEqual(first.value.unguarded, []);
     assert.deepEqual(spawned[0]?.engine?.args?.slice(0, 2), ['--model', 'opus']);
+    const pmArgs = spawned[0]?.engine?.args ?? [];
+    assert.ok(pmArgs.includes(PM_INITIAL_PROMPT));
+    assert.ok(pmArgs.indexOf(PM_INITIAL_PROMPT) < pmArgs.indexOf('--allowedTools'));
+    assert.deepEqual(written, [], 'the companion never types the native prompt into the PTY');
 
     const opened = context.service(spaceDesk).open();
     assert.ok(opened.ok);
@@ -1249,6 +1300,21 @@ test('PM ensure is deduplicated, records its narrow purpose and configured model
     assert.equal(restarted.ok, true, JSON.stringify(restarted));
     assert.notEqual(restarted.value.sessionId, first.value.sessionId);
     await h.invoke('spaceSessionEnd', spaceWindow, { sessionId: restarted.value.sessionId });
+
+    // An explicit binding is never silently replaced: its missing interactive
+    // prompt contract is reported before a process is spawned.
+    context.service(spaceUi).save('pm-profile', {
+      version: 1,
+      engineId: unsupportedPmEngine.id,
+    });
+    const unsupported = (await h.invoke('spacePmEnsure', spaceWindow, {})) as {
+      ok: boolean;
+      error?: { kind: string; message: string };
+    };
+    assert.equal(unsupported.ok, false);
+    assert.equal(unsupported.error?.kind, 'engine-not-supported');
+    assert.match(unsupported.error?.message ?? '', /no verified way/);
+    assert.equal(spawned.length, 2);
 
     // An explicit binding which was removed is reported as such, and must not fall back to another engine.
     context.service(spaceUi).save('pm-profile', { version: 1, engineId: 'removed-engine' });

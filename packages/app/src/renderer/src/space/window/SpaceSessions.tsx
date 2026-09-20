@@ -274,7 +274,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
               type="button"
               style={secondaryButtonStyle}
               data-testid="pm-dashboard-request"
-              title="Insert a dashboard request, then press Enter in the PM terminal to send it."
+              title="The PM receives an initial dashboard request automatically. Insert a follow-up request, then press Enter to send it."
               onClick={() => {
                 window.cockpit.sendTerminalInput({
                   id: ptyId,
@@ -283,7 +283,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
                 focusPty();
               }}
             >
-              Draft dashboard request
+              Draft follow-up dashboard request
             </button>
           ) : null}
           <SkillsColumn ptyId={ptyId} focusPty={focusPty} engineId={tab.engine ?? null} />

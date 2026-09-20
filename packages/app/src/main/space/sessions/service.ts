@@ -36,6 +36,7 @@ import {
   listSessions,
   profileOf,
   readLore,
+  splitParamText,
   startSession,
 } from '@ai-lore-companion/core';
 import type { SpaceContext } from '../context.js';
@@ -151,6 +152,68 @@ type Live = {
 
 /** What a session's close records when its engine reported nothing readable. */
 const NO_SPEND: SessionSpend = { source: 'none' };
+
+/** The first user turn of every new PM process. The CLI submits it after its own startup UI. */
+export const PM_INITIAL_PROMPT =
+  'You are the PM. Please update the dashboard using report_dashboard.';
+
+function optionWithValue(argv: readonly string[], long: string, short?: string): boolean {
+  if (argv.length === 1 && argv[0]?.startsWith(`${long}=`)) return true;
+  if (argv.length === 2 && (argv[0] === long || (short !== undefined && argv[0] === short)))
+    return argv[1] !== '';
+  if (short !== undefined && argv.length === 1 && argv[0]?.startsWith(short))
+    return argv[0].length > short.length;
+  return false;
+}
+
+/**
+ * PM startup adds one native initial prompt. Default-on parameters are
+ * therefore deliberately narrower than ordinary session parameters: accept
+ * only shapes known not to select a subcommand, add another prompt, or consume
+ * the trailing positional prompt as a variadic option.
+ */
+export function pmInitialPromptParamConflict(
+  adapter: Pick<EngineAdapter, 'catalogId'>,
+  params: readonly string[],
+): string | null {
+  for (const text of params) {
+    const argv = splitParamText(text);
+    let safe = false;
+    switch (adapter.catalogId) {
+      case 'claude-code':
+        safe =
+          optionWithValue(argv, '--model') ||
+          optionWithValue(argv, '--effort') ||
+          (argv.length === 1 && ['--chrome', '--no-chrome'].includes(argv[0] as string));
+        break;
+      case 'codex': {
+        const config =
+          argv.length === 2 && (argv[0] === '-c' || argv[0] === '--config')
+            ? argv[1]
+            : argv.length === 1 && (argv[0]?.startsWith('-c=') || argv[0]?.startsWith('--config='))
+              ? argv[0].slice(argv[0].indexOf('=') + 1)
+              : argv.length === 1 && argv[0]?.startsWith('-c') && argv[0].length > 2
+                ? argv[0].slice(2)
+                : undefined;
+        safe =
+          optionWithValue(argv, '--model', '-m') ||
+          (config !== undefined && /^\s*(?:model|model_reasoning_effort)\s*=/.test(config)) ||
+          (argv.length === 1 && argv[0] === '--no-alt-screen');
+        break;
+      }
+      case 'opencode':
+        safe =
+          optionWithValue(argv, '--model', '-m') ||
+          (argv.length === 1 && ['--mini', '--no-replay'].includes(argv[0] as string));
+        break;
+      case 'antigravity':
+        safe = false;
+        break;
+    }
+    if (!safe) return text;
+  }
+  return null;
+}
 
 function describe(caught: unknown): string {
   return caught instanceof Error ? caught.message : String(caught);
@@ -363,6 +426,15 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
       context.log.warn('session-not-started', { space: context.key, kind: 'engine-not-supported' });
       return { ok: false, error: { kind: 'engine-not-supported', message } };
     }
+    if (purpose === 'pm' && !adapter.supportsInitialPrompt) {
+      return {
+        ok: false,
+        error: {
+          kind: 'engine-not-supported',
+          message: `No PM session was started: ${engine.name} has no verified way to give a visible interactive session its automatic first dashboard request. Choose Claude Code or Codex CLI for the PM.`,
+        },
+      };
+    }
     const profile = profileOf(engine);
     // A configured profile owns model selection. Letting a clicked parameter add another model
     // makes the engine's precedence part of the security and product contract, so refuse it.
@@ -395,6 +467,18 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
           message: `No PM session was started: its configured parameters change the guard (${unguarded.join(', ')}). Remove them from the PM profile.`,
         },
       };
+    }
+    if (purpose === 'pm') {
+      const conflicting = pmInitialPromptParamConflict(adapter, params);
+      if (conflicting !== null) {
+        return {
+          ok: false,
+          error: {
+            kind: 'invalid-argument',
+            message: `No PM session was started: the default parameter "${conflicting}" is not safe with the automatic first dashboard request. Untick it for the PM profile.`,
+          },
+        };
+      }
     }
     const engineArgs = [...modelArgs, ...checked.value.argv];
     const pmCorpus = purpose === 'pm' ? await pmCorpusPaths(context.root) : null;
@@ -488,6 +572,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
         repositories,
         instructions,
         paramArgv: engineArgs,
+        ...(purpose === 'pm' ? { initialPrompt: PM_INITIAL_PROMPT } : {}),
       });
     } catch (caught) {
       await server.unregisterSession(sessionId);
@@ -595,12 +680,18 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
       let engineId = explicit;
       if (engineId === null) {
         const remembered = ui.read('session-engine').state?.engineId;
-        if (typeof remembered === 'string' && (await readiness(remembered)).ok)
-          engineId = remembered;
+        if (typeof remembered === 'string' && (await readiness(remembered)).ok) {
+          const engine = use.engines().find((candidate) => candidate.id === remembered);
+          if (engine !== undefined && adapterFor(engine)?.supportsInitialPrompt === true)
+            engineId = remembered;
+        }
       }
       if (engineId === null) {
         for (const candidate of use.engines()) {
-          if ((await readiness(candidate.id)).ok) {
+          if (
+            adapterFor(candidate)?.supportsInitialPrompt === true &&
+            (await readiness(candidate.id)).ok
+          ) {
             engineId = candidate.id;
             break;
           }

@@ -41,6 +41,7 @@ const CAPABILITY: EngineAdapter['capability'] = {
 export const claudeCodeAdapter: EngineAdapter = {
   catalogId: 'claude-code',
   capability: CAPABILITY,
+  supportsInitialPrompt: true,
   options: CLAUDE_CODE_OPTIONS,
   modelArgs: (model) => (model === '' ? [] : ['--model', model]),
   modelsSelectedBy: (argv) => {
@@ -82,6 +83,7 @@ export const claudeCodeAdapter: EngineAdapter = {
         pluginDir: input.install.pluginDir,
         tools: sessionToolNames(input.connection),
         appendSystemPrompt: input.instructions,
+        ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
       }),
       env: {},
       files: [

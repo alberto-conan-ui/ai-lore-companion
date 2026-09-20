@@ -93,6 +93,7 @@ function hooksTomlValue(matcher: string, command: string, timeoutSeconds: number
 export const codexAdapter: EngineAdapter = {
   catalogId: 'codex',
   capability: CAPABILITY,
+  supportsInitialPrompt: true,
   options: CODEX_OPTIONS,
   // Verified against the installed Codex CLI: `--model <MODEL>` is its public
   // session selector. Keeping it out of `-c` also avoids mixing user config
@@ -166,6 +167,10 @@ export const codexAdapter: EngineAdapter = {
       `hooks.PreToolUse=${hooksTomlValue(HOOK_MATCHER, preWrite, PRE_WRITE_TIMEOUTS.hookSeconds)}`,
       '-c',
       `hooks.PostToolUse=${hooksTomlValue(HOOK_MATCHER, postWrite, POST_WRITE_TIMEOUTS.hookSeconds)}`,
+      // `--` makes the prompt unambiguously positional instead of a value for
+      // any preceding option. PM startup separately rejects subcommands and
+      // variadic/default arguments that are unsafe with a native prompt.
+      ...(input.initialPrompt !== undefined ? ['--', input.initialPrompt] : []),
     ];
     return {
       args,

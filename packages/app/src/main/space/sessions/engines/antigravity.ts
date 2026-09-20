@@ -61,6 +61,9 @@ const PLUGIN_DIR = '.agents/plugins/lore';
 export const antigravityAdapter: EngineAdapter = {
   catalogId: 'antigravity',
   capability: CAPABILITY,
+  // `-p`/`--prompt` is only verified for a headless one-turn run. Do not use
+  // it for the visible interactive PM until that CLI documents or proves one.
+  supportsInitialPrompt: false,
   options: ANTIGRAVITY_OPTIONS,
   modelArgs: (model) => (model === '' ? [] : ['--model', model]),
   modelsSelectedBy: (argv) => {
@@ -76,6 +79,9 @@ export const antigravityAdapter: EngineAdapter = {
   skillInvocation: (name) => `/${name}`,
   verbsAre: 'invoked',
   launch(input: SessionLaunchInput): SessionLaunch {
+    if (input.initialPrompt !== undefined) {
+      throw new Error('Antigravity CLI has no verified interactive initial-prompt option');
+    }
     const shared = {
       python: input.python,
       spaceRoot: input.spaceRoot,
