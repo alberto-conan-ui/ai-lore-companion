@@ -15,6 +15,7 @@ vi.mock('../../../src/renderer/src/components/useXtermSession.js', () => ({
 }));
 
 import { SetupScreen } from '../../../src/renderer/src/space/setup/SetupScreen.js';
+import { SETUP_VALIDATE_DELAY_MS } from '../../../src/renderer/src/space/setup/useSetupFlow.js';
 import type {
   SetupReport,
   SetupStart,
@@ -553,4 +554,36 @@ test('"Space from a repository on this computer": Choose… fills the source, de
     expect((screen.getByTestId('setup-field-name') as HTMLInputElement).value).toBe('app-space'),
   );
   expect(screen.getByTestId('setup-source').textContent).toContain('This folder is not changed.');
+});
+
+test('a refusal from the plan survives the live validation that cannot reproduce it, and goes when the form changes', async () => {
+  await renderFlow();
+  type('setup-field-name', 'demo');
+
+  // `spaceSetupPlan` does the real work and refuses on `sourceDir` — a field no card
+  // renders inline, and one the cheap `spaceSetupValidate` never reproduces.
+  const REFUSAL = 'That folder has no origin remote.';
+  cockpit.spaceSetupPlan.mockResolvedValueOnce(
+    failure('invalid-input', REFUSAL, { problems: [{ field: 'sourceDir', message: REFUSAL }] }),
+  );
+
+  fireEvent.click(screen.getByTestId('setup-continue'));
+  const box = await screen.findByTestId('setup-problems');
+  expect(box.textContent).toContain(REFUSAL);
+
+  // The live validation runs a moment later and reports nothing. It used to overwrite
+  // the refusal, leaving a form that looked fine and a button that did nothing the
+  // person could explain.
+  cockpit.spaceSetupValidate.mockClear();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, SETUP_VALIDATE_DELAY_MS * 5));
+  });
+  expect(cockpit.spaceSetupValidate).toHaveBeenCalled();
+  expect(screen.getByTestId('setup-problems').textContent).toContain(REFUSAL);
+
+  // Changing something answers it: the refusal was about a form that no longer exists.
+  type('setup-field-name', 'demo-two');
+  await waitFor(() =>
+    expect(screen.queryByTestId('setup-problems')?.textContent ?? '').not.toContain(REFUSAL),
+  );
 });

@@ -237,6 +237,18 @@ export function useSetupFlow(start: SetupStart): SetupFlowView {
   const [touched, setTouched] = useState<ReadonlySet<string>>(new Set());
   const [submitted, setSubmitted] = useState(false);
   const [allProblems, setAllProblems] = useState<SetupInputProblem[]>([]);
+  /**
+   * The problems the plan itself refused with, kept apart from `allProblems`.
+   *
+   * `spaceSetupPlan` does the real work and can refuse for a reason the cheap
+   * `spaceSetupValidate` never reproduces — and it may name a field the form does
+   * not render inline, such as `sourceDir`, which is not in the form at all. Held
+   * in `allProblems` alone, such a problem was overwritten by the next live
+   * validation about 150 milliseconds later, so the person saw a flicker and an
+   * unchanged form with nothing to explain it. These survive every re-validation
+   * and are dropped only when the person changes something.
+   */
+  const [planProblems, setPlanProblems] = useState<SetupInputProblem[]>([]);
   const [parentDir, setParentDir] = useState<string | null>(null);
   const [sourceDir, setSourceDir] = useState<string | null>(
     start.kind === 'about-repository' ? start.folder : null,
@@ -410,13 +422,31 @@ export function useSetupFlow(start: SetupStart): SetupFlowView {
     return () => clearTimeout(timer);
   }, [form, parentDir, source, stage, touched, submitted, validate]);
 
-  const problems = useMemo(
-    () =>
-      submitted
-        ? allProblems
-        : allProblems.filter((problem) => touched.has(topField(problem.field))),
-    [allProblems, submitted, touched],
-  );
+  // What the form the plan refused about looked like. The plan's problems stand
+  // until this changes: `form` alone is not enough, because `sourceDir` is the
+  // app's own state and a refusal can name it.
+  const planProblemsAbout = useRef<string | null>(null);
+  const formPrint = useMemo(() => JSON.stringify({ form, sourceDir }), [form, sourceDir]);
+
+  useEffect(() => {
+    if (planProblemsAbout.current === null || planProblemsAbout.current === formPrint) return;
+    planProblemsAbout.current = null;
+    setPlanProblems([]);
+  }, [formPrint]);
+
+  const problems = useMemo(() => {
+    const live = submitted
+      ? allProblems
+      : allProblems.filter((problem) => touched.has(topField(problem.field)));
+    if (planProblems.length === 0) return live;
+    const shown = new Set(live.map((problem) => `${problem.field}\u0000${problem.message}`));
+    return [
+      ...live,
+      ...planProblems.filter(
+        (problem) => !shown.has(`${problem.field}\u0000${problem.message}`),
+      ),
+    ];
+  }, [allProblems, planProblems, submitted, touched]);
 
   // Focus moves to the field of the first problem after a refused request for the plan.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the token is what asks for the move.
@@ -486,6 +516,9 @@ export function useSetupFlow(start: SetupStart): SetupFlowView {
     setSubmitted(true);
     setError(null);
     setBusy(true);
+    // A fresh attempt: the last refusal is answered by this one, whatever it says.
+    setPlanProblems([]);
+    planProblemsAbout.current = null;
     try {
       const found = await validate(form);
       if (found === null) return;
@@ -505,6 +538,9 @@ export function useSetupFlow(start: SetupStart): SetupFlowView {
       if (mine !== planRequest.current) return;
       if (!result.ok && result.error.kind === 'invalid-input') {
         setAllProblems(result.error.problems);
+        // Kept so the next live validation cannot erase the refusal.
+        setPlanProblems(result.error.problems);
+        planProblemsAbout.current = formPrint;
         setStage('form');
         setFocusToken((token) => token + 1);
         return;
@@ -518,7 +554,7 @@ export function useSetupFlow(start: SetupStart): SetupFlowView {
     } finally {
       setBusy(false);
     }
-  }, [form, validate]);
+  }, [form, formPrint, validate]);
 
   const cancelCheck = useCallback(() => {
     planRequest.current += 1;
