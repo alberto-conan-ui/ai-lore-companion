@@ -283,41 +283,41 @@ For sizing only; the architect decides the design.
 
 ## 8. Acceptance criteria
 
-Each item is checked by hand. To see a first launch without changing the Human Lead's daily setup, use a second macOS user account, or launch the companion with `GH_CONFIG_DIR` pointing at an empty folder and its user data folder moved aside.
+Eleven of the twenty-five are checked by a machine on every build and name the test that does it; the other fourteen are checked by hand, because each needs a live GitHub account, a real browser flow, a real engine sign-in or a second macOS user account. The eleven were converted in stage M12 on 2026-09-20. To see a first launch without changing the Human Lead's daily setup, use a second macOS user account, or launch the companion with `GH_CONFIG_DIR` pointing at an empty folder and its user data folder moved aside.
 
 **First launch and Set up this Mac**
 
-1. With gh signed out, the companion opens on Set up this Mac, not on the welcome screen.
-2. **Sign in with the browser** opens the browser at GitHub's device page, the one-time code is on the clipboard and shown on the page, and after authorising, the GitHub row turns fine by itself, naming the account and its organisations, without pressing Check again.
-3. With a token that lacks the `project` scope, the row says so, and **Give access to Projects** fixes it through the browser.
-4. After signing in, `git clone` and `git push` of a private repository of the account work from a terminal without asking for a password.
-5. The engines section lists Claude Code, Codex CLI, Antigravity CLI and OpenCode, whether installed or not, and does not list Gemini CLI unless it was added by hand. Claude Code is marked Required; the others Optional.
-6. **Install** on an engine that is not installed runs the command shown next to the button in the panel below, and the row turns Installed when the command ends.
-7. With Claude Code signed out, **Sign in** runs `claude auth login`, and the row turns Signed in when it ends.
-8. The page is not ready while Claude Code is missing or signed out, and is ready while Codex CLI, Antigravity CLI and OpenCode are all missing.
-9. The Spaces folder is prefilled with `~/Spaces`; **Use this folder** creates it; Settings shows the same value under Spaces.
-10. With everything fine, a new launch opens the welcome screen directly, whose status line names the GitHub account, Claude Code and the Spaces folder.
+1. With gh signed out, the companion opens on Set up this Mac, not on the welcome screen. Checked by hand.
+2. **Sign in with the browser** opens the browser at GitHub's device page, the one-time code is on the clipboard and shown on the page, and after authorising, the GitHub row turns fine by itself, naming the account and its organisations, without pressing Check again. Checked by hand.
+3. With a token that lacks the `project` scope, the row says so, and **Give access to Projects** fixes it through the browser. Checked by hand.
+4. After signing in, `git clone` and `git push` of a private repository of the account work from a terminal without asking for a password. Checked by hand.
+5. The engines section lists Claude Code, Codex CLI, Antigravity CLI and OpenCode, whether installed or not, and does not list Gemini CLI unless it was added by hand. Claude Code is marked Required; the others Optional. Checked by "the engines section lists all four catalog engines with Claude Code required and the others optional, whether installed or not (criterion 5)" in `packages/app/test/space-setup-criteria.spec.ts`.
+6. **Install** on an engine that is not installed runs the command shown next to the button in the panel below, and the row turns Installed when the command ends. Checked by hand.
+7. With Claude Code signed out, **Sign in** runs `claude auth login`, and the row turns Signed in when it ends. Checked by hand.
+8. The page is not ready while Claude Code is missing or signed out, and is ready while Codex CLI, Antigravity CLI and OpenCode are all missing. Checked by "the page is ready only with Claude Code fine, and stays ready with Codex CLI, Antigravity CLI and OpenCode all missing (criterion 8)" in `packages/app/test/space-setup-criteria.spec.ts`.
+9. The Spaces folder is prefilled with `~/Spaces`; **Use this folder** creates it; Settings shows the same value under Spaces. Checked by "the Spaces folder is prefilled with ~/Spaces, "Use this folder" creates it, and Settings shows the same value in the same launch (criterion 9)" in `packages/app/test/space-setup-criteria.spec.ts`.
+10. With everything fine, a new launch opens the welcome screen directly, whose status line names the GitHub account, Claude Code and the Spaces folder. Checked by hand.
 
 **Creating a Space**
 
-11. The Create form has no field named with an internal name, and no text field for the owner. The owner drop-down lists the account and its organisations.
-12. Typing a name updates the full folder path, the repository and the Project in What will be created, and says the folder is new.
-13. Typing the name of an existing complete Space in that folder shows **Open it**; the name of a half-made one shows **Finish setting it up**.
-14. Continue shows each check with its state within a second, and the confirmation arrives within ten seconds for a new name.
-15. The confirmation fits on the screen without scrolling at the window's default size, asks one question, and states the folder, the repository with its visibility, and the Project.
-16. While running, no step reads "skipped"; a step found done reads "Already done".
-17. The result's first line says the Space is ready, and **Open the Space** opens it. The three GitHub settings each have a link that opens that view.
-18. Running Create again with the name of a complete Space leads to "already exists and is complete" and **Open the Space**, and creates nothing.
-19. Revoking the `project` scope before creating a Space leads to a result that says where it stopped and why; **Fix and run again** leads to the scope fix and then finishes the Space.
-20. Make a Space from a repository on this Mac says the chosen folder is not changed, and it is not changed afterwards (`git status` in it is as before).
+11. The Create form has no field named with an internal name, and no text field for the owner. The owner drop-down lists the account and its organisations. Checked by "the Create form has no internal name and the owner is a drop-down (criterion 11)" in `packages/app/test/space-create-criteria.spec.ts`. The owner drop-down is checked for the account only: the end-to-end machine runner answers `gh api user/orgs` with an empty list whatever a fake is built with, so no test can put an organisation there. The organisations half stays a manual check.
+12. Typing a name updates the full folder path, the repository and the Project in What will be created, and says the folder is new. Checked by "typing a name updates the folder, the repository and the Project, and says the folder is new (criterion 12)" in `packages/app/test/space-create-criteria.spec.ts`.
+13. Typing the name of an existing complete Space in that folder shows **Open it**; the name of a half-made one shows **Finish setting it up**. Checked by "a complete Space offers Open it; a half-made one also offers Finish setting it up (criterion 13)" in `packages/app/test/space-create-criteria.spec.ts`.
+14. Continue shows each check with its state within a second, and the confirmation arrives within ten seconds for a new name. Checked by hand.
+15. The confirmation fits on the screen without scrolling at the window's default size, asks one question, and states the folder, the repository with its visibility, and the Project. Checked by hand.
+16. While running, no step reads "skipped"; a step found done reads "Already done". Checked by "while running, no step reads "skipped", and a step found already done reads "Already done" (criterion 16)" in `packages/app/test/space-create-criteria.spec.ts`.
+17. The result's first line says the Space is ready, and **Open the Space** opens it. The three GitHub settings each have a link that opens that view. Checked by hand.
+18. Running Create again with the name of a complete Space leads to "already exists and is complete" and **Open the Space**, and creates nothing. Checked by "typing the name of a complete Space offers Open it and creates nothing (criterion 18)" in `packages/app/test/space-create-criteria.spec.ts`. The test proves the half that holds, that nothing is created. The other half does not match the application: once the local check finds the folder complete the Continue button is unmounted and only **Open it** remains, so "already exists and is complete" and **Open the Space** are never shown, and there is no control that asks for a fresh plan of a complete name. Either the criterion or the screen needs to change; that is the Human Lead's call.
+19. Revoking the `project` scope before creating a Space leads to a result that says where it stopped and why; **Fix and run again** leads to the scope fix and then finishes the Space. Checked by hand.
+20. Make a Space from a repository on this Mac says the chosen folder is not changed, and it is not changed afterwards (`git status` in it is as before). Checked by "making a Space from a repository on this Mac leaves the chosen folder unchanged (criterion 20)" in `packages/app/test/space-create-criteria.spec.ts`.
 
 **First session**
 
-21. In a newly created Space, the Dashboard button reads **Start a Claude Code session** and starts a Read only session with the Space's skills listed.
-22. With the Human Lead's current `engines.json` (Gemini first, `default.claude` removed, Claude re-added), a new Space still starts a Claude Code session, and Settings, Engines lists Claude Code once.
-23. `+ AI ▾` lists Codex CLI, Antigravity CLI and OpenCode greyed with the reason on the line, and picking one is not possible in a Space.
-24. In the v0.8 project window, an AI tab can start Codex CLI, Antigravity CLI or OpenCode once installed.
-25. With Claude Code signed out, the Space's start button shows the reason and **Sign in to Claude Code**; after signing in, the session starts without leaving the Space window.
+21. In a newly created Space, the Dashboard button reads **Start a Claude Code session** and starts a Read only session with the Space's skills listed. Checked by hand.
+22. With the Human Lead's current `engines.json` (Gemini first, `default.claude` removed, Claude re-added), a new Space still starts a Claude Code session, and Settings, Engines lists Claude Code once. Checked by "an awkward engines.json still starts Claude Code in a Space, and Settings lists it once (criterion 22)" in `packages/app/test/space-first-session-criteria.spec.ts`.
+23. `+ AI ▾` lists Codex CLI, Antigravity CLI and OpenCode greyed with the reason on the line, and picking one is not possible in a Space. Checked by "Codex CLI, Antigravity CLI and OpenCode are greyed with a reason in a Space, and cannot be picked (criterion 23)" in `packages/app/test/space-first-session-criteria.spec.ts`.
+24. In the v0.8 project window, an AI tab can start Codex CLI, Antigravity CLI or OpenCode once installed. Checked by hand.
+25. With Claude Code signed out, the Space's start button shows the reason and **Sign in to Claude Code**; after signing in, the session starts without leaving the Space window. Checked by hand.
 
 ## 9. Points for a ruling
 
