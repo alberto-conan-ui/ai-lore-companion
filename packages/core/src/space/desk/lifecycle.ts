@@ -66,6 +66,7 @@ import type {
   JsonObject,
   SessionClose,
   SessionProfile,
+  SessionPurpose,
   SessionRecord,
   SessionSpend,
 } from './types.js';
@@ -84,6 +85,8 @@ export type SessionStart = {
   profile?: SessionProfile;
   /** The texts of the parameters ticked at the start, in order. Written only when non-empty. */
   params?: readonly string[];
+  /** The automatically started PM session. Absent is the normal Human Lead session. */
+  purpose?: SessionPurpose;
 };
 
 /** What `repairSessionRecords` changed. Both lists are empty on a desk that follows the rule. */
@@ -172,6 +175,7 @@ export function startSession(desk: Desk, start: SessionStart): Result<SessionRec
       : {}),
     ...(start.profile !== undefined ? { profile: start.profile } : {}),
     ...(start.params !== undefined && start.params.length > 0 ? { params: [...start.params] } : {}),
+    ...(start.purpose !== undefined ? { purpose: start.purpose } : {}),
   });
 }
 

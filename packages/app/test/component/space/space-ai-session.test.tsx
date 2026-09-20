@@ -1,11 +1,16 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 // Phase M4.6: an AI tab in a Space window, with the real AiTab and the real tab kinds. The
 // dock is replaced by a stand-in that renders each tab's body as the dock would, and the
 // xterm hook by an inert one. The cockpit's engine spawn is a spy that must never be called.
+const attachedPtyIds: string[] = [];
 vi.mock('../../../src/renderer/src/components/useXtermSession.js', () => ({
-  useXtermSession: () => ({ hostRef: { current: null }, focus: () => {}, search: {} }),
+  useXtermSession: (config: { ptyId?: string }) => {
+    if (config.ptyId !== undefined) attachedPtyIds.push(config.ptyId);
+    return { hostRef: { current: null }, focus: () => {}, search: {} };
+  },
   useTerminalFindShortcut: () => {},
 }));
 vi.mock('../../../src/renderer/src/components/TerminalTab.js', () => ({
@@ -108,6 +113,8 @@ const cockpit = {
   spaceSessionEnginePick: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionReinstall: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionStart: vi.fn<(arg: unknown) => Promise<unknown>>(),
+  /** PM auto-start is opt-in per test; the normal fixture keeps old session tests focused. */
+  spacePmEnsure: vi.fn<(arg: unknown) => Promise<unknown>>(),
   spaceSessionEnd: vi.fn(async () => ({ ok: true, value: { sessionId: 's-1' } })),
   spaceSessionHeader: vi.fn(async () => ({ ok: true, value: readOnly })),
   spaceSessionLeaveWriting: vi.fn<(arg: unknown) => Promise<unknown>>(),
@@ -149,11 +156,16 @@ const cockpit = {
 };
 
 beforeEach(() => {
+  attachedPtyIds.length = 0;
   for (const mock of Object.values(cockpit)) mock.mockClear();
   cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: READY_CHOICE });
   cockpit.spaceSessionStart.mockResolvedValue({
     ok: true,
     value: { sessionId: 's-1', ptyId: 'pty-1', engineId: 'claude-code', unguarded: [] },
+  });
+  cockpit.spacePmEnsure.mockResolvedValue({
+    ok: false,
+    error: { kind: 'pm-unavailable', message: 'PM is disabled for this test.' },
   });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
   useSpaceNavStore.setState({ tickedParams: {} });
@@ -169,6 +181,146 @@ async function startFromNewAi(): Promise<void> {
   fireEvent.click(ai);
   await screen.findByTestId('session-header');
 }
+
+test('mounting a Space auto-starts PM once and attaches its returned PTY without a second spawn', async () => {
+  cockpit.spacePmEnsure.mockResolvedValue({
+    ok: true,
+    value: { sessionId: 'pm-1', ptyId: 'pm-pty-1', engineId: 'claude-code', unguarded: [] },
+  });
+  render(<SpaceSessions spaceRoot="/work/space" />);
+
+  await waitFor(() => expect(screen.getByTestId('session-header')).toBeTruthy());
+  expect(screen.getAllByTestId('dock-tab').map((tab) => tab.getAttribute('data-title'))).toContain(
+    'PM',
+  );
+  expect(cockpit.spacePmEnsure).toHaveBeenCalledWith({});
+  expect(cockpit.spacePmEnsure).toHaveBeenCalledTimes(1);
+  expect(cockpit.spaceSessionStart).not.toHaveBeenCalled();
+  expect(cockpit.spawnTerminalEngine).not.toHaveBeenCalled();
+  expect(attachedPtyIds).toContain('pm-pty-1');
+  expect(screen.getByTestId('ai-tab').dataset.aiState).toBe('running');
+});
+
+test('a refused PM auto-start can be retried, and the successful retry still uses the attached PTY', async () => {
+  cockpit.spacePmEnsure
+    .mockResolvedValueOnce({
+      ok: false,
+      error: { kind: 'pm-unavailable', message: 'PM is not ready yet.' },
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      value: { sessionId: 'pm-2', ptyId: 'pm-pty-2', engineId: 'claude-code', unguarded: [] },
+    });
+  render(<SpaceSessions spaceRoot="/work/space" />);
+
+  await waitFor(() => expect(screen.getByTestId('pm-retry')).toBeTruthy());
+  expect(screen.getByRole('alert').textContent).toBe('PM is not ready yet.');
+  fireEvent.click(screen.getByTestId('pm-retry'));
+  await waitFor(() => expect(screen.getByTestId('session-header')).toBeTruthy());
+  expect(cockpit.spacePmEnsure).toHaveBeenCalledTimes(2);
+  expect(cockpit.spaceSessionStart).not.toHaveBeenCalled();
+  expect(cockpit.spawnTerminalEngine).not.toHaveBeenCalled();
+});
+
+test('closing the PM tab ends its session and removes the tab', async () => {
+  cockpit.spacePmEnsure.mockResolvedValue({
+    ok: true,
+    value: { sessionId: 'pm-3', ptyId: 'pm-pty-3', engineId: 'claude-code', unguarded: [] },
+  });
+  render(<SpaceSessions spaceRoot="/work/space" />);
+  await waitFor(() => expect(screen.getByTestId('session-header')).toBeTruthy());
+
+  const pmTab = screen
+    .getAllByTestId('dock-tab')
+    .find((tab) => tab.getAttribute('data-title') === 'PM');
+  expect(pmTab).toBeTruthy();
+  fireEvent.click(within(pmTab as HTMLElement).getByTestId('dock-tab-close'));
+  expect(cockpit.spaceSessionEnd).toHaveBeenCalledWith({ sessionId: 'pm-3' });
+  expect(screen.queryByTestId('session-header')).toBeNull();
+});
+
+test('an exited PM offers Restart and attaches the replacement PM without a normal AI start', async () => {
+  let exited: ((payload: { id: string }) => void) | null = null;
+  cockpit.onTerminalExit.mockImplementation(((listener: (payload: { id: string }) => void) => {
+    exited = listener;
+    return () => {};
+  }) as never);
+  cockpit.spacePmEnsure
+    .mockResolvedValueOnce({
+      ok: true,
+      value: {
+        sessionId: 'pm-before',
+        ptyId: 'pm-before-pty',
+        engineId: 'claude-code',
+        unguarded: [],
+      },
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      value: {
+        sessionId: 'pm-after',
+        ptyId: 'pm-after-pty',
+        engineId: 'claude-code',
+        unguarded: [],
+      },
+    });
+  try {
+    render(<SpaceSessions spaceRoot="/work/space" />);
+    await screen.findByTestId('session-header');
+    act(() => exited?.({ id: 'pm-before-pty' }));
+    fireEvent.click(await screen.findByTestId('ai-restart'));
+    await screen.findByTestId('session-header');
+    expect(attachedPtyIds).toContain('pm-after-pty');
+    expect(cockpit.spacePmEnsure).toHaveBeenCalledTimes(2);
+    expect(cockpit.spaceSessionStart).not.toHaveBeenCalled();
+    expect(cockpit.spawnTerminalEngine).not.toHaveBeenCalled();
+  } finally {
+    cockpit.onTerminalExit.mockImplementation(() => () => {});
+  }
+});
+
+test('an in-flight PM ensure cannot resurrect a closed Space component', async () => {
+  let resolveEnsure: (value: unknown) => void = () => {};
+  cockpit.spacePmEnsure.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        resolveEnsure = resolve;
+      }),
+  );
+  const view = render(<SpaceSessions spaceRoot="/work/space" />);
+  await waitFor(() => expect(cockpit.spacePmEnsure).toHaveBeenCalledTimes(1));
+  view.unmount();
+  resolveEnsure({
+    ok: true,
+    value: { sessionId: 'pm-late', ptyId: 'pm-pty-late', engineId: 'claude-code', unguarded: [] },
+  });
+  await act(async () => {});
+  expect(cockpit.spaceSessionStart).not.toHaveBeenCalled();
+  expect(cockpit.spawnTerminalEngine).not.toHaveBeenCalled();
+});
+
+test('StrictMode remounts do not create duplicate PM tabs or ordinary AI spawns', async () => {
+  cockpit.spacePmEnsure.mockResolvedValue({
+    ok: true,
+    value: {
+      sessionId: 'pm-strict',
+      ptyId: 'pm-pty-strict',
+      engineId: 'claude-code',
+      unguarded: [],
+    },
+  });
+  render(
+    <StrictMode>
+      <SpaceSessions spaceRoot="/work/space" />
+    </StrictMode>,
+  );
+  await waitFor(() => expect(screen.getByTestId('session-header')).toBeTruthy());
+  expect(
+    screen.getAllByTestId('dock-tab').filter((tab) => tab.getAttribute('data-title') === 'PM'),
+  ).toHaveLength(1);
+  expect(cockpit.spaceSessionStart).not.toHaveBeenCalled();
+  expect(cockpit.spawnTerminalEngine).not.toHaveBeenCalled();
+});
 
 test('+ AI starts the guarded session through spaceSessionStart and never the unguarded engine spawn', async () => {
   await startFromNewAi();

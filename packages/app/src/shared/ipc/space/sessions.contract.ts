@@ -22,6 +22,8 @@ import type {
 } from './sessions.types.js';
 
 export const SPACE_SESSIONS_CONTRACT = {
+  /** Start or attach the one guarded, window-scoped PM session of this Space. */
+  spacePmEnsure: invoke<[arg: Record<string, never>], SpaceSessionStartResult>('space:pm-ensure'),
   /**
    * Whether a guarded session can start with the engine: Claude Code, `python3`,
    * and the Space's install with every check script as installed. Starts nothing.

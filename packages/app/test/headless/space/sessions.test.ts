@@ -1155,6 +1155,249 @@ test('M14.3: a started session records its profile and ticked parameters; a clos
   }
 });
 
+test('PM ensure is deduplicated, records its narrow purpose and configured model, and refuses unsafe or stale automatic settings', async () => {
+  const mcp: McpHost = createMcpHost();
+  await mcp.listen();
+  configureSessionServer({ host: async () => mcp });
+  const engine: EngineEntry = {
+    id: 'default.claude',
+    name: 'Claude Code',
+    binary: '/opt/nowhere/claude',
+    model: 'opus',
+    params: [{ text: '--model sonnet', defaultOn: false }],
+  };
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister(() => ({
+      engines: () => [engine],
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () => `s-pm-${Math.random().toString(16).slice(2, 8)}`,
+      probeEngine: async (candidate) => fineEngineCheck(candidate),
+    })),
+  );
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const spaceWindow = h.space.created[0];
+    assert.ok(spaceWindow);
+    const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+    assert.ok(context);
+    const spawned: { engine?: PtySpawnEngine; opts?: PtySpawnOpts }[] = [];
+    context.ptyService = {
+      spawn: (spawnedEngine, opts) => {
+        spawned.push({ engine: spawnedEngine, opts });
+        return `pty-pm-${spawned.length}`;
+      },
+      write: () => {},
+      resize: () => {},
+      kill: () => {},
+      killAll: () => {},
+      hasRunningTask: () => false,
+    } as PtyService;
+    const lore = await readLore(space.root);
+    assert.ok(lore.ok);
+    assert.ok((await installClaudeCode(lore.value, context.desk.install)).ok);
+
+    // Two mounts race through IPC but create precisely one PM PTY and receive the same tab target.
+    const [first, second] = (await Promise.all([
+      h.invoke('spacePmEnsure', spaceWindow, {}),
+      h.invoke('spacePmEnsure', spaceWindow, {}),
+    ])) as [
+      {
+        ok: boolean;
+        value: { sessionId: string; ptyId: string; engineId: string; unguarded: string[] };
+      },
+      {
+        ok: boolean;
+        value: { sessionId: string; ptyId: string; engineId: string; unguarded: string[] };
+      },
+    ];
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.deepEqual(second.value, first.value);
+    assert.equal(spawned.length, 1);
+    assert.equal(first.value.engineId, engine.id);
+    assert.deepEqual(first.value.unguarded, []);
+    assert.deepEqual(spawned[0]?.engine?.args?.slice(0, 2), ['--model', 'opus']);
+
+    const opened = context.service(spaceDesk).open();
+    assert.ok(opened.ok);
+    const pmRecord = getSession(opened.value, first.value.sessionId);
+    assert.ok(pmRecord.ok);
+    assert.equal(pmRecord.value?.purpose, 'pm');
+    assert.equal(pmRecord.value?.profile?.model, 'opus');
+    assert.deepEqual(context.service(spaceUi).read('pm-profile').state, {
+      version: 1,
+      engineId: engine.id,
+    });
+
+    // A profile model is the sole model selector: a ticked parameter cannot rely on
+    // undocumented CLI precedence to replace it.
+    const conflictingModel = (await h.invoke('spaceSessionStart', spaceWindow, {
+      engineId: engine.id,
+      params: ['--model sonnet'],
+    })) as { ok: boolean; error?: { kind: string } };
+    assert.equal(conflictingModel.ok, false);
+    assert.equal(conflictingModel.error?.kind, 'invalid-argument');
+    assert.equal(spawned.length, 1);
+
+    await h.invoke('spaceSessionEnd', spaceWindow, { sessionId: first.value.sessionId });
+    // There is no lifecycle retry on close. A later explicit ensure starts a fresh PM session.
+    const restarted = (await h.invoke('spacePmEnsure', spaceWindow, {})) as {
+      ok: boolean;
+      value: { sessionId: string };
+    };
+    assert.equal(restarted.ok, true, JSON.stringify(restarted));
+    assert.notEqual(restarted.value.sessionId, first.value.sessionId);
+    await h.invoke('spaceSessionEnd', spaceWindow, { sessionId: restarted.value.sessionId });
+
+    // An explicit binding which was removed is reported as such, and must not fall back to another engine.
+    context.service(spaceUi).save('pm-profile', { version: 1, engineId: 'removed-engine' });
+    const stale = (await h.invoke('spacePmEnsure', spaceWindow, {})) as {
+      ok: boolean;
+      error?: { kind: string };
+    };
+    assert.equal(stale.ok, false);
+    assert.equal(stale.error?.kind, 'engine-not-found');
+    assert.equal(spawned.length, 2);
+
+    await h.space.host.windowClosed(spaceWindow.id);
+  } finally {
+    configureSessionServer(null);
+    await mcp.close();
+    h.cleanup();
+  }
+});
+
+test('closing a Space awaits its in-flight PM readiness and prevents a late spawn', async () => {
+  const mcp = createMcpHost();
+  await mcp.listen();
+  configureSessionServer({ host: async () => mcp });
+  const engine: EngineEntry = {
+    id: 'default.claude',
+    name: 'Claude Code',
+    binary: '/opt/nowhere/claude',
+  };
+  let signalEntered: () => void = () => {};
+  let releaseProbe: () => void = () => {};
+  const entered = new Promise<void>((resolve) => {
+    signalEntered = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    releaseProbe = resolve;
+  });
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister(() => ({
+      engines: () => [engine],
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () => 's-pm-close-pending',
+      probeEngine: async (candidate) => {
+        signalEntered();
+        await held;
+        return fineEngineCheck(candidate);
+      },
+    })),
+  );
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const win = h.space.created[0];
+    assert.ok(win);
+    const context = h.space.host.contextFor({ sender: { id: win.webContents.id } });
+    assert.ok(context);
+    let spawns = 0;
+    context.ptyService = {
+      spawn: () => {
+        spawns += 1;
+        return 'never-spawn';
+      },
+      write: () => {},
+      resize: () => {},
+      kill: () => {},
+      killAll: () => {},
+      hasRunningTask: () => false,
+    } as PtyService;
+    const lore = await readLore(space.root);
+    assert.ok(lore.ok);
+    assert.ok((await installClaudeCode(lore.value, context.desk.install)).ok);
+    const start = h.invoke('spacePmEnsure', win, {});
+    await entered;
+    let closed = false;
+    const close = h.space.host.windowClosed(win.id).then(() => {
+      closed = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(closed, false, 'desk remains open until the pending PM has rolled back');
+    releaseProbe();
+    const result = (await start) as { ok: boolean };
+    await close;
+    assert.equal(result.ok, false);
+    assert.equal(spawns, 0);
+  } finally {
+    releaseProbe();
+    configureSessionServer(null);
+    await mcp.close();
+    h.cleanup();
+  }
+});
+
+test('PM ensure refuses default parameters that change the guard before spawning', async () => {
+  const mcp: McpHost = createMcpHost();
+  await mcp.listen();
+  configureSessionServer({ host: async () => mcp });
+  const engine: EngineEntry = {
+    id: 'claude-code',
+    name: 'Claude Code',
+    binary: '/opt/nowhere/claude',
+    params: [{ text: '--dangerously-skip-permissions', defaultOn: true }],
+  };
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister(() => ({
+      engines: () => [engine],
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () => `s-pm-unsafe-${Math.random().toString(16).slice(2, 8)}`,
+      probeEngine: async (candidate) => fineEngineCheck(candidate),
+    })),
+  );
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const spaceWindow = h.space.created[0];
+    assert.ok(spaceWindow);
+    const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+    assert.ok(context);
+    let spawns = 0;
+    context.ptyService = {
+      spawn: () => {
+        spawns += 1;
+        return 'pty-pm-unsafe';
+      },
+      write: () => {},
+      resize: () => {},
+      kill: () => {},
+      killAll: () => {},
+      hasRunningTask: () => false,
+    } as PtyService;
+    const lore = await readLore(space.root);
+    assert.ok(lore.ok);
+    assert.ok((await installClaudeCode(lore.value, context.desk.install)).ok);
+
+    const refused = (await h.invoke('spacePmEnsure', spaceWindow, {})) as {
+      ok: boolean;
+      error?: { kind: string; message: string };
+    };
+    assert.equal(refused.ok, false);
+    assert.equal(refused.error?.kind, 'engine-not-supported');
+    assert.match(refused.error?.message ?? '', /change the guard/);
+    assert.equal(spawns, 0);
+
+    await h.space.host.windowClosed(spaceWindow.id);
+  } finally {
+    configureSessionServer(null);
+    await mcp.close();
+    h.cleanup();
+  }
+});
+
 // Phase M14.6: the Claude Code adapter's readSpend, exercised through the full
 // close (`session-spend.test.ts` exercises `readSessionSpend` and the spend
 // adapter's Python on their own).

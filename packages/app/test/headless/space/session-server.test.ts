@@ -17,11 +17,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { type McpHost, createMcpHost } from '../../../src/main/helper/mcp-host.js';
 import type { SpaceContext } from '../../../src/main/space/context.js';
+import { spaceDashboardReport } from '../../../src/main/space/dashboard-report.js';
 import { spaceDesk } from '../../../src/main/space/desk-service.js';
 import type { SpaceLog, SpaceLogFields } from '../../../src/main/space/log.js';
 import { createDialogBroker } from '../../../src/main/space/session-server/broker.js';
 import { MAX_BODY_BYTES } from '../../../src/main/space/session-server/constants.js';
 import {
+  DASHBOARD_REPORT_TOOL_NAME,
   SESSION_TOOL_NAMES,
   type SessionConnection,
   type SessionServer,
@@ -95,6 +97,14 @@ afterEach(async () => {
 async function start(sessionId: string): Promise<SessionConnection> {
   assert.ok(startSession(desk, { id: sessionId, engine: 'claude-code' }).ok);
   const connection = await server.registerSession(sessionId);
+  assert.ok(connection.ok);
+  return connection.value;
+}
+
+/** A PM starts as the same Read-only session, with one report-only MCP tool. */
+async function startPm(sessionId: string): Promise<SessionConnection> {
+  assert.ok(startSession(desk, { id: sessionId, engine: 'claude-code' }).ok);
+  const connection = await server.registerSession(sessionId, { purpose: 'pm' });
   assert.ok(connection.ok);
   return connection.value;
 }
@@ -182,6 +192,67 @@ test('a session has the four tools of the cards, and no other', async () => {
   const client = await connect(connection);
   const { tools } = await client.listTools();
   assert.deepEqual(tools.map((tool) => tool.name).sort(), [...SESSION_TOOL_NAMES].sort());
+});
+
+test('only a PM session can publish one bounded dashboard report without a claim', async () => {
+  const ordinary = await connect(await start('s-ordinary-report'));
+  const ordinaryTools = await ordinary.listTools();
+  assert.equal(
+    ordinaryTools.tools.some((tool) => tool.name === DASHBOARD_REPORT_TOOL_NAME),
+    false,
+  );
+
+  const pmConnection = await startPm('s-pm-report');
+  assert.deepEqual(pmConnection.tools, [...SESSION_TOOL_NAMES, DASHBOARD_REPORT_TOOL_NAME]);
+  const pm = await connect(pmConnection);
+  const pmTools = await pm.listTools();
+  assert.equal(
+    pmTools.tools.some((tool) => tool.name === DASHBOARD_REPORT_TOOL_NAME),
+    true,
+  );
+
+  const published = await call(pm, DASHBOARD_REPORT_TOOL_NAME, {
+    markdown: '# Today\n\nThe project is waiting for review.',
+    basis: 'The PM read the current Lore and Project cache.',
+  });
+  assert.equal(published.isError, false, JSON.stringify(published.value));
+  assert.deepEqual(published.value, { status: 'received' });
+  const report = context.service(spaceDashboardReport).read().report;
+  assert.ok(report);
+  assert.deepEqual(report, {
+    markdown: '# Today\n\nThe project is waiting for review.',
+    basis: 'The PM read the current Lore and Project cache.',
+    sessionId: 's-pm-report',
+    receivedAt: report.receivedAt,
+    stale: false,
+    staleReason: null,
+  });
+  assert.match(report.receivedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+  const record = getSession(desk, 's-pm-report');
+  assert.ok(record.ok);
+  assert.equal(record.value?.mode, 'read-only');
+  const claims = listClaims(desk);
+  assert.ok(claims.ok);
+  assert.deepEqual(claims.value, []);
+
+  await server.unregisterSession('s-pm-report');
+  assert.deepEqual(context.service(spaceDashboardReport).read().report, {
+    ...report,
+    stale: true,
+    staleReason: 'session-ended',
+  });
+});
+
+test('a PM report rejects invalid bounded text before it reaches the Dashboard', async () => {
+  const pm = await connect(await startPm('s-pm-invalid-report'));
+  const oversized = await call(pm, DASHBOARD_REPORT_TOOL_NAME, {
+    markdown: 'x'.repeat(24 * 1024 + 1),
+  });
+  assert.equal(oversized.isError, true);
+  const control = await call(pm, DASHBOARD_REPORT_TOOL_NAME, { markdown: 'bad\u0000report' });
+  assert.equal(control.isError, true);
+  assert.equal(context.service(spaceDashboardReport).read().report, null);
 });
 
 test('request, pending, grant: the claim is on the desk before the session reads granted', async () => {

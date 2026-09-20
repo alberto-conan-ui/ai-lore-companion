@@ -94,6 +94,32 @@ export const codexAdapter: EngineAdapter = {
   catalogId: 'codex',
   capability: CAPABILITY,
   options: CODEX_OPTIONS,
+  // Verified against the installed Codex CLI: `--model <MODEL>` is its public
+  // session selector. Keeping it out of `-c` also avoids mixing user config
+  // with the companion's fixed session configuration.
+  modelArgs: (model) => (model === '' ? [] : ['--model', model]),
+  modelsSelectedBy: (argv) => {
+    const models: string[] = [];
+    for (let index = 0; index < argv.length; index += 1) {
+      const argument = argv[index] as string;
+      if (argument === '--model' && argv[index + 1] !== undefined) {
+        models.push(argv[index + 1] as string);
+        continue;
+      }
+      if (argument.startsWith('--model=')) {
+        models.push(argument.slice('--model='.length));
+        continue;
+      }
+      const value =
+        argument === '-c' || argument === '--config'
+          ? argv[index + 1]
+          : argument.startsWith('-c=') || argument.startsWith('--config=')
+            ? argument.slice(argument.indexOf('=') + 1)
+            : undefined;
+      if (value?.startsWith('model=')) models.push(value.slice('model='.length));
+    }
+    return models;
+  },
   skillInvocation: (name) => `Run the Lore's ${name}: read its card and follow it.`,
   verbsAre: 'listed',
   launch(input: SessionLaunchInput): SessionLaunch {

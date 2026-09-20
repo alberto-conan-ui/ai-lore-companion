@@ -36,7 +36,8 @@ function runScript<T>(lines: string[]): T {
  *  Mirrors `cockpit.spec.ts`'s `openSettingsViaMenu` (the app menu, and the `settings:open`
  *  push IPC it sends the focused window, are the same for a Space window). */
 async function openSettingsViaMenu(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ Menu }) => {
+  await app.evaluate(({ Menu, BrowserWindow }) => {
+    BrowserWindow.getAllWindows()[0]?.focus();
     const menu = Menu.getApplicationMenu();
     const submenu = menu?.items[0]?.submenu;
     const item = submenu?.items.find((i) => i.label === 'Settings…');
@@ -161,11 +162,11 @@ test.describe('the first-session criteria as end-to-end assertions (M12.4)', () 
       await expect(page.getByTestId('space-window')).toBeVisible({ timeout: 15_000 });
       await expect(page.getByTestId('space-rail-sessions')).toHaveAttribute('aria-current', 'page');
 
-      // The start control's primary button (the Sessions empty view's `+ AI`, same
+      // Opening now creates the PM tab automatically. The compact row's `+ AI`, same
       // `EngineStartControl` the Dashboard uses): the merge kept the re-added Claude's
       // stand-in binary but gave it the catalog's own name, so a guarded Claude Code
       // session is what starts, and the button names it so.
-      const start = page.getByTestId('space-sessions-empty').getByTestId('new-ai');
+      const start = page.getByRole('button', { name: 'Start a Claude Code session', exact: true });
       await expect(start).toBeEnabled({ timeout: 15_000 });
       await expect(start).toHaveText('Start a Claude Code session');
 

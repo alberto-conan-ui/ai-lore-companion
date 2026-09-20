@@ -23,15 +23,19 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { access } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   type CommandRunner,
   type EngineCheck,
   type EngineEntry,
+  type SessionPurpose,
   type SessionSpend,
   endSession,
   engineNameOf,
   listSessions,
   profileOf,
+  readLore,
   startSession,
 } from '@ai-lore-companion/core';
 import type { SpaceContext } from '../context.js';
@@ -40,7 +44,10 @@ import { spaceDesk } from '../desk-service.js';
 import { boardWithin, sessionBoard } from '../session-server/board.js';
 import { BOARD_UPDATE_WAIT_MS } from '../session-server/constants.js';
 import { sessionCloseCommits, sessionServer } from '../session-server/index.js';
+import { loreTemplateDir } from '../template-dir.js';
+import { spaceUi } from '../ui-store.js';
 import { MAX_LOGGED_REFUSALS, REQUIRED_CHECKS, SESSION_ID_ENV } from './constants.js';
+import { paramEffect } from './engine-options.js';
 import { adapterFor } from './engines/index.js';
 import { sessionInstructions } from './engines/instructions.js';
 import { readInstalledSkills } from './engines/skills.js';
@@ -71,7 +78,9 @@ export type StartedSession = {
   unguarded: string[];
 };
 
-type Started = { ok: true; value: StartedSession } | { ok: false; error: SessionStartFailure };
+export type StartedSessionResult =
+  | { ok: true; value: StartedSession }
+  | { ok: false; error: SessionStartFailure };
 
 /** What is ready for a start: the engine, `python3` and the install. */
 export type SessionReadiness =
@@ -91,7 +100,9 @@ export type SpaceSessions = {
   /** Check what a start needs, without starting. */
   readiness(engineId: string): Promise<SessionReadiness>;
   /** `params` are the ticked parameters' texts; every one must be a parameter of the engine now. */
-  start(engineId: string, params: readonly string[]): Promise<Started>;
+  start(engineId: string, params: readonly string[]): Promise<StartedSessionResult>;
+  /** Ensure this window-owned Space has one automatic PM session. */
+  ensurePm(): Promise<StartedSessionResult>;
   /** End a session of this service. `false` when it has no such session. The engine is stopped. */
   end(sessionId: string): Promise<boolean>;
   /** The ids of the sessions running now. */
@@ -131,6 +142,8 @@ export function newSessionId(now: Date = new Date()): string {
 
 type Live = {
   ptyId: string | null;
+  engineId: string;
+  purpose?: SessionPurpose;
   paths: SessionFilePaths;
   ending: Promise<void> | null;
   adapter: EngineAdapter;
@@ -143,12 +156,49 @@ function describe(caught: unknown): string {
   return caught instanceof Error ? caught.message : String(caught);
 }
 
-function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): SpaceSessions {
+/** The two corpus cards the PM reads. A Space's resolved card wins; an older Space gets the shipped default. */
+async function pmCorpusPaths(
+  spaceRoot: string,
+): Promise<{ ok: true; value: string[] } | { ok: false; message: string }> {
+  const names = ['pm', 'dashboard'];
+  const lore = await readLore(spaceRoot);
+  if (!lore.ok) {
+    return { ok: false, message: `the Space Lore could not be read (${lore.error.message})` };
+  }
+  const resolved = new Map(
+    lore.value.parts.corpus
+      .filter((entry) => names.includes(entry.name))
+      .map((entry) => [entry.name, entry.path]),
+  );
+  const template = loreTemplateDir();
+  if (!template.ok && names.some((name) => !resolved.has(name))) {
+    return {
+      ok: false,
+      message: `the shipped PM corpus is unavailable (${template.error.message})`,
+    };
+  }
+  const paths = names.flatMap((name) => {
+    const own = resolved.get(name);
+    if (own !== undefined) return [own];
+    return template.ok ? [join(template.value, 'lore', 'corpus', 'default', `${name}.md`)] : [];
+  });
+  try {
+    await Promise.all(paths.map((path) => access(path)));
+  } catch (caught) {
+    return { ok: false, message: `the PM corpus card cannot be read (${describe(caught)})` };
+  }
+  return { ok: true, value: paths };
+}
+
+function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Held {
   // The server first (it builds the desk first), so both are disposed after this service.
   const server = context.service(sessionServer);
   const desk = context.service(spaceDesk);
   const board = context.service(sessionBoard);
   const live = new Map<string, Live>();
+  let pmSessionId: string | null = null;
+  let pmStarting: Promise<StartedSessionResult> | null = null;
+  let disposing = false;
 
   const cleanup = (async () => {
     const opened = desk.open();
@@ -228,6 +278,9 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
     const spend = entry.adapter.readSpend
       ? await entry.adapter.readSpend({ sessionId, paths: entry.paths }).catch(() => NO_SPEND)
       : NO_SPEND;
+    // Remove the MCP token (and a PM's report publishing right) before the desk
+    // reflects the end, so no call can arrive for a session already marked closed.
+    await server.unregisterSession(sessionId);
     const opened = desk.open();
     if (opened.ok) {
       const closes = await sessionCloseCommits(context, opened.value, sessionId);
@@ -248,9 +301,9 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         kind: opened.error.kind,
       });
     }
-    await server.unregisterSession(sessionId);
     await removeSessionFiles(context.desk.sessions, sessionId);
     live.delete(sessionId);
+    if (entry.purpose === 'pm' && pmSessionId === sessionId) pmSessionId = null;
     context.log.info('session-ended', { space: context.key, session: sessionId });
   }
 
@@ -268,8 +321,21 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
     return entry.ending;
   }
 
-  async function start(engineId: string, params: readonly string[]): Promise<Started> {
+  async function start(
+    engineId: string,
+    params: readonly string[],
+    purpose?: SessionPurpose,
+  ): Promise<StartedSessionResult> {
     await cleanup;
+    if (disposing) {
+      return {
+        ok: false,
+        error: {
+          kind: 'start-failed',
+          message: 'No AI session was started: the Space window is closing.',
+        },
+      };
+    }
     const pty = context.ptyService;
     if (!pty) {
       return {
@@ -291,12 +357,55 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
       context.log.warn('session-not-started', { space: context.key, kind: checked.error.kind });
       return checked;
     }
-    const { argv: engineArgs, unguarded } = checked.value;
     const adapter = adapterFor(engine);
     if (adapter === null) {
       const message = `No AI session was started: a guarded session in a Space is started with Claude Code only, and "${engine.name}" is not Claude Code.`;
       context.log.warn('session-not-started', { space: context.key, kind: 'engine-not-supported' });
       return { ok: false, error: { kind: 'engine-not-supported', message } };
+    }
+    const profile = profileOf(engine);
+    // A configured profile owns model selection. Letting a clicked parameter add another model
+    // makes the engine's precedence part of the security and product contract, so refuse it.
+    if (profile.model !== undefined && adapter.modelsSelectedBy(checked.value.argv).length > 0) {
+      return {
+        ok: false,
+        error: {
+          kind: 'invalid-argument',
+          message: `No AI session was started: ${engine.name}'s profile already selects model ${profile.model}; remove the model parameter from this start.`,
+        },
+      };
+    }
+    const modelArgs = adapter.modelArgs(profile.model ?? '');
+    const modelEffect = paramEffect(adapter.options, modelArgs);
+    if (modelEffect.effect === 'refused') {
+      return {
+        ok: false,
+        error: {
+          kind: 'engine-not-supported',
+          message: `No AI session was started: the configured model of ${engine.name} uses ${modelEffect.options[0] ?? 'an option'} that the companion reserves.`,
+        },
+      };
+    }
+    const unguarded = [...checked.value.unguarded, ...modelEffect.options];
+    if (purpose === 'pm' && unguarded.length > 0) {
+      return {
+        ok: false,
+        error: {
+          kind: 'engine-not-supported',
+          message: `No PM session was started: its configured parameters change the guard (${unguarded.join(', ')}). Remove them from the PM profile.`,
+        },
+      };
+    }
+    const engineArgs = [...modelArgs, ...checked.value.argv];
+    const pmCorpus = purpose === 'pm' ? await pmCorpusPaths(context.root) : null;
+    if (pmCorpus !== null && !pmCorpus.ok) {
+      return {
+        ok: false,
+        error: {
+          kind: 'session-files-failed',
+          message: `No PM session was started: its role instructions are unavailable because ${pmCorpus.message}.`,
+        },
+      };
     }
     const opened = desk.open();
     if (!opened.ok || !opened.value.writable) {
@@ -311,7 +420,6 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
       };
     }
     const sessionId = use.newId();
-    const profile = profileOf(engine);
     const recorded = startSession(opened.value, {
       id: sessionId,
       engine: engine.id,
@@ -323,6 +431,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         ...(profile.model !== undefined ? { model: profile.model } : {}),
       },
       params: [...params],
+      ...(purpose !== undefined ? { purpose } : {}),
     });
     if (!recorded.ok) {
       return {
@@ -342,7 +451,10 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
           kind: undone.error.kind,
         });
     };
-    const connection = await server.registerSession(sessionId);
+    const connection =
+      purpose === 'pm'
+        ? await server.registerSession(sessionId, { purpose })
+        : await server.registerSession(sessionId);
     if (!connection.ok) {
       undoRecord();
       return {
@@ -356,7 +468,12 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
     const paths = sessionFilePaths(context.desk.sessions, sessionId);
     const repositories = context.manifest.repositories.map((repository) => repository.name);
     const skills = await readInstalledSkills(context.desk.install, context.root);
-    const instructions = sessionInstructions({ spaceRoot: context.root, skills, adapter });
+    const instructions = sessionInstructions({
+      spaceRoot: context.root,
+      skills,
+      adapter,
+      ...(purpose === 'pm' ? { purpose, pmCorpusPaths: pmCorpus?.value ?? [] } : {}),
+    });
     let launch: ReturnType<typeof adapter.launch>;
     try {
       launch = adapter.launch({
@@ -396,7 +513,26 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         },
       };
     }
-    const entry: Live = { ptyId: null, paths, ending: null, adapter };
+    if (disposing) {
+      await server.unregisterSession(sessionId);
+      await removeSessionFiles(context.desk.sessions, sessionId);
+      undoRecord();
+      return {
+        ok: false,
+        error: {
+          kind: 'start-failed',
+          message: 'No AI session was started: the Space window is closing.',
+        },
+      };
+    }
+    const entry: Live = {
+      ptyId: null,
+      engineId: engine.id,
+      ...(purpose !== undefined ? { purpose } : {}),
+      paths,
+      ending: null,
+      adapter,
+    };
     live.set(sessionId, entry);
     try {
       entry.ptyId = pty.spawn(
@@ -430,17 +566,94 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
     };
   }
 
+  /** The default-on parameters of an engine. PM starts run them only when none changes the guard. */
+  function defaultParams(engine: EngineEntry): string[] {
+    return (engine.params ?? []).filter((param) => param.defaultOn).map((param) => param.text);
+  }
+
+  async function ensurePm(): Promise<StartedSessionResult> {
+    if (pmSessionId !== null) {
+      const entry = live.get(pmSessionId);
+      if (entry !== undefined && entry.ptyId !== null && entry.ending === null) {
+        return {
+          ok: true,
+          value: {
+            sessionId: pmSessionId,
+            ptyId: entry.ptyId,
+            engineId: entry.engineId,
+            unguarded: [],
+          },
+        };
+      }
+      pmSessionId = null;
+    }
+    if (pmStarting !== null) return pmStarting;
+    const starting = (async (): Promise<StartedSessionResult> => {
+      const ui = context.service(spaceUi);
+      const bound = ui.read('pm-profile').state?.engineId;
+      const explicit = typeof bound === 'string' ? bound : null;
+      let engineId = explicit;
+      if (engineId === null) {
+        const remembered = ui.read('session-engine').state?.engineId;
+        if (typeof remembered === 'string' && (await readiness(remembered)).ok)
+          engineId = remembered;
+      }
+      if (engineId === null) {
+        for (const candidate of use.engines()) {
+          if ((await readiness(candidate.id)).ok) {
+            engineId = candidate.id;
+            break;
+          }
+        }
+      }
+      if (engineId === null) {
+        return {
+          ok: false,
+          error: {
+            kind: 'engine-not-supported',
+            message:
+              'No PM session was started: no configured engine is ready for a guarded Space session.',
+          },
+        };
+      }
+      const engine = use.engines().find((candidate) => candidate.id === engineId);
+      // An explicit stale setting reaches start so its precise refusal is shown; it is never silently replaced.
+      const started = await start(engineId, engine ? defaultParams(engine) : [], 'pm');
+      if (started.ok) {
+        pmSessionId = started.value.sessionId;
+        if (explicit === null) ui.save('pm-profile', { version: 1, engineId });
+      }
+      return started;
+    })().finally(() => {
+      pmStarting = null;
+    });
+    pmStarting = starting;
+    return starting;
+  }
+
+  async function end(sessionId: string): Promise<boolean> {
+    const entry = live.get(sessionId);
+    if (!entry) return false;
+    if (entry.ptyId !== null) context.ptyService?.kill(entry.ptyId);
+    await ended(sessionId);
+    return true;
+  }
+
   return {
     readiness,
-    start,
-    async end(sessionId) {
-      const entry = live.get(sessionId);
-      if (!entry) return false;
-      if (entry.ptyId !== null) context.ptyService?.kill(entry.ptyId);
-      await ended(sessionId);
-      return true;
-    },
+    start: (engineId, params) => start(engineId, params),
+    ensurePm,
+    end,
     live: () => [...live.keys()],
+    async dispose() {
+      disposing = true;
+      // A start that is awaiting readiness/files must finish its rollback before
+      // the context releases the server and desk used by that rollback.
+      await pmStarting?.catch((caught: unknown) => {
+        context.log.warn('pm-start-ended-during-close', { message: describe(caught) });
+      });
+      await Promise.all([...live.keys()].map((id) => end(id)));
+    },
   };
 }
 
@@ -451,13 +664,7 @@ export const spaceSessions = defineSpaceService<SpaceSessions>({
   id: 'sessions',
   create: (context): Held => {
     if (!parts) throw new Error('the sessions of a Space are used before configureSpaceSessions');
-    const service = createSpaceSessions(context, parts);
-    return {
-      ...service,
-      async dispose() {
-        await Promise.all(service.live().map((id) => service.end(id)));
-      },
-    };
+    return createSpaceSessions(context, parts);
   },
   dispose: (service) => (service as Held).dispose(),
 });

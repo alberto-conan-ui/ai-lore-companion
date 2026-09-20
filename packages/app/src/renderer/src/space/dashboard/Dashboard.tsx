@@ -5,6 +5,7 @@ import { AgentsBoard } from './AgentsBoard.js';
 import { FocusSheet } from './FocusSheet.js';
 import { FocusesByStage } from './FocusesByStage.js';
 import { NeedsYou } from './NeedsYou.js';
+import { PmReport } from './PmReport.js';
 import { Repositories } from './Repositories.js';
 import { StartSession } from './StartSession.js';
 import { stateSentence } from './dashboardText.js';
@@ -81,6 +82,7 @@ export function Dashboard({ justCreated }: Props = {}): JSX.Element {
         </p>
       ) : null}
       <StartSession justCreated={justCreated === true} />
+      <PmReport />
       {project !== null && model === null ? (
         <p style={emptyStyle} data-testid="dashboard-no-model">
           No Project has been read from GitHub for this Space yet, so there is nothing to show.
