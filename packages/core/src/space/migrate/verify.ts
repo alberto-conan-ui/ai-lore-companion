@@ -61,6 +61,12 @@ export type MigrationVerification = {
 
 /** How long lore-integrity may take over the Space's Lore. */
 const LORE_INTEGRITY_TIMEOUT_MS = 120_000;
+/**
+ * How long the issues check waits before it re-reads the Project for the
+ * references its first read did not find. GitHub can accept an issue onto a
+ * Project and not yet return it on the very next read.
+ */
+export const PROJECT_REREAD_PAUSE_MS = 2000;
 /** The Space-relative path of the Space's own lore-integrity script. */
 export const LORE_INTEGRITY_SCRIPT = 'lore/contracts/core/lore-integrity.py';
 /** How many paths a failed check names before it gives only the count of the rest. */
@@ -320,6 +326,30 @@ function refText(ref: IssueRef): string {
   return `${ref.repository}#${ref.number}`;
 }
 
+/** How many issue references, by their text, are on `snapshot`. */
+function countOnProject(snapshot: {
+  focuses: readonly { issue: IssueRef; items: readonly { issue: IssueRef }[] }[];
+  standalone: readonly { issue: IssueRef }[];
+}): Map<string, number> {
+  const onProject = new Map<string, number>();
+  const count = (ref: IssueRef) =>
+    onProject.set(refText(ref), (onProject.get(refText(ref)) ?? 0) + 1);
+  for (const focus of snapshot.focuses) {
+    count(focus.issue);
+    for (const item of focus.items) count(item.issue);
+  }
+  for (const item of snapshot.standalone) count(item.issue);
+  return onProject;
+}
+
+/** Wait `ms`, through `ctx.deps.pause` when given, a timer otherwise. */
+function waitFor(ctx: MigrationContext, ms: number): Promise<void> {
+  const wait =
+    ctx.deps.pause ??
+    ((delay: number) => new Promise<void>((resolve) => setTimeout(resolve, delay)));
+  return wait(ms);
+}
+
 async function issues(ctx: MigrationContext): Promise<VerificationCheck> {
   const title = 'Every planned issue exists once';
   const fail = (sentence: string, lookAt: string[] = [ctx.repositoryName]) =>
@@ -349,18 +379,12 @@ async function issues(ctx: MigrationContext): Promise<VerificationCheck> {
   const snapshot = await github.readProject({ project: project.value });
   if (!snapshot.ok)
     return fail(`GitHub could not be asked for the Project: ${snapshot.error.message}`);
-  const onProject = new Map<string, number>();
-  const count = (ref: IssueRef) =>
-    onProject.set(refText(ref), (onProject.get(refText(ref)) ?? 0) + 1);
-  for (const focus of snapshot.value.focuses) {
-    count(focus.issue);
-    for (const item of focus.items) count(item.issue);
-  }
-  for (const item of snapshot.value.standalone) count(item.issue);
+  const onProject = countOnProject(snapshot.value);
 
   const recorded = new Map(ledgerRecords(ctx, 'issue').map((record) => [record.key, record.issue]));
   const seen = new Map<string, string>();
   const problems: string[] = [];
+  const notYetOnProject: { key: string; text: string }[] = [];
   for (const issue of ctx.issues) {
     const all = found.value[issue.marker] ?? [];
     const ref = all[0];
@@ -384,7 +408,30 @@ async function issues(ctx: MigrationContext): Promise<VerificationCheck> {
     if (other !== undefined) problems.push(`${text} stands for both ${other} and ${issue.key}`);
     seen.set(text, issue.key);
     const times = onProject.get(text) ?? 0;
-    if (times !== 1) problems.push(`${text} (${issue.key}) is on the Project ${times} times`);
+    if (times === 0) notYetOnProject.push({ key: issue.key, text });
+    else if (times !== 1) problems.push(`${text} (${issue.key}) is on the Project ${times} times`);
+  }
+
+  // GitHub can accept an issue onto the Project and not yet return it on the
+  // very next read. Re-read once, only for the references still missing.
+  if (notYetOnProject.length > 0) {
+    await waitFor(ctx, PROJECT_REREAD_PAUSE_MS);
+    const reread = await github.readProject({ project: project.value });
+    if (!reread.ok)
+      return fail(`GitHub could not be asked for the Project: ${reread.error.message}`);
+    const onProjectAgain = countOnProject(reread.value);
+    for (const { key, text } of notYetOnProject) {
+      const times = onProjectAgain.get(text) ?? 0;
+      if (times === 1) continue;
+      const inLedger = recorded.get(key);
+      if (times === 0 && inLedger !== undefined && refText(inLedger) === text) {
+        problems.push(
+          `${text} (${key}) was recorded in the ledger as put on the Project when it was created, and the Project does not list it now`,
+        );
+      } else {
+        problems.push(`${text} (${key}) is on the Project ${times} times`);
+      }
+    }
   }
   if (problems.length === 0) {
     return check(

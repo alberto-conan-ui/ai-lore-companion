@@ -43,6 +43,7 @@ import {
 import { VERIFICATION_FAILED, verifyStep } from '../../src/space/migrate/steps/13-verify.js';
 import {
   type MigrationVerification,
+  PROJECT_REREAD_PAUSE_MS,
   VERIFICATION_CHECK_IDS,
   type VerificationCheckId,
   verifyMigration,
@@ -417,32 +418,144 @@ test('a second issue with the same marker fails the issues check', async () => {
   await assertPassesAgain(ctx);
 });
 
-test('an issue that is not on the Project fails the issues check', async () => {
+/** A `readProject` that drops one standalone item from every snapshot it returns. */
+function droppingReadProject(
+  fake: FakeGitHub,
+  drop: { issue: { number: number } },
+  onCall?: () => void,
+) {
+  return async (arg: Parameters<FakeGitHub['readProject']>[0]) => {
+    onCall?.();
+    const read = await fake.readProject(arg);
+    if (!read.ok) return read;
+    const standalone = read.value.standalone.filter(
+      (item) => item.issue.number !== drop.issue.number,
+    );
+    return { ok: true as const, value: { ...read.value, standalone } };
+  };
+}
+
+test('an issue an earlier read of the Project accepted but a later read has not returned yet still passes', async () => {
   const { fake, ctx } = b();
-  const snapshot = await fake.readProject({
-    project: await (async () => {
-      const found = await fake.findProject({ owner: ctx.settings.owner, title: ctx.settings.name });
-      assert.ok(found.ok && found.value !== null);
-      return found.value;
-    })(),
-  });
+  const found = await fake.findProject({ owner: ctx.settings.owner, title: ctx.settings.name });
+  assert.ok(found.ok && found.value !== null);
+  const snapshot = await fake.readProject({ project: found.value });
   assert.ok(snapshot.ok);
   const dropped = snapshot.value.standalone[0];
   assert.ok(dropped, 'the fixture has a standalone issue');
+  let calls = 0;
   const github = {
     ...fake,
     readProject: async (arg: Parameters<FakeGitHub['readProject']>[0]) => {
-      const read = await fake.readProject(arg);
-      if (!read.ok) return read;
-      const standalone = read.value.standalone.filter(
-        (item) => item.issue.number !== dropped.issue.number,
-      );
-      return { ok: true as const, value: { ...read.value, standalone } };
+      calls += 1;
+      if (calls === 1) return droppingReadProject(fake, dropped)(arg);
+      return fake.readProject(arg);
     },
   };
+  const waits: number[] = [];
+  const deps = { ...ctx.deps, github, pause: async (ms: number) => void waits.push(ms) };
+  const verification = await verifyMigration({ ...ctx, deps });
+  assert.equal(verification.passed, true, JSON.stringify(verification.checks, null, 2));
+  assert.equal(calls, 2, 'the Project was read a second time');
+  assert.deepEqual(waits, [PROJECT_REREAD_PAUSE_MS], 'paused once, for the re-read delay');
+});
+
+test('an issue still absent from a second read, with no ledger record of it, fails the issues check as before', async () => {
+  const { fake, ctx } = b();
+  const found = await fake.findProject({ owner: ctx.settings.owner, title: ctx.settings.name });
+  assert.ok(found.ok && found.value !== null);
+  const snapshot = await fake.readProject({ project: found.value });
+  assert.ok(snapshot.ok);
+  const dropped = snapshot.value.standalone[0];
+  assert.ok(dropped, 'the fixture has a standalone issue');
+  const github = { ...fake, readProject: droppingReadProject(fake, dropped) };
+  const ledger = ctx.ledger.filter(
+    (record) =>
+      !(
+        record.kind === 'issue' &&
+        record.issue.repository === dropped.issue.repository &&
+        record.issue.number === dropped.issue.number
+      ),
+  );
+  const verification = await verifyMigration({ ...ctx, ledger, deps: { ...ctx.deps, github } });
+  assert.deepEqual(outcome(verification), only(['issues']));
+  const sentence = sentenceOf(verification, 'issues');
+  assert.match(sentence, /is on the Project 0 times/);
+  assert.ok(sentence.includes(`${dropped.issue.repository}#${dropped.issue.number}`), sentence);
+});
+
+test('an issue the ledger recorded as put on the Project, still absent after a second read, names the disagreement', async () => {
+  const { fake, ctx } = b();
+  const found = await fake.findProject({ owner: ctx.settings.owner, title: ctx.settings.name });
+  assert.ok(found.ok && found.value !== null);
+  const snapshot = await fake.readProject({ project: found.value });
+  assert.ok(snapshot.ok);
+  const dropped = snapshot.value.standalone[0];
+  assert.ok(dropped, 'the fixture has a standalone issue');
+  const github = { ...fake, readProject: droppingReadProject(fake, dropped) };
   const verification = await verifyMigration({ ...ctx, deps: { ...ctx.deps, github } });
   assert.deepEqual(outcome(verification), only(['issues']));
-  assert.match(sentenceOf(verification, 'issues'), /is on the Project 0 times/);
+  const sentence = sentenceOf(verification, 'issues');
+  const text = `${dropped.issue.repository}#${dropped.issue.number}`;
+  assert.ok(sentence.includes(text), sentence);
+  assert.ok(
+    sentence.includes('was recorded in the ledger as put on the Project when it was created'),
+    sentence,
+  );
+  assert.ok(sentence.includes('the Project does not list it now'), sentence);
+});
+
+test('an issue on the Project twice fails the issues check without a second read', async () => {
+  const { fake, ctx } = b();
+  const found = await fake.findProject({ owner: ctx.settings.owner, title: ctx.settings.name });
+  assert.ok(found.ok && found.value !== null);
+  const snapshot = await fake.readProject({ project: found.value });
+  assert.ok(snapshot.ok);
+  const duplicated = snapshot.value.standalone[0];
+  assert.ok(duplicated, 'the fixture has a standalone issue');
+  let calls = 0;
+  const github = {
+    ...fake,
+    readProject: async (arg: Parameters<FakeGitHub['readProject']>[0]) => {
+      calls += 1;
+      const read = await fake.readProject(arg);
+      if (!read.ok) return read;
+      return {
+        ok: true as const,
+        value: { ...read.value, standalone: [...read.value.standalone, duplicated] },
+      };
+    },
+  };
+  const waits: number[] = [];
+  const deps = { ...ctx.deps, github, pause: async (ms: number) => void waits.push(ms) };
+  const verification = await verifyMigration({ ...ctx, deps });
+  assert.deepEqual(outcome(verification), only(['issues']));
+  const sentence = sentenceOf(verification, 'issues');
+  const text = `${duplicated.issue.repository}#${duplicated.issue.number}`;
+  assert.ok(
+    sentence.includes(`${text}`) && sentence.includes('is on the Project 2 times'),
+    sentence,
+  );
+  assert.equal(calls, 1, 'a genuine duplicate does not trigger a second read');
+  assert.deepEqual(waits, [], 'a genuine duplicate does not pause');
+});
+
+test('when every issue is on the Project once, the Project is read once and nothing pauses', async () => {
+  const { fake, ctx } = b();
+  let calls = 0;
+  const github = {
+    ...fake,
+    readProject: async (arg: Parameters<FakeGitHub['readProject']>[0]) => {
+      calls += 1;
+      return fake.readProject(arg);
+    },
+  };
+  const waits: number[] = [];
+  const deps = { ...ctx.deps, github, pause: async (ms: number) => void waits.push(ms) };
+  const verification = await verifyMigration({ ...ctx, deps });
+  assert.equal(verification.passed, true, JSON.stringify(verification.checks, null, 2));
+  assert.equal(calls, 1, 'read once when nothing is missing');
+  assert.deepEqual(waits, [], 'no pause when nothing is missing');
 });
 
 test('a Space commit that is not pushed fails the pushed check', async () => {
