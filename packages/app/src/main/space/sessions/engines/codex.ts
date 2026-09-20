@@ -102,7 +102,7 @@ export const codexAdapter: EngineAdapter = {
     const models: string[] = [];
     for (let index = 0; index < argv.length; index += 1) {
       const argument = argv[index] as string;
-      if (argument === '--model' && argv[index + 1] !== undefined) {
+      if ((argument === '--model' || argument === '-m') && argv[index + 1] !== undefined) {
         models.push(argv[index + 1] as string);
         continue;
       }
@@ -110,13 +110,20 @@ export const codexAdapter: EngineAdapter = {
         models.push(argument.slice('--model='.length));
         continue;
       }
+      if (argument.startsWith('-m') && argument.length > 2) {
+        models.push(argument.slice(argument.startsWith('-m=') ? 3 : 2));
+        continue;
+      }
       const value =
         argument === '-c' || argument === '--config'
           ? argv[index + 1]
           : argument.startsWith('-c=') || argument.startsWith('--config=')
             ? argument.slice(argument.indexOf('=') + 1)
-            : undefined;
-      if (value?.startsWith('model=')) models.push(value.slice('model='.length));
+            : argument.startsWith('-c') && argument.length > 2
+              ? argument.slice(2)
+              : undefined;
+      const modelConfig = value?.match(/^\s*model\s*=(.*)$/);
+      if (modelConfig) models.push(modelConfig[1] as string);
     }
     return models;
   },

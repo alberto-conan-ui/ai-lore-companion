@@ -51,6 +51,22 @@ const CONNECTION: SessionConnection = {
   tools: ['request_writing', 'request_gate', 'await_answer', 'leave_writing'],
 };
 
+test('Codex model conflicts include short selectors and config overrides', () => {
+  for (const argv of [
+    ['--model', 'other'],
+    ['--model=other'],
+    ['-m', 'other'],
+    ['-m=other'],
+    ['-mother'],
+    ['-c', 'model=other'],
+    ['-cmodel=other'],
+    ['--config= model =other'],
+  ]) {
+    assert.deepEqual(codexAdapter.modelsSelectedBy(argv), ['other'], argv.join(' '));
+  }
+  assert.deepEqual(codexAdapter.modelsSelectedBy(['-c', 'model_reasoning_effort=high']), []);
+});
+
 function engine(id: string, binary: string): EngineEntry {
   return { id, name: id, binary };
 }
