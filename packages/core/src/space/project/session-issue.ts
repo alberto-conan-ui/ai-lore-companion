@@ -61,6 +61,12 @@ export type SessionIssueContent = {
   person: string;
   /** The machine's name, or empty. */
   machine: string;
+  /**
+   * The profile the session ran, named in one line of the body between the
+   * item and the write targets (M14.4). Absent: the body names no profile, as
+   * it read before M14. The issue's title and marker never carry it.
+   */
+  profile?: { name: string; id: string; engine: string; model?: string };
 };
 
 /** The marker of a session's issue: the hidden line by which it is found again. */
@@ -86,6 +92,16 @@ export function sessionIssueTitle(session: { engine: string; startedAt: string }
   );
 }
 
+/**
+ * The one line that names the profile a session ran, in the body between the
+ * item and the write targets (M14.4). The model reads as the engine's own
+ * default when the profile named none.
+ */
+function profileLine(profile: NonNullable<SessionIssueContent['profile']>): string {
+  const model = profile.model ?? "the engine's default";
+  return `Profile: ${profile.name} (${profile.id}), engine ${profile.engine}, model ${model}`;
+}
+
 /** The body of a session's issue: short and literal, then the two hidden lines. */
 export function formatSessionIssueBody(content: SessionIssueContent): string {
   const item = content.item === undefined ? 'none' : content.item.url;
@@ -95,6 +111,7 @@ export function formatSessionIssueBody(content: SessionIssueContent): string {
     `The issue of the ${content.engine} session that started at ${content.startedAt}, kept by the companion.`,
     '',
     `Item: ${item}`,
+    ...(content.profile === undefined ? [] : ['', profileLine(content.profile)]),
     '',
     'Write targets:',
     ...targets,

@@ -196,6 +196,22 @@ const cockpit = {
   spaceProjectFocus: vi.fn(async () => ({ ok: true, value: null })),
   spaceProjectRefresh: vi.fn(),
   onSpaceProjectState: vi.fn(() => () => {}),
+  // The Dashboard mounts the Repositories section unconditionally (stage D1) and
+  // that section reads its own state, so these four are needed even though no test
+  // here asserts a repository. An empty model keeps it to a heading and one line.
+  spaceRepositoriesState: vi.fn(async () => ({
+    ok: true,
+    value: { version: 1, reading: false, model: null, readAt: null, problem: null },
+  })),
+  spaceRepositoriesRefresh: vi.fn(async () => ({
+    ok: true,
+    value: { version: 1, reading: false, model: null, readAt: null, problem: null },
+  })),
+  spaceRepositoriesFocus: vi.fn(async () => ({
+    ok: true,
+    value: { version: 1, reading: false, model: null, readAt: null, problem: null },
+  })),
+  onSpaceRepositoriesState: vi.fn(() => () => {}),
 };
 
 beforeEach(() => {

@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { isChainError } from '@ai-lore-companion/core';
+import { type EngineEntry, isChainError, profileOf } from '@ai-lore-companion/core';
 import { BrowserWindow } from 'electron';
 import type { HelperAction } from '../../shared/ipc.js';
 import { loadEngines, loadHelperEngine, saveHelperEngine } from '../engines.js';
@@ -27,10 +27,18 @@ const HELPER_MODEL = 'haiku';
  * the simple prompt the cheapest Gemini was the *most* complete (13 loose-ends,
  * ~26s). It can flake (an occasional empty reply), so a retry is owed. A model
  * must still be pinned or the CLI's auto-router crashes on a big prompt; an
- * explicit per-project `helperModel` overrides. (`gemini-2.5-flash` routes to
+ * explicit profile `model` overrides (M14.5). (`gemini-2.5-flash` routes to
  * gemini-3-flash on current CLIs.)
  */
 const GEMINI_HELPER_MODEL = 'gemini-2.5-flash';
+
+/** The model the Gemini helper runs with (M14.5): the entry's profile's
+ *  model, read through `profileOf` — which resolves `model` from `model`
+ *  itself or, on an entry written before M14, from `helperModel` — or
+ *  {@link GEMINI_HELPER_MODEL} when the profile names none. */
+export function geminiHelperModel(entry: EngineEntry): string {
+  return profileOf(entry).model ?? GEMINI_HELPER_MODEL;
+}
 
 /** Cap on the change list embedded in the `what-changed` prompt — a huge drift
  *  shouldn't blow the prompt. Truncation is noted in the prompt. */
@@ -167,9 +175,9 @@ function resolve(deps: Deps, event: Electron.IpcMainInvokeEvent): BoundHelper | 
       includeDirs: [ctx.root],
       // Pin Gemini 3 Pro for the crawl — without a pinned model the CLI's
       // auto-router crashes on the big prompt; with it, 3.1-pro-preview gives the
-      // most complete board in ~90s (trip 2026-06-03). A per-project
-      // `helperModel` still overrides.
-      model: engine.entry.helperModel ?? GEMINI_HELPER_MODEL,
+      // most complete board in ~90s (trip 2026-06-03). A per-project profile
+      // `model` still overrides.
+      model: geminiHelperModel(engine.entry),
     };
     return {
       ctx,

@@ -166,7 +166,7 @@ export type GeminiHost = {
   /** Extra readable roots beyond `cwd` — the **project root**, so the helper
    *  still sees the payload (its files are passed as absolute paths). */
   includeDirs?: string[];
-  /** The model to launch with, from the resolved engine's `helperModel`. Unset
+  /** The model to launch with, from the resolved engine's profile `model`. Unset
    *  → the CLI routes to its own default (the `--model` flag is honoured when
    *  set, but recent CLIs may route regardless). */
   model?: string;

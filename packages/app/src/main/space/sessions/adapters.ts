@@ -939,6 +939,231 @@ if __name__ == '__main__':
  * asks). The result is a plain JSON array literal, so the substitution cannot
  * break the surrounding JavaScript.
  */
+/**
+ * The spend adapter, `hooks/session-spend.py` (phase M14.6,
+ * `profile-shape-architecture.md` 3.6). Registered as a `Stop` hook for
+ * Claude Code only: a `Stop` hook, not a `SessionEnd` hook, because `Stop`
+ * fires when the engine finishes a response, so the file it writes is
+ * already on disk when the Human Lead kills the session's window or the
+ * process dies, which is the same reason `refusals.jsonl` is written by a
+ * `PreToolUse` hook rather than waited for at the end.
+ *
+ * It reads the `Stop` hook's JSON on standard input (Checked: it holds
+ * `session_id` and `transcript_path`), opens the file `transcript_path`
+ * names as JSON lines, sums the `usage` numbers of the assistant entries,
+ * and writes `{"source": "engine", ...}` to the path given by `--out`. It
+ * is written into every session's folder, whichever engine is running: the
+ * file is otherwise unused, exactly as `hooks/pre-write.py` and
+ * `hooks/post-write.py` are written for every engine and only some of them
+ * wire it up.
+ *
+ * **Unverified**, labelled as such by `profile-shape-architecture.md` 3.6:
+ * the field names below (`input_tokens`, `output_tokens`,
+ * `cache_creation_input_tokens`, `cache_read_input_tokens`) are the Messages
+ * API's own usage fields, carried over on the assumption that Claude Code's
+ * transcript reports usage the same way; whether a cost in dollars is
+ * anywhere in the transcript, and under which field name, is Unverified
+ * too, so a few candidate names are tried and none is required. This is
+ * confirmed only by a real session (M14.6's gate, the Human Lead's manual
+ * check) and is never assumed correct here: anything the transcript does
+ * not give in the exact expected shape is left out, never guessed at, and
+ * every failure - a missing file, JSON that does not parse, a shape that is
+ * not what is expected, a timeout, a signal - writes nothing at all rather
+ * than a wrong number. `readSessionSpend` (`files.ts`) then reads a spend
+ * file that was never written the same way it reads one that does not
+ * parse: `{ source: 'none' }`.
+ *
+ * The hook never blocks the engine: whatever happens it exits 0.
+ */
+export const SPEND_ADAPTER = String.raw`#!/usr/bin/env python3
+"""session-spend.py: the Claude Code spend adapter of an AI-Lore 1.0 session (M14.6).
+
+Written by the companion when the session starts. Do not edit: it is written again for each session.
+
+Registered as a Stop hook. Reads the JSON Claude Code gives a Stop hook on
+standard input, opens the file its "transcript_path" names, sums the "usage"
+numbers of the JSON-lines transcript's assistant entries, and writes what was
+found to the path given by --out as {"source": "engine", ...}. Never blocks
+the engine: whatever happens, including nothing usable being found, it exits
+0. Writing nothing at --out is read by the companion as "the engine reported
+nothing readable" (files.ts's readSessionSpend), which is different from a
+spend.json that says so; this adapter's job is only to write a true number
+when it has one, never a guess.
+
+The usage field names below are UNVERIFIED (profile-shape-architecture.md
+3.6): they are the Messages API's own names, carried over on the assumption
+that Claude Code's transcript reports usage the same way. Confirmed only by
+a real session (the Human Lead's manual check, M14.6's gate).
+"""
+
+import json
+import os
+import signal
+import sys
+
+
+def parse_arguments(argv):
+    found = {}
+    index = 0
+    while index < len(argv):
+        name = argv[index]
+        if name in ('--out', '--adapter-seconds') and index + 1 < len(argv):
+            found[name] = argv[index + 1]
+            index += 2
+        else:
+            index += 1
+    return found
+
+
+def finish():
+    os._exit(0)  # the hook never blocks the engine, whatever happened
+
+
+def on_alarm(_number, _frame):
+    finish()
+
+
+def on_signal(_number, _frame):
+    finish()
+
+
+def number_or_none(value):
+    """A JSON number that is not negative and not a bool (True/False are ints in Python)."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and value >= 0:
+        return value
+    return None
+
+
+def write_result(out_path, result):
+    try:
+        tmp = out_path + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as handle:
+            json.dump(result, handle)
+        os.replace(tmp, out_path)
+    except Exception:
+        pass  # the hook never blocks the engine; a spend that cannot be written is not written
+
+
+def read_transcript_usage(transcript_path):
+    """(tokens dict, has_tokens, usd or None, model or None) from the JSON-lines transcript's
+    assistant entries. Every unexpected shape is skipped, never guessed at."""
+    try:
+        with open(transcript_path, encoding='utf-8') as handle:
+            lines = handle.readlines()
+    except Exception:
+        return None
+    tokens = {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}
+    has_tokens = False
+    usd = 0.0
+    has_usd = False
+    model = None
+    token_fields = (
+        ('input', 'input_tokens'),
+        ('output', 'output_tokens'),
+        ('cacheRead', 'cache_read_input_tokens'),
+        ('cacheWrite', 'cache_creation_input_tokens'),
+    )
+    # Unverified candidate field names for a cost in dollars (3.6): tried in order, the
+    # first one present on an entry is taken; no field being present is not a fault.
+    cost_fields = ('costUSD', 'cost_usd', 'total_cost_usd')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(entry, dict) or entry.get('type') != 'assistant':
+            continue
+        message = entry.get('message')
+        if not isinstance(message, dict):
+            continue
+        usage = message.get('usage')
+        if isinstance(usage, dict):
+            for key, field in token_fields:
+                value = number_or_none(usage.get(field))
+                if value is not None:
+                    tokens[key] += value
+                    has_tokens = True
+            for field in cost_fields:
+                value = number_or_none(usage.get(field))
+                if value is not None:
+                    usd += value
+                    has_usd = True
+                    break
+        for field in cost_fields:
+            value = number_or_none(entry.get(field))
+            if value is not None:
+                usd += value
+                has_usd = True
+                break
+        model_name = message.get('model')
+        if isinstance(model_name, str) and model_name:
+            model = model_name
+    if not has_tokens and not has_usd:
+        return None
+    result = {'source': 'engine'}
+    if has_usd:
+        result['usd'] = usd
+    if has_tokens:
+        result['tokens'] = tokens
+    if model:
+        result['model'] = model
+    return result
+
+
+def main():
+    arguments = parse_arguments(sys.argv[1:])
+    out_path = arguments.get('--out')
+    if not out_path:
+        return
+    try:
+        seconds = int(arguments.get('--adapter-seconds', '8'))
+    except ValueError:
+        seconds = 8
+    if seconds > 0:
+        try:
+            signal.signal(signal.SIGALRM, on_alarm)
+            signal.alarm(seconds)
+        except (AttributeError, ValueError):
+            pass  # a platform without SIGALRM: the hook's own timeout still holds
+    try:
+        raw = sys.stdin.read()
+    except Exception:
+        return
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return
+    if not isinstance(data, dict):
+        return
+    transcript_path = data.get('transcript_path')
+    if not isinstance(transcript_path, str) or not transcript_path:
+        return
+    result = read_transcript_usage(transcript_path)
+    if result is None:
+        return
+    write_result(out_path, result)
+
+
+if __name__ == '__main__':
+    for name in ('SIGTERM', 'SIGHUP', 'SIGINT'):
+        number = getattr(signal, name, None)
+        if number is not None:
+            try:
+                signal.signal(number, on_signal)
+            except (OSError, ValueError):
+                pass
+    try:
+        main()
+    except BaseException:
+        pass  # anything unexpected writes nothing; it never blocks or crashes loud
+    finish()
+`;
+
 export const OPENCODE_GUARD_PLUGIN = String.raw`/**
  * lore-guard.js: the AI-Lore companion's before-write guard for an OpenCode
  * session. Written by the companion when the session starts. Do not edit: it

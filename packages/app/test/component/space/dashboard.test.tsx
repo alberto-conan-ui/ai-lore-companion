@@ -6,8 +6,24 @@ import type {
   SpaceEngineChoice,
   SpaceProjectState,
   SpaceProjectStateResult,
+  SpaceRepositoriesState,
+  SpaceRepositoriesStateResult,
   SpaceSessionEnginesResult,
 } from '../../../src/shared/ipc.js';
+
+/**
+ * The Dashboard mounts the Repositories section unconditionally (stage D1), and
+ * that section reads its own state, so every test here needs its four channels
+ * stubbed even though no test here asserts a repository. Answering with an empty
+ * model keeps the section to its heading and one sentence.
+ */
+const NO_REPOSITORIES: SpaceRepositoriesState = {
+  version: 1,
+  reading: false,
+  model: null,
+  readAt: null,
+  problem: null,
+};
 
 /** A ready `SpaceEngineChoice`: Claude Code, startable. */
 const READY_CHOICE: SpaceEngineChoice = {
@@ -115,6 +131,11 @@ const cockpit = {
   spaceSessionEnginePick: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionReinstall: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceNavigate: vi.fn(),
+  // The Repositories section of the Dashboard (stage D1) reads these on mount.
+  spaceRepositoriesState: vi.fn<(arg: unknown) => Promise<SpaceRepositoriesStateResult>>(),
+  spaceRepositoriesRefresh: vi.fn<(arg: unknown) => Promise<SpaceRepositoriesStateResult>>(),
+  spaceRepositoriesFocus: vi.fn<(arg: unknown) => Promise<SpaceRepositoriesStateResult>>(),
+  onSpaceRepositoriesState: vi.fn(() => () => {}),
 };
 
 const push = (payload: SpaceProjectState): void => {
@@ -130,6 +151,9 @@ beforeEach(() => {
   cockpit.spaceProjectRefresh.mockResolvedValue(answer(state()));
   cockpit.spaceProjectFocus.mockResolvedValue(answer(state()));
   cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: READY_CHOICE });
+  cockpit.spaceRepositoriesState.mockResolvedValue({ ok: true, value: NO_REPOSITORIES });
+  cockpit.spaceRepositoriesRefresh.mockResolvedValue({ ok: true, value: NO_REPOSITORIES });
+  cockpit.spaceRepositoriesFocus.mockResolvedValue({ ok: true, value: NO_REPOSITORIES });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
 });
 

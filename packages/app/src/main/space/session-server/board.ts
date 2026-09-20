@@ -209,6 +209,7 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
             attended: true,
             person: await account(where.github),
             machine,
+            ...(record.value.profile !== undefined ? { profile: record.value.profile } : {}),
           },
           'Writing',
           record.value?.issue,

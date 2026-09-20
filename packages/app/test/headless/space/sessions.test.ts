@@ -1021,6 +1021,219 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
   }
 });
 
+// Phase M14.3: a session starts from a profile, and the record it writes
+// names the profile and the parameters that were ticked.
+
+test('M14.3: a started session records its profile and ticked parameters; a closed one records its spend', async () => {
+  // The session server: a fake host, as the M9.7 test above does. Without this the
+  // real one is used, it listens on 127.0.0.1, nothing here stops it, and the test
+  // process never exits even though every assertion has passed.
+  const mcp: McpHost = createMcpHost();
+  await mcp.listen();
+  configureSessionServer({ host: async () => mcp });
+  // A catalog engine, as the Human Lead's own `engines.json` really holds: the id is
+  // `default.claude`, and `claude-code` is the catalog's own name for it. `catalogEntryFor`
+  // matches by id alone, so an entry whose id is not a catalog id has no catalog engine and
+  // takes its name from its binary instead. Using the catalog id here exercises the path a
+  // real Space session takes.
+  const engine: EngineEntry = {
+    id: 'default.claude',
+    name: 'Claude Code',
+    binary: '/opt/nowhere/claude',
+    params: [
+      { text: '--model opus', defaultOn: true },
+      { text: '--dangerously-skip-permissions', defaultOn: false },
+    ],
+  };
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister(() => ({
+      engines: () => [engine],
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () => `s-profile-${Math.random().toString(16).slice(2, 8)}`,
+      probeEngine: async (e) => fineEngineCheck(e),
+    })),
+  );
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const spaceWindow = h.space.created[0];
+    assert.ok(spaceWindow);
+    const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+    assert.ok(context);
+    const spawned: { engine?: PtySpawnEngine; opts?: PtySpawnOpts }[] = [];
+    context.ptyService = {
+      spawn: (engine, opts) => {
+        spawned.push({ engine, opts });
+        return `pty-${spawned.length}`;
+      },
+      write: () => {},
+      resize: () => {},
+      kill: () => {},
+      killAll: () => {},
+      hasRunningTask: () => false,
+    } as PtyService;
+    const lore = await readLore(space.root);
+    assert.ok(lore.ok);
+    assert.ok((await installClaudeCode(lore.value, context.desk.install)).ok);
+
+    // A start ticking one of the engine's parameters: the record carries the profile
+    // that ran, and the ticked texts, in order.
+    const started = (await h.invoke('spaceSessionStart', spaceWindow, {
+      engineId: 'default.claude',
+      params: ['--model opus'],
+    })) as { ok: boolean; value: { sessionId: string } };
+    assert.equal(started.ok, true, JSON.stringify(started));
+    const { sessionId } = started.value;
+
+    // The command line is byte-for-byte what it is today: the ticked parameter's own
+    // text is the only thing on it, and nothing of the profile (its id, its name, a
+    // "--model" of its own) reaches the engine's arguments or its environment.
+    const call = spawned[0];
+    assert.ok(call?.engine && call.opts);
+    assert.deepEqual(
+      call.engine.args?.slice(0, 2),
+      ['--model', 'opus'],
+      "the ticked parameter's own text, and nothing else, opens the argument list",
+    );
+    assert.equal(
+      call.engine.args?.filter((arg) => arg === '--model').length,
+      1,
+      'no second --model is added for the profile',
+    );
+    assert.deepEqual(
+      call.opts?.env,
+      { [SESSION_ID_ENV]: sessionId },
+      'no profile field reaches the environment',
+    );
+
+    const opened = context.service(spaceDesk).open();
+    assert.ok(opened.ok);
+    const record = getSession(opened.value, sessionId);
+    assert.ok(record.ok);
+    // `engine` keeps its name and its value: the profile's id, unchanged from today's engine id.
+    assert.equal(record.value?.engine, 'default.claude');
+    assert.deepEqual(record.value?.profile, {
+      id: 'default.claude',
+      name: 'Claude Code',
+      engine: 'claude-code',
+    });
+    assert.deepEqual(record.value?.params, ['--model opus']);
+    // No guard-changing option was ticked, so `unguarded` is absent, as today.
+    assert.equal(record.value?.unguarded, undefined);
+
+    // A start with no ticked parameter: the record has no `params` field.
+    const bare = (await h.invoke('spaceSessionStart', spaceWindow, {
+      engineId: 'default.claude',
+      params: [],
+    })) as { ok: boolean; value: { sessionId: string } };
+    assert.equal(bare.ok, true, JSON.stringify(bare));
+    const bareRecord = getSession(opened.value, bare.value.sessionId);
+    assert.ok(bareRecord.ok);
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(bareRecord.value ?? {}, 'params'),
+      false,
+      'no ticked parameter, so no params field',
+    );
+
+    // Closing a session, with no engine adapter able to read a spend yet (M14.6): the
+    // record carries `spend: { source: 'none' }`, never left absent.
+    await h.invoke('spaceSessionEnd', spaceWindow, { sessionId });
+    const closed = getSession(opened.value, sessionId);
+    assert.ok(closed.ok);
+    assert.ok(closed.value?.closedAt);
+    assert.deepEqual(closed.value?.spend, { source: 'none' });
+
+    await h.invoke('spaceSessionEnd', spaceWindow, { sessionId: bare.value.sessionId });
+
+    // Closing the Space window is what stops its session server. Without it the
+    // server keeps listening on 127.0.0.1 and the test process never exits.
+    await h.space.host.windowClosed(spaceWindow.id);
+  } finally {
+    configureSessionServer(null);
+    await mcp.close();
+    h.cleanup();
+  }
+});
+
+// Phase M14.6: the Claude Code adapter's readSpend, exercised through the full
+// close (`session-spend.test.ts` exercises `readSessionSpend` and the spend
+// adapter's Python on their own).
+
+test('M14.6: a Claude Code session whose folder holds a spend.json closes with that spend on its record', async () => {
+  // The session server: a fake host, as the M9.7 test above does. Without this the
+  // real one is used, it listens on 127.0.0.1, nothing here stops it, and the test
+  // process never exits even though every assertion has passed.
+  const mcp: McpHost = createMcpHost();
+  await mcp.listen();
+  configureSessionServer({ host: async () => mcp });
+  const engine: EngineEntry = {
+    id: 'claude-code',
+    name: 'Claude Code',
+    binary: '/opt/nowhere/claude',
+  };
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister(() => ({
+      engines: () => [engine],
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () => `s-spend-${Math.random().toString(16).slice(2, 8)}`,
+      probeEngine: async (e) => fineEngineCheck(e),
+    })),
+  );
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const spaceWindow = h.space.created[0];
+    assert.ok(spaceWindow);
+    const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+    assert.ok(context);
+    context.ptyService = {
+      spawn: () => 'pty-spend',
+      write: () => {},
+      resize: () => {},
+      kill: () => {},
+      killAll: () => {},
+      hasRunningTask: () => false,
+    } as PtyService;
+    const lore = await readLore(space.root);
+    assert.ok(lore.ok);
+    assert.ok((await installClaudeCode(lore.value, context.desk.install)).ok);
+
+    const started = (await h.invoke('spaceSessionStart', spaceWindow, {
+      engineId: 'claude-code',
+      params: [],
+    })) as { ok: boolean; value: { sessionId: string } };
+    assert.equal(started.ok, true, JSON.stringify(started));
+    const { sessionId } = started.value;
+
+    // As the real Stop hook would have (M14.6, adapters.ts's SPEND_ADAPTER): a
+    // spend.json in the session's folder, in place before the close reads it.
+    const files = sessionFilePaths(context.desk.sessions, sessionId);
+    const spend = {
+      source: 'engine',
+      usd: 0.0321,
+      tokens: { input: 500, output: 220, cacheRead: 40, cacheWrite: 0 },
+      model: 'claude-opus-4-1',
+    };
+    writeFileSync(files.spend, JSON.stringify(spend));
+
+    await h.invoke('spaceSessionEnd', spaceWindow, { sessionId });
+    const opened = context.service(spaceDesk).open();
+    assert.ok(opened.ok);
+    const closed = getSession(opened.value, sessionId);
+    assert.ok(closed.ok);
+    assert.ok(closed.value?.closedAt);
+    assert.deepEqual(closed.value?.spend, spend);
+
+    // Closing the Space window is what stops its session server. Without it the
+    // server keeps listening on 127.0.0.1 and the test process never exits.
+    await h.space.host.windowClosed(spaceWindow.id);
+  } finally {
+    configureSessionServer(null);
+    await mcp.close();
+    h.cleanup();
+  }
+});
+
 // Phase M9.7: the engine of a session is chosen by readiness (A.10), not the
 // order of `engines.json`; a picked engine that can start is remembered.
 

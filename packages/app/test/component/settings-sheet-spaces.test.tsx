@@ -123,10 +123,10 @@ test('editing an engine adds a parameter, ticks it by default and saves params t
   expect(own?.params).toEqual([{ text: '--dangerously-skip-permissions', defaultOn: true }]);
 });
 
-test("helperModel survives an edit that only changes the engine's name", async () => {
+test("model survives an edit that only changes the engine's name", async () => {
   cockpit.enginesList.mockResolvedValue([
     { id: 'default.claude', name: 'Claude Code', binary: 'claude' },
-    { id: 'my-own-cli', name: 'My CLI', binary: 'my-cli', helperModel: 'opus' },
+    { id: 'my-own-cli', name: 'My CLI', binary: 'my-cli', model: 'opus' },
   ]);
   cockpit.enginesSave.mockImplementation(async (next: EngineEntry[]) => next);
   render(<SettingsSheetModal onClose={() => {}} initialSection="engines" />);
@@ -140,6 +140,23 @@ test("helperModel survives an edit that only changes the engine's name", async (
   await waitFor(() => expect(cockpit.enginesSave).toHaveBeenCalled());
   const saved = cockpit.enginesSave.mock.calls[0]?.[0] as EngineEntry[];
   const own = saved.find((e) => e.id === 'my-own-cli');
-  expect(own?.helperModel).toBe('opus');
+  expect(own?.model).toBe('opus');
   expect(own?.name).toBe('My CLI, renamed');
+});
+
+test('typing a model into the engine editor saves it on the entry', async () => {
+  cockpit.enginesSave.mockImplementation(async (next: EngineEntry[]) => next);
+  render(<SettingsSheetModal onClose={() => {}} initialSection="engines" />);
+  const ownRow = await screen.findByTestId('engine-row-my-own-cli');
+  fireEvent.click(within(ownRow).getByTestId('engine-edit-my-own-cli'));
+
+  fireEvent.change(screen.getByTestId('engine-draft-model'), {
+    target: { value: 'opus' },
+  });
+  fireEvent.click(screen.getByTestId('engine-draft-save'));
+
+  await waitFor(() => expect(cockpit.enginesSave).toHaveBeenCalled());
+  const saved = cockpit.enginesSave.mock.calls[0]?.[0] as EngineEntry[];
+  const own = saved.find((e) => e.id === 'my-own-cli');
+  expect(own?.model).toBe('opus');
 });

@@ -1197,7 +1197,7 @@ function EnginesSection(): JSX.Element {
       binary: draft.binary.trim(),
       params: (draft.params ?? []).filter((param) => param.text.trim().length > 0),
     };
-    if (draft.helperModel !== undefined) entry.helperModel = draft.helperModel;
+    if (draft.model !== undefined) entry.model = draft.model;
 
     const index = engines.findIndex((e) => e.id === entry.id);
     if (index >= 0) {
@@ -1233,6 +1233,19 @@ function EnginesSection(): JSX.Element {
             value={draft.binary}
             onChange={(e) => setDraft({ ...draft, binary: e.target.value })}
             data-testid="engine-draft-binary"
+          />
+          <input
+            style={engineInputStyle}
+            placeholder="the engine's default"
+            value={draft.model ?? ''}
+            onChange={(e) => {
+              const model = e.target.value;
+              const next: EngineEntry = { ...draft };
+              if (model.trim().length > 0) next.model = model;
+              else delete next.model;
+              setDraft(next);
+            }}
+            data-testid="engine-draft-model"
           />
           <div style={engineParamsListStyle} data-testid="engine-draft-params">
             {(draft.params ?? []).map((param, index) => (

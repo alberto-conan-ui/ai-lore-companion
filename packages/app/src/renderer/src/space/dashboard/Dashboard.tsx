@@ -5,6 +5,7 @@ import { AgentsBoard } from './AgentsBoard.js';
 import { FocusSheet } from './FocusSheet.js';
 import { FocusesByStage } from './FocusesByStage.js';
 import { NeedsYou } from './NeedsYou.js';
+import { Repositories } from './Repositories.js';
 import { StartSession } from './StartSession.js';
 import { stateSentence } from './dashboardText.js';
 import { useProjectState } from './useProjectState.js';
@@ -18,8 +19,10 @@ const AGE_TICK_MS = 30 * 1000;
  * the Space's GitHub Project through the companion's cache. It renders only
  * what the push `onSpaceProjectState` gives, and holds no data of its own.
  * Needs you, the Agents board and Start a session are phase M7.4's parts,
- * mounted here; each carries its own heading. The Space window mounts the
- * Dashboard inside the Dashboard entry of its rail, so it fills its parent.
+ * mounted here; each carries its own heading. Repositories (stage D1) is
+ * mounted between Needs you and Focuses by Stage, and shows whether or not a
+ * Project has been read. The Space window mounts the Dashboard inside the
+ * Dashboard entry of its rail, so it fills its parent.
  */
 type Props = {
   /** Whether the Space window opened with `init.justCreated` (M9.10). */
@@ -85,8 +88,11 @@ export function Dashboard({ justCreated }: Props = {}): JSX.Element {
         </p>
       ) : null}
       {project !== null && model !== null ? (
+        <NeedsYou entries={model.needsYou} onOpenFocus={(focus) => setOpenUrl(focus.url)} />
+      ) : null}
+      <Repositories now={now} />
+      {project !== null && model !== null ? (
         <>
-          <NeedsYou entries={model.needsYou} onOpenFocus={(focus) => setOpenUrl(focus.url)} />
           <section style={sectionStyle} aria-labelledby="dashboard-focuses-heading">
             <h2 id="dashboard-focuses-heading" style={headingStyle}>
               Focuses by Stage

@@ -22,8 +22,9 @@
 
 import { chmod, lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
+import { type SessionSpend, isSessionSpend } from '@ai-lore-companion/core';
 import type { SessionConnection } from '../session-server/index.js';
-import { POST_WRITE_ADAPTER, PRE_WRITE_ADAPTER } from './adapters.js';
+import { POST_WRITE_ADAPTER, PRE_WRITE_ADAPTER, SPEND_ADAPTER } from './adapters.js';
 import { hookArgv, shellCommandLine } from './command-line.js';
 import {
   FILE_WRITING_MATCHER,
@@ -33,6 +34,7 @@ import {
   SESSION_FILES,
   SESSION_FILE_MODE,
   SESSION_ID_ENV,
+  SPEND_HOOK_TIMEOUTS,
 } from './constants.js';
 import type { SessionLaunch } from './engines/types.js';
 import { sessionPermissions } from './permissions.js';
@@ -46,6 +48,9 @@ export type SessionFilePaths = {
   preWrite: string;
   postWrite: string;
   refusals: string;
+  /** Written by the spend adapter: what the engine reported the session spent (M14.6). */
+  spend: string;
+  spendHook: string;
 };
 
 /** The paths of the files of the session `sessionId` under `sessionsDir` (`DeskPaths.sessions`). */
@@ -59,6 +64,8 @@ export function sessionFilePaths(sessionsDir: string, sessionId: string): Sessio
     preWrite: join(dir, SESSION_FILES.preWrite),
     postWrite: join(dir, SESSION_FILES.postWrite),
     refusals: join(dir, SESSION_FILES.refusals),
+    spend: join(dir, SESSION_FILES.spend),
+    spendHook: join(dir, SESSION_FILES.spendHook),
   };
 }
 
@@ -91,13 +98,18 @@ type HookEntry = {
   hooks: { type: 'command'; command: string; timeout: number }[];
 };
 
+/** A `Stop` hook entry: unlike `PreToolUse`/`PostToolUse`, Claude Code's `Stop` is not tool-matched. */
+type StopHookEntry = {
+  hooks: { type: 'command'; command: string; timeout: number }[];
+};
+
 /** The content of `settings.json`, as an object. */
 export function buildSessionSettings(
   input: SessionFilesInput,
   paths: SessionFilePaths,
 ): {
   permissions: ReturnType<typeof sessionPermissions>;
-  hooks: { PreToolUse: HookEntry[]; PostToolUse: HookEntry[] };
+  hooks: { PreToolUse: HookEntry[]; PostToolUse: HookEntry[]; Stop: StopHookEntry[] };
   env: Record<string, string>;
 } {
   const tools = sessionToolNames(input.connection);
@@ -130,6 +142,17 @@ export function buildSessionSettings(
       dialect: 'claude',
     }),
   );
+  // M14.6: a `Stop` hook, not a `SessionEnd` hook, so the file survives a killed
+  // terminal (`SPEND_ADAPTER`'s own comment, `adapters.ts`). It takes no `--check`
+  // and no `--dialect`: it never decides anything, so `hookArgv` is not used for it.
+  const spendCommand = shellCommandLine([
+    input.python,
+    paths.spendHook,
+    '--out',
+    paths.spend,
+    '--adapter-seconds',
+    String(SPEND_HOOK_TIMEOUTS.adapterSeconds),
+  ]);
   return {
     permissions: sessionPermissions(tools, input.repositories),
     hooks: {
@@ -146,6 +169,13 @@ export function buildSessionSettings(
           matcher: FILE_WRITING_MATCHER,
           hooks: [
             { type: 'command', command: postWrite, timeout: POST_WRITE_TIMEOUTS.hookSeconds },
+          ],
+        },
+      ],
+      Stop: [
+        {
+          hooks: [
+            { type: 'command', command: spendCommand, timeout: SPEND_HOOK_TIMEOUTS.hookSeconds },
           ],
         },
       ],
@@ -214,6 +244,9 @@ export async function writeSessionFiles(
     await makePrivateDir(paths.hooksDir);
     await writePrivateFile(paths.preWrite, PRE_WRITE_ADAPTER);
     await writePrivateFile(paths.postWrite, POST_WRITE_ADAPTER);
+    // Written for every engine, as the two adapters above are: only Claude Code's
+    // settings.json wires it up as a Stop hook (M14.6), and it is otherwise unused.
+    await writePrivateFile(paths.spendHook, SPEND_ADAPTER);
     for (const file of launch.files) {
       const target = launchFilePath(paths.dir, file.path);
       await makePrivateDir(dirname(target));
@@ -265,6 +298,29 @@ export async function readNotedRefusals(
     }
   }
   return refusals;
+}
+
+/**
+ * What a session's `spend.json` reads as (M14.6). `{ source: 'none' }` for a
+ * missing file, one that is not JSON, or one that is not a well-formed
+ * `SessionSpend` — a malformed or unwritten file is never read as a number,
+ * and never throws.
+ */
+export async function readSessionSpend(paths: SessionFilePaths): Promise<SessionSpend> {
+  const NO_SPEND: SessionSpend = { source: 'none' };
+  let text: string;
+  try {
+    text = await readFile(paths.spend, 'utf8');
+  } catch {
+    return NO_SPEND;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return NO_SPEND;
+  }
+  return isSessionSpend(parsed) ? parsed : NO_SPEND;
 }
 
 /**

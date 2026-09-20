@@ -231,6 +231,62 @@ test('a session that writes has its issue on the board, with its targets, and en
   assert.equal(sessionIssue?.state, 'open');
 });
 
+test('a session with a profile names it in the issue body; the marker and the title are unchanged (M14.4)', async () => {
+  const item = await fake.createIssue({
+    repository: SPACE_REPOSITORY,
+    title: 'An item',
+    body: 'The criteria.',
+    labels: [],
+  });
+  assert.ok(item.ok);
+  assert.ok(
+    startSession(desk, {
+      id: 's-profile',
+      engine: 'claude-code',
+      profile: { id: 'default.claude', name: 'Claude Code', engine: 'claude-code', model: 'opus' },
+    }).ok,
+  );
+  const connection = await server.registerSession('s-profile');
+  assert.ok(connection.ok);
+  const client = await connect(connection.value);
+
+  const granted = await enter(client, {
+    targets: [LORE],
+    item: item.value.number,
+    reason: 'Build the item.',
+  });
+  assert.equal(granted.granted, true);
+  const board = granted.board as { updated: boolean; issue?: string };
+  assert.equal(board.updated, true, JSON.stringify(board));
+
+  const issue = fake.state().issues.find((i) => i.ref.url === board.issue);
+  assert.ok(issue);
+  // The body names the profile.
+  assert.match(
+    issue.body,
+    /^Profile: Claude Code \(default\.claude\), engine claude-code, model opus$/m,
+  );
+  // The title is the string it is today: no profile in it, no id, no name.
+  assert.match(issue.title, /^The claude-code session that started at \S+$/);
+  assert.ok(!issue.title.includes('Profile') && !issue.title.includes('default.claude'));
+
+  // The marker still finds this same issue: a second Writing updates it and creates no other.
+  const again = await enter(client, { targets: [APP], reason: 'Again.' });
+  assert.equal((again.board as { updated: boolean }).updated, true);
+  const on = await rows();
+  assert.equal(on.length, 1, 'no second issue was created: the hidden marker still finds this one');
+  assert.equal(on[0]?.issue.url, board.issue);
+  const updated = fake.state().issues.find((i) => i.ref.url === board.issue);
+  assert.ok(updated);
+  // The title on the update is byte-identical to the title at creation.
+  assert.equal(updated.title, issue.title);
+  // The body still names the profile after the update.
+  assert.match(
+    updated.body,
+    /^Profile: Claude Code \(default\.claude\), engine claude-code, model opus$/m,
+  );
+});
+
 test('GitHub unreachable: the claim is granted, and the answer says the board was not updated', async () => {
   fake.setUnreachable(true);
   const client = await connect(await start('s-offline'));

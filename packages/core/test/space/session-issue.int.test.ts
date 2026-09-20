@@ -109,6 +109,66 @@ test('the body is short and literal, with the item, the targets and their branch
   assert.deepEqual(parseSessionBlock(body)?.targets, [{ kind: 'lore' }, APP]);
 });
 
+test('the body names the profile between the item and the write targets, without disturbing the marker or the title (M14.4)', () => {
+  const withoutProfile = formatSessionIssueBody({
+    sessionId: 's-1',
+    engine: 'claude-code',
+    startedAt: STARTED,
+    targets: [{ kind: 'lore' }],
+    item: { repository: REPOSITORY, number: 7, url: 'https://github.com/x/y/issues/7' },
+    attended: true,
+    person: 'fake-human',
+    machine: 'desk-1',
+  });
+  // Today's body, character for character, with no profile given: no line naming a profile.
+  assert.ok(!withoutProfile.includes('Profile:'));
+
+  const withModel = formatSessionIssueBody({
+    sessionId: 's-1',
+    engine: 'claude-code',
+    startedAt: STARTED,
+    targets: [{ kind: 'lore' }],
+    item: { repository: REPOSITORY, number: 7, url: 'https://github.com/x/y/issues/7' },
+    attended: true,
+    person: 'fake-human',
+    machine: 'desk-1',
+    profile: { name: 'Claude Code', id: 'default.claude', engine: 'claude-code', model: 'opus' },
+  });
+  assert.match(
+    withModel,
+    /^Profile: Claude Code \(default\.claude\), engine claude-code, model opus$/m,
+  );
+  // Between the item and the write targets.
+  const lines = withModel.split('\n');
+  const itemIndex = lines.findIndex((line) => line.startsWith('Item:'));
+  const profileIndex = lines.findIndex((line) => line.startsWith('Profile:'));
+  const targetsIndex = lines.findIndex((line) => line === 'Write targets:');
+  assert.ok(itemIndex >= 0 && profileIndex > itemIndex && targetsIndex > profileIndex);
+
+  const withoutModel = formatSessionIssueBody({
+    sessionId: 's-1',
+    engine: 'claude-code',
+    startedAt: STARTED,
+    targets: [{ kind: 'lore' }],
+    attended: true,
+    person: 'fake-human',
+    machine: 'desk-1',
+    profile: { name: 'Claude Code', id: 'default.claude', engine: 'claude-code' },
+  });
+  assert.match(
+    withoutModel,
+    /^Profile: Claude Code \(default\.claude\), engine claude-code, model the engine's default$/m,
+  );
+
+  // The marker and the title are byte-identical to what they are today, with or without a profile.
+  assert.equal(sessionIssueMarker('s-1'), formatIssueMarker('session-issue', 's-1'));
+  assert.ok(withoutProfile.includes(sessionIssueMarker('s-1')));
+  assert.ok(withModel.includes(sessionIssueMarker('s-1')));
+  const title = sessionIssueTitle({ engine: 'claude-code', startedAt: STARTED });
+  assert.equal(title, 'The claude-code session that started at 2026-09-18T12:00:00.000Z');
+  // sessionIssueTitle's own signature takes no `profile`: nothing it reads can be disturbed by one.
+});
+
 test("the session marker is not the migration's, and a quoted marker is not a marker", async (t) => {
   assert.notEqual(sessionIssueMarker('x'), formatIssueMarker('migrated', 'x'));
   assert.notEqual(sessionIssueMarker('x'), formatIssueMarker('session', 'x'));

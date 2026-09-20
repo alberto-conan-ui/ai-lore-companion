@@ -27,8 +27,11 @@ import {
   type CommandRunner,
   type EngineCheck,
   type EngineEntry,
+  type SessionSpend,
   endSession,
+  engineNameOf,
   listSessions,
+  profileOf,
   startSession,
 } from '@ai-lore-companion/core';
 import type { SpaceContext } from '../context.js';
@@ -41,6 +44,7 @@ import { MAX_LOGGED_REFUSALS, REQUIRED_CHECKS, SESSION_ID_ENV } from './constant
 import { adapterFor } from './engines/index.js';
 import { sessionInstructions } from './engines/instructions.js';
 import { readInstalledSkills } from './engines/skills.js';
+import type { EngineAdapter } from './engines/types.js';
 import {
   type SessionFilePaths,
   readNotedRefusals,
@@ -125,7 +129,15 @@ export function newSessionId(now: Date = new Date()): string {
   return `s-${stamp}-${randomBytes(3).toString('hex')}`;
 }
 
-type Live = { ptyId: string | null; paths: SessionFilePaths; ending: Promise<void> | null };
+type Live = {
+  ptyId: string | null;
+  paths: SessionFilePaths;
+  ending: Promise<void> | null;
+  adapter: EngineAdapter;
+};
+
+/** What a session's close records when its engine reported nothing readable. */
+const NO_SPEND: SessionSpend = { source: 'none' };
 
 function describe(caught: unknown): string {
   return caught instanceof Error ? caught.message : String(caught);
@@ -213,10 +225,13 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         reason: refusal.reason,
       });
     }
+    const spend = entry.adapter.readSpend
+      ? await entry.adapter.readSpend({ sessionId, paths: entry.paths }).catch(() => NO_SPEND)
+      : NO_SPEND;
     const opened = desk.open();
     if (opened.ok) {
       const closes = await sessionCloseCommits(context, opened.value, sessionId);
-      const ended = endSession(opened.value, sessionId, { closes });
+      const ended = endSession(opened.value, sessionId, { closes, spend });
       if (!ended.ok) {
         context.log.warn('session-end-not-recorded', {
           space: context.key,
@@ -296,10 +311,18 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
       };
     }
     const sessionId = use.newId();
+    const profile = profileOf(engine);
     const recorded = startSession(opened.value, {
       id: sessionId,
       engine: engine.id,
       ...(unguarded.length > 0 ? { unguarded } : {}),
+      profile: {
+        id: profile.id,
+        name: profile.name,
+        engine: engineNameOf(profile),
+        ...(profile.model !== undefined ? { model: profile.model } : {}),
+      },
+      params: [...params],
     });
     if (!recorded.ok) {
       return {
@@ -373,7 +396,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Spa
         },
       };
     }
-    const entry: Live = { ptyId: null, paths, ending: null };
+    const entry: Live = { ptyId: null, paths, ending: null, adapter };
     live.set(sessionId, entry);
     try {
       entry.ptyId = pty.spawn(

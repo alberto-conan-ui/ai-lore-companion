@@ -10,7 +10,7 @@
  * session server, the spawn in the PTY, the end.
  */
 
-import type { EngineCatalogId } from '@ai-lore-companion/core';
+import type { EngineCatalogId, SessionSpend } from '@ai-lore-companion/core';
 import type { SessionConnection } from '../../session-server/index.js';
 import type { EngineOptions } from '../engine-options.js';
 import type { SessionFilePaths } from '../files.js';
@@ -58,6 +58,9 @@ export type SessionLaunch = {
   files: LaunchFile[];
 };
 
+/** What `EngineAdapter.readSpend` takes. */
+export type ReadSpendInput = { sessionId: string; paths: SessionFilePaths };
+
 export type EngineAdapter = {
   catalogId: EngineCatalogId;
   capability: LoreCapability;
@@ -68,4 +71,6 @@ export type EngineAdapter = {
   /** `invoked`: the verbs are skills or commands the session can run. `listed`: the instructions list them with their card paths (3.3). */
   verbsAre: 'invoked' | 'listed';
   launch(input: SessionLaunchInput): SessionLaunch;
+  /** What the engine reported this session spent. An adapter without one reports `{ source: 'none' }`. */
+  readSpend?(input: ReadSpendInput): Promise<SessionSpend>;
 };

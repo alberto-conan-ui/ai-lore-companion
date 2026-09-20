@@ -7,7 +7,12 @@
 import { engineArgv } from '../command-line.js';
 import { SESSION_FILES } from '../constants.js';
 import { CLAUDE_CODE_OPTIONS } from '../engine-options.js';
-import { buildSessionMcpConfig, buildSessionSettings, sessionToolNames } from '../files.js';
+import {
+  buildSessionMcpConfig,
+  buildSessionSettings,
+  readSessionSpend,
+  sessionToolNames,
+} from '../files.js';
 import type { EngineAdapter, SessionLaunch, SessionLaunchInput } from './types.js';
 
 // Confirmed by a real run (M10.9 item 3, m10-engine-findings.md, "Claude
@@ -39,6 +44,10 @@ export const claudeCodeAdapter: EngineAdapter = {
   options: CLAUDE_CODE_OPTIONS,
   skillInvocation: (name) => `/lore:${name}`,
   verbsAre: 'invoked',
+  // M14.6: read by a `Stop` hook (`SPEND_ADAPTER`, `adapters.ts`), never by this
+  // process. `readSessionSpend` gives `{ source: 'none' }` for anything but a
+  // well-formed `spend.json`, and never throws.
+  readSpend: (input) => readSessionSpend(input.paths),
   launch(input: SessionLaunchInput): SessionLaunch {
     const settings = buildSessionSettings(
       {
