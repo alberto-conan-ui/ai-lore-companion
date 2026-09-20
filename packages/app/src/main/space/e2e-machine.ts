@@ -32,6 +32,18 @@
  * change the app's own environment. A launch without both, and every launch of
  * a packaged app, runs core's `checkMachine` unchanged. The fake is loaded from core's testing
  * entry at that moment only, so a normal run never loads it.
+ *
+ * A test that needs `checkMachineOfApp` to answer a report of its own choosing
+ * (M12.2: the engines section with engines present or missing, Claude Code
+ * signed out, and so on) states it in `AI_LORE_E2E_MACHINE`, an environment
+ * variable read only when `COCKPIT_E2E=1` and the app is not packaged — the
+ * same guard as the fake GitHub, but not conditioned on `AI_LORE_FAKE_GITHUB`
+ * being set, so a test can state the machine report without also running the
+ * fake GitHub. The variable holds a `MachineCheck` as JSON; it is parsed and
+ * shape-checked (`fakeMachineReportSchema`) before it is trusted, and on any
+ * parse failure, or any doubt about its shape, it is ignored — the check falls
+ * through to the behaviour above as if the variable were absent. The variable
+ * being unset takes the same path as before this addition, unchanged.
  */
 
 import { basename } from 'node:path';
@@ -49,7 +61,97 @@ import {
   checkMachine,
   isClaudeEngine,
 } from '@ai-lore-companion/core';
+import { z } from 'zod';
 import { isPackagedApp } from './template-dir.js';
+
+/** `MachineCheckState`, shape-checked (`packages/core/src/space/machine/types.ts`). */
+const machineCheckStateSchema = z.union([
+  z.strictObject({ kind: z.literal('fine'), version: z.string().nullable() }),
+  z.strictObject({ kind: z.literal('missing') }),
+  z.strictObject({ kind: z.literal('too-old'), version: z.string(), minimum: z.string() }),
+  z.strictObject({ kind: z.literal('not-signed-in') }),
+  z.strictObject({ kind: z.literal('missing-scope'), scope: z.string() }),
+  z.strictObject({ kind: z.literal('undetermined'), reason: z.string() }),
+]);
+
+/** `EngineInstallState`, shape-checked. */
+const engineInstallStateSchema = z.union([
+  z.strictObject({ kind: z.literal('installed'), version: z.string().nullable() }),
+  z.strictObject({ kind: z.literal('missing') }),
+  z.strictObject({ kind: z.literal('undetermined'), reason: z.string() }),
+]);
+
+/** `EngineSignInState`, shape-checked. */
+const engineSignInStateSchema = z.union([
+  z.strictObject({ kind: z.literal('signed-in') }),
+  z.strictObject({ kind: z.literal('not-signed-in') }),
+  z.strictObject({ kind: z.literal('not-checked') }),
+  z.strictObject({ kind: z.literal('undetermined'), reason: z.string() }),
+]);
+
+/** `EngineCheck`, shape-checked. */
+const engineCheckSchema = z.strictObject({
+  engineId: z.string(),
+  name: z.string(),
+  binary: z.string(),
+  state: machineCheckStateSchema,
+  guidance: z.string().nullable(),
+  command: z.string().nullable(),
+  catalogId: z.enum(['claude-code', 'codex', 'antigravity', 'opencode']).nullable(),
+  maker: z.string().nullable(),
+  required: z.boolean(),
+  guardedSessions: z.boolean(),
+  installed: engineInstallStateSchema,
+  signIn: engineSignInStateSchema,
+  installCommand: z.string().nullable(),
+  installNeeds: z.literal('npm').nullable(),
+  signInCommand: z.string().nullable(),
+  note: z.string().nullable(),
+  page: z.string().nullable(),
+});
+
+/** `MachineRequirementCheck`, shape-checked. */
+const machineRequirementCheckSchema = z.strictObject({
+  id: z.enum(['git', 'gh', 'engine', 'python3']),
+  binary: z.string().nullable(),
+  state: machineCheckStateSchema,
+  guidance: z.string().nullable(),
+  command: z.string().nullable(),
+});
+
+/**
+ * `MachineCheck`, shape-checked (`packages/core/src/space/machine/types.ts`).
+ * Not a proof that the report is internally consistent (for example, that the
+ * `engine` requirement agrees with the Claude Code entry of `engines`) — only
+ * that a test wrote something of the right shape. A test that states an
+ * inconsistent report gets an inconsistent screen, which is its own mistake to
+ * find, not a crash to guard against here.
+ */
+const fakeMachineReportSchema = z.strictObject({
+  requirements: z.array(machineRequirementCheckSchema),
+  engines: z.array(engineCheckSchema),
+  ready: z.boolean(),
+  github: z.strictObject({ account: z.string().nullable(), organisations: z.array(z.string()) }),
+  tools: z.strictObject({ brew: z.boolean(), npm: z.boolean() }),
+});
+
+/**
+ * The `MachineCheck` a test stated in `AI_LORE_E2E_MACHINE`, or `null` when
+ * the variable is absent, is not valid JSON, or does not parse against
+ * {@link fakeMachineReportSchema} — every one of those is "no report stated",
+ * never a thrown error.
+ */
+export function parseFakeMachineReport(raw: string | undefined): MachineCheck | null {
+  if (raw === undefined || raw === '') return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const result = fakeMachineReportSchema.safeParse(parsed);
+  return result.success ? (result.data as MachineCheck) : null;
+}
 
 /**
  * Whether this run uses the fakes of an end-to-end run: the fake GitHub
@@ -170,6 +272,15 @@ async function fakeAuth(stateFile: string): Promise<FakeAuth> {
  * Homebrew, npm and `gh` answered as this file's header says. `engines` is
  * the app's own list (catalog first) in both cases — a fake run checks the
  * same registry a real run does, not an engine of its own.
+ *
+ * Before either path, an unpackaged run with `COCKPIT_E2E=1` gets one more
+ * chance to answer without touching `runner` at all: `AI_LORE_E2E_MACHINE`,
+ * parsed and shape-checked by {@link parseFakeMachineReport}. A test states a
+ * report there when it needs one this file's own fake cannot give (an engine
+ * marked installed, Claude Code signed out, and so on — M12.2). When the
+ * variable is absent, or does not parse, this is a no-op and every line below
+ * runs exactly as it did before the variable existed: the default path is
+ * this function's `if` and `return` unchanged, reached the same way.
  */
 export function checkMachineOfApp(
   runner: CommandRunner,
@@ -178,6 +289,10 @@ export function checkMachineOfApp(
   env: Record<string, string | undefined> = process.env,
   packaged: boolean = isPackagedApp(),
 ): Promise<MachineCheck> {
+  if (!packaged && env.COCKPIT_E2E === '1') {
+    const stated = parseFakeMachineReport(env.AI_LORE_E2E_MACHINE);
+    if (stated !== null) return Promise.resolve(stated);
+  }
   if (!isFakeMachineRun(env, packaged)) return checkMachine(runner, engines, options);
   const stateFile = env.AI_LORE_FAKE_GITHUB ?? '';
   return checkMachine(

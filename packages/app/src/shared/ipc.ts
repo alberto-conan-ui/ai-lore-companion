@@ -58,6 +58,7 @@ export * from './ipc/space/roots.types.js';
 export * from './ipc/space/files.types.js';
 export * from './ipc/space/migration.types.js';
 export * from './ipc/space/project.types.js';
+export * from './ipc/space/repositories.types.js';
 
 /**
  * Type-only ChainResult discriminator that does not require importing

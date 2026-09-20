@@ -162,3 +162,89 @@ export const ROOT_CHANGES_TIMEOUT_MS = 30_000;
 
 /** How long the tracker waits after `scheduleRefresh` before it reads, as today's tracker does. */
 export const ROOT_TRACKER_DEBOUNCE_MS = 200;
+
+// Stage D1: the repository read, without a fetch (architecture document, section 3.2).
+
+/** Where `HEAD` is. */
+export type RootHeadState =
+  /** On a branch that has a commit. */
+  | { kind: 'branch'; branch: string; commit: string }
+  /** On a branch whose ref does not exist yet: a repository with no commit. */
+  | { kind: 'unborn-branch'; branch: string }
+  /** Not on a branch. During a rebase git detaches `HEAD`; `rebasing` then names the branch being rebased. */
+  | { kind: 'detached'; commit: string; rebasing: string | null };
+
+/** An operation git records as in progress in its folder, or `null` when there is none. */
+export type RootGitOperation = 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'bisect';
+
+/**
+ * Why the comparison with the tracking branch is not known.
+ * `no-remote`: the repository has no remote at all.
+ * `no-upstream`: the branch has no tracking branch configured.
+ * `upstream-missing`: a tracking branch is configured and its ref is not in this
+ *   repository. It has never been fetched, or it was deleted on the remote.
+ * `detached-head`: `HEAD` is not on a branch, so there is no tracking branch.
+ * `unborn-branch`: the branch has no commit, so there is nothing to compare.
+ * `git-failed`: a git command did not answer. `message` carries git's own words.
+ */
+export type RemoteUnknownReason =
+  | 'no-remote'
+  | 'no-upstream'
+  | 'upstream-missing'
+  | 'detached-head'
+  | 'unborn-branch'
+  | 'git-failed';
+
+/**
+ * What one repository's own records say about its remote, read without
+ * contacting it. `ahead` and `behind` are both numbers or both `null`; they are
+ * never `0` for a fact that could not be established.
+ */
+export type RootRemoteComparison = {
+  /** The remote's name, `origin`, or `null` when there is none to name. */
+  remote: string | null;
+  /** The tracking branch in its short form, `origin/main`, or `null`. */
+  upstream: string | null;
+  /** Commits on `HEAD` that the tracking branch does not have, or `null`. */
+  ahead: number | null;
+  /** Commits on the tracking branch that `HEAD` does not have, or `null`. */
+  behind: number | null;
+  /** Why `ahead` and `behind` are `null`; `null` when they are known. */
+  unknown: { reason: RemoteUnknownReason; message: string } | null;
+  /**
+   * When git last fetched into this repository, ISO 8601, from the modification
+   * time of `FETCH_HEAD` in its git folder. `null` when there is no such file,
+   * which is the case in a repository that has been cloned and never fetched.
+   */
+  lastFetchAt: string | null;
+};
+
+/** What one read of a repository established. */
+export type RootRepositoryState = {
+  /** The top folder of the working tree that was read. */
+  workTree: string;
+  head: RootHeadState;
+  operation: RootGitOperation | null;
+  remote: RootRemoteComparison;
+  /** When the read ran, ISO 8601. */
+  readAt: string;
+};
+
+/**
+ * Why a repository could not be read at all.
+ * `folder-missing`: there is no folder at the working tree's path.
+ * `not-a-repository`: the folder is in no git working tree.
+ * The other kinds are the command runner's.
+ */
+export type RootRepositoryFailureKind =
+  | 'folder-missing'
+  | 'not-a-repository'
+  | 'command-refused'
+  | 'command-not-found'
+  | 'command-timeout'
+  | 'command-failed';
+
+export type RootRepositoryFailure = Failure<RootRepositoryFailureKind>;
+
+/** How long a git command of a repository read may run. */
+export const ROOT_REPOSITORY_TIMEOUT_MS = 10_000;

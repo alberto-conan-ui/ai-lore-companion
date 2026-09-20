@@ -26,6 +26,16 @@ export {
   dashboardModel,
 } from './dashboard-model.js';
 
+// Stage D1: the Dashboard's repositories.
+export {
+  type RepositoriesModel,
+  type RepositoriesModelInput,
+  type RepositoryRead,
+  type RepositoryRow,
+  type RepositoryRowChanges,
+  repositoriesModel,
+} from './repositories-model.js';
+
 export {
   type LocalFolder,
   type SessionIssueContent,

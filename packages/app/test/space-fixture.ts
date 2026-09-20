@@ -30,17 +30,33 @@ export type SpaceE2eFixture = {
   root: string;
   /** A `userData` folder of the test's own, so the real one is never touched. */
   userData: string;
+  /** Names of the fixture's repositories under `repos/`, as given to `makeSpaceE2eFixture`. */
+  repositories: string[];
   /** Remove the Space, its remote and the `userData` folder. */
   cleanup: () => void;
 };
 
+/** Options of `makeSpaceE2eFixture` and `withSpaceApp`. */
+export type SpaceE2eFixtureOptions = {
+  /**
+   * Names of repositories to add under `repos/`, each a clone of a bare remote
+   * with the scripted history `makeSpaceFixture` gives it. Default: none.
+   */
+  repositories?: readonly string[];
+};
+
 /** Build a fixture Space named `name` in a temporary folder. */
-export function makeSpaceE2eFixture(name = 'e2e-space'): SpaceE2eFixture {
+export function makeSpaceE2eFixture(
+  name = 'e2e-space',
+  options?: SpaceE2eFixtureOptions,
+): SpaceE2eFixture {
+  const repositories = options?.repositories ?? [];
   const script = [
     "const { makeSpaceFixture } = await import('@ai-lore-companion/core/testing');",
     `const fixture = await makeSpaceFixture(${JSON.stringify({
       templateDir: LORE_TEMPLATE_DIR,
       name,
+      repositories,
     })});`,
     'console.log(JSON.stringify({ root: fixture.root }));',
   ].join('\n');
@@ -54,6 +70,7 @@ export function makeSpaceE2eFixture(name = 'e2e-space'): SpaceE2eFixture {
   return {
     root,
     userData,
+    repositories: [...repositories],
     cleanup: () => {
       // The builder puts the Space and its bare remote under one temporary folder.
       rmSync(dirname(root), { recursive: true, force: true, maxRetries: 3 });
@@ -140,8 +157,9 @@ export async function closeSpaceApp(app: ElectronApplication | undefined): Promi
 export async function withSpaceApp(
   name: string,
   body: (ctx: { app: ElectronApplication; page: Page; fixture: SpaceE2eFixture }) => Promise<void>,
+  options?: SpaceE2eFixtureOptions,
 ): Promise<void> {
-  const fixture = makeSpaceE2eFixture(name);
+  const fixture = makeSpaceE2eFixture(name, options);
   let app: ElectronApplication | undefined;
   try {
     const launched = await launchSpaceApp({ root: fixture.root, userData: fixture.userData });

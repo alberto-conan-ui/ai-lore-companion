@@ -24,3 +24,7 @@ test-results/
 
 # macOS
 .DS_Store
+
+# Python bytecode (the spec tooling is Python; agents run it directly)
+__pycache__/
+*.pyc
