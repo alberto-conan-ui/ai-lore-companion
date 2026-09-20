@@ -15,7 +15,7 @@ import {
   readDeskRecords,
   updateDeskRecords,
 } from './store.js';
-import type { SessionPatch, SessionRecord } from './types.js';
+import type { SessionPatch, SessionRecord, SessionSpend } from './types.js';
 
 /** The record file of the sessions. */
 export const SESSIONS_FILE: DeskRecordFile<SessionRecord> = {
@@ -89,11 +89,17 @@ export function updateSession(
 
 /**
  * Record that a session ended: sets `closedAt` and puts the session in Read
- * only. Its claims are released separately, with `releaseClaims`.
+ * only. When `spend` is given, it is recorded in the same write. Its claims
+ * are released separately, with `releaseClaims`.
  */
-export function closeSession(desk: Desk, sessionId: string): Result<SessionRecord, DeskFailure> {
+export function closeSession(
+  desk: Desk,
+  sessionId: string,
+  spend?: SessionSpend,
+): Result<SessionRecord, DeskFailure> {
   return updateSession(desk, sessionId, {
     mode: 'read-only',
     closedAt: desk.now().toISOString(),
+    ...(spend !== undefined ? { spend } : {}),
   });
 }

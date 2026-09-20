@@ -29,6 +29,7 @@ function mergedEntry(slot: Slot): EngineEntry {
   const taken = slot.taken;
   if (taken !== null) {
     if (isAbsolute(taken.binary)) out.binary = taken.binary;
+    if (taken.model !== undefined) out.model = taken.model;
     if (taken.helperModel !== undefined) out.helperModel = taken.helperModel;
   }
   // Rule 3 (3.4): a catalog entry gets the seed parameters when the stored entry it merges
@@ -59,9 +60,9 @@ function mergedEntry(slot: Slot): EngineEntry {
  *    removed, lower case) equals a catalog `binary` whose entry has not taken
  *    a stored entry yet, it is merged there; otherwise it is appended after
  *    the catalog entries as a hand-added engine, unchanged.
- * 3. Merging keeps the stored `params` and `helperModel`, and keeps the stored
- *    `binary` when it is an absolute path; the `id` and `name` are the
- *    catalog's. A stored entry with no `params` field gets the catalog
+ * 3. Merging keeps the stored `params`, `model` and `helperModel`, and keeps
+ *    the stored `binary` when it is an absolute path; the `id` and `name` are
+ *    the catalog's. A stored entry with no `params` field gets the catalog
  *    entry's `seedParams` when they are non-empty (M10.3). `args` is then
  *    derived from `params` (the arguments of the parameters ticked by
  *    default), or, when there is no `params`, kept from the stored entry.

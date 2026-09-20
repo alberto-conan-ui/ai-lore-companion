@@ -40,13 +40,12 @@ export type EngineEntry = {
    * and for older builds that read `engines.json`.
    */
   args?: string[];
+  /** The model of this entry's profile, in the engine's own naming. Absent: the engine's default. */
+  model?: string;
   /**
-   * Optional model the **read-only helper** launches this engine with (AI
-   * Helper, CR7) — free-text, since each engine names its own models (Claude:
-   * `haiku`/`sonnet`/`opus`; Gemini: `gemini-2.5-flash`/…). The helper-engine
-   * adapter maps it to the engine's model flag (`--model`); when unset, the
-   * adapter falls back to its own default. Does **not** affect the user's own
-   * interactive AI tab — only the app-driven helper.
+   * The previous name of `model`, before the profile shape (M14.1). Written
+   * with the same value so a build older than M14 still reads it, and read
+   * only when `model` is absent. Nothing but `parseEngineEntry` touches it.
    */
   helperModel?: string;
 };
@@ -75,6 +74,7 @@ export function isEngineEntry(value: unknown): value is EngineEntry {
     if (!Array.isArray(o.params)) return false;
     if (!o.params.every(isEngineParam)) return false;
   }
+  if (o.model !== undefined && typeof o.model !== 'string') return false;
   if (o.helperModel !== undefined && typeof o.helperModel !== 'string') return false;
   return true;
 }
@@ -108,8 +108,19 @@ export function parseEngineEntry(value: unknown): EngineEntry | null {
     const argv = defaultParamArgv(params);
     if (argv.length > 0) out.args = argv;
   }
-  if (typeof v.helperModel === 'string' && v.helperModel.length > 0) {
-    out.helperModel = v.helperModel;
+  // Section 3.5 of the profile-shape architecture document, rules 1 and 2:
+  // `model` is read from `model` when present, or from the older `helperModel`
+  // when it is not; once resolved, both are written with the same value so a
+  // build older than M14 still finds it under `helperModel`.
+  const model =
+    typeof v.model === 'string' && v.model.length > 0
+      ? v.model
+      : typeof v.helperModel === 'string' && v.helperModel.length > 0
+        ? v.helperModel
+        : undefined;
+  if (model !== undefined) {
+    out.model = model;
+    out.helperModel = model;
   }
   return out;
 }
@@ -122,7 +133,7 @@ export const engineCatalog: CatalogModel<EngineEntry> = {
   identity: (e) =>
     `${e.id}|${e.name.toLowerCase()}|${e.binary}|${(e.params ?? [])
       .map((p) => `${p.defaultOn ? '+' : '-'}${p.text}`)
-      .join('\u0001')}|${e.helperModel ?? ''}`,
+      .join('\u0001')}|${e.model ?? ''}`,
 };
 
 /** Parse an array of entries from a raw value, dropping malformed elements. */

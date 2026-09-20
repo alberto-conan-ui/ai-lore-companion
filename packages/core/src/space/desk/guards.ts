@@ -17,7 +17,9 @@ import type {
   JsonValue,
   ReviewedMark,
   SessionClose,
+  SessionProfile,
   SessionRecord,
+  SessionSpend,
   UnattendedTag,
   WriteTarget,
 } from './types.js';
@@ -69,6 +71,51 @@ export function isWriteTarget(value: unknown): value is WriteTarget {
   return false;
 }
 
+/** Whether `value` is a non-negative integer. */
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/** Whether `value` is a non-negative finite number. */
+function isNonNegativeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+type SessionSpendTokens = NonNullable<SessionSpend['tokens']>;
+
+/** Whether `value` is a `SessionSpend`'s `tokens`. */
+function isSessionSpendTokens(value: unknown): value is SessionSpendTokens {
+  return (
+    isJsonObject(value) &&
+    isOptional(value.input, isNonNegativeInteger) &&
+    isOptional(value.output, isNonNegativeInteger) &&
+    isOptional(value.cacheRead, isNonNegativeInteger) &&
+    isOptional(value.cacheWrite, isNonNegativeInteger)
+  );
+}
+
+/** Whether `value` is a `SessionProfile`. */
+export function isSessionProfile(value: unknown): value is SessionProfile {
+  return (
+    isJsonObject(value) &&
+    isText(value.id) &&
+    isText(value.name) &&
+    isText(value.engine) &&
+    isOptional(value.model, (model) => typeof model === 'string')
+  );
+}
+
+/** Whether `value` is a `SessionSpend`. */
+export function isSessionSpend(value: unknown): value is SessionSpend {
+  return (
+    isJsonObject(value) &&
+    (value.source === 'engine' || value.source === 'none') &&
+    isOptional(value.usd, isNonNegativeNumber) &&
+    isOptional(value.tokens, isSessionSpendTokens) &&
+    isOptional(value.model, (model) => typeof model === 'string')
+  );
+}
+
 /** Whether `value` is a `SessionRecord`. */
 export function isSessionRecord(value: unknown): value is SessionRecord {
   return (
@@ -81,7 +128,10 @@ export function isSessionRecord(value: unknown): value is SessionRecord {
     isOptional(value.closedAt, isTimestamp) &&
     isOptional(value.item, isIssueRef) &&
     isOptional(value.issue, isIssueRef) &&
-    isOptional(value.unguarded, isStringArray)
+    isOptional(value.unguarded, isStringArray) &&
+    isOptional(value.profile, isSessionProfile) &&
+    isOptional(value.params, isStringArray) &&
+    isOptional(value.spend, isSessionSpend)
   );
 }
 

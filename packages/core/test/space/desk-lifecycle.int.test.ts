@@ -20,6 +20,8 @@ import {
   DESK_OWNER_FILE,
   type Desk,
   type DeskFailure,
+  type SessionProfile,
+  type SessionSpend,
   addClaims,
   addSession,
   closeDesk,
@@ -1074,4 +1076,105 @@ test('of two processes that enter Writing on one repository at the same moment, 
     await assertAllowed(f, winner, 'repos/app/a.ts');
     await assertRefused(f, loser, 'repos/app/a.ts', 'Read only');
   }
+});
+
+// ---------- M14.2: the profile, the parameters ticked and what a session spent ----------
+
+const PROFILE: SessionProfile = {
+  id: 'default.claude',
+  name: 'Claude Code',
+  engine: 'claude-code',
+  model: 'opus',
+};
+
+test('a session started with a profile and ticked parameters has them on disk, and no params field when none were ticked', async (t) => {
+  const f = await makeFixture(t);
+  const withParams = must(
+    startSession(f.desk, {
+      id: 'first',
+      engine: 'default.claude',
+      profile: PROFILE,
+      params: ['--model', 'opus'],
+    }),
+  );
+  assert.deepEqual(withParams.profile, PROFILE);
+  assert.deepEqual(withParams.params, ['--model', 'opus']);
+  assert.equal(withParams.engine, 'default.claude');
+  const onDisk = records(f, 'sessions').find((r) => r.id === 'first');
+  assert.ok(onDisk);
+  assert.deepEqual(onDisk.profile, PROFILE);
+  assert.deepEqual(onDisk.params, ['--model', 'opus']);
+
+  // `params: []` writes no field, the same rule M10.3 gave `unguarded`.
+  const noParams = must(
+    startSession(f.desk, { id: 'second', engine: 'default.claude', profile: PROFILE, params: [] }),
+  );
+  assert.equal(noParams.params, undefined);
+  const secondOnDisk = records(f, 'sessions').find((r) => r.id === 'second');
+  assert.ok(secondOnDisk);
+  assert.equal('params' in secondOnDisk, false);
+
+  // A session started with no profile at all has neither field, as every session did before M14.
+  const bare = must(startSession(f.desk, { id: 'third', engine: 'default.claude' }));
+  assert.equal(bare.profile, undefined);
+  assert.equal(bare.params, undefined);
+});
+
+test('ending a session records what it spent in the same write, and leaves the field absent when none is given', async (t) => {
+  const f = await makeFixture(t);
+  start(f, 'first', 'second');
+  const spend: SessionSpend = {
+    source: 'engine',
+    usd: 1.23,
+    tokens: { input: 100, output: 40 },
+    model: 'claude-opus-4',
+  };
+
+  const ended = must(endSession(f.desk, 'first', { spend }));
+  assert.deepEqual(ended.session.spend, spend);
+  assert.deepEqual(records(f, 'sessions').find((r) => r.id === 'first')?.spend, spend);
+
+  const endedNoSpend = must(endSession(f.desk, 'second'));
+  assert.equal(endedNoSpend.session.spend, undefined);
+  const secondOnDisk = records(f, 'sessions').find((r) => r.id === 'second');
+  assert.ok(secondOnDisk);
+  assert.equal('spend' in secondOnDisk, false);
+});
+
+test('a sessions.json written by hand in the pre-M14 shape is read, a session of it is closed with a spend, and every other record stays byte-identical', async (t) => {
+  const f = await makeFixture(t);
+  const other = {
+    id: 'other',
+    engine: 'default.codex',
+    attended: true,
+    mode: 'read-only',
+    startedAt: '2026-09-18T09:00:00.000Z',
+  };
+  const target = {
+    id: 'first',
+    engine: 'default.claude',
+    attended: true,
+    mode: 'writing',
+    startedAt: '2026-09-18T09:05:00.000Z',
+  };
+  writeFileSync(
+    deskFile(f.paths, 'sessions'),
+    JSON.stringify({ version: 1, records: [other, target] }),
+  );
+
+  const spend: SessionSpend = { source: 'none' };
+  const ended = must(endSession(f.desk, 'first', { spend }));
+  assert.deepEqual(ended.session.spend, spend);
+  assert.equal(ended.session.profile, undefined);
+  assert.equal(ended.session.params, undefined);
+
+  const after = records(f, 'sessions');
+  assert.deepEqual(
+    after.find((r) => r.id === 'other'),
+    other,
+  );
+  assert.deepEqual(
+    after.find((r) => r.id === 'first'),
+    ended.session,
+  );
 });

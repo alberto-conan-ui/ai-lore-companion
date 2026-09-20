@@ -60,7 +60,15 @@ import { isJsonObject, isSessionRecord } from './guards.js';
 import { recordSessionClose } from './root-commits.js';
 import { addSession, closeSession, listSessions, updateSession } from './sessions.js';
 import { type DeskRecordFile, readDeskRecords } from './store.js';
-import type { Claim, IssueRef, JsonObject, SessionClose, SessionRecord } from './types.js';
+import type {
+  Claim,
+  IssueRef,
+  JsonObject,
+  SessionClose,
+  SessionProfile,
+  SessionRecord,
+  SessionSpend,
+} from './types.js';
 
 /** What the caller gives to start a session; the desk adds the mode and the time. */
 export type SessionStart = {
@@ -72,6 +80,10 @@ export type SessionStart = {
   item?: IssueRef;
   /** The options that changed the guard, by name. Written only when non-empty. */
   unguarded?: string[];
+  /** The profile the session ran, as it was when the session started. */
+  profile?: SessionProfile;
+  /** The texts of the parameters ticked at the start, in order. Written only when non-empty. */
+  params?: readonly string[];
 };
 
 /** What `repairSessionRecords` changed. Both lists are empty on a desk that follows the rule. */
@@ -113,6 +125,12 @@ export type LeaveOptions = Pick<LifecycleOptions, 'betweenWrites'> & {
   closes?: readonly SessionCloseCommit[];
 };
 
+/** Options of ending a session: `LeaveOptions` and what it spent. */
+export type EndOptions = LeaveOptions & {
+  /** What the session spent, recorded on the same write that closes it. */
+  spend?: SessionSpend;
+};
+
 /** Options of the steps that make two writes. */
 export type LifecycleOptions = {
   /** The item the session is on, recorded with the mode when the session enters Writing. */
@@ -152,6 +170,8 @@ export function startSession(desk: Desk, start: SessionStart): Result<SessionRec
     ...(start.unguarded !== undefined && start.unguarded.length > 0
       ? { unguarded: start.unguarded }
       : {}),
+    ...(start.profile !== undefined ? { profile: start.profile } : {}),
+    ...(start.params !== undefined && start.params.length > 0 ? { params: [...start.params] } : {}),
   });
 }
 
@@ -285,16 +305,18 @@ export function leaveWriting(
 
 /**
  * Record that a session ended: its close time is set, it is in Read only, and
- * every target it holds is released. The record is written first and the claims
- * are released second. A session that ended before keeps its close time.
+ * every target it holds is released. When `options.spend` is given it is
+ * written in the same call that sets the close time. The record is written
+ * first and the claims are released second. A session that ended before keeps
+ * its close time and its spend.
  */
 export function endSession(
   desk: Desk,
   sessionId: string,
-  options: LeaveOptions = {},
+  options: EndOptions = {},
 ): Result<WritingLeft, DeskFailure | WritingRefusal> {
   return leave(desk, sessionId, options, (session) =>
-    session.closedAt === undefined ? closeSession(desk, sessionId) : ok(session),
+    session.closedAt === undefined ? closeSession(desk, sessionId, options.spend) : ok(session),
   );
 }
 

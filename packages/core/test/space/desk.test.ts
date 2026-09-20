@@ -23,7 +23,9 @@ import {
   type DeskPaths,
   type GateAnswerInput,
   type IssueRef,
+  type SessionProfile,
   type SessionRecord,
+  type SessionSpend,
   type WriteTarget,
   addClaims,
   addMark,
@@ -46,7 +48,9 @@ import {
   isProcessRunning,
   isReviewedMark,
   isSessionClose,
+  isSessionProfile,
   isSessionRecord,
+  isSessionSpend,
   isUnattendedTag,
   isWriteTarget,
   lastMark,
@@ -717,6 +721,8 @@ test('the guards accept the record shapes with extra fields and refuse anything 
     isIssueRef,
     isWriteTarget,
     isSessionRecord,
+    isSessionProfile,
+    isSessionSpend,
     isClaim,
     isGateAnswer,
     isUnattendedTag,
@@ -764,4 +770,62 @@ test('the guards accept the record shapes with extra fields and refuse anything 
     }),
     true,
   );
+});
+
+// ---------- M14.2: the profile, the parameters and the spend on a session record ----------
+
+const PROFILE: SessionProfile = {
+  id: 'default.claude',
+  name: 'Claude Code',
+  engine: 'claude-code',
+};
+
+const SPEND_NONE: SessionSpend = { source: 'none' };
+const SPEND_ENGINE: SessionSpend = {
+  source: 'engine',
+  usd: 0.42,
+  tokens: { input: 100, output: 50, cacheRead: 10, cacheWrite: 5 },
+  model: 'claude-opus-4',
+};
+
+test('isSessionProfile accepts a valid profile, with and without a model, and refuses a malformed one', () => {
+  assert.equal(isSessionProfile(PROFILE), true);
+  assert.equal(isSessionProfile({ ...PROFILE, model: 'opus' }), true);
+  assert.equal(isSessionProfile({ ...PROFILE, extra: 1 }), true);
+  assert.equal(isSessionProfile({ ...PROFILE, id: '' }), false);
+  assert.equal(isSessionProfile({ ...PROFILE, name: '' }), false);
+  assert.equal(isSessionProfile({ ...PROFILE, engine: '' }), false);
+  assert.equal(isSessionProfile({ ...PROFILE, model: 7 }), false);
+  assert.equal(isSessionProfile({ name: PROFILE.name, engine: PROFILE.engine }), false);
+});
+
+test('isSessionSpend accepts `none` and `engine`, with tokens and usd optional, and refuses a malformed one', () => {
+  assert.equal(isSessionSpend(SPEND_NONE), true);
+  assert.equal(isSessionSpend(SPEND_ENGINE), true);
+  assert.equal(isSessionSpend({ source: 'engine' }), true);
+  assert.equal(isSessionSpend({ source: 'engine', tokens: {} }), true);
+  assert.equal(isSessionSpend({ source: 'engine', tokens: { input: 3 } }), true);
+  assert.equal(isSessionSpend({ source: 'checked' }), false);
+  assert.equal(isSessionSpend({ source: 'engine', usd: -1 }), false);
+  assert.equal(isSessionSpend({ source: 'engine', usd: 'free' }), false);
+  assert.equal(isSessionSpend({ source: 'engine', tokens: { input: -1 } }), false);
+  assert.equal(isSessionSpend({ source: 'engine', tokens: { input: 1.5 } }), false);
+  assert.equal(isSessionSpend({ source: 'engine', tokens: 'lots' }), false);
+  assert.equal(isSessionSpend({ source: 'engine', model: 7 }), false);
+});
+
+test('isSessionRecord accepts a record with none of profile, params and spend, and one with all three', () => {
+  assert.equal(isSessionRecord(session('s1')), true);
+  assert.equal(
+    isSessionRecord(
+      session('s1', { profile: PROFILE, params: ['--model', 'opus'], spend: SPEND_ENGINE }),
+    ),
+    true,
+  );
+  assert.equal(isSessionRecord(session('s1', { profile: PROFILE })), true);
+  assert.equal(isSessionRecord(session('s1', { params: [] })), true);
+  assert.equal(isSessionRecord(session('s1', { spend: SPEND_NONE })), true);
+  assert.equal(isSessionRecord({ ...session('s1'), profile: { id: 'x', name: 'x' } }), false);
+  assert.equal(isSessionRecord({ ...session('s1'), params: [1] }), false);
+  assert.equal(isSessionRecord({ ...session('s1'), spend: { source: 'maybe' } }), false);
 });

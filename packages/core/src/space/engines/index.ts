@@ -14,3 +14,10 @@ export {
   isCatalogEngineId,
 } from './catalog.js';
 export { mergeEnginesWithCatalog } from './merge.js';
+export {
+  type Profile,
+  engineNameOf,
+  entryOf,
+  profileById,
+  profileOf,
+} from './profiles.js';

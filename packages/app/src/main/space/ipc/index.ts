@@ -5,6 +5,7 @@ import { registerSpaceFiles } from './files.js';
 import { registerSpaceMachine } from './machine.js';
 import { registerSpaceMigration } from './migration.js';
 import { registerSpaceProject } from './project.js';
+import { registerSpaceRepositories } from './repositories.js';
 import { registerSpaceRoots } from './roots.js';
 import { registerSpaceSessions } from './sessions.js';
 import { registerSpaceSetup } from './setup.js';
@@ -26,4 +27,5 @@ export const SPACE_MODULES: readonly RegisterModule[] = [
   registerSpaceFiles,
   registerSpaceMigration,
   registerSpaceProject,
+  registerSpaceRepositories,
 ];

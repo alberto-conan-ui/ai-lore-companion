@@ -27,7 +27,9 @@ export type {
   SessionClose,
   SessionMode,
   SessionPatch,
+  SessionProfile,
   SessionRecord,
+  SessionSpend,
   UnattendedTag,
   WriteTarget,
 } from './types.js';
@@ -39,7 +41,9 @@ export {
   isIssueRef,
   isReviewedMark,
   isSessionClose,
+  isSessionProfile,
   isSessionRecord,
+  isSessionSpend,
   isUnattendedTag,
   isWriteTarget,
 } from './guards.js';
@@ -65,6 +69,7 @@ export { addSession, closeSession, getSession, listSessions, updateSession } fro
 export { addClaims, listClaims, releaseClaim, releaseClaims, sameWriteTarget } from './claims.js';
 // Phase M4.2: the steps of a session's life, which apply a decision of `space/claims`.
 export {
+  type EndOptions,
   type LeaveOptions,
   type LifecycleOptions,
   type SessionCloseCommit,
