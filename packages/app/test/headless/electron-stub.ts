@@ -58,6 +58,19 @@ export const utilityProcess = {
   },
 };
 
+/** `app.getAppPath()` this stub reports — `main/space/build-marker.ts` reads the
+ *  Space build marker from `<appPath>/package.json`. A test points this at a
+ *  fixture directory with `setAppPath` to exercise that without a real Electron app. */
+export let appPath = process.cwd();
+export function setAppPath(path: string): void {
+  appPath = path;
+}
+
+export const app = {
+  getAppPath: (): string => appPath,
+  name: 'AI-Lore',
+};
+
 /** Clear all recorded calls and restore the default window — call in `beforeEach`. */
 export function resetElectronStub(): void {
   shell.openPath.calls.length = 0;
@@ -66,4 +79,5 @@ export function resetElectronStub(): void {
   clipboard.writeText.calls.length = 0;
   fakeWindow = { id: 1, webContents: { send: () => {} } };
   allWindows = [];
+  appPath = process.cwd();
 }

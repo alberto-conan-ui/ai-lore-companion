@@ -63,6 +63,7 @@ import { addRecent, clearRecents, loadRecents, removeRecent } from './recents.js
 import { type SearchService, WorkerSearchService } from './search/service.js';
 import { loadGlobalSettings, loadProjectSettings } from './settings.js';
 import { withIcons } from './shortcuts.js';
+import { isSpaceBuild, spaceRoutingDecision } from './space/build-marker.js';
 import { type SpaceHost, createSpaceHost } from './space/host.js';
 import { createAppCommandRunner } from './space/live-github.js';
 import { createSpaceLog } from './space/log.js';
@@ -89,14 +90,17 @@ const MIN_CORE_VERSION = '0.5.1';
 const E2E_BYPASS_GUARDS = process.env.COCKPIT_E2E === '1';
 
 /**
- * AI-Lore 1.0 — routing by detection. With `AI_LORE_SPACE_ROUTING=1` every
- * folder goes through `detectFolder` and opens in a 1.0 window (the Space
- * window, the migration screen, the not-a-Space screen), and the welcome
- * window is the 1.0 welcome screen. Without it — the default until the switch
- * of this project — every folder is routed exactly as before, through
- * `checkProjectCompatibility`. Read once at startup.
+ * AI-Lore 1.0 — routing by detection. On with either of two inputs:
+ * `AI_LORE_SPACE_ROUTING=1`, or the packaged app being the Space build
+ * (`electron-builder.space.json`, `space/build-marker.ts`). Either way,
+ * every folder goes through `detectFolder` and opens in a 1.0 window (the
+ * Space window, the migration screen, the not-a-Space screen), and the
+ * welcome window is the 1.0 welcome screen. With neither — the v0.8 build,
+ * and this project's default until the switch — every folder is routed
+ * exactly as before, through `checkProjectCompatibility`. Read once at
+ * startup.
  */
-const SPACE_ROUTING = isSpaceRoutingOn();
+const SPACE_ROUTING = spaceRoutingDecision(isSpaceRoutingOn(), isSpaceBuild());
 
 /**
  * Decide whether a folder should open as a cockpit. Returns `null` when the

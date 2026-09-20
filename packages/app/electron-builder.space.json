@@ -1,0 +1,13 @@
+{
+  "extends": "./electron-builder.base.cjs",
+  "appId": "com.ai-lore.space",
+  "productName": "AI-Lore 1.0",
+  "extraMetadata": {
+    "dependencies": {
+      "chokidar": "^3.6.0",
+      "node-pty": "^1.1.0"
+    },
+    "productName": "AI-Lore 1.0",
+    "aiLoreSpaceBuild": true
+  }
+}
