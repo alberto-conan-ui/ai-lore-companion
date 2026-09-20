@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 
 BRANCHES = ("verbs", "processes", "contracts", "tooling")
 ARTIFACT_SUFFIX = {
@@ -31,6 +32,20 @@ ARTIFACT_SUFFIX = {
     "tooling": ".tooling.md",
 }
 LINK_RE = re.compile(r"(\]\()([^)#\s]+)((?:#[^)]*)?\))")
+# Fenced code blocks (``` or ~~~) and inline code spans (`` ` `` runs), for masking before a
+# *reporting* pass over LINK_RE — a documented example of a link is not a link. Never used on
+# the rewriting paths (install's skill projection, place_core, migrate's remap), which must see
+# every character of the source text unchanged.
+FENCE_RE = re.compile(r"(?m)^([ \t]*)(`{3,}|~{3,})[^\n]*\n.*?\n[ \t]*\2[ \t]*$", re.DOTALL)
+CODE_SPAN_RE = re.compile(r"(`+)(?:(?!\1).)+?\1")
+
+
+def mask_code(text):
+    """Blank fenced code blocks and inline code spans (newlines kept, so line numbers implied
+    by any later position math stay stable) so a reporting pass over LINK_RE does not mistake
+    a documented example of a link for a real one."""
+    blank = lambda m: re.sub(r"[^\n]", " ", m.group(0))
+    return CODE_SPAN_RE.sub(blank, FENCE_RE.sub(blank, text))
 TODAY = _dt.date.today().isoformat()
 
 
@@ -190,6 +205,9 @@ def rewrite_links(text, src_dir, dst_dir, base_root=None):
 
 
 def dead_links(root, skip_dirs=(".git",), only_prefix=None):
+    """Report-only: matches inside fenced code blocks and code spans are masked out first
+    (a documented example of a link is not a link), and a target is tried both as written
+    and percent-decoded (`urllib.parse.unquote`) before being called dead."""
     out, total = [], 0
     for dp, dn, fn in os.walk(root):
         dn[:] = [d for d in dn if d not in skip_dirs]
@@ -199,12 +217,13 @@ def dead_links(root, skip_dirs=(".git",), only_prefix=None):
             p = os.path.join(dp, f)
             if only_prefix and not p.startswith(only_prefix):
                 continue
-            for m in LINK_RE.finditer(read(p)):
+            for m in LINK_RE.finditer(mask_code(read(p))):
                 t = m.group(2)
                 if t.startswith(("http://", "https://", "mailto:", "/")):
                     continue
                 total += 1
-                if not os.path.exists(os.path.normpath(os.path.join(dp, t))):
+                candidates = {t, urllib.parse.unquote(t)}
+                if not any(os.path.exists(os.path.normpath(os.path.join(dp, c))) for c in candidates):
                     out.append((os.path.relpath(p, root), t))
     return total, out
 
@@ -454,6 +473,14 @@ def cmd_check(args):
             total, dead = dead_links(root, skip_dirs=(".git", "journal", "status", "blueprint") if label == "memory" else (".git",))
             if label == "skills":
                 dead = [d for d in dead if d[0].startswith("ai-lore-")]
+            if label == "memory":
+                # a sealed save-point entry is not edited after archive-focus moves its targets —
+                # that is a note, not a failure; next.save-point.md is the open accumulator and
+                # keeps failing like any other live file.
+                sealed = [d for d in dead if d[0].startswith("save-points" + os.sep) and os.path.basename(d[0]) != "next.save-point.md"]
+                if sealed:
+                    dead = [d for d in dead if d not in sealed]
+                    notes.append(f"memory: {len(sealed)} dead link(s) in sealed save-points (true when sealed; not a failure)")
             notes.append(f"{label}: {total} links, {len(dead)} dead")
             for f, t in dead[:20]:
                 problems.append(f"dead link in {label}/{f}: {t}")
