@@ -7,11 +7,19 @@
  *
  * A failed verification undoes nothing. Its message lists every check with
  * "Passed" or "Failed" and a sentence, and what to look at.
+ *
+ * Once verification passes, the step writes the follow-up note (phase M6.7)
+ * to `FOLLOW_UP_NOTE_PATH` in the Workbench, before `recordStepDone`, so a
+ * failed verification leaves the Space untouched. The note is not committed:
+ * the Workbench is gitignored and private to the desk.
  */
 
+import { writeFileAtomic } from '../../fs/atomic-write.js';
 import { fail } from '../../result.js';
+import { inSpace } from '../checks.js';
 import type { MigrationStep } from '../context.js';
-import { recordStepDone } from '../local/record.js';
+import { FOLLOW_UP_NOTE_PATH, followUpNoteText } from '../follow-up.js';
+import { recordStepDone, stepStopped } from '../local/record.js';
 import { verificationText, verifyMigration } from '../verify.js';
 
 const TITLE = 'Verify the migration';
@@ -56,11 +64,15 @@ export function verifyStep(): MigrationStep {
           `The verification of the migration failed. Nothing was undone; what the migration made stays in place.\n${verificationText(verification)}`,
         );
       }
-      return recordStepDone(
-        ctx,
-        'verify',
-        verification.checks.map((one) => `Passed: ${one.title}`),
+      const written = await writeFileAtomic(
+        inSpace(ctx, FOLLOW_UP_NOTE_PATH),
+        followUpNoteText(ctx),
       );
+      if (!written.ok) return stepStopped(written.error.kind, TITLE, written.error.message);
+      return recordStepDone(ctx, 'verify', [
+        ...verification.checks.map((one) => `Passed: ${one.title}`),
+        FOLLOW_UP_NOTE_PATH,
+      ]);
     },
   };
 }

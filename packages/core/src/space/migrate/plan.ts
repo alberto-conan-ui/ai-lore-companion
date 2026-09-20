@@ -18,7 +18,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { createGitPort } from '../exec/git-port.js';
 import { isPathInside } from '../fs/paths.js';
 import { DEFAULT_STAGES } from '../github/types.js';
-import { readV08Project, V08_ARCHIVE_TOP_FILES } from '../legacy/v08-reader.js';
+import { V08_ARCHIVE_TOP_FILES, readV08Project } from '../legacy/v08-reader.js';
 import type { V08Description, V08Problem } from '../legacy/v08-types.js';
 import { readSpaceManifest } from '../manifest/space-manifest.js';
 import { type Result, err, errorMessage, ok } from '../result.js';

@@ -211,10 +211,7 @@ test('the plan of the fixture: thirteen steps, the mapping with its counts and d
   assert.equal(backlog.count, c.backlogEntryCount);
 
   const issues = plan.issues;
-  assert.equal(
-    issues.length,
-    1 + c.stages.length + c.pausedFocuses.length + c.backlogEntryCount,
-  );
+  assert.equal(issues.length, 1 + c.stages.length + c.pausedFocuses.length + c.backlogEntryCount);
   for (const issue of issues) {
     assert.equal(issue.marker, formatIssueMarker('migrated', issue.key));
     assert.ok(issue.archived.startsWith('publish/archive/v0.8/'), issue.archived);

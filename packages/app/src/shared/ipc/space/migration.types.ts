@@ -59,6 +59,14 @@ export const MIGRATION_ISSUES_STEP_ID = 'issues';
 export const MIGRATION_VERIFY_STEP_ID = 'verify';
 
 /**
+ * Where step 13 writes the follow-up note in the new Space, Space-relative
+ * (phase M6.7). Mirrors core's `MIGRATION_FOLLOW_UP_NOTE_PATH`; a string
+ * literal, not a value import from core, so the renderer's build does not
+ * follow core's barrel to chokidar (section 2.1 rule 2).
+ */
+export const MIGRATION_FOLLOW_UP_NOTE_PATH = 'workbench/migration-follow-up.md';
+
+/**
  * What the Human Lead fills, without the folder. Field names are core's
  * `MigrationForm`. A text left out is proposed by core, and the plan says which
  * value it used.

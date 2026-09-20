@@ -1,5 +1,6 @@
-import type { JSX } from 'react';
+import { type JSX, useState } from 'react';
 import {
+  MIGRATION_FOLLOW_UP_NOTE_PATH,
   MIGRATION_ISSUES_STEP_ID,
   MIGRATION_VERIFY_STEP_ID,
   type MigrationIssueProgress,
@@ -79,7 +80,9 @@ function rowsOf(view: MigrationFlowView): Row[] {
  * The run: each of the thirteen steps with its state in words, each issue of
  * step 11 with its state, a failed step with its literal sentence and "Run
  * again", which continues and repeats nothing that is done; stop; and at the
- * end the verification result of step 13 and "Open the Space".
+ * end the verification result of step 13, a short prompt (phase M6.7) for an
+ * AI session to read the follow-up note step 13 wrote, with a Copy button,
+ * and "Open the Space".
  */
 export function MigrationProgressView({ view }: Props): JSX.Element {
   const rows = rowsOf(view);
@@ -247,9 +250,15 @@ function statusSentence(stage: MigrationFlowView['stage'], current: Row | undefi
 
 function Finished({ view }: Props): JSX.Element | null {
   const { report } = view;
+  const [copied, setCopied] = useState(false);
   if (report === null) return null;
   const verify = view.plan?.plan.steps.find((step) => step.stepId === MIGRATION_VERIFY_STEP_ID);
   const verified = report.completed.includes(MIGRATION_VERIFY_STEP_ID);
+  const prompt = `In ${report.spaceRoot}, read ${MIGRATION_FOLLOW_UP_NOTE_PATH} and do what it says.`;
+  const copyPrompt = (): void => {
+    void navigator.clipboard.writeText(prompt);
+    setCopied(true);
+  };
   return (
     <div style={finishedStyle} data-testid="migration-finished">
       <p style={statusStyle}>
@@ -269,6 +278,30 @@ function Finished({ view }: Props): JSX.Element | null {
           </ul>
         )}
       </div>
+      {verified && (
+        <div style={followUpStyle} data-testid="migration-follow-up">
+          <p style={hintStyle}>
+            The migration gathered and created; a session in the Space finishes the rest.
+          </p>
+          <output style={followUpPromptStyle} data-testid="migration-follow-up-prompt">
+            {prompt}
+          </output>
+          <div style={actionsStyle}>
+            <button
+              type="button"
+              style={secondaryButtonStyle}
+              data-testid="migration-follow-up-copy"
+              onClick={copyPrompt}
+            >
+              Copy
+            </button>
+            {copied && <span style={hintStyle}>Copied.</span>}
+          </div>
+          <p style={hintStyle} data-testid="migration-follow-up-path">
+            The note is also in the Space, at {MIGRATION_FOLLOW_UP_NOTE_PATH}.
+          </p>
+        </div>
+      )}
       <div>
         <button
           type="button"
@@ -349,4 +382,21 @@ const finishedStyle: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   gap: '0.7rem',
+};
+const followUpStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.4rem',
+  padding: '0.7rem 0.85rem',
+  background: 'var(--color-shell-deep)',
+  border: '1px solid var(--color-border)',
+  borderRadius: '6px',
+};
+const followUpPromptStyle: React.CSSProperties = {
+  display: 'block',
+  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontSize: '0.8rem',
+  color: 'var(--color-text)',
+  wordBreak: 'break-word',
+  userSelect: 'text',
 };

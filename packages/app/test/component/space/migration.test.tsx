@@ -256,6 +256,7 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({ ok: true, value: { mode: 'cockpit' } });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
+  Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
 });
 
 afterEach(() => cleanup());
@@ -466,6 +467,18 @@ test('confirm runs the plan by its token; progress per step and per issue; the e
   const verification = await screen.findByTestId('migration-verification');
   expect(verification.dataset.passed).toBe('true');
   expect(verification.textContent).toContain("Compare every archived file's SHA-256");
+  const prompt = screen.getByTestId('migration-follow-up-prompt');
+  expect(prompt.textContent).toBe(
+    'In /work/old-project-space, read workbench/migration-follow-up.md and do what it says.',
+  );
+  expect(screen.getByTestId('migration-follow-up-path').textContent).toContain(
+    'workbench/migration-follow-up.md',
+  );
+  fireEvent.click(screen.getByTestId('migration-follow-up-copy'));
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+    'In /work/old-project-space, read workbench/migration-follow-up.md and do what it says.',
+  );
+  expect(await screen.findByText('Copied.')).toBeTruthy();
   fireEvent.click(screen.getByTestId('migration-open-space'));
   await waitFor(() => expect(cockpit.spaceMigrationOpenSpace).toHaveBeenCalledWith({}));
 });
@@ -538,4 +551,5 @@ test('a run that ends without step 13 says the verification was not run', async 
   expect(verification.dataset.passed).toBe('false');
   expect(verification.textContent).toContain('The verification was not run.');
   expect(verification.textContent).not.toContain('passed');
+  expect(screen.queryByTestId('migration-follow-up')).toBeNull();
 });
