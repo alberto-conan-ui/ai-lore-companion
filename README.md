@@ -68,8 +68,20 @@ button remains available for an explicit later refresh: it inserts the request,
 and Enter sends it. The PM reads the role and dashboard definitions, then calls
 the authenticated `report_dashboard` MCP tool. Dashboard shows the latest report
 as literal text, with the submitting session, receipt time and a warning after
-the Project source changes or the PM ends. The existing factual Project board is
-unchanged.
+the Project source changes or the PM ends.
+
+Dashboard puts **Needs you** above the Project overview, stage counts, focus
+progress, Agents board and repositories. The PM report occupies its own column;
+the columns stack in narrower windows. Crowded pending lists scroll, while paused
+focuses and standalone items stay separate from active focus cards. Agents rows
+label targets recorded on the cached issue rather than implying those targets
+are still claimed.
+
+Sessions pins the PM above a roster of local worker AI tabs. Selecting a card
+activates its live dock panel; the roster can be hidden to give the terminal more
+room. Worker modes and targets come from the local session header. Shell and web
+tabs remain in the dock, and the Skills column still inserts into the selected
+terminal. PM follow-up, restart and close controls are on its roster card.
 
 The first PM uses the Space's ready remembered engine when it supports a native
 interactive initial prompt, or the first compatible ready engine, and remembers

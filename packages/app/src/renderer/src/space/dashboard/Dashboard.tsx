@@ -1,5 +1,6 @@
 import type { DashboardModel, FocusCard } from '@ai-lore-companion/core';
-import { type CSSProperties, type JSX, useEffect, useState } from 'react';
+import { type JSX, useEffect, useState } from 'react';
+import './dashboard.css';
 import { errorAreaStyle, secondaryButtonStyle } from '../styles.js';
 import { AgentsBoard } from './AgentsBoard.js';
 import { FocusSheet } from './FocusSheet.js';
@@ -14,17 +15,7 @@ import { useProjectState } from './useProjectState.js';
 /** How often the ages in the state line are written again. */
 const AGE_TICK_MS = 30 * 1000;
 
-/**
- * The Dashboard of a Space (phase M7.3): the state line with Refresh, Start a
- * session, then Needs you, Focuses by Stage and the Agents board, read from
- * the Space's GitHub Project through the companion's cache. It renders only
- * what the push `onSpaceProjectState` gives, and holds no data of its own.
- * Needs you, the Agents board and Start a session are phase M7.4's parts,
- * mounted here; each carries its own heading. Repositories (stage D1) is
- * mounted between Needs you and Focuses by Stage, and shows whether or not a
- * Project has been read. The Space window mounts the Dashboard inside the
- * Dashboard entry of its rail, so it fills its parent.
- */
+/** Project and repository facts beside the PM's separately sourced interpretation. */
 type Props = {
   /** Whether the Space window opened with `init.justCreated` (M9.10). */
   justCreated?: boolean;
@@ -47,10 +38,10 @@ export function Dashboard({ justCreated }: Props = {}): JSX.Element {
   const refreshing = requested || project?.refreshing === true;
 
   return (
-    <main style={rootStyle} aria-label="Dashboard" data-testid="dashboard">
-      <div style={stateRowStyle}>
+    <main className="dashboard" aria-label="Dashboard" data-testid="dashboard">
+      <div className="dashboard-state-row">
         <p
-          style={stateLineStyle}
+          className="dashboard-state-line"
           aria-live="polite"
           data-testid="dashboard-state"
           data-state={project?.state ?? ''}
@@ -81,29 +72,36 @@ export function Dashboard({ justCreated }: Props = {}): JSX.Element {
           {problem}
         </p>
       ) : null}
-      <StartSession justCreated={justCreated === true} />
-      <PmReport />
-      {project !== null && model === null ? (
-        <p style={emptyStyle} data-testid="dashboard-no-model">
-          No Project has been read from GitHub for this Space yet, so there is nothing to show.
-          {refreshing ? ' A refresh is running.' : ' Refresh reads it now.'}
-        </p>
-      ) : null}
-      {project !== null && model !== null ? (
+      {model !== null ? (
         <NeedsYou entries={model.needsYou} onOpenFocus={(focus) => setOpenUrl(focus.url)} />
       ) : null}
-      <Repositories now={now} />
-      {project !== null && model !== null ? (
-        <>
-          <section style={sectionStyle} aria-labelledby="dashboard-focuses-heading">
-            <h2 id="dashboard-focuses-heading" style={headingStyle}>
-              Focuses by Stage
+      <div className="dashboard-body">
+        <div className="dashboard-facts" data-testid="dashboard-facts">
+          <section className="dashboard-section" aria-labelledby="dashboard-focuses-heading">
+            <h2 id="dashboard-focuses-heading" className="dashboard-heading">
+              Where everything stands
             </h2>
-            <FocusesByStage model={model} onOpen={(focus) => setOpenUrl(focus.issue.url)} />
+            {project !== null && model === null ? (
+              <p className="dashboard-empty" data-testid="dashboard-no-model">
+                No Project has been read from GitHub for this Space yet, so there is nothing to
+                show.
+                {refreshing ? ' A refresh is running.' : ' Refresh reads it now.'}
+              </p>
+            ) : null}
+            {model !== null ? (
+              <FocusesByStage model={model} onOpen={(focus) => setOpenUrl(focus.issue.url)} />
+            ) : null}
           </section>
-          <AgentsBoard board={model.board} />
-        </>
-      ) : null}
+          {model !== null ? <AgentsBoard board={model.board} /> : null}
+          <Repositories now={now} />
+        </div>
+        <aside className="dashboard-pm-rail" aria-label="PM interpretation and sessions">
+          <PmReport />
+          <div className="dashboard-start-foot">
+            <StartSession justCreated={justCreated === true} />
+          </div>
+        </aside>
+      </div>
       {openFocus !== null ? (
         <FocusSheet focus={openFocus} onClose={() => setOpenUrl(null)} />
       ) : null}
@@ -119,32 +117,3 @@ function findFocus(model: DashboardModel, url: string): FocusCard | null {
   }
   return model.unstaged.find((focus) => focus.issue.url === url) ?? null;
 }
-
-const rootStyle: CSSProperties = {
-  height: '100%',
-  overflow: 'auto',
-  padding: '0.75rem 1rem',
-  boxSizing: 'border-box',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.75rem',
-  color: 'var(--color-text)',
-};
-const stateRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: '0.75rem' };
-const stateLineStyle: CSSProperties = {
-  flex: 1,
-  margin: 0,
-  fontSize: '0.8rem',
-  color: 'var(--color-text-secondary)',
-};
-const sectionStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: '0.5rem' };
-const headingStyle: CSSProperties = {
-  margin: 0,
-  fontSize: '0.95rem',
-  color: 'var(--color-text-bright)',
-};
-const emptyStyle: CSSProperties = {
-  margin: 0,
-  fontSize: '0.85rem',
-  color: 'var(--color-text-muted)',
-};

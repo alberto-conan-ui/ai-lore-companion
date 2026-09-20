@@ -1,7 +1,7 @@
 import type { IssueRef, NeedsYouEntry } from '@ai-lore-companion/core';
 import type { JSX } from 'react';
 import { openDialogTicket } from '../dialogs/useDialogQueue.js';
-import { secondaryButtonStyle } from '../styles.js';
+import './dashboard.css';
 import { useSpaceNavStore } from '../window/spaceNavStore.js';
 import { durationText, issueName, openIssue } from './agentsText.js';
 
@@ -51,21 +51,38 @@ export function NeedsYou({ entries, onOpenFocus }: Props): JSX.Element {
   };
 
   return (
-    <section style={sectionStyle} aria-labelledby="needs-you-title" data-testid="needs-you">
-      <h2 id="needs-you-title" style={titleStyle}>
+    <section className="dashboard-needs" aria-labelledby="needs-you-title" data-testid="needs-you">
+      <h2 id="needs-you-title" className="dashboard-heading">
         Needs you ({entries.length})
       </h2>
       {entries.length === 0 ? (
-        <p style={emptyStyle}>Nothing needs you.</p>
+        <p className="dashboard-empty">Nothing needs you.</p>
       ) : (
-        <ol style={listStyle}>
+        <ol className="dashboard-needs-list" aria-label="Pending decisions">
           {entries.map((entry, index) => {
             const { label, run } = action(entry);
             return (
-              <li key={keyOf(entry)} style={itemStyle} data-testid={`needs-you-${index}`}>
-                <span style={kindStyle}>{NEEDS_YOU_LABELS[entry.kind]}</span>
-                <span style={textStyle}>{describe(entry)}</span>
-                <button type="button" style={buttonStyle} onClick={run}>
+              <li
+                key={keyOf(entry)}
+                className="dashboard-needs-row"
+                data-kind={entry.kind}
+                data-testid={`needs-you-${index}`}
+              >
+                <span className="dashboard-needs-kind">{NEEDS_YOU_LABELS[entry.kind]}</span>
+                <div className="dashboard-needs-text">
+                  {entry.kind === 'gate' ? (
+                    <>
+                      <strong className="dashboard-gate-question">{entry.question}</strong>
+                      <span className="dashboard-muted">
+                        {entry.process} · {entry.step} · {entry.sessionId}
+                        {entry.item === null ? '' : ` · ${issueName(entry.item)}`}
+                      </span>
+                    </>
+                  ) : (
+                    describe(entry)
+                  )}
+                </div>
+                <button type="button" className="dashboard-pill" onClick={run}>
                   {label}
                 </button>
               </li>
@@ -93,48 +110,3 @@ function describe(entry: NeedsYouEntry): string {
   }
   return `The session issue ${issueName(entry.issue)} is in ${entry.column} with no change on GitHub for ${durationText(entry.idleMs)}.`;
 }
-
-const sectionStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.4rem',
-  minWidth: 0,
-};
-
-const titleStyle: React.CSSProperties = { margin: 0, fontSize: '0.95rem', fontWeight: 600 };
-
-const emptyStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: '0.8rem',
-  color: 'var(--color-text-secondary)',
-};
-
-const listStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.3rem',
-  margin: 0,
-  padding: 0,
-  listStyle: 'none',
-};
-
-const itemStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '0.5rem',
-  padding: '0.35rem 0.5rem',
-  border: '1px solid var(--color-border)',
-  borderRadius: '5px',
-  fontSize: '0.8rem',
-};
-
-const kindStyle: React.CSSProperties = { fontWeight: 600, flexShrink: 0 };
-
-const textStyle: React.CSSProperties = { flex: 1, minWidth: 0 };
-
-const buttonStyle: React.CSSProperties = {
-  ...secondaryButtonStyle,
-  padding: '0.15rem 0.6rem',
-  fontSize: '0.8rem',
-  flexShrink: 0,
-};

@@ -1,15 +1,23 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { StrictMode } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 // Phase M4.6: an AI tab in a Space window, with the real AiTab and the real tab kinds. The
 // dock is replaced by a stand-in that renders each tab's body as the dock would, and the
 // xterm hook by an inert one. The cockpit's engine spawn is a spy that must never be called.
 const attachedPtyIds: string[] = [];
+const focusedPtyIds: string[] = [];
+const activatedPanels: string[] = [];
 vi.mock('../../../src/renderer/src/components/useXtermSession.js', () => ({
   useXtermSession: (config: { ptyId?: string }) => {
     if (config.ptyId !== undefined) attachedPtyIds.push(config.ptyId);
-    return { hostRef: { current: null }, focus: () => {}, search: {} };
+    return {
+      hostRef: { current: null },
+      focus: () => {
+        if (config.ptyId) focusedPtyIds.push(config.ptyId);
+      },
+      search: {},
+    };
   },
   useTerminalFindShortcut: () => {},
 }));
@@ -37,24 +45,43 @@ vi.mock('../../../src/renderer/src/components/DockWorkspace.js', async () => {
       panels: Record<string, { tabs: Tab[] }>;
       renderCtx: Ctx;
       onCloseTab: (id: string) => void;
-    }) => (
-      <div data-testid="dock-workspace">
-        {Object.values(props.panels).flatMap((panel) =>
-          panel.tabs.map((tab) => (
-            <div key={tab.id} data-testid="dock-tab" data-kind={tab.kind} data-title={tab.title}>
-              <button
-                type="button"
-                data-testid="dock-tab-close"
-                onClick={() => props.onCloseTab(tab.id)}
-              >
-                close
-              </button>
-              {TAB_KINDS[tab.kind].renderBody(tab, true, props.renderCtx)}
-            </div>
-          )),
-        )}
-      </div>
-    ),
+      onApi: (api: unknown) => void;
+      onLayoutChange: () => void;
+    }) => {
+      useEffect(() => {
+        const api = {
+          activePanel: { id: '' },
+          getPanel: (id: string) => ({
+            api: {
+              setActive: () => {
+                activatedPanels.push(id);
+                api.activePanel = { id };
+                props.onLayoutChange();
+              },
+            },
+          }),
+        };
+        props.onApi(api);
+      }, [props.onApi, props.onLayoutChange]);
+      return (
+        <div data-testid="dock-workspace">
+          {Object.values(props.panels).flatMap((panel) =>
+            panel.tabs.map((tab) => (
+              <div key={tab.id} data-testid="dock-tab" data-kind={tab.kind} data-title={tab.title}>
+                <button
+                  type="button"
+                  data-testid="dock-tab-close"
+                  onClick={() => props.onCloseTab(tab.id)}
+                >
+                  close
+                </button>
+                {TAB_KINDS[tab.kind].renderBody(tab, true, props.renderCtx)}
+              </div>
+            )),
+          )}
+        </div>
+      );
+    },
   };
 });
 
@@ -63,6 +90,7 @@ import { StartSession } from '../../../src/renderer/src/space/dashboard/StartSes
 import { SpaceSessions } from '../../../src/renderer/src/space/window/SpaceSessions.js';
 import { useSpaceNavStore } from '../../../src/renderer/src/space/window/spaceNavStore.js';
 import type {
+  DashboardReportState,
   SpaceEngineChoice,
   SpaceSessionEnginesResult,
   SpaceSessionHeader,
@@ -87,7 +115,13 @@ const READY_CHOICE: SpaceEngineChoice = {
   refusal: null,
 };
 
-let headerListener: ((header: SpaceSessionHeader) => void) | null = null;
+const headerListeners = new Set<(header: SpaceSessionHeader) => void>();
+const headerBySession = new Map<string, SpaceSessionHeader>();
+let reportListener: ((state: DashboardReportState) => void) | null = null;
+function emitHeader(header: SpaceSessionHeader): void {
+  headerBySession.set(header.sessionId, header);
+  for (const listener of headerListeners) listener(header);
+}
 
 const readOnly: SpaceSessionHeader = {
   sessionId: 's-1',
@@ -116,12 +150,25 @@ const cockpit = {
   /** PM auto-start is opt-in per test; the normal fixture keeps old session tests focused. */
   spacePmEnsure: vi.fn<(arg: unknown) => Promise<unknown>>(),
   spaceSessionEnd: vi.fn(async () => ({ ok: true, value: { sessionId: 's-1' } })),
-  spaceSessionHeader: vi.fn(async () => ({ ok: true, value: readOnly })),
+  spaceDashboardReport: vi.fn(async () => ({
+    ok: true,
+    value: { version: 0, report: null } as DashboardReportState,
+  })),
+  onSpaceDashboardReport: vi.fn((listener: (state: DashboardReportState) => void) => {
+    reportListener = listener;
+    return () => {
+      reportListener = null;
+    };
+  }),
+  spaceSessionHeader: vi.fn(async ({ sessionId }: { sessionId: string }) => ({
+    ok: true,
+    value: headerBySession.get(sessionId) ?? { ...readOnly, sessionId },
+  })),
   spaceSessionLeaveWriting: vi.fn<(arg: unknown) => Promise<unknown>>(),
   onSpaceSessionHeader: vi.fn((listener: (header: SpaceSessionHeader) => void) => {
-    headerListener = listener;
+    headerListeners.add(listener);
     return () => {
-      headerListener = null;
+      headerListeners.delete(listener);
     };
   }),
   spaceSkillsList: vi.fn(async () => ({
@@ -157,6 +204,10 @@ const cockpit = {
 
 beforeEach(() => {
   attachedPtyIds.length = 0;
+  focusedPtyIds.length = 0;
+  activatedPanels.length = 0;
+  headerBySession.clear();
+  headerListeners.clear();
   for (const mock of Object.values(cockpit)) mock.mockClear();
   cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: READY_CHOICE });
   cockpit.spaceSessionStart.mockResolvedValue({
@@ -375,7 +426,7 @@ test('the header shows Read only, then Writing with the targets, their branches 
   expect(within(header).queryByTestId('session-header-leave-writing')).toBeNull();
 
   act(() =>
-    headerListener?.({
+    emitHeader({
       ...readOnly,
       mode: 'writing',
       targets: [{ kind: 'lore' }, { kind: 'repository', name: 'app', branch: 'feat/12-header' }],
@@ -391,7 +442,7 @@ test('the header shows Read only, then Writing with the targets, their branches 
   expect(within(header).getByTestId('session-header-item').textContent).toBe('item me/space#12');
 
   // A push for another session changes nothing here.
-  act(() => headerListener?.({ ...readOnly, sessionId: 's-other' }));
+  act(() => emitHeader({ ...readOnly, sessionId: 's-other' }));
   expect(within(header).getByTestId('session-header-mode').textContent).toBe('Writing');
 });
 
@@ -406,7 +457,7 @@ test('Leave Writing asks for no confirmation and says what it released', async (
   });
   await startFromNewAi();
   act(() =>
-    headerListener?.({
+    emitHeader({
       ...readOnly,
       mode: 'writing',
       targets: [{ kind: 'lore' }, { kind: 'repository', name: 'app', branch: 'feat/12-header' }],
@@ -499,10 +550,7 @@ test('a start sends the ticked parameter texts, and an unguarded start suffixes 
       unguarded: ['--dangerously-skip-permissions'],
     },
   });
-  cockpit.spaceSessionHeader.mockResolvedValueOnce({
-    ok: true,
-    value: { ...readOnly, unguarded: ['--dangerously-skip-permissions'] },
-  });
+  headerBySession.set('s-1', { ...readOnly, unguarded: ['--dangerously-skip-permissions'] });
   await startFromNewAi();
   expect(cockpit.spaceSessionStart).toHaveBeenCalledWith({
     engineId: 'claude-code',
@@ -511,4 +559,173 @@ test('a start sends the ticked parameter texts, and an unguarded start suffixes 
   const header = screen.getByTestId('session-header');
   expect(within(header).getByTestId('session-header-unguarded').textContent).toBe('Unguarded');
   expect(screen.getByTestId('dock-tab').dataset.title).toContain('· unguarded');
+});
+
+test('the roster selects the real worker dock panel, tracks header pushes and survives collapse', async () => {
+  await startFromNewAi();
+  const roster = screen.getByTestId('session-roster');
+  const worker = within(roster).getByTestId('session-roster-worker');
+  const select = within(worker).getAllByRole('button')[0];
+  fireEvent.click(select);
+  expect(activatedPanels).toEqual([worker.dataset.tabId]);
+  expect(select.getAttribute('aria-pressed')).toBe('true');
+  act(() =>
+    emitHeader({
+      ...readOnly,
+      mode: 'writing',
+      targets: [{ kind: 'repository', name: 'app', branch: 'feature-roster' }],
+    }),
+  );
+  expect(worker.textContent).toContain('Writing');
+  expect(worker.textContent).toContain('repository app, branch feature-roster');
+  const dock = screen.getByTestId('dock-workspace');
+  fireEvent.click(screen.getByTestId('session-roster-toggle'));
+  expect(screen.getByTestId('session-roster-toggle').getAttribute('aria-expanded')).toBe('false');
+  expect(screen.getByTestId('dock-workspace')).toBe(dock);
+  fireEvent.click(screen.getByTestId('session-roster-toggle'));
+  expect(screen.getByTestId('session-roster')).toBe(roster);
+  expect(cockpit.spaceSessionStart).toHaveBeenCalledTimes(1);
+});
+
+test('the pinned PM restart ends the old session and attaches exactly one replacement', async () => {
+  cockpit.spacePmEnsure.mockResolvedValueOnce({
+    ok: true,
+    value: { sessionId: 'pm-old', ptyId: 'pty-old', engineId: 'claude-code', unguarded: [] },
+  });
+  cockpit.spacePmEnsure.mockResolvedValueOnce({
+    ok: true,
+    value: { sessionId: 'pm-new', ptyId: 'pty-new', engineId: 'claude-code', unguarded: [] },
+  });
+  render(<SpaceSessions spaceRoot="/work/space" />);
+  await screen.findByTestId('pm-restart');
+  fireEvent.click(screen.getByTestId('pm-restart'));
+  await waitFor(() => expect(attachedPtyIds).toContain('pty-new'));
+  expect(cockpit.spaceSessionEnd).toHaveBeenCalledWith({ sessionId: 'pm-old' });
+  expect(cockpit.spacePmEnsure).toHaveBeenCalledTimes(2);
+  expect(screen.getAllByTestId('session-roster-pm')).toHaveLength(1);
+  expect(screen.getAllByTestId('dock-tab')).toHaveLength(1);
+  expect(screen.queryByTestId('session-roster-worker')).toBeNull();
+  fireEvent.click(screen.getByTestId('pm-dashboard-request'));
+  expect(activatedPanels.at(-1)).toBe('space-pm');
+  expect(focusedPtyIds.at(-1)).toBe('pty-new');
+  expect(cockpit.sendTerminalInput).toHaveBeenCalledWith({
+    id: 'pty-new',
+    data: 'You are the PM. Please update the dashboard using report_dashboard.',
+  });
+});
+
+test('roster report pushes retain their version and survive a late failed initial read', async () => {
+  let failRead: ((reason: Error) => void) | undefined;
+  cockpit.spaceDashboardReport.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        failRead = reject;
+      }),
+  );
+  render(<SpaceSessions spaceRoot="/work/space" />);
+  const report: DashboardReportState['report'] = {
+    markdown: 'A report',
+    basis: 'Project',
+    sessionId: 'pm-source',
+    receivedAt: '2026-09-20T12:00:00Z',
+    stale: true,
+    staleReason: 'project-changed',
+  };
+  act(() => reportListener?.({ version: 2, report }));
+  const pm = screen.getByTestId('session-roster-pm');
+  expect(pm.textContent).toContain('Source: pm-source');
+  expect(pm.textContent).toContain('the Project source changed.');
+  act(() => reportListener?.({ version: 1, report: null }));
+  await act(async () => failRead?.(new Error('late read failure')));
+  expect(pm.textContent).toContain('Source: pm-source');
+  expect(pm.textContent).not.toContain('late read failure');
+  fireEvent.click(within(pm).getByRole('button', { name: 'Read report on Dashboard' }));
+  expect(useSpaceNavStore.getState().screen).toBe('dashboard');
+});
+
+test('roster header failures display unavailable and a later push recovers', async () => {
+  // The roster subscribes first; leave the native header's independent read successful.
+  cockpit.spaceSessionHeader.mockRejectedValueOnce(new Error('Desk read failed'));
+  cockpit.spaceSessionHeader.mockResolvedValueOnce({ ok: true, value: readOnly });
+  await startFromNewAi();
+  const worker = screen.getByTestId('session-roster-worker');
+  await waitFor(() => expect(worker.textContent).toContain('Session details unavailable'));
+  expect(worker.textContent).toContain('Desk read failed');
+  act(() => emitHeader({ ...readOnly, mode: 'writing' }));
+  expect(worker.textContent).toContain('Writing');
+  expect(worker.textContent).not.toContain('Desk read failed');
+});
+
+test('closing the PM dock tab while restart waits for session end cancels the replacement', async () => {
+  let finishEnd: ((result: { ok: boolean; value: { sessionId: string } }) => void) | undefined;
+  cockpit.spacePmEnsure.mockResolvedValueOnce({
+    ok: true,
+    value: {
+      sessionId: 'pm-closing',
+      ptyId: 'pty-closing',
+      engineId: 'claude-code',
+      unguarded: [],
+    },
+  });
+  cockpit.spaceSessionEnd.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishEnd = resolve;
+      }),
+  );
+  render(<SpaceSessions spaceRoot="/work/space" />);
+  await screen.findByTestId('pm-restart');
+  fireEvent.click(screen.getByTestId('pm-restart'));
+  expect(cockpit.spaceSessionEnd).toHaveBeenCalledWith({ sessionId: 'pm-closing' });
+  fireEvent.click(screen.getByTestId('dock-tab-close'));
+  await act(async () => finishEnd?.({ ok: true, value: { sessionId: 'pm-closing' } }));
+  expect(cockpit.spacePmEnsure).toHaveBeenCalledTimes(1);
+  expect(screen.queryByTestId('dock-tab')).toBeNull();
+  expect(screen.getByTestId('pm-retry').textContent).toBe('Start PM');
+  expect(screen.getByTestId('pm-status').textContent).toContain('Not running');
+});
+
+test('Sessions folds options and readiness while preserving active unguarded warnings and parameter choices', async () => {
+  cockpit.spaceSessionEngines.mockResolvedValue({
+    ok: true,
+    value: {
+      ...READY_CHOICE,
+      options: [
+        {
+          ...READY_CHOICE.options[0],
+          params: [
+            {
+              text: '--dangerously-skip-permissions',
+              defaultOn: true,
+              effect: 'unguarded',
+              options: ['--dangerously-skip-permissions'],
+            },
+          ],
+          lore: {
+            asClaudeCode: true,
+            lines: [{ aspect: 'guard', state: 'yes', text: 'Guard is installed.' }],
+          },
+        },
+      ],
+    },
+  });
+  render(<SpaceSessions spaceRoot="/work/space" />);
+  const toggle = await screen.findByRole('button', { name: 'Options and readiness' });
+  await waitFor(() => expect(screen.getByTestId('new-ai').textContent).toContain('unguarded'));
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  expect(screen.getByTestId('new-ai-unguarded-note').closest('[hidden]')).toBeNull();
+  expect(screen.getByTestId('new-ai-lore').closest('[hidden]')).not.toBeNull();
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  const checkbox = screen.getByRole('checkbox') as HTMLInputElement;
+  expect(checkbox.checked).toBe(true);
+  fireEvent.click(checkbox);
+  expect(screen.queryByTestId('new-ai-unguarded-note')).toBeNull();
+  expect(screen.getByTestId('new-ai').textContent).toBe('Start a Claude Code session');
+  fireEvent.click(toggle);
+  expect(screen.queryByRole('checkbox')).toBeNull();
+  fireEvent.click(screen.getByTestId('new-ai'));
+  await screen.findByTestId('session-header');
+  expect(cockpit.spaceSessionStart).toHaveBeenCalledWith({ engineId: 'claude-code', params: [] });
 });

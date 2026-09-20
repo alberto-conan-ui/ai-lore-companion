@@ -71,12 +71,12 @@ type DashboardRun = {
  * and a standalone item. The Space is installed on its desk, and the engine list names
  * the sleeping `claude` script.
  */
-function seedDashboardRun(): DashboardRun {
+function seedDashboardRun(busy = false): DashboardRun {
   const temp = realpathSync(mkdtempSync(join(tmpdir(), 'ai-lore-e2e-dashboard-')));
   const userData = join(temp, 'user-data');
   mkdirSync(userData);
   const stateFile = join(temp, 'fake-github.json');
-  const options = { temp, userData, stateFile, owner: OWNER, name: NAME, stages: STAGES };
+  const options = { temp, userData, stateFile, owner: OWNER, name: NAME, stages: STAGES, busy };
   let root: string | null = null;
   try {
     const seeded = runScript<Seeded>([
@@ -106,6 +106,11 @@ function seedDashboardRun(): DashboardRun {
       'for (const one of [focus, first, second, standalone]) placed[one.number] = must(await fake.addIssueToProject({ project, issue: one }), `project item ${one.number}`);',
       "must(await fake.setSingleSelect({ project, item: placed[focus.number], field: stage, option: 'Build' }), 'Stage of the focus');",
       "must(await fake.closeIssue({ issue: first }), 'close');",
+      'if (o.busy) for (let index = 1; index <= 6; index += 1) {',
+      "  const review = await issue(`Review fixture ${index}: a decision with enough detail to wrap`, 'Ready for review.', ['feature']);",
+      "  const placed = must(await fake.addIssueToProject({ project, issue: review }), 'place review');",
+      "  must(await fake.setSingleSelect({ project, item: placed, field: stage, option: 'Review' }), 'review stage');",
+      '}',
       'fake.save(o.stateFile);',
       "const lore = must(await core.readLore(space.root), 'lore');",
       'const desk = core.deskPaths(o.userData, space.root);',
@@ -129,7 +134,7 @@ function seedDashboardRun(): DashboardRun {
     // before it sleeps, so a test can read it back.
     writeFileSync(
       engine,
-      `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argvFile)}-"$AI_LORE_SESSION_ID"\nexec sleep 600\n`,
+      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '2.1.278 (Claude Code)'; exit 0; fi\nif [ "$1" = "auth" ]; then echo '{"loggedIn":true}'; exit 0; fi\nprintf '%s\\n' "$@" > ${JSON.stringify(argvFile)}-"$AI_LORE_SESSION_ID"\nexec sleep 600\n`,
     );
     chmodSync(engine, 0o755);
     writeFileSync(
@@ -240,6 +245,139 @@ async function startSession(page: Page): Promise<void> {
 }
 
 test.describe('the Dashboard', () => {
+  test('crowded overview and session roster remain usable at wide and narrow sizes', async () => {
+    test.setTimeout(150_000);
+    const run = seedDashboardRun(true);
+    let app: ElectronApplication | undefined;
+    try {
+      const launched = await launchSpaceApp({
+        root: run.seeded.root,
+        userData: run.userData,
+        env: run.env,
+      });
+      app = launched.app;
+      const page = launched.page;
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await showDashboard(page);
+      await refresh(page);
+      await expect(page.getByTestId('needs-you').getByRole('listitem')).toHaveCount(6);
+      // Even the last entry in a crowded band remains keyboard reachable.
+      const lastReview = page.getByTestId('needs-you-5').getByRole('button');
+      await page.getByTestId('needs-you-4').getByRole('button').focus();
+      await page.keyboard.press('Tab');
+      await expect(lastReview).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(page.getByTestId('dashboard-focus-sheet')).toBeVisible();
+      await page.getByTestId('dashboard-sheet-close').click();
+
+      await startSession(page);
+      const worker = page.getByTestId('session-roster-worker');
+      await expect(worker).toHaveCount(1);
+      await expect.poll(() => sessionMcpFile(run.seeded.sessionsDir)).not.toBeNull();
+      const mcp = sessionMcpFile(run.seeded.sessionsDir) as string;
+      callSessionTool(mcp, 'request_writing', {
+        targets: [{ kind: 'lore' }],
+        item: run.seeded.item,
+        reason: 'Exercise roster claim updates in the isolated test Space.',
+      });
+      await page.getByTestId('writing-confirm').click();
+      await expect(worker).toContainText('Writing');
+
+      // Selecting the PM and the worker must switch the real dock's visible terminal header.
+      await page.getByTestId('pm-select').click();
+      await expect(page.locator('[data-testid="session-header-mode"]:visible')).toHaveText(
+        'Read only',
+      );
+      const tabId = await worker.getAttribute('data-tab-id');
+      await page.getByTestId(`session-roster-select-${tabId}`).click();
+      await expect(page.locator('[data-testid="session-header-mode"]:visible')).toHaveText(
+        'Writing',
+      );
+
+      await page.getByTestId('space-rail-dashboard').click();
+      await refresh(page);
+      await page.emulateMedia({ colorScheme: 'dark' });
+
+      // Supply fixture report text through the authenticated PM channel, never renderer injection.
+      const recordsFile = join(dirname(run.seeded.sessionsDir), 'desk', 'sessions.json');
+      const records = JSON.parse(readFileSync(recordsFile, 'utf8')).records as Array<{
+        id: string;
+        purpose?: string;
+        closedAt?: string;
+      }>;
+      const pm = records.find((record) => record.purpose === 'pm' && !record.closedAt);
+      expect(pm).toBeDefined();
+      callSessionTool(join(run.seeded.sessionsDir, pm?.id ?? '', 'mcp.json'), 'report_dashboard', {
+        markdown:
+          'Current position\nThis fixture has one Build focus and six focuses awaiting review.\n\nActive work\nOne local worker holds the Lore.\n\nBlockers\nNo blocker is recorded in this fixture.\n\nDecisions needed\nReview the six completed proposals.',
+        basis: 'Isolated E2E Project fixture and its local session records.',
+      });
+
+      for (const viewport of [
+        { width: 1440, height: 900 },
+        { width: 1000, height: 800 },
+      ]) {
+        await launched.app.evaluate(({ BrowserWindow }, size) => {
+          BrowserWindow.getAllWindows()[0]?.setContentSize(size.width, size.height);
+        }, viewport);
+        await page.setViewportSize(viewport);
+        await page.getByTestId('space-rail-dashboard').click();
+        await expect(page.getByTestId('pm-report-text')).toContainText('Current position');
+        for (const action of [
+          lastReview,
+          page.getByRole('button', { name: 'Talk to PM in Sessions' }),
+        ]) {
+          await action.scrollIntoViewIfNeeded();
+          const bounds = await action.boundingBox();
+          expect(bounds).not.toBeNull();
+          expect(bounds?.x).toBeGreaterThanOrEqual(0);
+          expect((bounds?.x ?? 0) + (bounds?.width ?? 0)).toBeLessThanOrEqual(viewport.width);
+          expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(viewport.height);
+        }
+        await page.getByTestId('dashboard').evaluate((node) => {
+          node.scrollTop = 0;
+          const pending = node.querySelector('.dashboard-needs-list');
+          if (pending) pending.scrollTop = 0;
+        });
+        expect(
+          await page
+            .getByTestId('dashboard')
+            .evaluate((node) => node.scrollWidth <= node.clientWidth),
+        ).toBe(true);
+        await page.screenshot({ path: test.info().outputPath(`dashboard-${viewport.width}.png`) });
+        await page.getByTestId('space-rail-sessions').click();
+        await expect(page.getByTestId('session-roster')).toBeVisible();
+        await expect(page.locator('[data-testid="session-header-mode"]:visible')).toHaveText(
+          'Writing',
+        );
+        await expect(page.locator('[data-testid="session-header"]:visible')).toBeInViewport();
+        // Wait for the restored dock to receive pointer input after switching screens.
+        await page
+          .getByRole('button', { name: 'Leave Writing', exact: true })
+          .click({ trial: true });
+        expect(
+          await page
+            .getByTestId('space-sessions')
+            .evaluate((node) => node.scrollWidth <= node.clientWidth),
+        ).toBe(true);
+        await page.screenshot({ path: test.info().outputPath(`sessions-${viewport.width}.png`) });
+      }
+
+      const toggle = page.getByTestId('session-roster-toggle');
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+      await expect(page.locator('[data-testid="session-header-mode"]:visible')).toHaveText(
+        'Writing',
+      );
+      await toggle.click();
+      await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      await expect(worker).toHaveCount(1);
+    } finally {
+      await closeSpaceApp(app);
+      run.cleanup();
+    }
+  });
+
   test('with the fake reachable: the Project by Stage, the Agents board and Needs you', async () => {
     test.setTimeout(150_000);
     const run = seedDashboardRun();
@@ -269,11 +407,10 @@ test.describe('the Dashboard', () => {
       expect(stages).toEqual(STAGES);
 
       // The focus card at Build: kind, item progress, spec link.
-      const card = page
-        .locator('[data-testid="dashboard-column"][data-stage="Build"]')
-        .getByTestId('dashboard-focus-card');
+      const card = page.getByTestId('dashboard-focus-card');
       await expect(card).toHaveCount(1);
       await expect(card).toContainText(`#${run.seeded.focus} Dashboard focus`);
+      await expect(card).toContainText('Build');
       await expect(card.getByTestId('dashboard-focus-kind')).toHaveText('kind feature');
       await expect(card.getByTestId('dashboard-focus-items')).toHaveText('1 of 2 items done');
       await expect(card.getByTestId('dashboard-focus-spec')).toBeVisible();

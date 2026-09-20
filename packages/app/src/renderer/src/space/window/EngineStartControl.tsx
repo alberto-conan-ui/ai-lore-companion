@@ -11,6 +11,8 @@ import { CommandPanel } from '../common/CommandPanel.js';
 import { bannerStyle, primaryButtonStyle, secondaryButtonStyle } from '../styles.js';
 
 type Props = {
+  /** Fold parameters and Lore details in space-constrained toolbars. */
+  compact?: boolean;
   choice: SpaceEngineChoice | null;
   onStart: (engineId: string) => void;
   onPick: (engineId: string) => void;
@@ -61,6 +63,7 @@ function overallLoreState(lines: readonly SpaceLoreLine[]): SpaceLoreLine['state
  * `SpaceSessions`' empty view and compact row.
  */
 export function EngineStartControl({
+  compact = false,
   choice,
   onStart,
   onPick,
@@ -74,6 +77,7 @@ export function EngineStartControl({
   onTickedChange,
 }: Props): JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [running, setRunning] = useState<SpaceEngineFix | null>(null);
 
@@ -141,7 +145,9 @@ export function EngineStartControl({
       ? AI_READINESS_CHECKING
       : choice.refusal !== null
         ? choice.refusal.message
-        : `Starts ${engineName(choice, engineId ?? '')} in this Space's folder, in Read only. Writing needs your confirmation.`;
+        : compact
+          ? 'Starts in Read only. Writing needs your confirmation.'
+          : `Starts ${engineName(choice, engineId ?? '')} in this Space's folder, in Read only. Writing needs your confirmation.`;
 
   const runFix = (fix: SpaceEngineFix): void => {
     setMenuOpen(false);
@@ -245,85 +251,126 @@ export function EngineStartControl({
             )}
           </PopoverShell>
         ) : null}
+        {compact ? (
+          <button
+            type="button"
+            style={secondaryButtonStyle}
+            aria-expanded={detailsOpen}
+            aria-controls={`${buttonTestId}-details`}
+            data-testid={`${buttonTestId}-options`}
+            onClick={() => setDetailsOpen((open) => !open)}
+          >
+            Options and readiness
+          </button>
+        ) : null}
       </span>
-      {chosenOption !== null ? (
-        <div style={paramsWrapperStyle}>
-          <h3 style={paramsHeadingStyle} data-testid={`${buttonTestId}-params`}>
-            Parameters of {chosenOption.name}
-          </h3>
-          {params.length === 0 ? (
-            <>
-              <p style={paramsEmptyStyle}>
-                {chosenOption.name} has no parameters. Add them in Settings, Engines.
-              </p>
-              <button
-                type="button"
-                style={linkButtonStyle}
-                data-testid={`${buttonTestId}-params-edit`}
-                onClick={() => useSpaceSettings.getState().open('engines')}
-              >
-                Edit parameters
-              </button>
-            </>
-          ) : (
-            <ul style={paramsListStyle}>
-              {params.map((param, index) => (
-                <li key={param.text} style={paramItemStyle}>
-                  <label style={paramLabelStyle}>
-                    <input
-                      type="checkbox"
-                      data-testid={`${buttonTestId}-param-${index}`}
-                      checked={isTicked(param)}
-                      disabled={param.effect === 'refused'}
-                      onChange={() => toggleParam(param)}
-                    />
-                    <span style={paramTextStyle}>{param.text}</span>
-                    {param.effect === 'unguarded' ? (
-                      <span style={paramMutedStyle}> — changes the guard</span>
-                    ) : null}
-                    {param.effect === 'refused' ? (
-                      <span style={paramMutedStyle}>
-                        {' '}
-                        — set by the companion; remove it in Settings
-                      </span>
-                    ) : null}
-                  </label>
-                </li>
-              ))}
-            </ul>
-          )}
+      {compact ? (
+        <p id={noteTestId} style={noteStyle} data-testid={noteTestId}>
+          {noteText}
+        </p>
+      ) : null}
+      {compact ? (
+        <>
           {isUnguarded ? (
             <p style={unguardedNoteStyle} data-testid={`${buttonTestId}-unguarded-note`}>
               This session will be unguarded: {unguardedOptions.join(', ')} changes what it may do
               without asking you. Its tab and its Dashboard entry will say so.
             </p>
           ) : null}
-        </div>
+        </>
       ) : null}
+      <div
+        id={`${buttonTestId}-details`}
+        hidden={compact && !detailsOpen}
+        style={compact ? { maxHeight: '40vh', overflowY: 'auto' } : undefined}
+      >
+        <div style={rootStyle}>
+          {chosenOption !== null ? (
+            <div style={paramsWrapperStyle}>
+              <h3 style={paramsHeadingStyle} data-testid={`${buttonTestId}-params`}>
+                Parameters of {chosenOption.name}
+              </h3>
+              {params.length === 0 ? (
+                <>
+                  <p style={paramsEmptyStyle}>
+                    {chosenOption.name} has no parameters. Add them in Settings, Engines.
+                  </p>
+                  <button
+                    type="button"
+                    style={linkButtonStyle}
+                    data-testid={`${buttonTestId}-params-edit`}
+                    onClick={() => useSpaceSettings.getState().open('engines')}
+                  >
+                    Edit parameters
+                  </button>
+                </>
+              ) : (
+                <ul style={paramsListStyle}>
+                  {params.map((param, index) => (
+                    <li key={param.text} style={paramItemStyle}>
+                      <label style={paramLabelStyle}>
+                        <input
+                          type="checkbox"
+                          data-testid={`${buttonTestId}-param-${index}`}
+                          checked={isTicked(param)}
+                          disabled={param.effect === 'refused'}
+                          onChange={() => toggleParam(param)}
+                        />
+                        <span style={paramTextStyle}>{param.text}</span>
+                        {param.effect === 'unguarded' ? (
+                          <span style={paramMutedStyle}> — changes the guard</span>
+                        ) : null}
+                        {param.effect === 'refused' ? (
+                          <span style={paramMutedStyle}>
+                            {' '}
+                            — set by the companion; remove it in Settings
+                          </span>
+                        ) : null}
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!compact && isUnguarded ? (
+                <p style={unguardedNoteStyle} data-testid={`${buttonTestId}-unguarded-note`}>
+                  This session will be unguarded: {unguardedOptions.join(', ')} changes what it may
+                  do without asking you. Its tab and its Dashboard entry will say so.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
-      <p id={noteTestId} style={noteStyle} data-testid={noteTestId}>
-        {noteText}
-      </p>
+          {!compact ? (
+            <p id={noteTestId} style={noteStyle} data-testid={noteTestId}>
+              {noteText}
+            </p>
+          ) : null}
 
-      {loreLines !== null && overallLore !== null ? (
-        <div style={loreWrapperStyle}>
-          <p data-testid={`${buttonTestId}-lore`} data-state={overallLore} style={loreLineStyle}>
-            Reads the Lore as Claude Code does: {overallLore}
-          </p>
-          <ul style={loreListStyle}>
-            {loreLines.map((line) => (
-              <li
-                key={line.aspect}
-                data-testid={`${buttonTestId}-lore-${line.aspect}`}
-                data-state={line.state}
+          {loreLines !== null && overallLore !== null ? (
+            <div style={loreWrapperStyle}>
+              <p
+                data-testid={`${buttonTestId}-lore`}
+                data-state={overallLore}
                 style={loreLineStyle}
               >
-                {loreWord(line.state)} — {line.text}
-              </li>
-            ))}
-          </ul>
+                Reads the Lore as Claude Code does: {overallLore}
+              </p>
+              <ul style={loreListStyle}>
+                {loreLines.map((line) => (
+                  <li
+                    key={line.aspect}
+                    data-testid={`${buttonTestId}-lore-${line.aspect}`}
+                    data-state={line.state}
+                    style={loreLineStyle}
+                  >
+                    {loreWord(line.state)} — {line.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
-      ) : null}
+      </div>
 
       {engineId === null && choice !== null && choice.refusal !== null ? (
         <div style={bannerStyle('warn')} data-testid={`${buttonTestId}-refusal`}>
@@ -364,7 +411,7 @@ const rootStyle: React.CSSProperties = {
   gap: '0.4rem',
 };
 
-const splitStyle: React.CSSProperties = { display: 'inline-flex', gap: '0.3rem' };
+const splitStyle: React.CSSProperties = { display: 'inline-flex', flexWrap: 'wrap', gap: '0.3rem' };
 
 const paramsWrapperStyle: React.CSSProperties = {
   display: 'flex',

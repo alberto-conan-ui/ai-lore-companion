@@ -264,7 +264,7 @@ test('the window gaining focus calls space:project-focus', async () => {
   await waitFor(() => expect(cockpit.spaceProjectFocus).toHaveBeenCalledWith({}));
 });
 
-test('columns follow the model order and carry their focuses as cards', async () => {
+test('stage counts follow the Project order, while active cards and paused focuses stay distinct', async () => {
   await shown();
   const columns = screen.getAllByTestId('dashboard-column');
   expect(columns.map((column) => column.getAttribute('data-stage'))).toEqual([
@@ -273,9 +273,12 @@ test('columns follow the model order and carry their focuses as cards', async ()
     'Review',
   ]);
   expect(within(columns[0]).getByRole('heading', { level: 3 }).textContent).toBe('Spec (0)');
-  expect(within(columns[0]).getByText('No focus.')).toBeTruthy();
+  expect(within(columns[2]).getByRole('heading').textContent).toBe('Review (0)');
+  expect(screen.getByTestId('dashboard-overview-counts').textContent).toBe(
+    '4 focuses · 4 items · 1 done',
+  );
 
-  const card = within(columns[1]).getByTestId('dashboard-focus-card');
+  const card = screen.getAllByTestId('dashboard-focus-card')[0];
   expect(within(card).getByRole('heading', { level: 4 }).textContent).toBe('#1 Focus 1');
   expect(within(card).getByTestId('dashboard-focus-kind').textContent).toBe('kind feature');
   expect(within(card).getByTestId('dashboard-focus-items').textContent).toBe('1 of 2 items done');
@@ -286,13 +289,11 @@ test('columns follow the model order and carry their focuses as cards', async ()
   expect(cockpit.urlOpenExternal).toHaveBeenCalledWith('https://example.test/spec-1');
   expect(within(card).queryByTestId('dashboard-focus-paused')).toBeNull();
 
-  const review = within(columns[2]).getByTestId('dashboard-focus-card');
-  expect(within(review).getByTestId('dashboard-focus-kind').textContent).toBe('no kind');
-  expect(within(review).queryByTestId('dashboard-focus-spec')).toBeNull();
-  expect(within(review).queryByTestId('dashboard-focus-gate')).toBeNull();
-  // A paused focus says so in words.
-  expect(within(review).getByTestId('dashboard-focus-paused').textContent).toBe('Paused.');
-  fireEvent.click(within(review).getByTestId('dashboard-focus-open'));
+  const paused = screen.getByRole('region', { name: 'Paused focuses' });
+  expect(within(paused).getByTestId('dashboard-focus-paused').textContent).toContain(
+    '#2 Focus 2 · Review',
+  );
+  fireEvent.click(within(paused).getByRole('button'));
   expect(
     within(await screen.findByTestId('dashboard-focus-sheet')).getByTestId(
       'dashboard-sheet-summary',
@@ -309,8 +310,8 @@ test('unstaged focuses are listed with their reason; standalone items sit beside
     'Its Stage "Later" is not an option of the Stage field.',
   ]);
 
-  const row = screen.getByTestId('dashboard-columns');
-  const standalone = within(row).getByTestId('dashboard-standalone');
+  const standalone = screen.getByTestId('dashboard-standalone');
+  fireEvent.click(within(standalone).getByText('Standalone items (2)'));
   const items = within(standalone).getAllByTestId('dashboard-standalone-state');
   expect(items.map((node) => node.textContent)).toEqual([
     'open, no Status, paused',
@@ -360,7 +361,8 @@ test('the parts of phase M7.4 are mounted: Start a session, Needs you, the Agent
   const board = screen.getByTestId('agents-board');
   const before = (a: Element, b: Element): boolean =>
     (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-  expect(before(start, needsYou) && before(needsYou, columns) && before(columns, board)).toBe(true);
+  expect(before(needsYou, columns) && before(columns, board) && before(board, start)).toBe(true);
+  expect(screen.getByTestId('pm-report').closest('aside')?.contains(start)).toBe(true);
 
   // A focus at Review in Needs you opens its sheet.
   fireEvent.click(within(needsYou).getByRole('button', { name: 'Open the focus' }));

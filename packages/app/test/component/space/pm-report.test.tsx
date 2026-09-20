@@ -35,7 +35,7 @@ beforeEach(() => {
     ok: true,
     value: { version: 1, report: null },
   });
-  useSpaceNavStore.setState({ screen: 'dashboard' });
+  useSpaceNavStore.setState({ screen: 'dashboard', sessionsWithTab: [], sessionsRequest: null });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
 });
 
@@ -115,4 +115,50 @@ test('Talk to PM navigates to Sessions', async () => {
   render(<PmReport />);
   fireEvent.click(screen.getByRole('button', { name: 'Talk to PM in Sessions' }));
   expect(useSpaceNavStore.getState().screen).toBe('sessions');
+});
+
+test('PM interpretation labels the source and receipt, missing basis and ended-session staleness', async () => {
+  cockpit.spaceDashboardReport.mockResolvedValue({
+    ok: true,
+    value: { version: 1, report: report({ stale: true, staleReason: 'session-ended' }) },
+  });
+  render(<PmReport />);
+  await screen.findByTestId('pm-report-text');
+  expect(screen.getByText('PM interpretation · read only')).toBeTruthy();
+  expect(screen.getByTestId('pm-report').textContent).toContain('Source session: pm-1');
+  expect(screen.getByTestId('pm-report').querySelector('time')?.dateTime).toBe(
+    '2026-09-20T18:00:00.000Z',
+  );
+  expect(screen.getByTestId('pm-report-basis').textContent).toBe('No basis stated by PM.');
+  expect(screen.getByTestId('pm-report-stale').textContent).toContain('the PM session ended.');
+});
+
+test('Talk to PM selects the report source when its local tab exists', async () => {
+  useSpaceNavStore.setState({ sessionsWithTab: ['pm-1'] });
+  cockpit.spaceDashboardReport.mockResolvedValue({
+    ok: true,
+    value: { version: 1, report: report() },
+  });
+  render(<PmReport />);
+  await screen.findByTestId('pm-report-text');
+  fireEvent.click(screen.getByRole('button', { name: 'Talk to PM in Sessions' }));
+  expect(useSpaceNavStore.getState().sessionsRequest).toMatchObject({
+    kind: 'show-session',
+    sessionId: 'pm-1',
+  });
+});
+
+test('a report push recovers from a read failure', async () => {
+  cockpit.spaceDashboardReport.mockResolvedValue({
+    ok: false,
+    error: { message: 'Temporarily unavailable.' },
+  });
+  render(<PmReport />);
+  await screen.findByRole('alert');
+  expect(screen.getByTestId('pm-report-empty').textContent).toBe(
+    'The PM report could not be read.',
+  );
+  act(() => pushed?.({ version: 2, report: report() }));
+  expect(screen.queryByRole('alert')).toBeNull();
+  expect(screen.getByTestId('pm-report-text').textContent).toBe('A literal report.');
 });

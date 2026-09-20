@@ -17,74 +17,110 @@ type Props = {
   onOpen: (focus: FocusCard) => void;
 };
 
-/**
- * Focuses by Stage (phase M7.3): one column per option of the Project's Stage
- * field, in the model's order, with a card per focus; the focuses whose Stage
- * is not a column, each with its reason; the standalone items beside the
- * columns. Every name is the Project's own.
- */
+/** Stage names and order always come from the Project, including custom stages. */
 export function FocusesByStage({ model, onOpen }: Props): JSX.Element {
+  const focuses = [...model.columns.flatMap((column) => column.focuses), ...model.unstaged];
+  const paused = focuses.filter(isPausedFocus);
+  const items = new Map(
+    [...focuses.flatMap((focus) => focus.items), ...model.standalone].map((item) => [
+      item.issue.url,
+      item,
+    ]),
+  );
+  const activeCount = (cards: FocusCard[]): number =>
+    cards.filter((focus) => !isPausedFocus(focus)).length;
+  const largestStage = Math.max(1, ...model.columns.map((column) => activeCount(column.focuses)));
   return (
-    <div style={wrapStyle}>
-      <div style={rowStyle} data-testid="dashboard-columns">
+    <div className="dashboard-focuses">
+      <p className="dashboard-summary" data-testid="dashboard-overview-counts">
+        {focuses.length} focuses · {items.size} items ·{' '}
+        {[...items.values()].filter((item) => item.done).length} done
+      </p>
+      <div
+        className="dashboard-funnel"
+        aria-label="Focuses by Stage"
+        data-testid="dashboard-columns"
+      >
         {model.columns.map((column) => (
           <section
             key={column.id}
-            style={columnStyle}
             aria-labelledby={`dashboard-column-${column.id}`}
             data-testid="dashboard-column"
             data-stage={column.name}
           >
-            <h3 id={`dashboard-column-${column.id}`} style={columnHeadingStyle}>
-              {column.name} ({column.focuses.length})
+            <div className="dashboard-funnel-bar" aria-hidden="true">
+              <span style={{ height: `${(activeCount(column.focuses) / largestStage) * 100}%` }} />
+            </div>
+            <h3 id={`dashboard-column-${column.id}`}>
+              {column.name} ({activeCount(column.focuses)})
             </h3>
-            {column.focuses.length === 0 ? (
-              <p style={emptyStyle}>No focus.</p>
-            ) : (
-              <ul style={listStyle}>
-                {column.focuses.map((focus) => (
-                  <FocusCardView key={focus.issue.url} focus={focus} onOpen={onOpen} />
-                ))}
-              </ul>
-            )}
           </section>
         ))}
-        <section
-          style={standaloneStyle}
-          aria-labelledby="dashboard-standalone-heading"
-          data-testid="dashboard-standalone"
-        >
-          <h3 id="dashboard-standalone-heading" style={columnHeadingStyle}>
-            Standalone items ({model.standalone.length})
-          </h3>
-          {model.standalone.length === 0 ? (
-            <p style={emptyStyle}>No standalone item.</p>
-          ) : (
-            <ul style={listStyle}>
-              {model.standalone.map((item) => (
-                <StandaloneItem key={item.issue.url} item={item} />
-              ))}
-            </ul>
-          )}
-        </section>
+        <div className="dashboard-funnel-extra">
+          <strong>{paused.length}</strong>
+          <span>Paused focuses</span>
+        </div>
+        <div className="dashboard-funnel-extra">
+          <strong>{model.standalone.length}</strong>
+          <span>Standalone items</span>
+        </div>
       </div>
-      {model.unstaged.length > 0 ? (
+      <ul className="dashboard-focus-grid" aria-label="Focus cards">
+        {model.columns
+          .flatMap((column) => column.focuses.filter((focus) => !isPausedFocus(focus)))
+          .map((focus) => (
+            <FocusCardView key={focus.issue.url} focus={focus} onOpen={onOpen} />
+          ))}
+      </ul>
+      {paused.length > 0 ? (
+        <section className="dashboard-paused" aria-label="Paused focuses">
+          <span className="dashboard-muted">Paused:</span>
+          {paused.map((focus) => (
+            <button
+              key={focus.issue.url}
+              type="button"
+              style={linkStyle}
+              onClick={() => onOpen(focus)}
+              aria-haspopup="dialog"
+              data-testid="dashboard-focus-paused"
+            >
+              #{focus.issue.number} {focus.title} · {focus.stage ?? 'no Stage'}
+            </button>
+          ))}
+        </section>
+      ) : null}
+      {model.unstaged.filter((focus) => !isPausedFocus(focus)).length > 0 ? (
         <section aria-labelledby="dashboard-unstaged-heading" data-testid="dashboard-unstaged">
-          <h3 id="dashboard-unstaged-heading" style={columnHeadingStyle}>
-            Focuses not in a Stage column ({model.unstaged.length})
+          <h3 id="dashboard-unstaged-heading" className="dashboard-subheading">
+            Focuses not in a Stage column (
+            {model.unstaged.filter((focus) => !isPausedFocus(focus)).length})
           </h3>
-          <ul style={unstagedListStyle}>
-            {model.unstaged.map((focus) => (
-              <FocusCardView
-                key={focus.issue.url}
-                focus={focus}
-                onOpen={onOpen}
-                reason={unstagedReason(focus)}
-              />
-            ))}
+          <ul className="dashboard-focus-grid">
+            {model.unstaged
+              .filter((focus) => !isPausedFocus(focus))
+              .map((focus) => (
+                <FocusCardView
+                  key={focus.issue.url}
+                  focus={focus}
+                  onOpen={onOpen}
+                  reason={unstagedReason(focus)}
+                />
+              ))}
           </ul>
         </section>
       ) : null}
+      <details className="dashboard-standalone" data-testid="dashboard-standalone">
+        <summary>Standalone items ({model.standalone.length})</summary>
+        {model.standalone.length === 0 ? (
+          <p className="dashboard-empty">No standalone item.</p>
+        ) : (
+          <ul className="dashboard-focus-grid">
+            {model.standalone.map((item) => (
+              <StandaloneItem key={item.issue.url} item={item} />
+            ))}
+          </ul>
+        )}
+      </details>
     </div>
   );
 }
@@ -100,11 +136,12 @@ function FocusCardView({
 }): JSX.Element {
   return (
     <li
-      style={cardStyle}
+      className="dashboard-focus-card"
       data-testid="dashboard-focus-card"
       data-issue={focus.issue.number}
       data-done={focus.done ? 'true' : 'false'}
     >
+      <span className="dashboard-stage-chip">{focus.stage ?? 'No Stage'}</span>
       <h4 style={cardHeadingStyle}>
         <button
           type="button"
@@ -119,6 +156,12 @@ function FocusCardView({
       <p style={metaStyle} data-testid="dashboard-focus-kind">
         {focus.kind === null ? 'no kind' : `kind ${focus.kind}`}
       </p>
+      <progress
+        className="dashboard-focus-progress"
+        value={focus.itemsDone}
+        max={Math.max(1, focus.itemsTotal)}
+        aria-label={`Items done for ${focus.title}`}
+      />
       <p style={metaStyle} data-testid="dashboard-focus-items">
         {itemsDoneText(focus)}
         {focus.done ? '; focus done' : ''}
@@ -155,7 +198,7 @@ function FocusCardView({
 function StandaloneItem({ item }: { item: ItemCard }): JSX.Element {
   return (
     <li
-      style={cardStyle}
+      className="dashboard-focus-card"
       data-testid="dashboard-standalone-item"
       data-issue={item.issue.number}
       data-paused={item.paused ? 'true' : 'false'}
@@ -178,44 +221,6 @@ function StandaloneItem({ item }: { item: ItemCard }): JSX.Element {
   );
 }
 
-const wrapStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: '0.75rem' };
-const rowStyle: CSSProperties = {
-  display: 'flex',
-  gap: '0.75rem',
-  alignItems: 'flex-start',
-  overflowX: 'auto',
-  paddingBottom: '0.25rem',
-};
-const columnStyle: CSSProperties = {
-  flex: '0 0 15rem',
-  background: 'var(--color-panel)',
-  border: '1px solid var(--color-border)',
-  borderRadius: '6px',
-  padding: '0.5rem',
-};
-const standaloneStyle: CSSProperties = { ...columnStyle, flex: '0 0 12rem' };
-const columnHeadingStyle: CSSProperties = {
-  margin: '0 0 0.5rem',
-  fontSize: '0.8rem',
-  fontWeight: 600,
-  color: 'var(--color-text-secondary)',
-};
-const listStyle: CSSProperties = {
-  listStyle: 'none',
-  margin: 0,
-  padding: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.5rem',
-};
-const unstagedListStyle: CSSProperties = { ...listStyle, flexDirection: 'row', flexWrap: 'wrap' };
-const cardStyle: CSSProperties = {
-  background: 'var(--color-raised)',
-  border: '1px solid var(--color-border-faint)',
-  borderRadius: '5px',
-  padding: '0.45rem 0.55rem',
-  minWidth: '12rem',
-};
 const cardHeadingStyle: CSSProperties = { margin: 0, fontSize: '0.85rem' };
 const titleButtonStyle: CSSProperties = {
   background: 'none',
@@ -238,7 +243,6 @@ const metaStyle: CSSProperties = {
   color: 'var(--color-text-muted)',
 };
 const gateStyle: CSSProperties = { ...metaStyle, color: 'var(--color-warn-fg)' };
-const emptyStyle: CSSProperties = { ...metaStyle, margin: 0 };
 export const linkStyle: CSSProperties = {
   marginTop: '0.3rem',
   background: 'none',
