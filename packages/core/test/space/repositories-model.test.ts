@@ -310,7 +310,7 @@ test('mirrorDrift reports matches when lists match', () => {
   const result = mirrorDrift({
     path: 'p',
     stored: ['a', 'b'],
-    generated: ['b', 'a'],
+    generated: ['a', 'b'],
     checkedAt: 'time',
   });
   assert.equal(result.state, 'matches');
@@ -329,4 +329,40 @@ test('mirrorDrift reports differs with correct added and removed counts', () => 
   assert.equal(result.state, 'differs');
   assert.equal(result.added, 2);
   assert.equal(result.removed, 1);
+});
+
+test('mirrorDrift treats reordered skeleton entries as a change', () => {
+  const result = mirrorDrift({
+    path: 'p',
+    stored: ['a', 'b'],
+    generated: ['b', 'a'],
+    checkedAt: null,
+  });
+  assert.equal(result.state, 'differs');
+  assert.equal(result.added, 1);
+  assert.equal(result.removed, 1);
+});
+
+test('mirrorDrift preserves duplicate entries when counting changes', () => {
+  const result = mirrorDrift({
+    path: 'p',
+    stored: ['a', 'a'],
+    generated: ['a'],
+    checkedAt: null,
+  });
+  assert.equal(result.state, 'differs');
+  assert.equal(result.added, 0);
+  assert.equal(result.removed, 1);
+});
+
+test('mirrorDrift considers two empty skeletons a match', () => {
+  assert.equal(
+    mirrorDrift({
+      path: 'p',
+      stored: [],
+      generated: [],
+      checkedAt: null,
+    }).state,
+    'matches',
+  );
 });

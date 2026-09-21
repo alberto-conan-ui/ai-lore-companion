@@ -147,6 +147,18 @@ test('a later state carries a row for the repository and one for the Lore, none 
   assert.equal(publish?.status, 'ready');
 });
 
+test('the publish row settles with a current mirror result', async () => {
+  const o = await open();
+  const state = await waitForState(o, (candidate) => {
+    const publish = candidate.model?.rows.find((row) => row.rootId === 'publish:publish');
+    return (
+      publish !== undefined && publish.mirror !== null && publish.mirror.state !== 'not-checked'
+    );
+  });
+  const publish = state.model?.rows.find((row) => row.rootId === 'publish:publish');
+  assert.equal(publish?.mirror?.state, 'matches');
+});
+
 test('one failing read fails only its own row: the others keep working', async () => {
   const o = await open();
   const appDir = `${space.paths.repos}/app`;

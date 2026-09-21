@@ -25,25 +25,28 @@ export function mirrorDrift(arg: {
   if (arg.generated === null) {
     return { path: arg.path, state: 'not-checked', added: 0, removed: 0, checkedAt: arg.checkedAt };
   }
-  let added = 0;
-  let removed = 0;
-  let matches = 0;
-
-  // Simple diff-like sequential comparison using Myers or just counting additions/removals
-  // Wait, if we just want "['a','b'] vs ['b','a']" to return differs, 
-  // actually, the simplest way is to check element by element?
-  // No, the test says:
-  // "stored: ['a', 'b'], generated: ['b', 'c', 'd']" => added: 2, removed: 1
-  // If we don't use Sets, how do we get added/removed?
-  // Maybe just a simple LCS (Longest Common Subsequence) based diff?
-  // Let's write a small LCS function to get exact added/removed.
-
+  // Skeleton order is significant. Count insertions and removals around their
+  // longest common subsequence, preserving duplicates and reordered entries.
   const lcs = (a: readonly string[], b: readonly string[]): number => {
-    const prev = new Int32Array(b.length + 1);
-    const curr = new Int32Array(b.length + 1);
-    for (let i = 0; i < a.length; i++) {
-      for (let j = 0; j < b.length; j++) {
-        if (a[i] === b[j]) {
+    // Most refreshes leave the skeleton unchanged, or change only a small
+    // region. Exclude the shared ends before allocating the comparison rows.
+    let start = 0;
+    while (start < a.length && start < b.length && a[start] === b[start]) start++;
+    let aEnd = a.length;
+    let bEnd = b.length;
+    while (aEnd > start && bEnd > start && a[aEnd - 1] === b[bEnd - 1]) {
+      aEnd--;
+      bEnd--;
+    }
+    const sharedEnds = start + a.length - aEnd;
+    const left = a.slice(start, aEnd);
+    const right = b.slice(start, bEnd);
+    if (left.length === 0 || right.length === 0) return sharedEnds;
+    const prev = new Int32Array(right.length + 1);
+    const curr = new Int32Array(right.length + 1);
+    for (let i = 0; i < left.length; i++) {
+      for (let j = 0; j < right.length; j++) {
+        if (left[i] === right[j]) {
           curr[j + 1] = (prev[j] as number) + 1;
         } else {
           curr[j + 1] = Math.max(curr[j] as number, prev[j + 1] as number);
@@ -51,12 +54,12 @@ export function mirrorDrift(arg: {
       }
       prev.set(curr);
     }
-    return curr[b.length] as number;
+    return sharedEnds + (curr[right.length] as number);
   };
 
   const common = lcs(arg.stored, arg.generated);
-  added = arg.generated.length - common;
-  removed = arg.stored.length - common;
+  const added = arg.generated.length - common;
+  const removed = arg.stored.length - common;
 
   return {
     path: arg.path,
