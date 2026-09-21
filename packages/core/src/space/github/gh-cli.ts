@@ -214,10 +214,15 @@ function parseProjectItem(item: unknown): RawProjectIssue | null {
   const issue = parseIssueRef(content, '');
   if (issue === null) return null;
   const fieldValues: Record<string, string> = {};
+  const fieldValuesAt: Record<string, string> = {};
   for (const value of list(item, 'fieldValues', 'nodes')) {
     const field = text(value, 'field', 'name');
     const name = text(value, 'name');
-    if (field !== null && name !== null) fieldValues[field] = name;
+    if (field !== null && name !== null) {
+      fieldValues[field] = name;
+      const updatedAt = text(value, 'updatedAt');
+      if (updatedAt !== null) fieldValuesAt[field] = updatedAt;
+    }
   }
   const sameRepository =
     text(content, 'parent', 'repository', 'nameWithOwner') === issue.repository;
@@ -230,6 +235,7 @@ function parseProjectItem(item: unknown): RawProjectIssue | null {
     updatedAt: text(content, 'updatedAt') ?? '',
     parentNumber: sameRepository ? int(content, 'parent', 'number') : null,
     fieldValues,
+    fieldValuesAt,
     subIssues: list(content, 'subIssues', 'nodes').flatMap((sub) => {
       const ref = parseIssueRef(sub, issue.repository);
       if (ref === null) return [];
