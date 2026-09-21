@@ -97,22 +97,25 @@ Action!
   assert.equal(result.nextAction, 'Action!');
 });
 
-import fs from 'node:fs';
-import path from 'node:path';
+test('parses real entries with bold labels', () => {
+  const entry = `
+## Handover
 
-test('parses real entries from journal', () => {
-  const journalDir = '/Users/albertogutierrez/Spaces/ai-lore/workbench/journal/';
-  const files = fs.readdirSync(journalDir);
-  for (const file of files) {
-    if (!file.endsWith('.md')) continue;
-    const content = fs.readFileSync(path.join(journalDir, file), 'utf-8');
-    const result = parseHandover(content);
-    assert.ok(result);
-    if (file === '2026-09-21-1324-pty-flow-control-s-20260921-1101-b7bd5f.md') {
-      assert.equal(result.fallback, false);
-      assert.ok(result.done?.includes('Implemented the fix'));
-      assert.ok(result.inProgress?.includes('terminal freeze'));
-      assert.ok(result.nextAction?.includes('Orient.'));
-    }
-  }
+**What was done**
+- Implemented the fix for the \`Ctrl+S\` terminal freeze bug in the companion app source code.
+- Guided the Human Lead through compiling and locating the new macOS binary.
+
+**What is in progress**
+- The edits to fix the terminal freeze are sitting **uncommitted** in the working tree. 
+
+**What the next session should do**
+1. Orient.
+2. Commit the uncommitted flow control fixes.
+`.trim();
+
+  const result = parseHandover(entry);
+  assert.equal(result.fallback, false);
+  assert.ok(result.done?.includes('Implemented the fix'));
+  assert.ok(result.inProgress?.includes('terminal freeze'));
+  assert.ok(result.nextAction?.includes('Orient.'));
 });
