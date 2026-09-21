@@ -1,404 +1,112 @@
-import type { DashboardModel, FocusCard, ItemCard } from '@ai-lore-companion/core';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { Dashboard } from '../../../src/renderer/src/space/dashboard/Dashboard.js';
-import type {
-  SpaceEngineChoice,
-  SpaceProjectState,
-  SpaceProjectStateResult,
-  SpaceRepositoriesState,
-  SpaceRepositoriesStateResult,
-  SpaceSessionEnginesResult,
-} from '../../../src/shared/ipc.js';
+import type { DashboardDefinitionState } from '../../../src/renderer/src/space/dashboard/useDashboardDefinition.js';
+import type { ProjectStateView } from '../../../src/renderer/src/space/dashboard/useProjectState.js';
+import type { RepositoriesStateView } from '../../../src/renderer/src/space/dashboard/useRepositoriesState.js';
+import { projectState, reportState, repositoriesState } from './dashboard-fixtures.js';
 
-/**
- * The Dashboard mounts the Repositories section unconditionally (stage D1), and
- * that section reads its own state, so every test here needs its four channels
- * stubbed even though no test here asserts a repository. Answering with an empty
- * model keeps the section to its heading and one sentence.
- */
-const NO_REPOSITORIES: SpaceRepositoriesState = {
-  version: 1,
-  reading: false,
-  model: null,
-  readAt: null,
-  problem: null,
-};
-
-/** A ready `SpaceEngineChoice`: Claude Code, startable. */
-const READY_CHOICE: SpaceEngineChoice = {
-  options: [
-    { engineId: 'default.claude', name: 'Claude Code', canStart: true, reason: null, fix: null },
-  ],
-  engineId: 'default.claude',
-  buttonName: 'Claude Code',
-  refusal: null,
-};
-
-const REPO = 'owner/space';
-const ref = (number: number) => ({
-  repository: REPO,
-  number,
-  url: `https://github.com/${REPO}/issues/${number}`,
-});
-
-const item = (number: number, over: Partial<ItemCard> = {}): ItemCard => ({
-  issue: ref(number),
-  title: `Item ${number}`,
-  state: 'open',
-  status: null,
-  labels: [],
-  done: false,
-  paused: false,
-  ...over,
-});
-
-const focus = (number: number, over: Partial<FocusCard> = {}): FocusCard => ({
-  issue: ref(number),
-  title: `Focus ${number}`,
-  state: 'open',
-  status: null,
-  labels: [],
-  stage: 'Build',
-  kind: 'feature',
-  specUrl: null,
-  items: [],
-  itemsDone: 0,
-  itemsTotal: 0,
-  gateNote: null,
-  done: false,
-  ...over,
-});
-
-const MODEL: DashboardModel = {
-  columns: [
-    { id: 's1', name: 'Spec', focuses: [] },
-    {
-      id: 's2',
-      name: 'Build',
-      focuses: [
-        focus(1, {
-          specUrl: 'https://example.test/spec-1',
-          items: [item(11, { state: 'closed', done: true }), item(12, { status: 'In progress' })],
-          itemsDone: 1,
-          itemsTotal: 2,
-          gateNote: 'Is the draft agreed?',
-        }),
-      ],
-    },
-    {
-      id: 's3',
-      name: 'Review',
-      focuses: [focus(2, { stage: 'Review', kind: null, labels: ['paused'] })],
-    },
-  ],
-  unstaged: [focus(3, { stage: null }), focus(4, { stage: 'Later' })],
-  standalone: [item(20, { paused: true, labels: ['paused'] }), item(21)],
-  board: [],
-  needsYou: [],
-};
-
-const FETCHED = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
-
-const state = (over: Partial<SpaceProjectState> = {}): SpaceProjectState => ({
-  version: 1,
-  snapshot: null,
-  fetchedAt: FETCHED,
-  state: 'fresh',
-  failure: null,
-  refreshing: false,
-  model: MODEL,
-  ...over,
-});
-
-let pushed: ((payload: SpaceProjectState) => void) | null = null;
-
-const cockpit = {
-  spaceProjectState: vi.fn<(arg: unknown) => Promise<SpaceProjectStateResult>>(),
-  spaceProjectRefresh: vi.fn<(arg: unknown) => Promise<SpaceProjectStateResult>>(),
-  spaceProjectFocus: vi.fn<(arg: unknown) => Promise<SpaceProjectStateResult>>(),
-  onSpaceProjectState: vi.fn((listener: (payload: SpaceProjectState) => void) => {
-    pushed = listener;
-    return () => {
-      pushed = null;
-    };
-  }),
-  urlOpenExternal: vi.fn(),
-  // Start a session (phase M7.4, engine choice M9.10).
-  enginesList: vi.fn(async () => []),
-  onEnginesChanged: vi.fn(() => () => {}),
-  spaceSessionEngines: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
-  spaceSessionEnginePick: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
-  spaceSessionReinstall: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
-  spaceNavigate: vi.fn(),
-  // The Repositories section of the Dashboard (stage D1) reads these on mount.
-  spaceRepositoriesState: vi.fn<(arg: unknown) => Promise<SpaceRepositoriesStateResult>>(),
-  spaceRepositoriesRefresh: vi.fn<(arg: unknown) => Promise<SpaceRepositoriesStateResult>>(),
-  spaceRepositoriesFocus: vi.fn<(arg: unknown) => Promise<SpaceRepositoriesStateResult>>(),
-  onSpaceRepositoriesState: vi.fn(() => () => {}),
-  // The PM report is mounted by Dashboard; keep it empty in Project-model tests.
-  spaceDashboardReport: vi.fn(async () => ({
-    ok: true,
-    value: {
-      version: 1,
-      definition: null,
-      context: null,
-      report: null,
-      refresh: { status: 'idle', requestId: null, reason: null, requestedAt: null, failure: null },
-    },
-  })),
-  spaceDashboardRefresh: vi.fn<(arg: unknown) => Promise<unknown>>(),
-  onSpaceDashboardReport: vi.fn(() => () => {}),
-};
-
-const push = (payload: SpaceProjectState): void => {
-  act(() => pushed?.(payload));
-};
-
-const answer = (value: SpaceProjectState): SpaceProjectStateResult => ({ ok: true, value });
-
+let project: ProjectStateView;
+let reports: DashboardDefinitionState;
+let repositories: RepositoriesStateView;
+vi.mock('../../../src/renderer/src/space/dashboard/useProjectState.js', () => ({
+  useProjectState: () => project,
+}));
+vi.mock('../../../src/renderer/src/space/dashboard/useDashboardDefinition.js', () => ({
+  useDashboardDefinition: () => reports,
+}));
+vi.mock('../../../src/renderer/src/space/dashboard/useRepositoriesState.js', () => ({
+  useRepositoriesState: () => repositories,
+}));
+vi.mock('../../../src/renderer/src/space/dashboard/StartSession.js', () => ({
+  StartSession: ({ justCreated }: { justCreated: boolean }) => (
+    <button type="button">{justCreated ? 'Start in the new Space' : 'Start a session'}</button>
+  ),
+}));
 beforeEach(() => {
-  pushed = null;
-  for (const mock of Object.values(cockpit)) mock.mockClear();
-  cockpit.spaceProjectState.mockResolvedValue(answer(state()));
-  cockpit.spaceProjectRefresh.mockResolvedValue(answer(state()));
-  cockpit.spaceProjectFocus.mockResolvedValue(answer(state()));
-  cockpit.spaceSessionEngines.mockResolvedValue({ ok: true, value: READY_CHOICE });
-  cockpit.spaceRepositoriesState.mockResolvedValue({ ok: true, value: NO_REPOSITORIES });
-  cockpit.spaceRepositoriesRefresh.mockResolvedValue({ ok: true, value: NO_REPOSITORIES });
-  cockpit.spaceRepositoriesFocus.mockResolvedValue({ ok: true, value: NO_REPOSITORIES });
-  (window as unknown as { cockpit: unknown }).cockpit = cockpit;
+  project = { project: projectState(), problem: null, requested: false, refresh: vi.fn() };
+  reports = { state: reportState(), problem: null, refreshing: false, refresh: vi.fn() };
+  repositories = {
+    repositories: repositoriesState(),
+    problem: null,
+    requested: false,
+    refresh: vi.fn(),
+  };
 });
+afterEach(cleanup);
 
-afterEach(() => cleanup());
-
-const shown = async (): Promise<void> => {
-  render(<Dashboard />);
-  await screen.findByTestId('dashboard-columns');
-};
-
-test('before the first answer the state line says it is reading; with no model a literal sentence stands', async () => {
-  let resolve: (value: SpaceProjectStateResult) => void = () => {};
-  cockpit.spaceProjectState.mockReturnValue(
-    new Promise((done) => {
-      resolve = done;
-    }),
-  );
-  render(<Dashboard />);
-  expect(screen.getByTestId('dashboard-state').textContent).toBe(
-    'Reading the state of the Project from the companion.',
-  );
-  await act(async () =>
-    resolve(answer(state({ model: null, fetchedAt: null, state: 'stale', refreshing: true }))),
-  );
-  expect(screen.getByTestId('dashboard-no-model').textContent).toBe(
-    'No Project has been read from GitHub for this Space yet, so there is nothing to show. A refresh is running.',
-  );
-  expect(screen.getByTestId('dashboard-state').textContent).toBe(
-    'stale, refreshing. No refresh has succeeded since the app opened this Space.',
-  );
-  expect(screen.queryByTestId('dashboard-columns')).toBeNull();
-  expect(screen.queryByTestId('agents-board')).toBeNull();
-});
-
-test('the state line says fresh, stale with its age, offline with the failure and the last good read', async () => {
-  await shown();
-  expect(screen.getByTestId('dashboard-state').getAttribute('data-state')).toBe('fresh');
-  expect(screen.getByTestId('dashboard-state-name').textContent).toBe('fresh');
-  expect(screen.getByTestId('dashboard-state-sentence').textContent).toMatch(
-    /^Read from GitHub at .+, 3 hours ago\.$/,
-  );
-
-  push(
-    state({
-      state: 'stale',
-      failure: { kind: 'rate-limited', message: 'GitHub limited the requests.', at: FETCHED },
-    }),
-  );
-  expect(screen.getByTestId('dashboard-state-name').textContent).toBe('stale');
-  expect(screen.getByTestId('dashboard-state-sentence').textContent).toMatch(
-    /^The shown Project was read from GitHub at .+, 3 hours ago\. The last refresh failed at .+: GitHub limited the requests\.$/,
-  );
-
-  push(
-    state({
-      state: 'offline',
-      failure: { kind: 'unreachable', message: 'github.com could not be reached.', at: FETCHED },
-    }),
-  );
-  expect(screen.getByTestId('dashboard-state-name').textContent).toBe('offline');
-  const sentence = screen.getByTestId('dashboard-state-sentence').textContent ?? '';
-  expect(sentence).toMatch(
-    /^GitHub could not be reached\. The last refresh failed at .+: github\.com could not be reached\./,
-  );
-  expect(sentence).toMatch(/The last good read is from .+, 3 hours ago\.$/);
-  // The cache is still shown.
-  expect(screen.getAllByTestId('dashboard-column')).toHaveLength(3);
-
-  push(state({ refreshing: true }));
-  expect(screen.getByTestId('dashboard-state').getAttribute('data-refreshing')).toBe('true');
-  expect(screen.getByTestId('dashboard-state').textContent).toMatch(/^fresh, refreshing\. /);
-  expect((screen.getByTestId('dashboard-refresh') as HTMLButtonElement).disabled).toBe(true);
-  expect(screen.getByTestId('dashboard-refresh').textContent).toBe('Refreshing');
-});
-
-test('a push older than the shown state is ignored, as pushes can arrive out of order', async () => {
-  await shown();
-  push(state({ version: 5 }));
-  push(state({ version: 4, refreshing: true, model: null }));
-  expect(screen.getByTestId('dashboard-state').getAttribute('data-refreshing')).toBe('false');
-  expect(screen.getByTestId('dashboard-columns')).toBeTruthy();
-  push(state({ version: 6, refreshing: true }));
-  expect(screen.getByTestId('dashboard-state').getAttribute('data-refreshing')).toBe('true');
-});
-
-test('Refresh asks main for a refresh; a refused request is shown', async () => {
-  await shown();
-  cockpit.spaceDashboardRefresh.mockResolvedValueOnce({
-    ok: false,
-    error: { kind: 'not-a-space-window', message: 'This window shows no Space.' },
-  });
-  fireEvent.click(screen.getByTestId('dashboard-refresh'));
-  expect(cockpit.spaceDashboardRefresh).toHaveBeenCalledWith({ reason: 'human' });
-  expect((await screen.findByTestId('dashboard-problem')).textContent).toBe(
-    'This window shows no Space.',
-  );
-});
-
-test('the window gaining focus calls space:project-focus', async () => {
-  await shown();
-  expect(cockpit.spaceProjectFocus).not.toHaveBeenCalled();
-  act(() => {
-    window.dispatchEvent(new Event('focus'));
-  });
-  await waitFor(() => expect(cockpit.spaceProjectFocus).toHaveBeenCalledWith({}));
-});
-
-test('stage counts follow the Project order, while active cards and paused focuses stay distinct', async () => {
-  await shown();
-  const columns = screen.getAllByTestId('dashboard-column');
-  expect(columns.map((column) => column.getAttribute('data-stage'))).toEqual([
-    'Spec',
-    'Build',
-    'Review',
-  ]);
-  expect(within(columns[0]).getByRole('heading', { level: 3 }).textContent).toBe('Spec (0)');
-  expect(within(columns[2]).getByRole('heading').textContent).toBe('Review (0)');
-  expect(screen.getByTestId('dashboard-overview-counts').textContent).toBe(
-    '4 focuses · 4 items · 1 done',
-  );
-
-  const card = screen.getAllByTestId('dashboard-focus-card')[0];
-  expect(within(card).getByRole('heading', { level: 4 }).textContent).toBe('#1 Focus 1');
-  expect(within(card).getByTestId('dashboard-focus-kind').textContent).toBe('kind feature');
-  expect(within(card).getByTestId('dashboard-focus-items').textContent).toBe('1 of 2 items done');
-  expect(within(card).getByTestId('dashboard-focus-gate').textContent).toBe(
-    'Waits at a gate: Is the draft agreed?',
-  );
-  fireEvent.click(within(card).getByTestId('dashboard-focus-spec'));
-  expect(cockpit.urlOpenExternal).toHaveBeenCalledWith('https://example.test/spec-1');
-  expect(within(card).queryByTestId('dashboard-focus-paused')).toBeNull();
-
-  const paused = screen.getByRole('region', { name: 'Paused focuses' });
-  expect(within(paused).getByTestId('dashboard-focus-paused').textContent).toContain(
-    '#2 Focus 2 · Review',
-  );
-  fireEvent.click(within(paused).getByRole('button'));
-  expect(
-    within(await screen.findByTestId('dashboard-focus-sheet')).getByTestId(
-      'dashboard-sheet-summary',
-    ).textContent,
-  ).toBe('Stage Review; no kind; open; 0 of 0 items done; paused');
-});
-
-test('unstaged focuses are listed with their reason; standalone items sit beside the columns, paused ones marked', async () => {
-  await shown();
-  const unstaged = within(screen.getByTestId('dashboard-unstaged'));
-  const reasons = unstaged.getAllByTestId('dashboard-focus-reason').map((node) => node.textContent);
-  expect(reasons).toEqual([
-    'It has no Stage.',
-    'Its Stage "Later" is not an option of the Stage field.',
-  ]);
-
-  const standalone = screen.getByTestId('dashboard-standalone');
-  fireEvent.click(within(standalone).getByText('Standalone items (2)'));
-  const items = within(standalone).getAllByTestId('dashboard-standalone-state');
-  expect(items.map((node) => node.textContent)).toEqual([
-    'open, no Status, paused',
-    'open, no Status',
-  ]);
-  fireEvent.click(within(standalone).getAllByTestId('dashboard-standalone-github')[1]);
-  expect(cockpit.urlOpenExternal).toHaveBeenCalledWith(`https://github.com/${REPO}/issues/21`);
-});
-
-test('opening a card shows the focus sheet with its items, their state and links to GitHub', async () => {
-  await shown();
-  const open = screen.getAllByTestId('dashboard-focus-open')[0];
-  open.focus();
-  fireEvent.click(open);
-  const sheet = within(await screen.findByTestId('dashboard-focus-sheet'));
-  expect(screen.getByRole('dialog', { name: 'Focus #1' })).toBeTruthy();
-  expect(sheet.getByText('#1 Focus 1')).toBeTruthy();
-  expect(sheet.getByTestId('dashboard-sheet-summary').textContent).toBe(
-    'Stage Build; kind feature; open; 1 of 2 items done',
-  );
-  expect(
-    sheet.getAllByTestId('dashboard-sheet-item-state').map((node) => node.textContent),
-  ).toEqual(['closed, no Status, done', 'open, Status In progress']);
-  fireEvent.click(sheet.getAllByTestId('dashboard-sheet-item-github')[1]);
-  expect(cockpit.urlOpenExternal).toHaveBeenCalledWith(`https://github.com/${REPO}/issues/12`);
-  fireEvent.click(sheet.getByTestId('dashboard-sheet-github'));
-  expect(cockpit.urlOpenExternal).toHaveBeenCalledWith(`https://github.com/${REPO}/issues/1`);
-  fireEvent.click(sheet.getByTestId('dashboard-sheet-spec'));
-  expect(cockpit.urlOpenExternal).toHaveBeenCalledWith('https://example.test/spec-1');
-
-  fireEvent.click(sheet.getByTestId('dashboard-sheet-close'));
-  expect(screen.queryByTestId('dashboard-focus-sheet')).toBeNull();
-});
-
-test('the parts of phase M7.4 are mounted: Start a session, Needs you, the Agents board', async () => {
-  cockpit.spaceProjectState.mockResolvedValue(
-    answer(
-      state({
-        model: { ...MODEL, needsYou: [{ kind: 'review', focus: ref(2), title: 'Focus 2' }] },
-      }),
-    ),
-  );
-  await shown();
-  const start = screen.getByTestId('dashboard-start');
-  const needsYou = screen.getByTestId('needs-you');
-  const columns = screen.getByTestId('dashboard-columns');
-  const board = screen.getByTestId('agents-board');
-  const before = (a: Element, b: Element): boolean =>
-    (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-  expect(before(needsYou, columns) && before(columns, board) && before(board, start)).toBe(true);
-  // The literal PM report panel was replaced by typed definition components.
-  expect(screen.queryByTestId('pm-report')).toBeNull();
-  expect(start).toBeTruthy();
-
-  // A focus at Review in Needs you opens its sheet.
-  fireEvent.click(within(needsYou).getByRole('button', { name: 'Open the focus' }));
-  expect(await screen.findByRole('dialog', { name: 'Focus #2' })).toBeTruthy();
-});
-
-test('Start a session is shown before the first read of the Project', async () => {
-  cockpit.spaceProjectState.mockResolvedValue(answer(state({ model: null, fetchedAt: null })));
-  render(<Dashboard />);
-  await screen.findByTestId('dashboard-no-model');
-  expect(screen.getByTestId('dashboard-start')).toBeTruthy();
-  expect(screen.queryByTestId('needs-you')).toBeNull();
-  expect(screen.queryByTestId('agents-board')).toBeNull();
-});
-
-test('the start button names the engine of a stubbed choice (M9.10)', async () => {
-  await shown();
-  expect(await screen.findByRole('button', { name: 'Start a Claude Code session' })).toBeTruthy();
-});
-
-test('justCreated shows the ready line above the start control', async () => {
+test('the empty Space renders the new bands and can start a session before initial reads', () => {
+  project.project = null;
+  reports.state = null;
   render(<Dashboard justCreated />);
-  await screen.findByTestId('dashboard-columns');
-  expect(screen.getByTestId('dashboard-just-created').textContent).toBe(
-    'The Space is ready. Start a session to begin work; it starts in Read only.',
+  expect(screen.getByTestId('dashboard-v2')).toBeTruthy();
+  expect(screen.getByTestId('dashboard-state').textContent).toContain('Reading');
+  expect(screen.getByRole('button', { name: 'Start in the new Space' })).toBeTruthy();
+  expect(screen.queryByText('No data is available yet.')).toBeNull();
+});
+
+test('Refresh updates factual Project, repository and PM sources together', () => {
+  render(<Dashboard />);
+  fireEvent.click(screen.getByTestId('dashboard-refresh'));
+  expect(project.refresh).toHaveBeenCalledOnce();
+  expect(repositories.refresh).toHaveBeenCalledOnce();
+  expect(reports.refresh).toHaveBeenCalledOnce();
+});
+
+test('a pending refresh disables another request and exposes source failures', () => {
+  reports.refreshing = true;
+  project.problem = 'GitHub authentication is required.';
+  render(<Dashboard />);
+  expect((screen.getByTestId('dashboard-refresh') as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByTestId('dashboard-problem').textContent).toContain('authentication');
+});
+
+test('unsupported overrides remain visible with their fallback diagnostic', () => {
+  const state = reportState();
+  if (state.definition === null) throw Error('fixture');
+  state.definition.source = 'packaged-default';
+  state.definition.diagnostic = {
+    kind: 'unsupported-version',
+    message: 'This dashboard definition is version 1.',
+  };
+  reports.state = state;
+  render(<Dashboard />);
+  expect(screen.getByTestId('dashboard-definition-diagnostic').getAttribute('role')).toBe('alert');
+  expect(screen.getByTestId('dashboard-definition-diagnostic').textContent).toContain(
+    'Showing a valid fallback',
   );
+  expect(screen.getByTestId('dashboard-refresh-status').textContent).toContain('packaged default');
+});
+
+test('provenance is hidden until Details is opened, while accepted data and refresh failures remain distinct', () => {
+  const state = reportState();
+  state.report = {
+    components: [],
+    definitionHash: 'hash',
+    basis: 'Issue 42',
+    sessionId: 'private-session-17',
+    receivedAt: '2026-09-21T11:55:00Z',
+    stale: true,
+    staleReason: 'project-changed',
+  };
+  state.refresh = {
+    ...state.refresh,
+    status: 'failed',
+    failure: { kind: 'failed', message: 'PM refresh unavailable' },
+  };
+  reports.state = state;
+  project.project = projectState({
+    state: 'offline',
+    failure: { kind: 'unreachable', message: 'No network', at: '2026-09-21T11:56:00Z' },
+  });
+  render(<Dashboard />);
+  expect(screen.queryByText(/private-session-17/)).toBeNull();
+  expect(screen.getByTestId('dashboard-state-name').textContent).toBe('offline');
+  expect(screen.getByTestId('dashboard-refresh-failure').textContent).toContain(
+    'Previous accepted',
+  );
+  fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+  expect(screen.getByTestId('dashboard-details').textContent).toContain('private-session-17');
+  expect(screen.getByTestId('dashboard-details').textContent).toContain('Issue 42');
+  expect(screen.getByTestId('dashboard-state-sentence').textContent).toContain('No network');
 });
