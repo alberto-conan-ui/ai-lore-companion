@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { CONTRACT, type CockpitApi } from '../shared/ipc.js';
+import { CONTRACT, type CockpitApi, type WindowInitPayload } from '../shared/ipc.js';
+import { createWindowInitReplay } from './window-init-replay.js';
+
+const windowInitReplay = createWindowInitReplay();
+const windowInitChannel = CONTRACT.onWindowInit.channel;
+ipcRenderer.on(windowInitChannel, (_event, payload: WindowInitPayload) => {
+  windowInitReplay.receive(payload);
+});
 
 /**
  * The renderer bridge is **generated** from the IPC contract — one entry per
@@ -14,6 +21,12 @@ import { CONTRACT, type CockpitApi } from '../shared/ipc.js';
  */
 const api = Object.fromEntries(
   Object.entries(CONTRACT).map(([method, desc]) => {
+    if (method === 'onWindowInit') {
+      return [
+        method,
+        (handler: (payload: WindowInitPayload) => void) => windowInitReplay.subscribe(handler),
+      ];
+    }
     if (desc.kind === 'invoke') {
       return [method, (...args: unknown[]) => ipcRenderer.invoke(desc.channel, ...args)];
     }
