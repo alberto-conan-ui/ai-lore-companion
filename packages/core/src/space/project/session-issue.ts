@@ -296,6 +296,90 @@ export async function developItemBranch(
   return made;
 }
 
+export type HandoverParts = {
+  done: string | null;
+  inProgress: string | null;
+  nextAction: string | null;
+  /** The whole `## Handover` body, or the entry's opening lines when it has none. */
+  text: string;
+  /** True when no part was recognised and `text` is the fallback. */
+  fallback: boolean;
+};
+
+export function parseHandover(entry: string): HandoverParts {
+  const text = readHandover(entry);
+  if (text !== null) {
+    const lines = text.split('\n');
+    let done: string | null = null;
+    let inProgress: string | null = null;
+    let nextAction: string | null = null;
+    
+    let currentPart: 'done' | 'inProgress' | 'nextAction' | null = null;
+    let currentLines: string[] = [];
+    
+    const savePart = () => {
+      if (currentPart && currentLines.length > 0) {
+        const joined = currentLines.join('\n').trim();
+        if (joined !== '') {
+          if (currentPart === 'done') done = joined;
+          else if (currentPart === 'inProgress') inProgress = joined;
+          else if (currentPart === 'nextAction') nextAction = joined;
+        }
+      }
+      currentLines = [];
+    };
+
+    for (const line of lines) {
+      const isHeading = /^#{1,6}\s+(.*)$/.exec(line);
+      if (isHeading) {
+        const hText = isHeading[1]?.toLowerCase() ?? '';
+        if (/\bdone\b/.test(hText) || /what was done/.test(hText)) {
+          savePart();
+          currentPart = 'done';
+          continue;
+        } else if (/\bin progress\b/.test(hText) || /what is in progress/.test(hText)) {
+          savePart();
+          currentPart = 'inProgress';
+          continue;
+        } else if (/next session/.test(hText) || /what.*next/.test(hText) || /next action/.test(hText)) {
+          savePart();
+          currentPart = 'nextAction';
+          continue;
+        } else {
+          // Some other sub-heading inside a part
+          if (currentPart) currentLines.push(line);
+        }
+      } else {
+        if (currentPart) {
+          currentLines.push(line);
+        }
+      }
+    }
+    savePart();
+
+    if (done !== null || inProgress !== null || nextAction !== null) {
+      return { done, inProgress, nextAction, text, fallback: false };
+    }
+  }
+
+  // fallback
+  const lines = entry.split('\n');
+  const fallbackLines: string[] = [];
+  for (const line of lines) {
+    if (/^#{1,6}\s/.test(line)) continue; // skip headings
+    if (line.trim() === '') continue; // skip empty lines
+    fallbackLines.push(line);
+    if (fallbackLines.length >= 3) break;
+  }
+  return {
+    done: null,
+    inProgress: null,
+    nextAction: null,
+    text: text ?? fallbackLines.join('\n'),
+    fallback: true
+  };
+}
+
 /**
  * The text under the heading `Handover` of a journal entry, up to the next
  * heading of the same or a higher level, or `null` when the entry has none.

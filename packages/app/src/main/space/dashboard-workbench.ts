@@ -2,7 +2,7 @@ import type { Dirent, Stats } from 'node:fs';
 import { type FileHandle, lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative } from 'node:path';
 import type { SessionRecord } from '@ai-lore-companion/core';
-import { readHandover } from '@ai-lore-companion/core';
+import { readHandover, parseHandover } from '@ai-lore-companion/core';
 import type {
   DashboardActivitySession,
   DashboardDefinitionDiagnostic,
@@ -175,13 +175,21 @@ function documentOf(file: FileRecord, title: string): DashboardWorkbenchDocument
 
 function handoverOf(file: FileRecord, text: string): DashboardWorkbenchHandover {
   const sessionId = file.relativePath.match(SESSION_ID)?.[1] ?? null;
-  const handover = readHandover(text);
+  const parts = parseHandover(text);
+  const textVal = readHandover(text);
   return {
     id: `handover:${file.relativePath}`,
     path: file.relativePath,
     title: titleOf(text, basename(file.relativePath, '.md')),
     sessionId,
-    text: handover === null ? null : handover.slice(0, MAX_TEXT),
+    text: textVal === null ? null : textVal.slice(0, MAX_TEXT),
+    parts: {
+      done: parts.done === null ? null : parts.done.slice(0, MAX_TEXT),
+      inProgress: parts.inProgress === null ? null : parts.inProgress.slice(0, MAX_TEXT),
+      nextAction: parts.nextAction === null ? null : parts.nextAction.slice(0, MAX_TEXT),
+      text: parts.text.slice(0, MAX_TEXT),
+      fallback: parts.fallback,
+    },
     timestamp: new Date(file.createdAt || file.modifiedAt).toISOString(),
     timestampKind: file.timestampKind,
     modifiedAt: new Date(file.modifiedAt).toISOString(),

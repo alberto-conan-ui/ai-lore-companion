@@ -49,6 +49,8 @@ export {
   formatSessionIssueBody,
   issueRefFor,
   moveSessionIssue,
+  parseHandover,
+  type HandoverParts,
   putSessionIssue,
   readHandover,
   sessionIssueMarker,
