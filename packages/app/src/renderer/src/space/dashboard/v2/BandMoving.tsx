@@ -7,7 +7,7 @@ import type {
   SpaceProjectState,
 } from '../../../../../shared/ipc.js';
 import { ModalSheet } from '../../../components/overlay/ModalSheet.js';
-import { relativeTime } from '../format.js';
+import { durationText, relativeTime } from '../format.js';
 import { PMPanel, PmLine } from './PMPanel.js';
 import { OverflowFooter, capItems } from './overflow.js';
 import { StageMark } from './statusVocabulary.js';
@@ -77,7 +77,6 @@ export function BandMoving({
                 key={panel.id}
                 items={moving.dormant}
                 aggregate={dormant}
-                now={now}
                 onOpenBacklog={() => setBacklogOpen(true)}
                 pmLine={
                   panel.pmLine === undefined
@@ -186,25 +185,25 @@ function MovingRows({
 function DormantRow({
   items,
   aggregate,
-  now,
   onOpenBacklog,
   pmLine,
 }: {
   items: readonly FocusCard[];
   aggregate: SpaceProjectState['dormant'];
-  now: number;
   onOpenBacklog: () => void;
   pmLine: string | null;
 }): JSX.Element | null {
   if (aggregate.count === 0) return null;
   const oldest =
     aggregate.oldestAgeMs === null
-      ? 'UNKNOWN'
-      : relativeTime(new Date(now - aggregate.oldestAgeMs).toISOString(), now);
+      ? 'STAGE AGE UNKNOWN'
+      : `MOST IDLE: ${durationText(aggregate.oldestAgeMs)}`;
   return (
     <article className="dashboard-v2-dormant-row">
       <div>
-        <strong>{aggregate.count} dormant focuses</strong>
+        <strong>
+          {aggregate.count} dormant {aggregate.count === 1 ? 'focus' : 'focuses'}
+        </strong>
         <p className="dashboard-v2-micro dashboard-v2-dormant-facts">
           {pmLine === null ? null : (
             <span className="dashboard-v2-pm-line" title={pmLine}>
@@ -212,7 +211,8 @@ function DormantRow({
             </span>
           )}
           <span>
-            {pmLine === null ? '' : ' · '}MOST IDLE SINCE {oldest}
+            {pmLine === null ? '' : ' · '}
+            {oldest}
             {aggregate.paused === 0 ? '' : ` · ${aggregate.paused} PAUSED`}
           </span>
         </p>
