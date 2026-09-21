@@ -2,8 +2,8 @@ import type { FocusCard } from '@ai-lore-companion/core';
 import type { CSSProperties, JSX } from 'react';
 import { ModalSheet } from '../../components/overlay/ModalSheet.js';
 import { secondaryButtonStyle } from '../styles.js';
-import { linkStyle, openLink } from './FocusesByStage.js';
 import { isPausedFocus, itemStateText, itemsDoneText } from './dashboardText.js';
+import { linkStyle, openLink } from './v2/format.js';
 
 type Props = {
   focus: FocusCard;

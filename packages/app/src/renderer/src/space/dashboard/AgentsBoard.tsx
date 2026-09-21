@@ -2,8 +2,8 @@ import type { BoardRow } from '@ai-lore-companion/core';
 import type { JSX } from 'react';
 import { openDialogTicket } from '../dialogs/useDialogQueue.js';
 import './dashboard.css';
-import { linkStyle } from './FocusesByStage.js';
-import { BOARD_COLUMNS, durationText, issueName, openIssue } from './agentsText.js';
+import { BOARD_COLUMNS, issueName, openIssue } from './agentsText.js';
+import { durationText, linkStyle, openLink } from './v2/format.js';
 
 type Props = {
   /** The rows of the Dashboard's model (`model.board`), one per session issue. */

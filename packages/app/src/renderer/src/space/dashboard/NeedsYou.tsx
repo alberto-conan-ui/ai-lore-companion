@@ -3,7 +3,8 @@ import type { JSX } from 'react';
 import { openDialogTicket } from '../dialogs/useDialogQueue.js';
 import './dashboard.css';
 import { useSpaceNavStore } from '../window/spaceNavStore.js';
-import { durationText, issueName, openIssue } from './agentsText.js';
+import { issueName, openIssue } from './agentsText.js';
+import { durationText } from './v2/format.js';
 
 type Props = {
   /** The entries of the Dashboard's model (`model.needsYou`), in its order. */

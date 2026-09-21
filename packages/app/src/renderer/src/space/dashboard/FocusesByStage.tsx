@@ -1,3 +1,5 @@
+import { linkStyle, openLink } from './v2/format.js';
+
 import type { DashboardModel, FocusCard, ItemCard } from '@ai-lore-companion/core';
 import type { CSSProperties, JSX } from 'react';
 import { isPausedFocus, itemStateText, itemsDoneText, unstagedReason } from './dashboardText.js';
@@ -7,9 +9,6 @@ import { isPausedFocus, itemStateText, itemsDoneText, unstagedReason } from './d
  * window of the app. `urlOpenExternal` hands the system only an `http` or
  * `https` address, which matters for a spec link read from an issue's body.
  */
-export function openLink(url: string): void {
-  window.cockpit.urlOpenExternal(url);
-}
 
 type Props = {
   model: DashboardModel;
@@ -243,13 +242,3 @@ const metaStyle: CSSProperties = {
   color: 'var(--color-text-muted)',
 };
 const gateStyle: CSSProperties = { ...metaStyle, color: 'var(--color-warn-fg)' };
-export const linkStyle: CSSProperties = {
-  marginTop: '0.3rem',
-  background: 'none',
-  border: 'none',
-  padding: 0,
-  color: 'var(--color-link)',
-  fontSize: '0.75rem',
-  textDecoration: 'underline',
-  cursor: 'pointer',
-};

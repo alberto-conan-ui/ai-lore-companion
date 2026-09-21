@@ -1,7 +1,6 @@
 import type { RepositoryRow } from '@ai-lore-companion/core';
 import type { JSX } from 'react';
 import './dashboard.css';
-import { linkStyle } from './FocusesByStage.js';
 import {
   branchText,
   changesText,
@@ -16,6 +15,7 @@ import {
   untrackedRowText,
 } from './repositoriesText.js';
 import { useRepositoriesState } from './useRepositoriesState.js';
+import { linkStyle } from './v2/format.js';
 
 type Props = {
   /** `Date.now()` at this render, from the Dashboard's own age tick, so the remote line's age stays current. */
