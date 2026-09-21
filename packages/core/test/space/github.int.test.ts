@@ -33,6 +33,7 @@ gitHubPortContract('FakeGitHub', () => {
       rateLimitNext: (count, seconds) => fake.rateLimitNext(count, seconds),
       loseNextAnswer: (error) => fake.loseNextAnswer(error),
       setViewsSupported: (on) => fake.setViewsSupported(on),
+      addOpenPullRequest: (repository, pull) => fake.addOpenPullRequest(repository, pull),
     },
     cleanup: () => fake.dispose(),
   };
@@ -47,7 +48,13 @@ gitHubPortContract('GhCliGitHub over a simulated gh', () => {
     port: createGhCliGitHub(gh),
     owner: 'fake-human',
     realCloneAddress: (fullName) => realCloneAddress(fake, fullName),
-    control: gh,
+    control: {
+      setUnreachable: (on) => gh.setUnreachable(on),
+      rateLimitNext: (count, seconds) => gh.rateLimitNext(count, seconds),
+      loseNextAnswer: (error) => gh.loseNextAnswer(error),
+      setViewsSupported: (on) => gh.setViewsSupported(on),
+      addOpenPullRequest: (repository, pull) => fake.addOpenPullRequest(repository, pull),
+    },
     cleanup: () => fake.dispose(),
   };
 });

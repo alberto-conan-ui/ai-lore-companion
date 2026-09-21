@@ -201,3 +201,13 @@ export type RawProjectIssue = {
    */
   subIssues: { issue: IssueRef; title: string; state: 'open' | 'closed' }[];
 };
+
+export type PullRequestChecks = 'passing' | 'failing' | 'pending' | 'none';
+export type PullRequestReview = 'approved' | 'changes-requested' | 'review-required' | 'none';
+export type OpenPullRequest = {
+  repository: string; number: number; title: string; url: string;
+  headBranch: string; baseBranch: string; draft: boolean;
+  createdAt: string; updatedAt: string;
+  checks: PullRequestChecks; review: PullRequestReview;
+  mergeable: 'mergeable' | 'conflicting' | 'unknown';
+};

@@ -721,6 +721,55 @@ export function createSimulatedGh(fake: FakeGitHub): SimulatedGh {
       return plain(result, (made) => `github.com/${branchRepository}/tree/${made.branch}\n`);
     }
     if (first === 'pr' && second === 'list') {
+      if (flag(args, '--state') === 'open') {
+        const result = await fake.openPullRequests({
+          repository: flag(args, '--repo'),
+          limit: Number(flag(args, '--limit')),
+        });
+        return plain(result, (pulls) =>
+          JSON.stringify(
+            pulls.map((pull) => ({
+              number: pull.number,
+              title: pull.title,
+              url: pull.url,
+              headRefName: pull.headBranch,
+              baseRefName: pull.baseBranch,
+              isDraft: pull.draft,
+              createdAt: pull.createdAt,
+              updatedAt: pull.updatedAt,
+              statusCheckRollup:
+                pull.checks === 'none'
+                  ? []
+                  : [
+                      {
+                        __typename: 'CheckRun',
+                        conclusion:
+                          pull.checks === 'failing'
+                            ? 'FAILURE'
+                            : pull.checks === 'passing'
+                              ? 'SUCCESS'
+                              : '',
+                        status: pull.checks === 'pending' ? 'IN_PROGRESS' : 'COMPLETED',
+                      },
+                    ],
+              reviewDecision:
+                pull.review === 'approved'
+                  ? 'APPROVED'
+                  : pull.review === 'changes-requested'
+                    ? 'CHANGES_REQUESTED'
+                    : pull.review === 'review-required'
+                      ? 'REVIEW_REQUIRED'
+                      : '',
+              mergeable:
+                pull.mergeable === 'mergeable'
+                  ? 'MERGEABLE'
+                  : pull.mergeable === 'conflicting'
+                    ? 'CONFLICTING'
+                    : 'UNKNOWN',
+            })),
+          ),
+        );
+      }
       const result = await fake.mergedPullRequests({
         repository: flag(args, '--repo'),
         limit: Number(flag(args, '--limit')),
