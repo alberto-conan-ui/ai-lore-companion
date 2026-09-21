@@ -20,7 +20,10 @@ import {
   type DashboardReportResult,
   SPACE_DASHBOARD_REPORT_CONTRACT,
 } from '../../../src/shared/ipc/space/dashboard-report.contract.js';
-import type { DashboardReportState } from '../../../src/shared/ipc/space/dashboard-report.types.js';
+import type {
+  DashboardPmComponentValue,
+  DashboardReportState,
+} from '../../../src/shared/ipc/space/dashboard-report.types.js';
 import {
   type FakeSpaceWindow,
   LORE_TEMPLATE_DIR,
@@ -28,24 +31,56 @@ import {
   spaceHarnessFor,
 } from './space-harness.js';
 
-test('dashboard reports stay in their Space and a closed source becomes stale', () => {
+async function typedInput(
+  service: ReturnType<typeof createDashboardReportService>,
+  text = 'A',
+): Promise<{
+  definitionHash: string;
+  components: DashboardPmComponentValue[];
+  basis: string;
+}> {
+  await service.ready();
+  const resolved = service.definition();
+  assert.ok(resolved);
+  return {
+    definitionHash: resolved.hash,
+    components: resolved.definition.components
+      .filter((component) => component.source === 'pm')
+      .map((component) => {
+        if (component.type === 'text') return { id: component.id, type: 'text', text };
+        if (component.type === 'metric') return { id: component.id, type: 'metric', value: text };
+        return { id: component.id, type: 'list', items: [] };
+      }),
+    basis: 'headless test',
+  };
+}
+
+test('dashboard reports stay in their Space and a closed source becomes stale', async () => {
   let tick = 0;
   const a = createDashboardReportService({
+    definition: { spaceRoot: process.cwd(), templateDir: LORE_TEMPLATE_DIR },
     now: () => new Date(`2026-09-20T00:00:0${tick++}.000Z`),
   });
-  const b = createDashboardReportService();
+  const b = createDashboardReportService({
+    definition: { spaceRoot: process.cwd(), templateDir: LORE_TEMPLATE_DIR },
+  });
+  const input = await typedInput(a);
   a.openSession('pm-a');
   b.openSession('pm-b');
-  assert.ok(a.publish('pm-a', { markdown: 'A' }).ok);
+  assert.ok(a.publish('pm-a', input).ok);
   assert.equal(b.read().report, null);
   assert.equal(a.read().report?.stale, false);
 
   a.markProjectChanged();
   assert.equal(a.read().report?.staleReason, 'project-changed');
-  assert.ok(a.publish('pm-a', { markdown: 'A again' }).ok);
+  const oldGeneration = a.publish('pm-a', input);
+  assert.equal(oldGeneration.ok, false);
+  if (!oldGeneration.ok) assert.equal(oldGeneration.error.kind, 'request-mismatch');
+  assert.ok(a.readContextForSession('pm-a'));
+  assert.ok(a.publish('pm-a', await typedInput(a, 'A again')).ok);
   a.closeSession('pm-a');
   assert.equal(a.read().report?.staleReason, 'session-ended');
-  const late = a.publish('pm-a', { markdown: 'Too late' });
+  const late = a.publish('pm-a', input);
   assert.equal(late.ok, false);
   if (!late.ok) assert.equal(late.error.kind, 'session-ended');
 });
@@ -146,7 +181,7 @@ test('IPC reads and pushes reports only to their own Space, once per subscribed 
 
   const reports = a.context.service(spaceDashboardReport);
   reports.openSession('pm-a');
-  assert.ok(reports.publish('pm-a', { markdown: '# A' }).ok);
+  assert.ok(reports.publish('pm-a', await typedInput(reports, '# A')).ok);
 
   assert.equal(pushes(a.window).length, 1);
   assert.deepEqual(pushes(a.window)[0]?.report?.sessionId, 'pm-a');
@@ -182,7 +217,9 @@ test('a Project refresh stales a reported summary and pushes the transition once
 
   const reports = opened.context.service(spaceDashboardReport);
   reports.openSession('pm-refresh');
-  assert.ok(reports.publish('pm-refresh', { markdown: 'The Project needs review.' }).ok);
+  assert.ok(
+    reports.publish('pm-refresh', await typedInput(reports, 'The Project needs review.')).ok,
+  );
   assert.equal(reports.read().report?.stale, false);
   const before = pushes(opened.window).length;
 
@@ -201,7 +238,10 @@ test('a Project refresh stales a report published before the Dashboard reads it'
 
   const reports = opened.context.service(spaceDashboardReport);
   reports.openSession('pm-before-read');
-  assert.ok(reports.publish('pm-before-read', { markdown: 'A report before the first read.' }).ok);
+  assert.ok(
+    reports.publish('pm-before-read', await typedInput(reports, 'A report before the first read.'))
+      .ok,
+  );
 
   await opened.context.service(spaceProjectRefresh).refresh();
 

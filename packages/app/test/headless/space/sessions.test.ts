@@ -32,6 +32,8 @@ import {
   startSession,
 } from '@ai-lore-companion/core';
 import { type SpaceFixture, makeSpaceFixture } from '@ai-lore-companion/core/testing';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { loadEngines } from '../../../src/main/engines.js';
 import { type McpHost, createMcpHost } from '../../../src/main/helper/mcp-host.js';
 import {
@@ -40,6 +42,7 @@ import {
   type PtySpawnOpts,
   quoteForShell,
 } from '../../../src/main/pty.js';
+import { spaceDashboardReport } from '../../../src/main/space/dashboard-report.js';
 import { spaceDesk } from '../../../src/main/space/desk-service.js';
 import { createSpaceSessionsRegister } from '../../../src/main/space/ipc/sessions.js';
 import {
@@ -66,6 +69,7 @@ import {
   findPython3,
   verifyInstall,
 } from '../../../src/main/space/sessions/preflight.js';
+import { spaceSessions } from '../../../src/main/space/sessions/service.js';
 import {
   PM_INITIAL_PROMPT,
   pmInitialPromptParamConflict,
@@ -188,6 +192,28 @@ async function sessionFiles(sessionId: string): Promise<SessionFilePaths> {
     paramArgv: [],
   });
   return writeSessionFiles(paths.sessions, { sessionId }, launch);
+}
+
+/** Connect to a live session through the MCP configuration written for its engine. */
+async function clientFromSessionFiles(files: SessionFilePaths): Promise<Client> {
+  const config = JSON.parse(readFileSync(files.mcp, 'utf8')) as {
+    mcpServers: Record<string, { url: string; headers: Record<string, string> }>;
+  };
+  const entry = Object.values(config.mcpServers)[0];
+  assert.ok(entry);
+  const client = new Client({ name: 'dashboard-refresh-test', version: '1.0.0' });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(entry.url), {
+      requestInit: { headers: entry.headers },
+    }),
+  );
+  return client;
+}
+
+async function waitFor(predicate: () => boolean, message: string): Promise<void> {
+  for (let attempt = 0; attempt < 100 && !predicate(); attempt += 1)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(predicate(), true, message);
 }
 
 type Settings = {
@@ -1330,6 +1356,188 @@ test('PM ensure is deduplicated, records its narrow purpose and configured model
   } finally {
     configureSessionServer(null);
     await mcp.close();
+    h.cleanup();
+  }
+});
+
+test('dashboard refresh coalesces, uses a native PM prompt, cleans up, and keeps conversational PM alive', async () => {
+  const mcp = createMcpHost();
+  await mcp.listen();
+  configureSessionServer({ host: async () => mcp });
+  const engine: EngineEntry = {
+    id: 'default.claude',
+    name: 'Claude Code',
+    binary: '/opt/nowhere/claude',
+    model: 'opus',
+  };
+  let nextId = 0;
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister(() => ({
+      engines: () => [engine],
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () =>
+        ['s-pm-conversation', 's-agent', 's-refresh-one', 's-refresh-two'][nextId++] ??
+        `s-extra-${nextId}`,
+      probeEngine: async (candidate) => fineEngineCheck(candidate),
+      dashboardRefreshTimeoutMs: 200,
+    })),
+  );
+  const clients: Client[] = [];
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const spaceWindow = h.space.created[0];
+    assert.ok(spaceWindow);
+    const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+    assert.ok(context);
+    const spawned: { engine?: PtySpawnEngine; opts?: PtySpawnOpts }[] = [];
+    const written: { id: string; data: string }[] = [];
+    context.ptyService = {
+      spawn: (spawnedEngine, opts) => {
+        spawned.push({ engine: spawnedEngine, opts });
+        return `pty-refresh-${spawned.length}`;
+      },
+      write: (id, data) => written.push({ id, data }),
+      resize: () => {},
+      kill: (id) => spawned[Number(id.slice('pty-refresh-'.length)) - 1]?.opts?.onExit?.(0),
+      killAll: () => {},
+      hasRunningTask: () => false,
+    } as PtyService;
+    const lore = await readLore(space.root);
+    assert.ok(lore.ok);
+    assert.ok((await installClaudeCode(lore.value, context.desk.install)).ok);
+
+    const pm = (await h.invoke('spacePmEnsure', spaceWindow, {})) as {
+      ok: boolean;
+      value: { sessionId: string };
+    };
+    assert.equal(pm.ok, true, JSON.stringify(pm));
+    assert.match(spawned[0]?.engine?.args?.join(' ') ?? '', /You are the PM/);
+    const ordinary = (await h.invoke('spaceSessionStart', spaceWindow, {
+      engineId: engine.id,
+      params: [],
+    })) as { ok: boolean; value: { sessionId: string } };
+    assert.equal(ordinary.ok, true, JSON.stringify(ordinary));
+    const ordinaryClient = await clientFromSessionFiles(
+      sessionFilePaths(context.desk.sessions, ordinary.value.sessionId),
+    );
+    clients.push(ordinaryClient);
+
+    const firstResult = await ordinaryClient.callTool({
+      name: 'request_dashboard_update',
+      arguments: {},
+    });
+    const firstAnswer = JSON.parse(
+      (firstResult.content as Array<{ text: string }>)[0]?.text ?? '{}',
+    ) as { requestId: string; status: string };
+    assert.equal(firstAnswer.status, 'requested');
+    const secondResult = await ordinaryClient.callTool({
+      name: 'request_dashboard_update',
+      arguments: {},
+    });
+    const secondAnswer = JSON.parse(
+      (secondResult.content as Array<{ text: string }>)[0]?.text ?? '{}',
+    ) as { requestId: string; status: string; coalesced?: boolean };
+    assert.equal(secondAnswer.requestId, firstAnswer.requestId);
+    assert.equal(secondAnswer.coalesced, true);
+    await waitFor(() => spawned.length >= 3, 'the coalesced request starts one transient PM');
+    const transient = spawned[2];
+    assert.ok(transient?.opts);
+    assert.match(transient.engine?.args?.join(' ') ?? '', /You are the PM/);
+    assert.deepEqual(written, [], 'the native prompt is never typed into the PTY');
+    const transientId = transient.opts?.env?.[SESSION_ID_ENV];
+    assert.equal(transientId, 's-refresh-one');
+    const refreshClient = await clientFromSessionFiles(
+      sessionFilePaths(context.desk.sessions, transientId),
+    );
+    clients.push(refreshClient);
+    const contextResult = await refreshClient.callTool({
+      name: 'get_dashboard_context',
+      arguments: {},
+    });
+    const dashboard = JSON.parse(
+      (contextResult.content as Array<{ text: string }>)[0]?.text ?? '{}',
+    ) as {
+      definition?: {
+        hash?: string;
+        definition?: { components?: Array<{ id: string; source: string; type: string }> };
+      };
+    };
+    const definition = dashboard.definition;
+    assert.ok(definition?.hash);
+    const components = (definition.definition?.components ?? [])
+      .filter((component) => component.source === 'pm')
+      .map((component) =>
+        component.type === 'text'
+          ? { id: component.id, type: 'text' as const, text: 'Transient update' }
+          : component.type === 'metric'
+            ? { id: component.id, type: 'metric' as const, value: 1 }
+            : { id: component.id, type: 'list' as const, items: [] },
+      );
+    const reportResult = await refreshClient.callTool({
+      name: 'report_dashboard',
+      arguments: { definitionHash: definition.hash, components, basis: 'test' },
+    });
+    assert.equal(reportResult.isError, undefined);
+    await waitFor(
+      () => !context.service(spaceSessions).live().includes(transientId),
+      'an accepted transient session is cleaned up',
+    );
+    assert.equal(context.service(spaceDashboardReport).read().report?.stale, false);
+    assert.ok(context.service(spaceSessions).live().includes(pm.value.sessionId));
+
+    const retry = await ordinaryClient.callTool({
+      name: 'request_dashboard_update',
+      arguments: {},
+    });
+    const retryAnswer = JSON.parse((retry.content as Array<{ text: string }>)[0]?.text ?? '{}') as {
+      status: string;
+    };
+    assert.equal(retryAnswer.status, 'requested');
+    await waitFor(() => spawned.length >= 4, 'a later request starts a fresh transient PM');
+    const exitedId = spawned[3]?.opts?.env?.[SESSION_ID_ENV];
+    assert.equal(exitedId, 's-refresh-two');
+    spawned[3]?.opts?.onExit?.(1);
+    await waitFor(
+      () => context.service(spaceDashboardReport).read().refresh?.status === 'failed',
+      'an exited transient PM fails the request',
+    );
+    await waitFor(
+      () =>
+        !context
+          .service(spaceSessions)
+          .live()
+          .includes(exitedId as string),
+      'an exited transient session is cleaned up',
+    );
+    const timed = await ordinaryClient.callTool({
+      name: 'request_dashboard_update',
+      arguments: {},
+    });
+    const timedAnswer = JSON.parse((timed.content as Array<{ text: string }>)[0]?.text ?? '{}') as {
+      status: string;
+    };
+    assert.equal(timedAnswer.status, 'requested');
+    await waitFor(() => spawned.length >= 5, 'a retry starts a transient PM for timeout coverage');
+    await waitFor(
+      () => context.service(spaceDashboardReport).read().refresh?.failure?.kind === 'timeout',
+      'a timed-out transient PM fails the request',
+    );
+    const timedId = spawned[4]?.opts?.env?.[SESSION_ID_ENV];
+    await waitFor(
+      () =>
+        !context
+          .service(spaceSessions)
+          .live()
+          .includes(timedId as string),
+      'a timed-out transient session is cleaned up',
+    );
+    assert.deepEqual(written, [], 'no lifecycle path injects PTY Enter input');
+  } finally {
+    for (const client of clients) await client.close().catch(() => {});
+    configureSessionServer(null);
+    await mcp.close();
+    await h.space.host.windowClosed(h.space.created[0]?.id ?? -1);
     h.cleanup();
   }
 });

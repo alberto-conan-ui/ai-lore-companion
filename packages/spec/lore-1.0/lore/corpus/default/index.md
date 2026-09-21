@@ -3,7 +3,7 @@ type: index
 ---
 
 - [pm.md](./pm.md): the PM role, its reporting responsibility and its Read only boundaries.
-- [dashboard.md](./dashboard.md): the PM dashboard report, its default sections and project customisation.
+- [dashboard.md](./dashboard.md): the structured dashboard definition, typed PM data and Workbench review access.
 
 # Corpus: default entries
 
@@ -20,3 +20,4 @@ These files ship with AI-Lore. They are not edited in place, and an upgrade of A
 - [pull-request.md](./pull-request.md): what a pull request is in the default way of working, how the process work ends the work on an item, opened without asking and merged only by the Human Lead.
 - [unattended-label.md](./unattended-label.md): what the `unattended` label is, a proposed GitHub label that shows which items the Human Lead tagged for unattended work.
 - [default-publish-area.md](./default-publish-area.md): what the default publish area is, the folder `publish/` of the Space repository with its folder `specs/` for the agreed specs, and its mirror.
+- [dashboard.json](./dashboard.json): the structured dashboard layout and content definition.

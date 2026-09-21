@@ -23,7 +23,9 @@ import type { SpaceLog, SpaceLogFields } from '../../../src/main/space/log.js';
 import { createDialogBroker } from '../../../src/main/space/session-server/broker.js';
 import { MAX_BODY_BYTES } from '../../../src/main/space/session-server/constants.js';
 import {
+  DASHBOARD_CONTEXT_TOOL_NAME,
   DASHBOARD_REPORT_TOOL_NAME,
+  DASHBOARD_UPDATE_TOOL_NAME,
   SESSION_TOOL_NAMES,
   type SessionConnection,
   type SessionServer,
@@ -109,6 +111,16 @@ async function startPm(sessionId: string): Promise<SessionConnection> {
   return connection.value;
 }
 
+async function startRefresh(sessionId: string, requestId: string): Promise<SessionConnection> {
+  assert.ok(startSession(desk, { id: sessionId, engine: 'claude-code' }).ok);
+  const connection = await server.registerSession(sessionId, {
+    purpose: 'dashboard-refresh',
+    requestId,
+  });
+  assert.ok(connection.ok);
+  return connection.value;
+}
+
 async function connect(connection: SessionConnection): Promise<Client> {
   const client = new Client({ name: 'test-engine', version: '1.0.0' });
   const transport = new StreamableHTTPClientTransport(new URL(connection.url), {
@@ -138,6 +150,26 @@ async function ticketOf(answer: Promise<ToolAnswer>): Promise<string> {
   assert.equal(isError, false, JSON.stringify(value));
   assert.equal(typeof value.ticket, 'string');
   return value.ticket as string;
+}
+
+async function typedDashboardInput() {
+  const reports = context.service(spaceDashboardReport);
+  await reports.ready();
+  const resolved = reports.definition();
+  assert.ok(resolved);
+  return {
+    definitionHash: resolved.hash,
+    components: resolved.definition.components
+      .filter((component) => component.source === 'pm')
+      .map((component) =>
+        component.type === 'text'
+          ? { id: component.id, type: 'text' as const, text: 'Current position' }
+          : component.type === 'metric'
+            ? { id: component.id, type: 'metric' as const, value: 1 }
+            : { id: component.id, type: 'list' as const, items: [] },
+      ),
+    basis: 'headless test',
+  };
 }
 
 /** One raw HTTP request, so that `Host` and `Origin` can be set as a browser or a stranger would. */
@@ -184,14 +216,17 @@ function raw(options: {
 
 const LIST_TOOLS = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} });
 
-test('a session has the four tools of the cards, and no other', async () => {
+test('a session has the card tools plus read-only dashboard context', async () => {
   const connection = await start('s-tools');
   assert.equal(connection.serverName, 'ailore');
-  assert.deepEqual([...connection.tools], [...SESSION_TOOL_NAMES]);
+  assert.deepEqual([...connection.tools], [...SESSION_TOOL_NAMES, DASHBOARD_CONTEXT_TOOL_NAME]);
   assert.match(connection.header.value, /^Bearer [A-Za-z0-9_-]{43}$/);
   const client = await connect(connection);
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((tool) => tool.name).sort(), [...SESSION_TOOL_NAMES].sort());
+  assert.deepEqual(
+    tools.map((tool) => tool.name).sort(),
+    [...SESSION_TOOL_NAMES, DASHBOARD_CONTEXT_TOOL_NAME].sort(),
+  );
 });
 
 test('only a PM session can publish one bounded dashboard report without a claim', async () => {
@@ -203,7 +238,11 @@ test('only a PM session can publish one bounded dashboard report without a claim
   );
 
   const pmConnection = await startPm('s-pm-report');
-  assert.deepEqual(pmConnection.tools, [...SESSION_TOOL_NAMES, DASHBOARD_REPORT_TOOL_NAME]);
+  assert.deepEqual(pmConnection.tools, [
+    ...SESSION_TOOL_NAMES,
+    DASHBOARD_CONTEXT_TOOL_NAME,
+    DASHBOARD_REPORT_TOOL_NAME,
+  ]);
   const pm = await connect(pmConnection);
   const pmTools = await pm.listTools();
   assert.equal(
@@ -211,8 +250,24 @@ test('only a PM session can publish one bounded dashboard report without a claim
     true,
   );
 
+  const contextAnswer = await call(pm, DASHBOARD_CONTEXT_TOOL_NAME);
+  const definition = contextAnswer.value.definition as {
+    hash?: unknown;
+    definition?: { components?: Array<{ id: string; source: string; type: string }> };
+  };
+  assert.equal(typeof definition.hash, 'string');
+  const components = (definition.definition?.components ?? [])
+    .filter((component) => component.source === 'pm')
+    .map((component) =>
+      component.type === 'text'
+        ? { id: component.id, type: 'text' as const, text: 'The project is waiting for review.' }
+        : component.type === 'metric'
+          ? { id: component.id, type: 'metric' as const, value: 1 }
+          : { id: component.id, type: 'list' as const, items: [] },
+    );
   const published = await call(pm, DASHBOARD_REPORT_TOOL_NAME, {
-    markdown: '# Today\n\nThe project is waiting for review.',
+    definitionHash: definition.hash,
+    components,
     basis: 'The PM read the current Lore and Project cache.',
   });
   assert.equal(published.isError, false, JSON.stringify(published.value));
@@ -220,7 +275,8 @@ test('only a PM session can publish one bounded dashboard report without a claim
   const report = context.service(spaceDashboardReport).read().report;
   assert.ok(report);
   assert.deepEqual(report, {
-    markdown: '# Today\n\nThe project is waiting for review.',
+    components,
+    definitionHash: definition.hash,
     basis: 'The PM read the current Lore and Project cache.',
     sessionId: 's-pm-report',
     receivedAt: report.receivedAt,
@@ -244,6 +300,21 @@ test('only a PM session can publish one bounded dashboard report without a claim
   });
 });
 
+test('an ordinary session can request a dashboard update when the session service is wired', async () => {
+  // The session-server fixture intentionally does not construct the session service, so this
+  // assertion stays at the registration seam: ordinary sessions receive the update tool only
+  // after the service installs its authenticated handler.
+  server.setDashboardUpdateHandler(async () => ({ status: 'requested', requestId: 'r-test' }));
+  const connection = await start('s-tools-update');
+  assert.deepEqual(connection.tools, [
+    ...SESSION_TOOL_NAMES,
+    DASHBOARD_CONTEXT_TOOL_NAME,
+    DASHBOARD_UPDATE_TOOL_NAME,
+  ]);
+  const answer = await call(await connect(connection), DASHBOARD_UPDATE_TOOL_NAME);
+  assert.deepEqual(answer.value, { status: 'requested', requestId: 'r-test' });
+});
+
 test('a PM report rejects invalid bounded text before it reaches the Dashboard', async () => {
   const pm = await connect(await startPm('s-pm-invalid-report'));
   const oversized = await call(pm, DASHBOARD_REPORT_TOOL_NAME, {
@@ -253,6 +324,65 @@ test('a PM report rejects invalid bounded text before it reaches the Dashboard',
   const control = await call(pm, DASHBOARD_REPORT_TOOL_NAME, { markdown: 'bad\u0000report' });
   assert.equal(control.isError, true);
   assert.equal(context.service(spaceDashboardReport).read().report, null);
+});
+
+test('a conversational PM must reread context after a newer refresh generation', async () => {
+  const pm = await connect(await startPm('s-pm-generation'));
+  await call(pm, DASHBOARD_CONTEXT_TOOL_NAME);
+  const oldInput = await typedDashboardInput();
+  server.markDashboardRefreshRequested();
+  const stale = await call(pm, DASHBOARD_REPORT_TOOL_NAME, oldInput);
+  assert.equal(stale.isError, true);
+  assert.match(String(stale.value.message), /read get_dashboard_context again/i);
+  assert.equal(context.service(spaceDashboardReport).read().report, null);
+
+  await call(pm, DASHBOARD_CONTEXT_TOOL_NAME);
+  const current = await call(pm, DASHBOARD_REPORT_TOOL_NAME, await typedDashboardInput());
+  assert.equal(current.isError, false, JSON.stringify(current.value));
+});
+
+test('transient reports bind request identity and definition hash before publication', async () => {
+  const reports = context.service(spaceDashboardReport);
+  await reports.ready();
+  const requested = reports.request('agent');
+  const input = await typedDashboardInput();
+
+  const wrongHash = await connect(
+    await startRefresh('s-refresh-hash', requested.request.requestId),
+  );
+  const rejectedHash = await call(wrongHash, DASHBOARD_REPORT_TOOL_NAME, {
+    ...input,
+    definitionHash: 'obsolete-definition',
+  });
+  assert.equal(rejectedHash.isError, true);
+  assert.equal(reports.read().report, null, 'a stale hash never reaches the report store');
+  await server.unregisterSession('s-refresh-hash');
+  reports.failRequest(requested.request.requestId, {
+    kind: 'test-reset',
+    message: 'reset',
+  });
+
+  const next = reports.request('agent');
+  const wrongRequest = await connect(await startRefresh('s-refresh-request', 'different-request'));
+  const rejectedRequest = await call(wrongRequest, DASHBOARD_REPORT_TOOL_NAME, input);
+  assert.equal(rejectedRequest.isError, true);
+  assert.equal(reports.read().report, null, 'a late request never reaches the report store');
+  await server.unregisterSession('s-refresh-request');
+  reports.failRequest(next.request.requestId, { kind: 'test-reset', message: 'reset' });
+});
+
+test('an accepted transient report survives transient session cleanup', async () => {
+  const reports = context.service(spaceDashboardReport);
+  await reports.ready();
+  const requested = reports.request('agent');
+  const transient = await connect(
+    await startRefresh('s-refresh-preserve', requested.request.requestId),
+  );
+  const input = await typedDashboardInput();
+  const published = await call(transient, DASHBOARD_REPORT_TOOL_NAME, input);
+  assert.equal(published.isError, false, JSON.stringify(published.value));
+  await server.unregisterSession('s-refresh-preserve');
+  assert.equal(reports.read().report?.stale, false);
 });
 
 test('request, pending, grant: the claim is on the desk before the session reads granted', async () => {

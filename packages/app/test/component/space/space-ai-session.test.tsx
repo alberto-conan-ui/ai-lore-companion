@@ -152,7 +152,23 @@ const cockpit = {
   spaceSessionEnd: vi.fn(async () => ({ ok: true, value: { sessionId: 's-1' } })),
   spaceDashboardReport: vi.fn(async () => ({
     ok: true,
-    value: { version: 0, report: null } as DashboardReportState,
+    value: {
+      version: 1,
+      definition: null,
+      context: null,
+      report: null,
+      refresh: { status: 'idle', requestId: null, reason: null, requestedAt: null, failure: null },
+    } as DashboardReportState,
+  })),
+  spaceDashboardRefresh: vi.fn(async () => ({
+    ok: true,
+    value: {
+      version: 1,
+      definition: null,
+      context: null,
+      report: null,
+      refresh: { status: 'idle', requestId: null, reason: null, requestedAt: null, failure: null },
+    },
   })),
   onSpaceDashboardReport: vi.fn((listener: (state: DashboardReportState) => void) => {
     reportListener = listener;
@@ -606,12 +622,8 @@ test('the pinned PM restart ends the old session and attaches exactly one replac
   expect(screen.getAllByTestId('dock-tab')).toHaveLength(1);
   expect(screen.queryByTestId('session-roster-worker')).toBeNull();
   fireEvent.click(screen.getByTestId('pm-dashboard-request'));
-  expect(activatedPanels.at(-1)).toBe('space-pm');
-  expect(focusedPtyIds.at(-1)).toBe('pty-new');
-  expect(cockpit.sendTerminalInput).toHaveBeenCalledWith({
-    id: 'pty-new',
-    data: 'You are the PM. Please update the dashboard using report_dashboard.',
-  });
+  expect(cockpit.spaceDashboardRefresh).toHaveBeenCalledWith({ reason: 'human' });
+  expect(cockpit.sendTerminalInput).not.toHaveBeenCalled();
 });
 
 test('roster report pushes retain their version and survive a late failed initial read', async () => {
@@ -624,18 +636,45 @@ test('roster report pushes retain their version and survive a late failed initia
   );
   render(<SpaceSessions spaceRoot="/work/space" />);
   const report: DashboardReportState['report'] = {
-    markdown: 'A report',
+    definitionHash: 'hash',
+    components: [{ id: 'position', type: 'text', text: 'A report' }],
     basis: 'Project',
     sessionId: 'pm-source',
     receivedAt: '2026-09-20T12:00:00Z',
     stale: true,
     staleReason: 'project-changed',
   };
-  act(() => reportListener?.({ version: 2, report }));
+  act(() =>
+    reportListener?.({
+      ...{
+        version: 1,
+        definition: null,
+        context: null,
+        report: null,
+        refresh: {
+          status: 'idle',
+          requestId: null,
+          reason: null,
+          requestedAt: null,
+          failure: null,
+        },
+      },
+      version: 2,
+      report,
+    }),
+  );
   const pm = screen.getByTestId('session-roster-pm');
   expect(pm.textContent).toContain('Source: pm-source');
   expect(pm.textContent).toContain('the Project source changed.');
-  act(() => reportListener?.({ version: 1, report: null }));
+  act(() =>
+    reportListener?.({
+      version: 1,
+      definition: null,
+      context: null,
+      report: null,
+      refresh: { status: 'idle', requestId: null, reason: null, requestedAt: null, failure: null },
+    }),
+  );
   await act(async () => failRead?.(new Error('late read failure')));
   expect(pm.textContent).toContain('Source: pm-source');
   expect(pm.textContent).not.toContain('late read failure');

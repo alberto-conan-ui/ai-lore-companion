@@ -8,10 +8,12 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { expect, test } from '@playwright/test';
 import type { ElectronApplication, Page } from 'playwright';
 import { closeSpaceApp, launchSpaceApp } from './space-fixture';
@@ -23,11 +25,9 @@ import { closeSpaceApp, launchSpaceApp } from './space-fixture';
 // app reads that switch only in an end-to-end run of the unpackaged app.
 //
 // The fixture Space is installed into Claude Code on its desk, and the app's engine list
-// holds one engine: a script named `claude` in the test's temporary folder that only
-// sleeps. So Start a session passes the guarded start's checks and starts that script,
-// never the real engine. The test then acts as the session's engine: a child process
-// reads the session's `mcp.json` and calls the companion's session server, as the
-// engine would. The fake's state file, the Space, `userData` and the script all live in
+// holds one stand-in `claude` in the test's temporary folder. PM prompts use the authenticated
+// MCP connection to submit a small typed report, while ordinary sessions stay alive until the
+// app closes them. The fake's state file, the Space, `userData` and the script all live in
 // temporary folders, removed with the app closed also when a test fails.
 
 const APP_DIR = resolve(process.cwd());
@@ -119,7 +119,8 @@ function seedDashboardRun(busy = false): DashboardRun {
     ]);
     root = seeded.root;
 
-    // The engine list: one engine, a script named `claude` that only sleeps.
+    // The engine list: one engine, a stand-in `claude` that reports for PM prompts and sleeps
+    // for ordinary sessions.
     // The catalog merge (M9.4) matches it by binary basename into the
     // catalog's `default.claude` slot, keeping this absolute path, so a
     // guarded session runs the stand-in and never the real `claude` on this
@@ -131,10 +132,25 @@ function seedDashboardRun(busy = false): DashboardRun {
     const argvFile = join(bin, 'argv.txt');
     // M10.9 item 5: a parameter ticked on the start control must reach the
     // engine's argument list. The stand-in writes what it was called with
-    // before it sleeps, so a test can read it back.
+    // before it serves the session, so a test can read it back.
+    const sdkRoot = resolve(APP_DIR, '../../node_modules/@modelcontextprotocol/sdk/dist/esm');
     writeFileSync(
       engine,
-      `#!/bin/sh\nif [ "$1" = "--version" ]; then echo '2.1.278 (Claude Code)'; exit 0; fi\nif [ "$1" = "auth" ]; then echo '{"loggedIn":true}'; exit 0; fi\nprintf '%s\\n' "$@" > ${JSON.stringify(argvFile)}-"$AI_LORE_SESSION_ID"\nexec sleep 600\n`,
+      [
+        `#!${process.execPath}`,
+        "const fs = require('node:fs');",
+        'const args = process.argv.slice(2);',
+        "if (args[0] === '--version') { console.log('2.1.278 (Claude Code)'); process.exit(0); }",
+        "if (args[0] === 'auth') { console.log(JSON.stringify({loggedIn:true})); process.exit(0); }",
+        `fs.writeFileSync(${JSON.stringify(argvFile)} + '-' + (process.env.AI_LORE_SESSION_ID ?? 'unknown'), args.join('\\n') + '\\n');`,
+        "const allowed = args.indexOf('--allowedTools');",
+        "const initialPrompt = allowed > 0 ? args[allowed - 1] : '';",
+        '(async () => {',
+        `if (initialPrompt.includes('Read get_dashboard_context first, then update the dashboard by calling report_dashboard with complete typed values.')) { const { Client } = await import(${JSON.stringify(pathToFileURL(join(sdkRoot, 'client/index.js')).href)}); const { StreamableHTTPClientTransport } = await import(${JSON.stringify(pathToFileURL(join(sdkRoot, 'client/streamableHttp.js')).href)}); const config = JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')); const server = Object.values(config.mcpServers)[0]; const client = new Client({name:'dashboard-e2e',version:'1.0'}); await client.connect(new StreamableHTTPClientTransport(new URL(server.url), {requestInit:{headers:server.headers}})); const context = await client.callTool({name:'get_dashboard_context',arguments:{}}); const text = context.content?.[0]?.text ?? '{}'; const dashboard = JSON.parse(text); await client.callTool({name:'report_dashboard',arguments:{definitionHash:dashboard.definition?.hash,components:[{id:'position',type:'text',text:'Current position: dashboard fixture report'},{id:'blockers',type:'list',items:[]},{id:'decisions',type:'list',items:[]}],basis:'Deterministic dashboard E2E fixture.'}}); await client.close(); }`,
+        'setInterval(() => undefined, 1000);',
+        '})().catch((error) => { console.error(error); process.exit(1); });',
+        '',
+      ].join('\n'),
     );
     chmodSync(engine, 0o755);
     writeFileSync(
@@ -186,7 +202,8 @@ function sessionMcpFile(sessionsDir: string): string | null {
   for (const entry of readdirSync(sessionsDir)) {
     if (
       !records.some(
-        (record) => record.id === entry && record.purpose !== 'pm' && record.closedAt === undefined,
+        (record) =>
+          record.id === entry && record.purpose === undefined && record.closedAt === undefined,
       )
     )
       continue;
@@ -245,6 +262,64 @@ async function startSession(page: Page): Promise<void> {
 }
 
 test.describe('the Dashboard', () => {
+  test('shows recent Workbench documents and opens exact paths in the shared Files window', async () => {
+    test.setTimeout(120_000);
+    const run = seedDashboardRun();
+    let app: ElectronApplication | undefined;
+    try {
+      const launched = await launchSpaceApp({
+        root: run.seeded.root,
+        userData: run.userData,
+        env: run.env,
+      });
+      app = launched.app;
+      const page = launched.page;
+      await showDashboard(page);
+
+      const drafts = join(run.seeded.root, 'workbench', 'drafts');
+      mkdirSync(drafts, { recursive: true });
+      const firstPath = join(drafts, 'alpha-spec.md');
+      const secondPath = join(drafts, 'beta-notes.md');
+      writeFileSync(firstPath, '# Alpha review spec\n\nA recent proposal.\n');
+      writeFileSync(secondPath, '# Beta notes\n\nA second recent proposal.\n');
+
+      // The Workbench poll supplies context changes without a PM report request.
+      const documents = page.getByTestId('dashboard-component-review-documents');
+      const first = documents.getByRole('button', { name: 'Alpha review spec', exact: true });
+      const second = documents.getByRole('button', { name: 'Beta notes', exact: true });
+      await expect(first).toBeVisible({ timeout: 15_000 });
+      await expect(second).toBeVisible({ timeout: 15_000 });
+      await expect(documents).toContainText(/spec · .* \((creation|modification)\)/);
+
+      // The first click opens the Files window and preserves the exact relative path.
+      const filesOpened = app.waitForEvent('window');
+      await first.click();
+      const files = await filesOpened;
+      await expect(files.getByTestId('files-window')).toBeVisible({ timeout: 15_000 });
+      const firstTab = files.getByTestId('files-doc-tab-workbench-drafts/alpha-spec.md');
+      await expect(firstTab).toHaveAttribute('data-active', 'true', { timeout: 15_000 });
+      await expect(files.getByTestId('files-editor-cm-host')).toBeVisible();
+
+      // A second click reuses the already open Files window and activates Beta.
+      await second.click();
+      const secondTab = files.getByTestId('files-doc-tab-workbench-drafts/beta-notes.md');
+      await expect(secondTab).toHaveAttribute('data-active', 'true', { timeout: 15_000 });
+
+      // A stale dashboard entry remains actionable long enough to report a clear
+      // editor failure when its Workbench path has been deleted.
+      await files.getByTestId('files-doc-close-workbench-drafts/beta-notes.md').click();
+      unlinkSync(secondPath);
+      await second.click();
+      await expect(files.getByTestId('files-editor-status-not-text')).toHaveText(
+        'There is no file at this path in the working tree.',
+        { timeout: 15_000 },
+      );
+    } finally {
+      await closeSpaceApp(app);
+      run.cleanup();
+    }
+  });
+
   test('crowded overview and session roster remain usable at wide and narrow sizes', async () => {
     test.setTimeout(150_000);
     const run = seedDashboardRun(true);
@@ -298,7 +373,7 @@ test.describe('the Dashboard', () => {
       await refresh(page);
       await page.emulateMedia({ colorScheme: 'dark' });
 
-      // Supply fixture report text through the authenticated PM channel, never renderer injection.
+      // Supply typed fixture values through the authenticated PM channel, never renderer injection.
       const recordsFile = join(dirname(run.seeded.sessionsDir), 'desk', 'sessions.json');
       const records = JSON.parse(readFileSync(recordsFile, 'utf8')).records as Array<{
         id: string;
@@ -307,9 +382,25 @@ test.describe('the Dashboard', () => {
       }>;
       const pm = records.find((record) => record.purpose === 'pm' && !record.closedAt);
       expect(pm).toBeDefined();
-      callSessionTool(join(run.seeded.sessionsDir, pm?.id ?? '', 'mcp.json'), 'report_dashboard', {
-        markdown:
-          'Current position\nThis fixture has one Build focus and six focuses awaiting review.\n\nActive work\nOne local worker holds the Lore.\n\nBlockers\nNo blocker is recorded in this fixture.\n\nDecisions needed\nReview the six completed proposals.',
+      const pmMcp = join(run.seeded.sessionsDir, pm?.id ?? '', 'mcp.json');
+      const dashboardContext = callSessionTool(pmMcp, 'get_dashboard_context', {});
+      const definitionHash = (dashboardContext.definition as { hash?: unknown } | undefined)?.hash;
+      expect(typeof definitionHash).toBe('string');
+      callSessionTool(pmMcp, 'report_dashboard', {
+        definitionHash,
+        components: [
+          {
+            id: 'position',
+            type: 'text',
+            text: 'Current position: one Build focus and six focuses awaiting review.',
+          },
+          { id: 'blockers', type: 'list', items: [] },
+          {
+            id: 'decisions',
+            type: 'list',
+            items: [{ id: 'review', label: 'Review the six completed proposals.' }],
+          },
+        ],
         basis: 'Isolated E2E Project fixture and its local session records.',
       });
 
@@ -322,11 +413,10 @@ test.describe('the Dashboard', () => {
         }, viewport);
         await page.setViewportSize(viewport);
         await page.getByTestId('space-rail-dashboard').click();
-        await expect(page.getByTestId('pm-report-text')).toContainText('Current position');
-        for (const action of [
-          lastReview,
-          page.getByRole('button', { name: 'Talk to PM in Sessions' }),
-        ]) {
+        await expect(page.getByTestId('dashboard-component-position')).toContainText(
+          'Current position',
+        );
+        for (const action of [lastReview, page.getByTestId('dashboard-component-position')]) {
           await action.scrollIntoViewIfNeeded();
           const bounds = await action.boundingBox();
           expect(bounds).not.toBeNull();

@@ -46,6 +46,7 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
         "if (args[0] === '--version') { console.log('2.1.276 (Claude Code)'); process.exit(0); }",
         "if (args[0] === 'auth') { console.log(JSON.stringify({loggedIn:true})); process.exit(0); }",
         `fs.appendFileSync(${JSON.stringify(launches)}, JSON.stringify(args) + '\\n');`,
+        `const processTag = fs.readFileSync(${JSON.stringify(launches)}, 'utf8').trim().split('\\n').filter(Boolean).length;`,
         '(async () => {',
         `const { Client } = await import(${JSON.stringify(pathToFileURL(join(sdkRoot, 'client/index.js')).href)});`,
         `const { StreamableHTTPClientTransport } = await import(${JSON.stringify(pathToFileURL(join(sdkRoot, 'client/streamableHttp.js')).href)});`,
@@ -54,7 +55,7 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
         'await client.connect(new StreamableHTTPClientTransport(new URL(config.url), {requestInit:{headers:config.headers}}));',
         `process.stdin.on('data', (chunk) => fs.appendFileSync(${JSON.stringify(stdinWrites)}, chunk.toString()));`,
         'let reports = 0;',
-        `const report = async () => { reports += 1; fs.appendFileSync(${JSON.stringify(reportCalls)}, reports + '\\n'); await client.callTool({name:'report_dashboard',arguments:{markdown:'Current position: PM report ' + reports + '\\n<script>not executable</script>',basis:'Deterministic engine exercising the real MCP transport.'}}); };`,
+        `const report = async () => { reports += 1; fs.appendFileSync(${JSON.stringify(reportCalls)}, processTag + ':' + reports + '\\n'); const context = await client.callTool({name:'get_dashboard_context',arguments:{}}); const text = context.content?.[0]?.text ?? '{}'; const dashboard = JSON.parse(text); const definitionHash = dashboard.definition?.hash; await client.callTool({name:'report_dashboard',arguments:{definitionHash,components:[{id:'position',type:'text',text:'Current position: PM report ' + processTag + '.' + reports},{id:'blockers',type:'list',items:[]},{id:'decisions',type:'list',items:[]}],basis:'Deterministic engine exercising the real MCP transport.'}}); };`,
         "const allowed = args.indexOf('--allowedTools');",
         "const initialPrompt = allowed > 0 ? args[allowed - 1] : '';",
         `if (initialPrompt.includes('update the dashboard')) { fs.writeFileSync(${JSON.stringify(promptSeen)}, initialPrompt); }`,
@@ -86,16 +87,15 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
     const initialPrompt = readFileSync(promptSeen, 'utf8');
     expect(initialPrompt).toContain('update the dashboard');
     await page.getByTestId('space-rail-dashboard').click();
-    await expect(page.getByTestId('pm-report-empty')).toBeVisible();
-    await expect(page.getByTestId('pm-report-text')).toHaveCount(0);
+    await expect(page.getByTestId('dashboard-definition')).toBeVisible();
+    await expect(page.getByTestId('dashboard-component-position')).toHaveCount(1);
     expect(existsSync(stdinWrites)).toBe(false);
 
     writeFileSync(trustCleared, 'ok');
-    await expect(page.getByTestId('pm-report-text')).toContainText('PM report 1', {
+    await expect(page.getByTestId('dashboard-component-position')).toContainText('PM report 1', {
       timeout: 15_000,
     });
-    await expect(page.getByTestId('pm-report-text').locator('script')).toHaveCount(0);
-    expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1']);
+    expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1:1']);
     expect(existsSync(stdinWrites)).toBe(false);
 
     // Repeated/concurrent attachment requests must not replay the native initial prompt.
@@ -107,18 +107,29 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
       new Set(initialAttachments.flatMap((result) => (result.ok ? [result.value.sessionId] : [])))
         .size,
     ).toBe(1);
-    expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1']);
+    expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1:1']);
 
-    // The manual action remains available as a follow-up turn after the automatic one.
-    await page.getByTestId('space-rail-sessions').click();
-    await expect(page.getByTestId('pm-dashboard-request')).toBeVisible({ timeout: 20_000 });
-    await page.getByTestId('pm-dashboard-request').click();
-    await page.keyboard.press('Enter');
+    // The Dashboard button starts a separate typed refresh operation. It must
+    // leave the conversational PM attached and must not send a terminal turn.
+    const conversational = initialAttachments[0];
+    if (!conversational.ok) throw new Error(conversational.error.message);
     await page.getByTestId('space-rail-dashboard').click();
-    await expect(page.getByTestId('pm-report-text')).toContainText('PM report 2', {
-      timeout: 15_000,
+    await page.getByTestId('dashboard-refresh').click();
+    await expect(page.getByTestId('dashboard-component-position')).toContainText('PM report 2.1', {
+      timeout: 20_000,
     });
-    expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1', '2']);
+    await expect(page.getByTestId('dashboard-refresh-status')).toHaveAttribute(
+      'data-refresh-status',
+      'updated',
+      { timeout: 20_000 },
+    );
+    const afterRefresh = await page.evaluate(() => window.cockpit.spacePmEnsure({}));
+    expect(afterRefresh.ok).toBe(true);
+    expect(afterRefresh.ok ? afterRefresh.value.sessionId : '').toBe(
+      conversational.value.sessionId,
+    );
+    expect(existsSync(stdinWrites)).toBe(false);
+    expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1:1', '2:1']);
     const readSessions = (): Array<{
       purpose?: string;
       closedAt?: string;
@@ -135,7 +146,9 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
       ).records;
     expect(readSessions().filter((session) => session.purpose === 'pm')).toHaveLength(1);
     expect(readSessions()[0]?.profile?.model).toBe('pm-test-model');
-    const args = JSON.parse(readFileSync(launches, 'utf8').trim()) as string[];
+    const args = JSON.parse(
+      readFileSync(launches, 'utf8').trim().split('\n').at(-1) ?? '[]',
+    ) as string[];
     expect(args[args.indexOf('--model') + 1]).toBe('pm-test-model');
     expect(args.join(' ')).toContain('dashboard.md');
 
@@ -148,7 +161,7 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
     expect(
       new Set(attachments.flatMap((result) => (result.ok ? [result.value.sessionId] : []))).size,
     ).toBe(1);
-    expect(readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(1);
+    expect(readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(2);
 
     // Restarting from the roster starts one replacement and one fresh native initial turn.
     const firstAttachment = attachments[0];
@@ -156,12 +169,12 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
     const previousSessionId = firstAttachment.value.sessionId;
     await page.getByTestId('space-rail-sessions').click();
     await page.getByTestId('pm-restart').click();
-    await expect.poll(() => readFileSync(launches, 'utf8').trim().split('\n').length).toBe(2);
+    await expect.poll(() => readFileSync(launches, 'utf8').trim().split('\n').length).toBe(3);
     const restarted = await page.evaluate(() => window.cockpit.spacePmEnsure({}));
     expect(restarted.ok).toBe(true);
     expect(restarted.ok ? restarted.value.sessionId : '').not.toBe(previousSessionId);
     await expect.poll(() => readFileSync(reportCalls, 'utf8').trim().split('\n').length).toBe(3);
-    expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1', '2', '1']);
+    expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1:1', '2:1', '3:1']);
     await closeSpaceApp(app);
     expect(readSessions().every((session) => typeof session.closedAt === 'string')).toBe(true);
   } finally {

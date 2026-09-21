@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "sections": [
+    {
+      "id": "attention",
+      "title": "Needs you",
+      "columns": [["needs-you"]]
+    },
+    {
+      "id": "overview",
+      "title": "Current position",
+      "columns": [["position", "plan"], ["blockers", "decisions"]]
+    },
+    {
+      "id": "workbench",
+      "title": "Workbench",
+      "columns": [["review-documents"], ["handovers", "activity"]]
+    },
+    {
+      "id": "resources",
+      "title": "Sessions and repositories",
+      "columns": [["agents"], ["repositories"]]
+    }
+  ],
+  "components": [
+    {
+      "id": "needs-you",
+      "type": "needs-you",
+      "source": "companion",
+      "title": "Needs your attention"
+    },
+    {
+      "id": "position",
+      "type": "text",
+      "source": "pm",
+      "title": "Current position",
+      "instruction": "Summarise the present goal and evidence of progress. Include relevant Workbench work, distinguish observed facts from proposals, and state missing sources."
+    },
+    {
+      "id": "plan",
+      "type": "plan",
+      "source": "companion",
+      "title": "Where everything stands"
+    },
+    {
+      "id": "blockers",
+      "type": "list",
+      "source": "pm",
+      "title": "Blockers",
+      "limit": 8,
+      "instruction": "List evidenced blockers, what can unblock each, and unresolved unknowns. Return an empty list when none are known."
+    },
+    {
+      "id": "decisions",
+      "type": "list",
+      "source": "pm",
+      "title": "Decisions needed",
+      "limit": 8,
+      "instruction": "List concrete decisions needed from the Human Lead, with the relevant issue or document named in the text. Return an empty list when none are known."
+    },
+    {
+      "id": "review-documents",
+      "type": "workbench-docs",
+      "source": "companion",
+      "title": "Documents to review",
+      "limit": 10,
+      "recentDays": 14
+    },
+    {
+      "id": "handovers",
+      "type": "handovers",
+      "source": "companion",
+      "title": "Recent handovers",
+      "limit": 5
+    },
+    {
+      "id": "activity",
+      "type": "activity",
+      "source": "companion",
+      "title": "Current local sessions",
+      "limit": 10
+    },
+    {
+      "id": "agents",
+      "type": "agents",
+      "source": "companion",
+      "title": "Agents board"
+    },
+    {
+      "id": "repositories",
+      "type": "repositories",
+      "source": "companion",
+      "title": "Repositories"
+    }
+  ]
+}

@@ -89,6 +89,153 @@
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* Configurable dashboard definitions. Layout values are deliberately limited
+   to the renderer's own vocabulary; a definition never supplies CSS. */
+.dashboard-definition {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.dashboard-definition-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 24px;
+}
+.dashboard-definition-status {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.dashboard-definition-diagnostic {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-warn);
+  border-radius: 6px;
+  color: var(--color-warn);
+  background: var(--color-inset);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.dashboard-definition-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.dashboard-definition-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  gap: 10px;
+  min-width: 0;
+}
+.dashboard-definition-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.dashboard-definition-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-panel);
+}
+.dashboard-definition-component-title {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.dashboard-definition-text,
+.dashboard-definition-unavailable,
+.dashboard-definition-metric {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.dashboard-definition-unavailable {
+  color: var(--color-warn);
+}
+.dashboard-definition-unavailable p {
+  margin: 0;
+}
+.dashboard-definition-metric {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--color-text-muted);
+}
+.dashboard-definition-metric strong {
+  color: var(--color-text-bright);
+  font-size: 1.45rem;
+  font-weight: 600;
+}
+.dashboard-definition-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.dashboard-definition-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.dashboard-definition-list > li > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.dashboard-definition-status {
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.dashboard-definition-link {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.dashboard-definition-link:hover {
+  color: var(--color-text-bright);
+}
+.dashboard-definition-documents > li {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+.dashboard-definition-widget {
+  min-width: 0;
+}
+@container (max-width: 600px) {
+  .dashboard-definition-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .dashboard-needs {
   flex: none;
   min-width: 0;

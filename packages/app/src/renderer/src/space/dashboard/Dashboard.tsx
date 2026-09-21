@@ -3,13 +3,14 @@ import { type JSX, useEffect, useState } from 'react';
 import './dashboard.css';
 import { errorAreaStyle, secondaryButtonStyle } from '../styles.js';
 import { AgentsBoard } from './AgentsBoard.js';
+import { DashboardDefinitionRenderer } from './DashboardDefinition.js';
 import { FocusSheet } from './FocusSheet.js';
 import { FocusesByStage } from './FocusesByStage.js';
 import { NeedsYou } from './NeedsYou.js';
-import { PmReport } from './PmReport.js';
 import { Repositories } from './Repositories.js';
 import { StartSession } from './StartSession.js';
 import { stateSentence } from './dashboardText.js';
+import { useDashboardDefinition } from './useDashboardDefinition.js';
 import { useProjectState } from './useProjectState.js';
 
 /** How often the ages in the state line are written again. */
@@ -22,7 +23,8 @@ type Props = {
 };
 
 export function Dashboard({ justCreated }: Props = {}): JSX.Element {
-  const { project, problem, requested, refresh } = useProjectState();
+  const { project, problem, requested } = useProjectState();
+  const dashboard = useDashboardDefinition();
   const [, setTick] = useState(0);
   const [openUrl, setOpenUrl] = useState<string | null>(null);
 
@@ -35,7 +37,9 @@ export function Dashboard({ justCreated }: Props = {}): JSX.Element {
   const now = Date.now();
   const model = project?.model ?? null;
   const openFocus = model === null || openUrl === null ? null : findFocus(model, openUrl);
-  const refreshing = requested || project?.refreshing === true;
+  // Keep factual views available while the definition loads or cannot be read.
+  const dashboardReady = dashboard.state?.definition != null;
+  const refreshing = requested || project?.refreshing === true || dashboard.refreshing;
 
   return (
     <main className="dashboard" aria-label="Dashboard" data-testid="dashboard">
@@ -60,48 +64,65 @@ export function Dashboard({ justCreated }: Props = {}): JSX.Element {
         <button
           type="button"
           style={secondaryButtonStyle}
-          onClick={refresh}
+          onClick={dashboard.refresh}
           disabled={refreshing}
           data-testid="dashboard-refresh"
         >
           {refreshing ? 'Refreshing' : 'Refresh'}
         </button>
       </div>
-      {problem !== null ? (
+      {problem !== null || dashboard.problem !== null ? (
         <p style={errorAreaStyle} role="alert" data-testid="dashboard-problem">
-          {problem}
+          {problem ?? dashboard.problem}
         </p>
       ) : null}
-      {model !== null ? (
+      {!dashboardReady && dashboard.state !== null ? (
+        <DashboardDefinitionRenderer
+          state={dashboard.state}
+          model={model}
+          now={now}
+          onOpenFocus={(focus) => setOpenUrl(focus.issue.url)}
+        />
+      ) : null}
+      {!dashboardReady && model !== null ? (
         <NeedsYou entries={model.needsYou} onOpenFocus={(focus) => setOpenUrl(focus.url)} />
       ) : null}
-      <div className="dashboard-body">
-        <div className="dashboard-facts" data-testid="dashboard-facts">
-          <section className="dashboard-section" aria-labelledby="dashboard-focuses-heading">
-            <h2 id="dashboard-focuses-heading" className="dashboard-heading">
-              Where everything stands
-            </h2>
-            {project !== null && model === null ? (
-              <p className="dashboard-empty" data-testid="dashboard-no-model">
-                No Project has been read from GitHub for this Space yet, so there is nothing to
-                show.
-                {refreshing ? ' A refresh is running.' : ' Refresh reads it now.'}
-              </p>
-            ) : null}
-            {model !== null ? (
-              <FocusesByStage model={model} onOpen={(focus) => setOpenUrl(focus.issue.url)} />
-            ) : null}
-          </section>
-          {model !== null ? <AgentsBoard board={model.board} /> : null}
-          <Repositories now={now} />
-        </div>
-        <aside className="dashboard-pm-rail" aria-label="PM interpretation and sessions">
-          <PmReport />
-          <div className="dashboard-start-foot">
-            <StartSession justCreated={justCreated === true} />
+      {dashboardReady ? (
+        <DashboardDefinitionRenderer
+          state={dashboard.state as NonNullable<typeof dashboard.state>}
+          model={model}
+          now={now}
+          onOpenFocus={(focus) => setOpenUrl(focus.issue.url)}
+        />
+      ) : (
+        <div className="dashboard-body">
+          <div className="dashboard-facts" data-testid="dashboard-facts">
+            <section className="dashboard-section" aria-labelledby="dashboard-focuses-heading">
+              <h2 id="dashboard-focuses-heading" className="dashboard-heading">
+                Where everything stands
+              </h2>
+              {project !== null && model === null ? (
+                <p className="dashboard-empty" data-testid="dashboard-no-model">
+                  No Project has been read from GitHub for this Space yet, so there is nothing to
+                  show.
+                  {refreshing ? ' A refresh is running.' : ' Refresh reads it now.'}
+                </p>
+              ) : null}
+              {model !== null ? (
+                <FocusesByStage model={model} onOpen={(focus) => setOpenUrl(focus.issue.url)} />
+              ) : null}
+            </section>
+            {model !== null ? <AgentsBoard board={model.board} /> : null}
+            <Repositories now={now} />
           </div>
-        </aside>
-      </div>
+          <aside className="dashboard-pm-rail" aria-label="Sessions">
+            <div className="dashboard-start-foot">
+              <StartSession justCreated={justCreated === true} />
+            </div>
+          </aside>
+        </div>
+      )}
+      {dashboardReady ? <StartSession justCreated={justCreated === true} /> : null}
       {openFocus !== null ? (
         <FocusSheet focus={openFocus} onClose={() => setOpenUrl(null)} />
       ) : null}

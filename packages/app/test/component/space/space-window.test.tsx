@@ -218,7 +218,16 @@ const cockpit = {
   })),
   onSpaceRepositoriesState: vi.fn(() => () => {}),
   // Dashboard mounts the PM report; this window fixture keeps it empty.
-  spaceDashboardReport: vi.fn(async () => ({ ok: true, value: { version: 1, report: null } })),
+  spaceDashboardReport: vi.fn(async () => ({
+    ok: true,
+    value: {
+      version: 1,
+      definition: null,
+      context: null,
+      report: null,
+      refresh: { status: 'idle', requestId: null, reason: null, requestedAt: null, failure: null },
+    },
+  })),
   onSpaceDashboardReport: vi.fn(() => () => {}),
 };
 
