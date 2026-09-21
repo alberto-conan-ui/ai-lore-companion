@@ -396,6 +396,8 @@ test('an accepted transient report survives transient session cleanup', async ()
   const transient = await connect(
     await startRefresh('s-refresh-preserve', requested.request.requestId),
   );
+  const contextAnswer = await call(transient, DASHBOARD_CONTEXT_TOOL_NAME);
+  assert.equal(contextAnswer.isError, false, JSON.stringify(contextAnswer.value));
   const input = await typedDashboardInput();
   const published = await call(transient, DASHBOARD_REPORT_TOOL_NAME, input);
   assert.equal(published.isError, false, JSON.stringify(published.value));
