@@ -1242,7 +1242,7 @@ function EnginesSection(): JSX.Element {
               const model = e.target.value;
               const next: EngineEntry = { ...draft };
               if (model.trim().length > 0) next.model = model;
-              else next.model = undefined;
+              else delete next.model;
               setDraft(next);
             }}
             data-testid="engine-draft-model"

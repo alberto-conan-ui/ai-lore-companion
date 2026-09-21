@@ -1,4 +1,5 @@
 import { type JSX, useEffect, useState } from 'react';
+import type { DashboardModel, FocusCard } from '@ai-lore-companion/core';
 import { FocusSheet } from '../FocusSheet.js';
 import { useDashboardDefinition } from '../useDashboardDefinition.js';
 import { useProjectState } from '../useProjectState.js';
@@ -22,6 +23,9 @@ export function DashboardV2({ justCreated }: Props = {}): JSX.Element {
     return () => clearInterval(handle);
   }, []);
 
+  const model = project?.model ?? null;
+  const openFocus = model === null || openUrl === null ? null : findFocus(model, openUrl);
+
   return (
     <div className="dashboard-v2" style={{ padding: 'var(--d-page-pad)' }}>
       <div style={{ height: '56px' }}>Dashboard</div>
@@ -34,13 +38,24 @@ export function DashboardV2({ justCreated }: Props = {}): JSX.Element {
         <div />
       </div>
 
-      {openUrl && project?.snapshot && (
+      <div className="dashboard-v2-overflow-footer">
+        +N more
+      </div>
+
+      {openFocus !== null ? (
         <FocusSheet
-          projectUrl={project.snapshot.project.url}
-          issueUrl={openUrl}
+          focus={openFocus}
           onClose={() => setOpenUrl(null)}
         />
-      )}
+      ) : null}
     </div>
   );
+}
+
+function findFocus(model: DashboardModel, url: string): FocusCard | null {
+  for (const column of model.columns) {
+    const found = column.focuses.find((focus) => focus.issue.url === url);
+    if (found) return found;
+  }
+  return model.unstaged.find((focus) => focus.issue.url === url) ?? null;
 }

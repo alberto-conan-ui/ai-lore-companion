@@ -1,7 +1,7 @@
 import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
 import type { SpaceInitOf } from '../../../../shared/ipc.js';
 import { SearchDialog, type SearchScope } from '../../components/SearchDialog.js';
-import { Dashboard } from '../dashboard/Dashboard.js';
+import { DashboardV2 as Dashboard } from '../dashboard/v2/DashboardV2.js';
 import { SpaceDialogs } from '../dialogs/SpaceDialogs.js';
 import { errorAreaStyle } from '../styles.js';
 import { useWindowRequest } from '../useWindowRequest.js';

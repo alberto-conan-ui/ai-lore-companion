@@ -442,7 +442,9 @@ export function useSetupFlow(start: SetupStart): SetupFlowView {
     const shown = new Set(live.map((problem) => `${problem.field}\u0000${problem.message}`));
     return [
       ...live,
-      ...planProblems.filter((problem) => !shown.has(`${problem.field}\u0000${problem.message}`)),
+      ...planProblems.filter(
+        (problem) => !shown.has(`${problem.field}\u0000${problem.message}`),
+      ),
     ];
   }, [allProblems, planProblems, submitted, touched]);
 

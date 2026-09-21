@@ -15,11 +15,24 @@ describe('relativeTime', () => {
     expect(relativeTime(iso, now)).toBe(expected);
   });
 
-  it('returns "since Month" format for older dates (>30 days)', () => {
+  it('returns "since Month Year" format for older dates (>30 days)', () => {
     const now = new Date('2026-09-21T15:00:00Z').getTime();
     const iso = '2026-06-15T10:00:00Z';
     const date = new Date(iso);
     const month = date.toLocaleString('en-US', { month: 'long' });
-    expect(relativeTime(iso, now)).toBe(`since ${month}`);
+    const year = date.getFullYear();
+    expect(relativeTime(iso, now)).toBe(`since ${month} ${year}`);
+  });
+
+  it('returns "N days ago" format for 2-30 days', () => {
+    const now = new Date('2026-09-21T15:00:00Z').getTime();
+    const iso = '2026-09-10T10:00:00Z'; // 11 days ago
+    expect(relativeTime(iso, now)).toBe('11 days ago');
+  });
+
+  it('returns "today" for future dates', () => {
+    const now = new Date('2026-09-21T15:00:00Z').getTime();
+    const iso = '2026-09-22T10:00:00Z';
+    expect(relativeTime(iso, now)).toBe('today');
   });
 });

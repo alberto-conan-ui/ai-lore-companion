@@ -15,7 +15,7 @@ export const linkStyle: CSSProperties = {
   background: 'none',
   border: 'none',
   padding: 0,
-  color: 'var(--d-accent, #5a9bd4)',
+  color: 'var(--color-link)',
   fontSize: '0.75rem',
   textDecoration: 'underline',
   cursor: 'pointer',
@@ -33,7 +33,7 @@ export function relativeTime(iso: string, now: number): string {
   const nowMidnight = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate());
   const diffDays = Math.round((nowMidnight.getTime() - dateMidnight.getTime()) / 86400000);
 
-  if (diffDays === 0) {
+  if (diffDays <= 0) {
     return 'today';
   }
   if (diffDays === 1) {
@@ -43,7 +43,8 @@ export function relativeTime(iso: string, now: number): string {
   }
   if (diffDays > 30) {
     const month = date.toLocaleString('en-US', { month: 'long' });
-    return `since ${month}`;
+    const year = date.getFullYear();
+    return `since ${month} ${year}`;
   }
   return `${diffDays} days ago`;
 }
