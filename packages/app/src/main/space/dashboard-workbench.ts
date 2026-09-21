@@ -182,14 +182,10 @@ function handoverOf(file: FileRecord, text: string): DashboardWorkbenchHandover 
     path: file.relativePath,
     title: titleOf(text, basename(file.relativePath, '.md')),
     sessionId,
-    text: textVal === null ? null : textVal.slice(0, MAX_TEXT),
-    parts: {
-      done: parts.done === null ? null : parts.done.slice(0, MAX_TEXT),
-      inProgress: parts.inProgress === null ? null : parts.inProgress.slice(0, MAX_TEXT),
-      nextAction: parts.nextAction === null ? null : parts.nextAction.slice(0, MAX_TEXT),
-      text: parts.text.slice(0, MAX_TEXT),
-      fallback: parts.fallback,
-    },
+    // The reader already bounds IO. The sheet must keep the whole readable note,
+    // rather than inheriting the old card preview's 4096-character truncation.
+    text: textVal ?? text,
+    parts: { ...parts, text: parts.fallback ? (textVal ?? text) : parts.text },
     timestamp: new Date(file.createdAt || file.modifiedAt).toISOString(),
     timestampKind: file.timestampKind,
     modifiedAt: new Date(file.modifiedAt).toISOString(),

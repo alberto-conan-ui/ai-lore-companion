@@ -56,7 +56,9 @@ function definition(): DashboardDefinition {
       },
       {
         id: 'waiting',
-        panels: [{ id: 'handover', kind: 'handovers', source: 'companion', limit: 5, order: 'newest' }],
+        panels: [
+          { id: 'handover', kind: 'handovers', source: 'companion', limit: 5, order: 'newest' },
+        ],
       },
     ],
   };
@@ -165,7 +167,12 @@ test('definition and PM validation reject unsupported, duplicate, incomplete and
 
   const badDefinition = {
     version: 2,
-    bands: [{ id: 'needs-you', panels: [{ id: 'next', kind: 'next-action', source: 'companion', bogus: true }] }],
+    bands: [
+      {
+        id: 'needs-you',
+        panels: [{ id: 'next', kind: 'next-action', source: 'companion', bogus: true }],
+      },
+    ],
   };
   await writeFile(join(root, 'lore', 'corpus', 'dashboard.json'), JSON.stringify(badDefinition));
   const rejected = await readDashboardDefinition({ spaceRoot: root });
@@ -174,7 +181,12 @@ test('definition and PM validation reject unsupported, duplicate, incomplete and
 
   const badLimit: DashboardDefinition = {
     version: 2,
-    bands: [{ id: 'needs-you', panels: [{ id: 'position', kind: 'text', source: 'pm', title: 'Position', limit: 2 }] }],
+    bands: [
+      {
+        id: 'needs-you',
+        panels: [{ id: 'position', kind: 'text', source: 'pm', title: 'Position', limit: 2 }],
+      },
+    ],
   };
   await writeFile(join(root, 'lore', 'corpus', 'dashboard.json'), JSON.stringify(badLimit));
   const ignoredLimit = await readDashboardDefinition({ spaceRoot: root });
@@ -202,7 +214,12 @@ test('duplicate list item IDs and Workbench reads are bounded', async () => {
   );
   const listDefinition: DashboardDefinition = {
     version: 2,
-    bands: [{ id: 'needs-you', panels: [{ id: 'items', kind: 'list', source: 'pm', title: 'Items', limit: 5 }] }],
+    bands: [
+      {
+        id: 'needs-you',
+        panels: [{ id: 'items', kind: 'list', source: 'pm', title: 'Items', limit: 5 }],
+      },
+    ],
   };
   const listRoot = await rootWithDefinition(listDefinition);
   const listResolved = await readDashboardDefinition({ spaceRoot: listRoot });
@@ -265,6 +282,30 @@ test('Workbench reads a handover at the end of a bounded long journal and reject
   );
 });
 
+test('handover sheets retain text beyond the old preview limit and the whole fallback note', async () => {
+  const root = await rootWithDefinition(definition());
+  const done = `${'A detailed implementation note. '.repeat(200)}The final evidence.`;
+  const fallback =
+    '# An unstructured note\nOpening line.\nSecond line.\nThird line.\nFourth line must survive.';
+  await writeFile(
+    join(root, 'workbench', 'journal', 'parts.md'),
+    `# Session\n## Handover\n### Done\n${done}\n### In progress\nVerification.\n### What the next session should do\nReview the result.`,
+  );
+  await writeFile(join(root, 'workbench', 'journal', 'fallback.md'), fallback);
+  const snapshot = await readDashboardWorkbench({
+    workbenchRoot: join(root, 'workbench'),
+    limit: 10,
+  });
+  assert.equal(
+    snapshot.handovers.find((entry) => entry.path.endsWith('parts.md'))?.parts.done,
+    done,
+  );
+  assert.equal(
+    snapshot.handovers.find((entry) => entry.path.endsWith('fallback.md'))?.parts.text,
+    fallback,
+  );
+});
+
 test('polling marks body edits stale, ignores transient activity and rejects late request generations', async () => {
   const root = await rootWithDefinition(definition());
   const draft = join(root, 'workbench', 'drafts', 'draft.md');
@@ -305,10 +346,22 @@ test('polling marks body edits stale, ignores transient activity and rejects lat
               source: 'companion',
               pmLine: { id: 'position', instruction: 'Changed position.' },
             },
-            { id: 'review', kind: 'review-documents', source: 'companion', limit: 3, recentDays: 14, order: 'newest' },
+            {
+              id: 'review',
+              kind: 'review-documents',
+              source: 'companion',
+              limit: 3,
+              recentDays: 14,
+              order: 'newest',
+            },
           ],
         },
-        { id: 'waiting', panels: [{ id: 'handover', kind: 'handovers', source: 'companion', limit: 5, order: 'newest' }] },
+        {
+          id: 'waiting',
+          panels: [
+            { id: 'handover', kind: 'handovers', source: 'companion', limit: 5, order: 'newest' },
+          ],
+        },
       ],
     }),
   );
