@@ -55,7 +55,7 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
         'await client.connect(new StreamableHTTPClientTransport(new URL(config.url), {requestInit:{headers:config.headers}}));',
         `process.stdin.on('data', (chunk) => fs.appendFileSync(${JSON.stringify(stdinWrites)}, chunk.toString()));`,
         'let reports = 0;',
-        `const report = async () => { reports += 1; fs.appendFileSync(${JSON.stringify(reportCalls)}, processTag + ':' + reports + '\\n'); const context = await client.callTool({name:'get_dashboard_context',arguments:{}}); const text = context.content?.[0]?.text ?? '{}'; const dashboard = JSON.parse(text); const definitionHash = dashboard.definition?.hash; await client.callTool({name:'report_dashboard',arguments:{definitionHash,components:[{id:'position',type:'text',text:'Current position: PM report ' + processTag + '.' + reports},{id:'blockers',type:'list',items:[]},{id:'decisions',type:'list',items:[]}],basis:'Deterministic engine exercising the real MCP transport.'}}); };`,
+        `const report = async () => { reports += 1; fs.appendFileSync(${JSON.stringify(reportCalls)}, processTag + ':' + reports + '\\n'); const context = await client.callTool({name:'get_dashboard_context',arguments:{}}); const text = context.content?.[0]?.text ?? '{}'; const dashboard = JSON.parse(text); const definitionHash = dashboard.definition?.hash; await client.callTool({name:'report_dashboard',arguments:{definitionHash,components:[{id:'next-action-note',type:'text',text:'PM report ' + processTag + '.' + reports},{id:'dormant-note',type:'text',text:'Dormant note ' + processTag + '.' + reports}],basis:'Deterministic engine exercising the real MCP transport.'}}); };`,
         "const allowed = args.indexOf('--allowedTools');",
         "const initialPrompt = allowed > 0 ? args[allowed - 1] : '';",
         `if (initialPrompt.includes('update the dashboard')) { fs.writeFileSync(${JSON.stringify(promptSeen)}, initialPrompt); }`,
@@ -87,14 +87,27 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
     const initialPrompt = readFileSync(promptSeen, 'utf8');
     expect(initialPrompt).toContain('update the dashboard');
     await page.getByTestId('space-rail-dashboard').click();
-    await expect(page.getByTestId('dashboard-definition')).toBeVisible();
-    await expect(page.getByTestId('dashboard-component-position')).toHaveCount(1);
+    await expect(page.getByTestId('dashboard')).toBeVisible();
     expect(existsSync(stdinWrites)).toBe(false);
 
     writeFileSync(trustCleared, 'ok');
-    await expect(page.getByTestId('dashboard-component-position')).toContainText('PM report 1', {
+    await expect(page.getByTestId('dashboard-refresh-status')).toContainText('Updated', {
       timeout: 15_000,
     });
+    await page.getByRole('button', { name: 'Details', exact: true }).click();
+    await expect(page.getByTestId('dashboard-details')).toContainText('Accepted');
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const result = await window.cockpit.spaceDashboardReport({});
+          if (!result.ok) return null;
+          const component = result.value.report?.components.find(
+            (candidate) => candidate.id === 'next-action-note' && candidate.type === 'text',
+          );
+          return component?.type === 'text' ? component.text : null;
+        }),
+      )
+      .toBe('PM report 1.1');
     expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1:1']);
     expect(existsSync(stdinWrites)).toBe(false);
 
@@ -115,7 +128,7 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
     if (!conversational.ok) throw new Error(conversational.error.message);
     await page.getByTestId('space-rail-dashboard').click();
     await page.getByTestId('dashboard-refresh').click();
-    await expect(page.getByTestId('dashboard-component-position')).toContainText('PM report 2.1', {
+    await expect(page.getByTestId('dashboard-refresh-status')).toContainText('Updated', {
       timeout: 20_000,
     });
     await expect(page.getByTestId('dashboard-refresh-status')).toHaveAttribute(
@@ -123,6 +136,18 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
       'updated',
       { timeout: 20_000 },
     );
+    await expect
+      .poll(async () =>
+        page.evaluate(async () => {
+          const result = await window.cockpit.spaceDashboardReport({});
+          if (!result.ok) return null;
+          const component = result.value.report?.components.find(
+            (candidate) => candidate.id === 'next-action-note' && candidate.type === 'text',
+          );
+          return component?.type === 'text' ? component.text : null;
+        }),
+      )
+      .toBe('PM report 2.1');
     const afterRefresh = await page.evaluate(() => window.cockpit.spacePmEnsure({}));
     expect(afterRefresh.ok).toBe(true);
     expect(afterRefresh.ok ? afterRefresh.value.sessionId : '').toBe(
