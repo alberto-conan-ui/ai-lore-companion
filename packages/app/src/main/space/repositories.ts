@@ -34,7 +34,7 @@ import {
   generateRepositorySkeleton,
   mirrorDrift,
   type MirrorDrift,
-  type MirrorCard
+  type MirrorCard,
 } from '@ai-lore-companion/core';
 import type {
   RootSummary,
@@ -198,31 +198,51 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
 
         if (now().getTime() >= nextMirrorCheck) {
           nextMirrorCheck = now().getTime() + DEFAULT_REPOSITORY_REFRESH_MS * 2;
-          const loreRoot = list.roots.find(summary => summary.root.kind === 'lore')?.root;
+          const loreRoot = list.roots.find((summary) => summary.root.kind === 'lore')?.root;
           if (loreRoot && loreRoot.tracking.tracked) {
             const spaceRoot = loreRoot.tracking.workTree;
             const loreResult = await readLore(spaceRoot);
             if (loreResult.ok) {
-              const mirrors = loreResult.value.cards.filter((c): c is MirrorCard => c.kind === 'mirror');
+              const mirrors: MirrorCard[] = loreResult.value.parts.mirrors.map((e: any) => e.card);
               await Promise.allSettled(
-                list.roots.map(async summary => {
+                list.roots.map(async (summary) => {
                   const root = summary.root;
                   if (root.kind !== 'repository' && root.kind !== 'publish-area') return;
                   const payloadPath = `repos/${root.name}`;
-                  const card = mirrors.find(m => m.payload === payloadPath);
+                  const card = mirrors.find((m: MirrorCard) => m.payload === payloadPath);
                   const mirrorPath = `lore/mirrors/${root.name}.md`;
                   if (!card) {
-                    cachedMirrors[root.id] = { path: mirrorPath, state: 'no-mirror', added: 0, removed: 0, checkedAt: now().toISOString() };
+                    cachedMirrors[root.id] = {
+                      path: mirrorPath,
+                      state: 'no-mirror',
+                      added: 0,
+                      removed: 0,
+                      checkedAt: now().toISOString(),
+                    };
                     return;
                   }
                   try {
-                    const generatedResult = await generateRepositorySkeleton({ spaceRoot, runner: options.runner, name: root.name });
+                    const generatedResult = await generateRepositorySkeleton({
+                      spaceRoot,
+                      runner: options.runner,
+                      name: root.name,
+                    });
                     const generated = generatedResult.ok ? generatedResult.value : null;
-                    cachedMirrors[root.id] = mirrorDrift({ path: mirrorPath, stored: card.skeleton, generated, checkedAt: now().toISOString() });
+                    cachedMirrors[root.id] = mirrorDrift({
+                      path: mirrorPath,
+                      stored: card.skeleton,
+                      generated,
+                      checkedAt: now().toISOString(),
+                    });
                   } catch (e) {
-                    cachedMirrors[root.id] = mirrorDrift({ path: mirrorPath, stored: card.skeleton, generated: null, checkedAt: now().toISOString() });
+                    cachedMirrors[root.id] = mirrorDrift({
+                      path: mirrorPath,
+                      stored: card.skeleton,
+                      generated: null,
+                      checkedAt: now().toISOString(),
+                    });
                   }
-                })
+                }),
               );
             }
           }

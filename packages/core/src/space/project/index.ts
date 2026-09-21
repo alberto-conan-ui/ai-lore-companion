@@ -35,7 +35,7 @@ export {
   type RepositoryRowChanges,
   repositoriesModel,
   mirrorDrift,
-  type MirrorDrift
+  type MirrorDrift,
 } from './repositories-model.js';
 
 export {
