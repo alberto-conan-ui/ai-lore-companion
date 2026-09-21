@@ -51,6 +51,8 @@ export {
   moveSessionIssue,
   putSessionIssue,
   readHandover,
+  type HandoverParts,
+  parseHandover,
   sessionIssueMarker,
   sessionIssueTitle,
 } from './session-issue.js';

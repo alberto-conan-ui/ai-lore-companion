@@ -315,6 +315,92 @@ export function readHandover(entry: string): string | null {
   return text === '' ? null : text;
 }
 
+export type HandoverParts = {
+  done: string | null;
+  inProgress: string | null;
+  nextAction: string | null;
+  /** The whole `## Handover` body, or the entry's opening lines when it has none. */
+  text: string;
+  /** True when no part was recognised and `text` is the fallback. */
+  fallback: boolean;
+};
+
+export function parseHandover(entry: string): HandoverParts {
+  const handoverBody = readHandover(entry);
+  const lines = entry.split('\n');
+  let fallbackText = '';
+  const firstLines: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed !== '' && !trimmed.startsWith('#')) {
+      firstLines.push(trimmed);
+      if (firstLines.length >= 3) break;
+    }
+  }
+  fallbackText = firstLines.join('\n');
+
+  const parts: HandoverParts = {
+    done: null,
+    inProgress: null,
+    nextAction: null,
+    text: handoverBody ?? fallbackText,
+    fallback: true,
+  };
+
+  if (handoverBody !== null) {
+    const bodyLines = handoverBody.split('\n');
+    let currentPart: 'done' | 'inProgress' | 'nextAction' | null = null;
+    let currentContent: string[] = [];
+
+    const flush = () => {
+      if (currentPart !== null && currentContent.length > 0) {
+        const joined = currentContent.join('\n').trim();
+        if (joined !== '') {
+          parts[currentPart] = parts[currentPart]
+            ? parts[currentPart] + '\n\n' + joined
+            : joined;
+        }
+      }
+      currentContent = [];
+    };
+
+    for (const line of bodyLines) {
+      if (/^#{1,6}\s/.test(line)) {
+        const h = line.toLowerCase();
+        let matched = false;
+        if (/\bdone\b/.test(h)) {
+          flush();
+          currentPart = 'done';
+          matched = true;
+          parts.fallback = false;
+        } else if (/\bin progress\b/.test(h)) {
+          flush();
+          currentPart = 'inProgress';
+          matched = true;
+          parts.fallback = false;
+        } else if (/next session|what.*next/.test(h)) {
+          flush();
+          currentPart = 'nextAction';
+          matched = true;
+          parts.fallback = false;
+        }
+
+        if (matched) continue;
+      }
+      if (currentPart !== null) {
+        currentContent.push(line);
+      }
+    }
+    flush();
+    
+    if (parts.fallback) {
+      parts.text = fallbackText;
+    }
+  }
+
+  return parts;
+}
+
 /** Why a GitHub operation failed, as the end of a sentence. */
 export function describeGitHubFailure(error: GitHubError): string {
   switch (error.kind) {
