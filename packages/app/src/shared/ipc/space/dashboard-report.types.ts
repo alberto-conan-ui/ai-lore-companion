@@ -4,6 +4,8 @@
  * app state and is never written to a Space payload.
  */
 
+import type { HandoverParts } from '@ai-lore-companion/core';
+
 /** Limits shared by the app-side validator and the reporting tool. */
 export const DASHBOARD_REPORT_MAX_CHARS = 24 * 1024;
 export const DASHBOARD_REPORT_BASIS_MAX_CHARS = 1024;
@@ -105,6 +107,7 @@ export type DashboardWorkbenchHandover = {
   title: string;
   sessionId: string | null;
   text: string | null;
+  parts: HandoverParts;
   timestamp: string;
   timestampKind: 'creation' | 'modification';
   modifiedAt: string;
