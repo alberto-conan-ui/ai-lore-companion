@@ -331,8 +331,9 @@ export function parseHandover(entry: string): HandoverParts {
 
     for (const line of lines) {
       const isHeading = /^#{1,6}\s+(.*)$/.exec(line);
-      if (isHeading) {
-        const hText = isHeading[1]?.toLowerCase() ?? '';
+      const isBold = /^\*\*([^*]+)\*\*$/.exec(line.trim());
+      if (isHeading || isBold) {
+        const hText = (isHeading ? isHeading[1] : isBold![1])?.toLowerCase() ?? '';
         if (/\bdone\b/.test(hText) || /what was done/.test(hText)) {
           savePart();
           currentPart = 'done';

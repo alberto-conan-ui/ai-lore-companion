@@ -1,4 +1,5 @@
-import { expect, test } from 'vitest';
+import test from 'node:test';
+import assert from 'node:assert/strict';
 import { parseHandover } from '../../src/space/project/session-issue.js';
 
 test('parses handover with all three parts', () => {
@@ -17,10 +18,10 @@ Fix D.
 `.trim();
 
   const result = parseHandover(entry);
-  expect(result.fallback).toBe(false);
-  expect(result.done).toBe('Finished A.\nFinished B.');
-  expect(result.inProgress).toBe('Working on C.');
-  expect(result.nextAction).toBe('Fix D.');
+  assert.equal(result.fallback, false);
+  assert.equal(result.done, 'Finished A.\nFinished B.');
+  assert.equal(result.inProgress, 'Working on C.');
+  assert.equal(result.nextAction, 'Fix D.');
 });
 
 test('parses handover with missing parts', () => {
@@ -32,10 +33,10 @@ Something.
 `.trim();
 
   const result = parseHandover(entry);
-  expect(result.fallback).toBe(false);
-  expect(result.done).toBe('Something.');
-  expect(result.inProgress).toBeNull();
-  expect(result.nextAction).toBeNull();
+  assert.equal(result.fallback, false);
+  assert.equal(result.done, 'Something.');
+  assert.equal(result.inProgress, null);
+  assert.equal(result.nextAction, null);
 });
 
 test('parses handover with missing headings but a handover block', () => {
@@ -47,11 +48,11 @@ But here is some text.
 `.trim();
 
   const result = parseHandover(entry);
-  expect(result.fallback).toBe(true);
-  expect(result.done).toBeNull();
-  expect(result.inProgress).toBeNull();
-  expect(result.nextAction).toBeNull();
-  expect(result.text).toBe('I forgot the headings.\nBut here is some text.');
+  assert.equal(result.fallback, true);
+  assert.equal(result.done, null);
+  assert.equal(result.inProgress, null);
+  assert.equal(result.nextAction, null);
+  assert.equal(result.text, 'I forgot the headings.\nBut here is some text.');
 });
 
 test('parses fallback with opening lines when no handover heading', () => {
@@ -65,17 +66,17 @@ Line 4
 `.trim();
 
   const result = parseHandover(entry);
-  expect(result.fallback).toBe(true);
-  expect(result.done).toBeNull();
-  expect(result.inProgress).toBeNull();
-  expect(result.nextAction).toBeNull();
-  expect(result.text).toBe('Line 1\nLine 2\nLine 3');
+  assert.equal(result.fallback, true);
+  assert.equal(result.done, null);
+  assert.equal(result.inProgress, null);
+  assert.equal(result.nextAction, null);
+  assert.equal(result.text, 'Line 1\nLine 2\nLine 3');
 });
 
 test('empty input', () => {
   const result = parseHandover('');
-  expect(result.fallback).toBe(true);
-  expect(result.text).toBe('');
+  assert.equal(result.fallback, true);
+  assert.equal(result.text, '');
 });
 
 test('handles malformed headings', () => {
@@ -90,8 +91,28 @@ Action!
 `.trim();
 
   const result = parseHandover(entry);
-  expect(result.fallback).toBe(false);
-  expect(result.done).toBeNull();
-  expect(result.inProgress).toBe('Working.');
-  expect(result.nextAction).toBe('Action!');
+  assert.equal(result.fallback, false);
+  assert.equal(result.done, null);
+  assert.equal(result.inProgress, 'Working.');
+  assert.equal(result.nextAction, 'Action!');
+});
+
+import fs from 'node:fs';
+import path from 'node:path';
+
+test('parses real entries from journal', () => {
+  const journalDir = '/Users/albertogutierrez/Spaces/ai-lore/workbench/journal/';
+  const files = fs.readdirSync(journalDir);
+  for (const file of files) {
+    if (!file.endsWith('.md')) continue;
+    const content = fs.readFileSync(path.join(journalDir, file), 'utf-8');
+    const result = parseHandover(content);
+    assert.ok(result);
+    if (file === '2026-09-21-1324-pty-flow-control-s-20260921-1101-b7bd5f.md') {
+      assert.equal(result.fallback, false);
+      assert.ok(result.done?.includes('Implemented the fix'));
+      assert.ok(result.inProgress?.includes('terminal freeze'));
+      assert.ok(result.nextAction?.includes('Orient.'));
+    }
+  }
 });
