@@ -21,11 +21,13 @@
 
 import {
   DEFAULT_STALE_AFTER_MS,
+  type DashboardDraft,
   type DashboardGate,
   type Desk,
   type DeskFailure,
   type GitHubError,
   type GitHubPort,
+  type OpenPullRequest,
   type ProjectCache,
   type ProjectCacheFailure,
   type ProjectInfo,
@@ -35,15 +37,20 @@ import {
   type SpaceManifest,
   dashboardModel,
   describeGitHubFailure,
+  dormantAggregate,
   findSpaceProject,
   listSessions,
+  partitionMoving,
+  rankNextActions,
   readProjectCache,
   recordProjectFailure,
   recordProjectSnapshot,
+  spaceStats,
 } from '@ai-lore-companion/core';
 import type { SpaceProjectState } from '../../shared/ipc.js';
 import { type SpaceContext, defineSpaceService } from './context.js';
 import { spaceDashboardReport } from './dashboard-report.js';
+import { readDashboardWorkbench } from './dashboard-workbench.js';
 import { spaceDesk } from './desk-service.js';
 import { spaceGitHub } from './github-service.js';
 import type { SpaceLog } from './log.js';
@@ -59,6 +66,7 @@ export type ProjectRefreshOptions = {
   desk: () => Result<Desk, DeskFailure>;
   /** The gates that wait now. */
   gates: () => DashboardGate[];
+  drafts?: () => Promise<DashboardDraft[]>;
   now?: () => Date;
   /** Default `DEFAULT_PROJECT_REFRESH_MS`. `0` starts no timer. */
   intervalMs?: number;
@@ -99,6 +107,7 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
   let queued: Promise<void> | null = null;
   let disposed = false;
   let attempted = false;
+  let drafts: DashboardDraft[] = [];
   /** The `version` of the last state given; each state gets the next number. */
   let version = 0;
 
@@ -123,7 +132,20 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
   };
 
   const current = (): SpaceProjectState => {
-    const { snapshot, failure } = loaded();
+    const { snapshot, failure, pullRequests = [], pullRequestsFailure = null } = loaded();
+    const at = now().toISOString();
+    const live = sessions();
+    const model =
+      snapshot === null
+        ? null
+        : dashboardModel({
+            snapshot,
+            sessions: live,
+            gates: options.gates(),
+            now: at,
+            staleAfterMs,
+          });
+    const moving = partitionMoving({ model, sessions: live, now: at });
     const state: SpaceProjectState['state'] =
       failure === null
         ? succeeded
@@ -140,16 +162,27 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
       state,
       failure,
       refreshing: running !== null,
-      model:
-        snapshot === null
-          ? null
-          : dashboardModel({
-              snapshot,
-              sessions: sessions(),
-              gates: options.gates(),
-              now: now().toISOString(),
-              staleAfterMs,
-            }),
+      model,
+      pullRequests,
+      pullRequestsFailure,
+      nextActions: rankNextActions({
+        needsYou:
+          model?.needsYou ??
+          options
+            .gates()
+            .map((gate) => ({
+              kind: 'gate' as const,
+              ...gate,
+              item: live.find((session) => session.id === gate.sessionId)?.item ?? null,
+            })),
+        pulls: pullRequests,
+        drafts,
+        now: at,
+        focuses: [...moving.inProgress, ...moving.queued, ...moving.dormant, ...moving.done],
+      }),
+      moving,
+      dormant: dormantAggregate(moving.dormant, at),
+      stats: spaceStats({ model, pulls: pullRequests, sessions: live }),
     };
   };
 
@@ -186,11 +219,18 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
       at: now().toISOString(),
     };
     succeeded = false;
-    keep((desk) => recordProjectFailure(desk, failure), { snapshot: loaded().snapshot, failure });
+    keep((desk) => recordProjectFailure(desk, failure), { ...loaded(), failure });
     options.log?.info('project-refresh-failed', { ...fields, kind: error.kind });
   };
 
   const read = async (): Promise<void> => {
+    if (options.drafts !== undefined) {
+      try {
+        drafts = await options.drafts();
+      } catch {
+        /* Retain the last readable drafts. */
+      }
+    }
     const manifest = options.manifest();
     const repository = manifest.github.repository;
     if (repository === '') {
@@ -234,7 +274,39 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
     }
     succeeded = true;
     const value: ProjectSnapshot = snapshot.value;
-    keep((desk) => recordProjectSnapshot(desk, value), { snapshot: value, failure: null });
+    const repositories = [
+      ...new Set(manifest.repositories.map((entry) => entry.github).filter((name) => name !== '')),
+    ];
+    const previous = loaded().pullRequests ?? [];
+    const pullRequests: OpenPullRequest[] = [];
+    let pullRequestsFailure: ProjectCacheFailure | null = null;
+    for (const repository of repositories) {
+      try {
+        const read = await github.openPullRequests({ repository, limit: 100 });
+        if (read.ok) pullRequests.push(...read.value);
+        else {
+          pullRequests.push(...previous.filter((pull) => pull.repository === repository));
+          pullRequestsFailure ??= {
+            kind: read.error.kind,
+            message: describeGitHubFailure(read.error),
+            at: now().toISOString(),
+          };
+        }
+      } catch (caught) {
+        pullRequests.push(...previous.filter((pull) => pull.repository === repository));
+        pullRequestsFailure ??= {
+          kind: 'failed',
+          message: String(caught),
+          at: now().toISOString(),
+        };
+      }
+    }
+    const pulls = { pullRequests, pullRequestsFailure };
+    keep((desk) => recordProjectSnapshot(desk, value, pulls), {
+      snapshot: value,
+      failure: null,
+      ...pulls,
+    });
   };
 
   const run = (): Promise<void> => {
@@ -341,6 +413,17 @@ export const spaceProjectRefresh = defineSpaceService<ProjectRefresh>({
       manifest: () => context.manifest,
       desk: () => desk.open(),
       gates: () => pendingGates(context),
+      drafts: async () => {
+        const workbench = await readDashboardWorkbench({
+          workbenchRoot: context.paths.workbench,
+          now: settings.now,
+        });
+        return workbench.documents.map((document) => ({
+          path: document.path,
+          title: document.title,
+          at: document.timestamp,
+        }));
+      },
       log: context.log,
       space: context.key,
       ...settings,
@@ -349,9 +432,11 @@ export const spaceProjectRefresh = defineSpaceService<ProjectRefresh>({
     // subscribed to reports yet. Ordinary reads/version increments do not stale prose.
     const reports = context.service(spaceDashboardReport);
     const initial = refresh.current();
-    let source = `${initial.fetchedAt}|${initial.state}|${initial.failure?.at ?? ''}`;
+    const sourceKey = (state: SpaceProjectState): string =>
+      JSON.stringify([state.fetchedAt, state.state, state.failure?.at, state.pullRequests, state.pullRequestsFailure]);
+    let source = sourceKey(initial);
     refresh.subscribe((state) => {
-      const next = `${state.fetchedAt}|${state.state}|${state.failure?.at ?? ''}`;
+      const next = sourceKey(state);
       if (source !== next) reports.markProjectChanged();
       source = next;
     });
