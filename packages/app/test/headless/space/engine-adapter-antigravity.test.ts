@@ -239,6 +239,34 @@ test('launch: parameters first, the two --add-dir in order, the plugin files, an
   assert.ok(shellRules.deny.includes('Bash(git *--output*)'));
 });
 
+test('launch: an interactive initial prompt is refused until Antigravity has a verified form', async () => {
+  const sessionId = 's-no-interactive-prompt';
+  const filePaths = sessionFilePaths(paths.sessions, sessionId);
+  const skills = await readInstalledSkills(paths.install, space.root);
+  assert.throws(
+    () =>
+      antigravityAdapter.launch({
+        sessionId,
+        spaceRoot: space.root,
+        deskDir: paths.desk,
+        paths: filePaths,
+        python,
+        install: {
+          pluginDir: claudeCodeInstallPaths(paths.install).plugin,
+          beforeChecks: before_,
+          afterChecks: after_,
+        },
+        skills,
+        connection: { ...CONNECTION, sessionId },
+        repositories: ['app'],
+        instructions: 'Session instructions.\n',
+        paramArgv: [],
+        initialPrompt: 'Update the dashboard.',
+      }),
+    /no verified interactive initial-prompt option/,
+  );
+});
+
 test('before-write: write_to_file into lore/ in Read only is denied with the mode sentence; into workbench/ it is allowed; a relative TargetFile is resolved against workspacePaths[0]', async () => {
   const sessionId = 's-agy-write';
   writeSessionRecord(sessionId, 'read-only');

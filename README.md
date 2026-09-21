@@ -54,6 +54,55 @@ npm run dev -- --root /path/to/some/other/ai-lore-project
 
 Or set the `COCKPIT_ROOT` environment variable.
 
+## Space PM (Post-MVP thin slice)
+
+Opening an AI-Lore 1.0 Space automatically starts one guarded **PM** tab in
+Sessions. If its engine or Lore installation is unavailable, Sessions explains
+why and offers Retry PM. Ordinary `+ AI` sessions remain independent.
+
+The companion gives each new compatible PM one automatic initial request through
+the engine's native interactive prompt interface. The engine therefore owns its
+startup, trust and authentication ordering; the companion does not type the
+automatic request into the terminal. The **Draft follow-up dashboard request**
+button remains available for an explicit later refresh: it inserts the request,
+and Enter sends it. The PM reads the role and dashboard definitions, then calls
+the authenticated `report_dashboard` MCP tool. Dashboard shows the latest report
+as literal text, with the submitting session, receipt time and a warning after
+the Project source changes or the PM ends. The existing factual Project board is
+unchanged.
+
+The first PM uses the Space's ready remembered engine when it supports a native
+interactive initial prompt, or the first compatible ready engine, and remembers
+that binding separately as `pm-profile`. Only Claude Code and Codex CLI are
+currently selectable for the automatic guarded PM. The OpenCode adapter supports
+its native prompt option, but OpenCode is not a guarded-session engine in the
+current catalog and therefore is not selectable for the PM. Antigravity's prompt
+option has only been verified for headless runs, so an explicit Antigravity PM
+binding is refused and unbound automatic selection skips it. The engine profile's
+`model` is passed to the CLI; an unset model uses the engine's default. A missing
+or unsupported bound engine, ambiguous prompt/subcommand parameters, or
+guard-changing defaults produce a refusal, never a silent switch or an automatic
+unguarded start. Role/model selection has no new settings UI in this slice.
+
+New Spaces receive `lore/corpus/default/pm.md` and `dashboard.md`. To customise
+the report, create `lore/corpus/dashboard.md` with its index entry under a
+confirmed Lore claim. Older Spaces without these cards use the app's shipped
+definitions without modifying their Lore.
+
+The PM stays Read only for reporting. It is window-scoped, not a background
+supervisor; closing the PM stops it, and Start PM/Restart starts a new session.
+Closing the Space stops its sessions and discards the report. This slice adds
+neither worker delegation nor the v1.1 resident AI Lead runtime.
+
+The isolated integration check uses real Electron, terminal I/O and the MCP SDK
+with a deterministic model stand-in (no model API spend):
+
+```bash
+npm run build
+cd packages/app
+../../node_modules/.bin/playwright test space-pm.spec.ts
+```
+
 ## Test
 
 ```bash

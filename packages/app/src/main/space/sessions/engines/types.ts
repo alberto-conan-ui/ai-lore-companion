@@ -45,6 +45,12 @@ export type SessionLaunchInput = {
   instructions: string;
   /** The argument list of the ticked parameters, in the order of the engine's parameters. */
   paramArgv: readonly string[];
+  /**
+   * A user turn the interactive CLI owns from launch. The CLI must keep this
+   * queued behind any of its own trust, authentication or startup UI; the
+   * companion never types it into the PTY.
+   */
+  initialPrompt?: string;
 };
 
 /** A file an adapter writes, relative to the session's folder, with `/`. Mode 0600; folders 0700. */
@@ -64,8 +70,14 @@ export type ReadSpendInput = { sessionId: string; paths: SessionFilePaths };
 export type EngineAdapter = {
   catalogId: EngineCatalogId;
   capability: LoreCapability;
+  /** Whether this CLI has a verified native interactive initial-prompt form. */
+  supportsInitialPrompt: boolean;
   /** The engine's own reserved and guard-changing options (3.5). */
   options: EngineOptions;
+  /** The arguments that pin a configured model, or none for the engine default. */
+  modelArgs(model: string): string[];
+  /** The models a parameter argument list selects. Used to reject a conflicting configured model. */
+  modelsSelectedBy(argv: readonly string[]): string[];
   /** The text the Skills column types for a verb or process `name`, without a newline. */
   skillInvocation(name: string): string;
   /** `invoked`: the verbs are skills or commands the session can run. `listed`: the instructions list them with their card paths (3.3). */

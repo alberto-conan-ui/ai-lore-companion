@@ -1,6 +1,7 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
 import type { DockviewApi } from 'dockview';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { SpaceSessionStarted } from '../../../../shared/ipc.js';
 import type { AiTabSpace } from '../../components/AiTab.js';
 import { DockWorkspace } from '../../components/DockWorkspace.js';
 import type { PanelId, WorkspaceTab } from '../../components/TabbedPanel.js';
@@ -46,6 +47,7 @@ const AI_TAB_HINT =
   "Start begins a guarded session in Read only, in the Space's folder. It enters Writing only through the dialog the companion shows.";
 
 const AI_NOTE_ID = 'space-sessions-ai-note';
+const PM_TAB_ID = 'space-pm';
 
 /**
  * Sessions of a Space window: the v0.8 dock workspace, hosted as it is.
@@ -74,6 +76,10 @@ const AI_NOTE_ID = 'space-sessions-ai-note';
 export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   const [tabs, setTabs] = useState<WorkspaceTab[]>(() => initialTabs ?? []);
   const [engines, setEngines] = useState<EngineEntry[]>([]);
+  const [pmSession, setPmSession] = useState<SpaceSessionStarted | null>(null);
+  const [pmProblem, setPmProblem] = useState<string | null>(null);
+  const [pmStarting, setPmStarting] = useState(true);
+  const mounted = useRef(false);
   const { choice, pick, reinstall, refresh } = useEngineChoice();
   /** AI tabs made by `+ AI` that have not started yet. */
   const pendingStart = useRef(new Set<string>());
@@ -89,6 +95,49 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   const reportSessions = useCallback((): void => {
     setSessionsWithTab([...sessionByTab.current.values()]);
   }, [setSessionsWithTab]);
+
+  const ensurePm = useCallback(async (): Promise<void> => {
+    setPmStarting(true);
+    setPmProblem(null);
+    try {
+      const started = await window.cockpit.spacePmEnsure({});
+      if (!mounted.current) return;
+      if (!started.ok) {
+        setPmProblem(started.error.message);
+        return;
+      }
+      setPmSession(started.value);
+      sessionByTab.current.set(PM_TAB_ID, started.value.sessionId);
+      reportSessions();
+      setTabs((prev) =>
+        prev.some((tab) => tab.id === PM_TAB_ID)
+          ? prev
+          : [
+              {
+                id: PM_TAB_ID,
+                kind: 'ai',
+                title: 'PM',
+                baseTitle: 'PM',
+                manualTitle: true,
+                engine: started.value.engineId,
+              },
+              ...prev,
+            ],
+      );
+    } catch (caught) {
+      if (mounted.current) setPmProblem(`PM could not start: ${String(caught)}`);
+    } finally {
+      if (mounted.current) setPmStarting(false);
+    }
+  }, [reportSessions]);
+
+  useEffect(() => {
+    mounted.current = true;
+    void ensurePm();
+    return () => {
+      mounted.current = false;
+    };
+  }, [ensurePm]);
 
   const engineId = choice?.engineId ?? null;
   const aiReason = choice === null ? AI_READINESS_CHECKING : (choice.refusal?.message ?? undefined);
@@ -150,6 +199,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
         reportSessions();
       }
       pendingStart.current.delete(tabId);
+      if (tabId === PM_TAB_ID) setPmSession(null);
       setTabs((prev) => withoutTab(prev, tabId));
     },
     [tabs, endSession, reportSessions],
@@ -171,11 +221,20 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
 
   const spaceAi = useCallback(
     (tab: WorkspaceTab): AiTabSpace => ({
+      ...(tab.id === PM_TAB_ID
+        ? {
+            engineLocked: true,
+            ...(pmSession ? { existingSession: pmSession } : {}),
+          }
+        : {}),
       start: async (engineId) => {
         pendingStart.current.delete(tab.id);
         const option = choice?.options.find((candidate) => candidate.engineId === engineId);
         const params = tickedParams[engineId] ?? defaultParamTexts(option?.params ?? []);
-        const started = await window.cockpit.spaceSessionStart({ engineId, params });
+        const started =
+          tab.id === PM_TAB_ID
+            ? await window.cockpit.spacePmEnsure({})
+            : await window.cockpit.spaceSessionStart({ engineId, params });
         if (!started.ok) {
           refresh();
           return { ok: false, message: started.error.message };
@@ -183,11 +242,16 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
         if (started.value.unguarded.length > 0) {
           setTabs((prev) => withAiUnguarded(prev, tab.id));
         }
+        if (tab.id === PM_TAB_ID) {
+          setPmSession(started.value);
+          setTabs((prev) => withAiEngine(prev, tab.id, started.value.engineId, engineName));
+        }
         return { ok: true, sessionId: started.value.sessionId, ptyId: started.value.ptyId };
       },
       autoStart: pendingStart.current.has(tab.id) && !tab.lastSession,
       onSessionChange: (sessionId) => {
         if (sessionId === null) {
+          if (tab.id === PM_TAB_ID) setPmSession(null);
           sessionByTab.current.delete(tab.id);
           reportSessions();
           return;
@@ -204,11 +268,30 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
         <SessionHeader sessionId={sessionId} engineName={engineName(tab.engine ?? '')} />
       ),
       sidebar: (ptyId, focusPty) => (
-        <SkillsColumn ptyId={ptyId} focusPty={focusPty} engineId={tab.engine ?? null} />
+        <>
+          {tab.id === PM_TAB_ID ? (
+            <button
+              type="button"
+              style={secondaryButtonStyle}
+              data-testid="pm-dashboard-request"
+              title="The PM receives an initial dashboard request automatically. Insert a follow-up request, then press Enter to send it."
+              onClick={() => {
+                window.cockpit.sendTerminalInput({
+                  id: ptyId,
+                  data: 'You are the PM. Please update the dashboard using report_dashboard.',
+                });
+                focusPty();
+              }}
+            >
+              Draft follow-up dashboard request
+            </button>
+          ) : null}
+          <SkillsColumn ptyId={ptyId} focusPty={focusPty} engineId={tab.engine ?? null} />
+        </>
       ),
       hint: AI_TAB_HINT,
     }),
-    [engineName, endSession, refresh, reportSessions, choice, tickedParams],
+    [engineName, endSession, refresh, reportSessions, choice, tickedParams, pmSession],
   );
 
   const onDockApi = useCallback((api: DockviewApi): void => {
@@ -283,12 +366,33 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
     [tabs],
   );
 
+  const pmNotice = (
+    <div data-testid="pm-status" style={emptyTextStyle}>
+      {pmStarting ? (
+        'Starting PM…'
+      ) : pmProblem !== null ? (
+        <span role="alert">{pmProblem}</span>
+      ) : null}
+      {!pmStarting && !tabs.some((tab) => tab.id === PM_TAB_ID) ? (
+        <button
+          type="button"
+          style={secondaryButtonStyle}
+          data-testid="pm-retry"
+          onClick={() => void ensurePm()}
+        >
+          {pmProblem ? 'Retry PM' : 'Start PM'}
+        </button>
+      ) : null}
+    </div>
+  );
+
   // The dock's creators are in the header of a tab group, and with no tab there is no
   // group. The same creators are offered here until the first tab exists.
   if (tabs.length === 0) {
     return (
       <section style={emptyStyle} aria-label="Sessions" data-testid="space-sessions-empty">
         <h2 style={emptyTitleStyle}>Sessions</h2>
+        {pmNotice}
         <p style={emptyTextStyle}>No tab is open. A shell starts in the Space's folder.</p>
         <EngineStartControl
           choice={choice}
@@ -329,6 +433,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   return (
     <section style={dockStyle} aria-label="Sessions" data-testid="space-sessions">
       <div style={aiCompactRowStyle}>
+        {pmNotice}
         <EngineStartControl
           choice={choice}
           onStart={startEngine}

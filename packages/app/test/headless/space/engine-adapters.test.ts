@@ -51,6 +51,22 @@ const CONNECTION: SessionConnection = {
   tools: ['request_writing', 'request_gate', 'await_answer', 'leave_writing'],
 };
 
+test('Codex model conflicts include short selectors and config overrides', () => {
+  for (const argv of [
+    ['--model', 'other'],
+    ['--model=other'],
+    ['-m', 'other'],
+    ['-m=other'],
+    ['-mother'],
+    ['-c', 'model=other'],
+    ['-cmodel=other'],
+    ['--config= model =other'],
+  ]) {
+    assert.deepEqual(codexAdapter.modelsSelectedBy(argv), ['other'], argv.join(' '));
+  }
+  assert.deepEqual(codexAdapter.modelsSelectedBy(['-c', 'model_reasoning_effort=high']), []);
+});
+
 function engine(id: string, binary: string): EngineEntry {
   return { id, name: id, binary };
 }
@@ -192,6 +208,7 @@ test('the Claude Code launch gives the parameters first, --append-system-prompt 
     repositories: [],
     instructions,
     paramArgv: ['--model', 'opus'],
+    initialPrompt: 'Update the dashboard.',
   });
 
   assert.deepEqual(launch.args.slice(0, 2), ['--model', 'opus']);
@@ -199,6 +216,7 @@ test('the Claude Code launch gives the parameters first, --append-system-prompt 
   assert.ok(appendIndex >= 0);
   assert.equal(launch.args[appendIndex + 1], instructions);
   assert.ok(appendIndex < launch.args.indexOf('--allowedTools'));
+  assert.ok(launch.args.indexOf('Update the dashboard.') < launch.args.indexOf('--allowedTools'));
   assert.deepEqual(launch.env, {});
   assert.equal(claudeCodeInstallPaths(paths.install).plugin, verified.value.pluginDir);
 

@@ -144,6 +144,8 @@ const cockpit = {
   spaceSessionEnginePick: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionReinstall: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionStart: vi.fn<(arg: unknown) => Promise<unknown>>(),
+  // PM auto-start is opt-in for the session tests; this fixture keeps it refused.
+  spacePmEnsure: vi.fn<(arg: unknown) => Promise<unknown>>(),
   spaceSessionEnd: vi.fn(async () => ({ ok: true, value: { sessionId: 's-1' } })),
   spaceDialogsPending: vi.fn(async () => ({ ok: true, value: { requests: [GATE] } })),
   onSpaceDialogsPending: vi.fn(() => () => {}),
@@ -174,6 +176,10 @@ beforeEach(() => {
   cockpit.spaceSessionStart.mockResolvedValue({
     ok: true,
     value: { sessionId: 's-1', ptyId: 'pty-1', engineId: 'claude-code', unguarded: [] },
+  });
+  cockpit.spacePmEnsure.mockResolvedValue({
+    ok: false,
+    error: { kind: 'pm-unavailable', message: 'PM is disabled for this test.' },
   });
   (window as unknown as { cockpit: unknown }).cockpit = cockpit;
   useSpaceNavStore.setState({ screen: 'dashboard', sessionsRequest: null, sessionsWithTab: [] });

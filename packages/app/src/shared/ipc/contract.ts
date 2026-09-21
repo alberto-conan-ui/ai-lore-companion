@@ -79,6 +79,7 @@ import type {
   WindowInitPayload,
 } from '../ipc.js';
 import { SPACE_COMMANDS_CONTRACT } from './space/commands.contract.js';
+import { SPACE_DASHBOARD_REPORT_CONTRACT } from './space/dashboard-report.contract.js';
 import { SPACE_DIALOGS_CONTRACT } from './space/dialogs.contract.js';
 import { SPACE_FILES_CONTRACT } from './space/files.contract.js';
 import { SPACE_MACHINE_CONTRACT } from './space/machine.contract.js';
@@ -313,6 +314,7 @@ export const CONTRACT = {
   ...SPACE_MACHINE_CONTRACT,
   ...SPACE_COMMANDS_CONTRACT,
   ...SPACE_SESSIONS_CONTRACT,
+  ...SPACE_DASHBOARD_REPORT_CONTRACT,
   ...SPACE_DIALOGS_CONTRACT,
   ...SPACE_ROOTS_CONTRACT,
   ...SPACE_FILES_CONTRACT,

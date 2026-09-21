@@ -121,6 +121,24 @@ test('launch: the args after the parameters, in the order of section 5 M10.7 ite
   assert.deepEqual(launch.files, []);
 });
 
+test('launch: a native initial prompt is the unambiguous positional after --', () => {
+  const launch = codexAdapter.launch({
+    sessionId: 's-codex-prompt',
+    spaceRoot: '/space',
+    deskDir: '/desk',
+    paths: sessionFilePaths('/sessions', 's-codex-prompt'),
+    python: '/usr/bin/python3',
+    install: FAKE_INSTALL,
+    skills: [],
+    connection: CONNECTION,
+    repositories: [],
+    instructions: 'Session instructions.\n',
+    paramArgv: ['--no-alt-screen'],
+    initialPrompt: 'Update the dashboard.',
+  });
+  assert.deepEqual(launch.args.slice(-2), ['--', 'Update the dashboard.']);
+});
+
 test('launch: the -c values quote the instructions and the connection fields as TOML basic strings (JSON.stringify)', () => {
   const instructions = 'A line with a "quote", a \\ backslash and a\nnewline.\n';
   const connection: SessionConnection = {

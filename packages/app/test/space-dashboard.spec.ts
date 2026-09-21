@@ -129,7 +129,7 @@ function seedDashboardRun(): DashboardRun {
     // before it sleeps, so a test can read it back.
     writeFileSync(
       engine,
-      `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argvFile)}\nexec sleep 600\n`,
+      `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(argvFile)}-"$AI_LORE_SESSION_ID"\nexec sleep 600\n`,
     );
     chmodSync(engine, 0o755);
     writeFileSync(
@@ -168,10 +168,23 @@ function seedDashboardRun(): DashboardRun {
   }
 }
 
-/** The `mcp.json` of the one session started in the run. */
+/** The manual session's MCP connection, not the PM automatically started on open. */
 function sessionMcpFile(sessionsDir: string): string | null {
   if (!existsSync(sessionsDir)) return null;
+  const recordsFile = join(dirname(sessionsDir), 'desk', 'sessions.json');
+  if (!existsSync(recordsFile)) return null;
+  const records = (
+    JSON.parse(readFileSync(recordsFile, 'utf8')) as {
+      records: Array<{ id: string; purpose?: string; closedAt?: string }>;
+    }
+  ).records;
   for (const entry of readdirSync(sessionsDir)) {
+    if (
+      !records.some(
+        (record) => record.id === entry && record.purpose !== 'pm' && record.closedAt === undefined,
+      )
+    )
+      continue;
     const file = join(sessionsDir, entry, 'mcp.json');
     if (existsSync(file)) return file;
   }
@@ -221,7 +234,9 @@ async function startSession(page: Page): Promise<void> {
   await expect(start).toBeEnabled({ timeout: 15_000 });
   await start.click();
   await expect(page.getByTestId('space-rail-sessions')).toHaveAttribute('aria-current', 'page');
-  await expect(page.getByTestId('session-header')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-testid="session-header"]:visible')).toBeVisible({
+    timeout: 15_000,
+  });
 }
 
 test.describe('the Dashboard', () => {
@@ -439,12 +454,17 @@ test.describe('the Dashboard', () => {
         .toBe(true);
 
       // The ticked parameter reached the stand-in engine's argument list.
-      await expect.poll(() => existsSync(run.argvFile), { timeout: 10_000 }).toBe(true);
-      const argv = readFileSync(run.argvFile, 'utf8').split('\n');
+      const manualMcp = sessionMcpFile(run.seeded.sessionsDir);
+      expect(manualMcp).not.toBeNull();
+      const manualArgv = `${run.argvFile}-${dirname(manualMcp as string)
+        .split('/')
+        .pop()}`;
+      await expect.poll(() => existsSync(manualArgv), { timeout: 10_000 }).toBe(true);
+      const argv = readFileSync(manualArgv, 'utf8').split('\n');
       expect(argv).toContain('--dangerously-skip-permissions');
 
       // The tab and the session header say the session is unguarded.
-      await expect(page.getByTestId('tab-ai')).toContainText('· unguarded');
+      await expect(page.getByTestId('tab-ai').filter({ hasText: '· unguarded' })).toBeVisible();
       await expect(page.getByTestId('session-header-unguarded')).toHaveText('Unguarded');
     } finally {
       await closeSpaceApp(app);

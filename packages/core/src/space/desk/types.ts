@@ -20,6 +20,9 @@ export type JsonObject = { [key: string]: JsonValue };
 /** The two modes of a session. */
 export type SessionMode = 'read-only' | 'writing';
 
+/** Why the companion started a session. Absent records are ordinary Human Lead sessions. */
+export type SessionPurpose = 'pm';
+
 /**
  * What a session in Writing may write: the Lore, a publish area, or a
  * repository held whole on a named branch.
@@ -76,6 +79,8 @@ export type SessionRecord = {
   engine: string;
   /** Always `true` in the MVP: unattended sessions are a non-goal. */
   attended: true;
+  /** Present only for the Space's automatically started Project Manager session. */
+  purpose?: SessionPurpose;
   mode: SessionMode;
   /** ISO 8601. */
   startedAt: string;

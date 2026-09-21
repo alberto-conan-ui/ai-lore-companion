@@ -49,6 +49,7 @@ import {
   isReviewedMark,
   isSessionClose,
   isSessionProfile,
+  isSessionPurpose,
   isSessionRecord,
   isSessionSpend,
   isUnattendedTag,
@@ -721,6 +722,7 @@ test('the guards accept the record shapes with extra fields and refuse anything 
     isIssueRef,
     isWriteTarget,
     isSessionRecord,
+    isSessionPurpose,
     isSessionProfile,
     isSessionSpend,
     isClaim,
@@ -746,6 +748,8 @@ test('the guards accept the record shapes with extra fields and refuse anything 
   assert.equal(isSessionRecord({ ...session('s1'), item: { number: 1 } }), false);
   assert.equal(isSessionRecord({ ...session('s1'), unguarded: ['--x'] }), true);
   assert.equal(isSessionRecord({ ...session('s1'), unguarded: [1] }), false);
+  assert.equal(isSessionPurpose('pm'), true);
+  assert.equal(isSessionPurpose('human-lead'), false);
   assert.equal(isClaim({ sessionId: 's1', target: REPO, claimedAt: FIXED }), true);
   assert.equal(
     isClaim({ sessionId: 's1', target: { kind: 'repository' }, claimedAt: FIXED }),
@@ -825,7 +829,9 @@ test('isSessionRecord accepts a record with none of profile, params and spend, a
   assert.equal(isSessionRecord(session('s1', { profile: PROFILE })), true);
   assert.equal(isSessionRecord(session('s1', { params: [] })), true);
   assert.equal(isSessionRecord(session('s1', { spend: SPEND_NONE })), true);
+  assert.equal(isSessionRecord(session('s1', { purpose: 'pm' })), true);
   assert.equal(isSessionRecord({ ...session('s1'), profile: { id: 'x', name: 'x' } }), false);
   assert.equal(isSessionRecord({ ...session('s1'), params: [1] }), false);
   assert.equal(isSessionRecord({ ...session('s1'), spend: { source: 'maybe' } }), false);
+  assert.equal(isSessionRecord({ ...session('s1'), purpose: 'human-lead' }), false);
 });

@@ -93,7 +93,41 @@ function hooksTomlValue(matcher: string, command: string, timeoutSeconds: number
 export const codexAdapter: EngineAdapter = {
   catalogId: 'codex',
   capability: CAPABILITY,
+  supportsInitialPrompt: true,
   options: CODEX_OPTIONS,
+  // Verified against the installed Codex CLI: `--model <MODEL>` is its public
+  // session selector. Keeping it out of `-c` also avoids mixing user config
+  // with the companion's fixed session configuration.
+  modelArgs: (model) => (model === '' ? [] : ['--model', model]),
+  modelsSelectedBy: (argv) => {
+    const models: string[] = [];
+    for (let index = 0; index < argv.length; index += 1) {
+      const argument = argv[index] as string;
+      if ((argument === '--model' || argument === '-m') && argv[index + 1] !== undefined) {
+        models.push(argv[index + 1] as string);
+        continue;
+      }
+      if (argument.startsWith('--model=')) {
+        models.push(argument.slice('--model='.length));
+        continue;
+      }
+      if (argument.startsWith('-m') && argument.length > 2) {
+        models.push(argument.slice(argument.startsWith('-m=') ? 3 : 2));
+        continue;
+      }
+      const value =
+        argument === '-c' || argument === '--config'
+          ? argv[index + 1]
+          : argument.startsWith('-c=') || argument.startsWith('--config=')
+            ? argument.slice(argument.indexOf('=') + 1)
+            : argument.startsWith('-c') && argument.length > 2
+              ? argument.slice(2)
+              : undefined;
+      const modelConfig = value?.match(/^\s*model\s*=(.*)$/);
+      if (modelConfig) models.push(modelConfig[1] as string);
+    }
+    return models;
+  },
   skillInvocation: (name) => `Run the Lore's ${name}: read its card and follow it.`,
   verbsAre: 'listed',
   launch(input: SessionLaunchInput): SessionLaunch {
@@ -133,6 +167,10 @@ export const codexAdapter: EngineAdapter = {
       `hooks.PreToolUse=${hooksTomlValue(HOOK_MATCHER, preWrite, PRE_WRITE_TIMEOUTS.hookSeconds)}`,
       '-c',
       `hooks.PostToolUse=${hooksTomlValue(HOOK_MATCHER, postWrite, POST_WRITE_TIMEOUTS.hookSeconds)}`,
+      // `--` makes the prompt unambiguously positional instead of a value for
+      // any preceding option. PM startup separately rejects subcommands and
+      // variadic/default arguments that are unsafe with a native prompt.
+      ...(input.initialPrompt !== undefined ? ['--', input.initialPrompt] : []),
     ];
     return {
       args,

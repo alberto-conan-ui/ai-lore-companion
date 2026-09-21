@@ -87,7 +87,19 @@ function commandFile(skill: SessionLaunchInput['skills'][number]): LaunchFile | 
 export const opencodeAdapter: EngineAdapter = {
   catalogId: 'opencode',
   capability: CAPABILITY,
+  supportsInitialPrompt: true,
   options: OPENCODE_OPTIONS,
+  modelArgs: (model) => (model === '' ? [] : ['--model', model]),
+  modelsSelectedBy: (argv) => {
+    const models: string[] = [];
+    for (let index = 0; index < argv.length; index += 1) {
+      const argument = argv[index] as string;
+      if (argument === '--model' && argv[index + 1] !== undefined)
+        models.push(argv[index + 1] as string);
+      else if (argument.startsWith('--model=')) models.push(argument.slice('--model='.length));
+    }
+    return models;
+  },
   skillInvocation: (name) => `/${name}`,
   verbsAre: 'invoked',
   launch(input: SessionLaunchInput): SessionLaunch {
@@ -136,7 +148,10 @@ export const opencodeAdapter: EngineAdapter = {
       .filter((file): file is LaunchFile => file !== null);
 
     return {
-      args: [...input.paramArgv],
+      args: [
+        ...input.paramArgv,
+        ...(input.initialPrompt !== undefined ? ['--prompt', input.initialPrompt] : []),
+      ],
       env: {
         OPENCODE_CONFIG: configFile,
         OPENCODE_CONFIG_DIR: configDir,

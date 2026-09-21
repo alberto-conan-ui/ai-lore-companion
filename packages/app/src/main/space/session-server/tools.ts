@@ -13,6 +13,10 @@
  */
 
 import { z } from 'zod';
+import {
+  DASHBOARD_REPORT_BASIS_MAX_CHARS,
+  DASHBOARD_REPORT_MAX_CHARS,
+} from '../../../shared/ipc/space/dashboard-report.types.js';
 import type { McpHostTool, McpHostToolResult } from '../../helper/mcp-host.js';
 import type { SpaceLog } from '../log.js';
 import type { BrokerFailure, SessionPort } from './broker.js';
@@ -35,7 +39,36 @@ export const SESSION_TOOL_NAMES = [
 
 export type SessionToolName = (typeof SESSION_TOOL_NAMES)[number];
 
+/** The extra tool only a PM session receives. It is not a write-target tool. */
+export const DASHBOARD_REPORT_TOOL_NAME = 'report_dashboard';
+
+/** The validated text the PM gives the app. `basis` is descriptive, not evidence. */
+export type DashboardReportToolInput = { markdown: string; basis?: string };
+
+/** A small app-state port that receives a PM's validated report. */
+export type DashboardReportPort = {
+  publish: (
+    input: DashboardReportToolInput,
+  ) => { ok: true } | { ok: false; error: { kind: string; message: string } };
+};
+
 const text = z.string().min(1).max(MAX_TEXT_LENGTH);
+
+/** Text that is safe to retain and show as literal Markdown, rather than HTML. */
+function hasDisallowedControl(value: string): boolean {
+  return [...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 8 || code === 11 || code === 12 || (code >= 14 && code <= 31) || code === 127;
+  });
+}
+
+const reportText = (maximum: number) =>
+  z
+    .string()
+    .min(1)
+    .max(maximum)
+    .refine((value) => value.trim().length > 0, 'must contain non-whitespace text')
+    .refine((value) => !hasDisallowedControl(value), 'must not contain control characters');
 
 const targetShape = z.object({
   kind: z.enum(['lore', 'publish-area', 'repository']),
@@ -76,6 +109,17 @@ const SHAPES = {
   leave_writing: {},
 } satisfies Record<SessionToolName, z.ZodRawShape>;
 
+const DASHBOARD_REPORT_SHAPE = {
+  markdown: reportText(DASHBOARD_REPORT_MAX_CHARS).describe(
+    'The complete dashboard report in plain Markdown. It is shown as text; do not send HTML.',
+  ),
+  basis: reportText(DASHBOARD_REPORT_BASIS_MAX_CHARS)
+    .optional()
+    .describe(
+      'An optional plain-language description of what you read. This is not trusted freshness.',
+    ),
+} satisfies z.ZodRawShape;
+
 const DESCRIPTIONS: Record<SessionToolName, string> = {
   request_writing:
     'Ask the Human Lead for the entering-Writing dialog. Returns { "ticket" } at once. Then call await_answer with the ticket.',
@@ -86,6 +130,9 @@ const DESCRIPTIONS: Record<SessionToolName, string> = {
   leave_writing:
     'Return the session to Read only. The companion releases every write target the session holds. Takes no arguments.',
 };
+
+const DASHBOARD_REPORT_DESCRIPTION =
+  "Publish the PM dashboard report to this Space's Dashboard. This changes only ephemeral app state, not files, claims or session mode.";
 
 function answer(value: unknown): McpHostToolResult {
   return { text: JSON.stringify(value) };
@@ -105,6 +152,8 @@ export type SessionToolsOptions = {
   maxCallsPerWindow?: number;
   /** Called around every tool call, so that closing can wait for answers that are on their way out. */
   onCall?: (phase: 'start' | 'end') => void;
+  /** Present only for a PM session; normal sessions never receive the report tool. */
+  dashboardReport?: DashboardReportPort;
 };
 
 /** The tools of one session. */
@@ -117,12 +166,13 @@ export function createSessionTools(options: SessionToolsOptions): McpHostTool[] 
     now: options.now ?? (() => Date.now()),
   });
 
-  const run: {
-    [K in SessionToolName]: (
+  const run: Record<
+    SessionToolName | typeof DASHBOARD_REPORT_TOOL_NAME,
+    (
       args: Record<string, unknown>,
       extra: { signal: AbortSignal },
-    ) => McpHostToolResult | Promise<McpHostToolResult>;
-  } = {
+    ) => McpHostToolResult | Promise<McpHostToolResult>
+  > = {
     request_writing: (args) => {
       const asked = port.requestWriting(args as Parameters<SessionPort['requestWriting']>[0]);
       return asked.ok ? answer(asked.value) : refusal(asked.error);
@@ -142,12 +192,27 @@ export function createSessionTools(options: SessionToolsOptions): McpHostTool[] 
       const left = await port.leaveWriting();
       return left.ok ? answer(left.value) : refusal(left.error);
     },
+    report_dashboard: (args) => {
+      if (options.dashboardReport === undefined) {
+        return refusal({
+          kind: 'not-a-pm-session',
+          message: 'This session cannot publish Dashboard reports.',
+        });
+      }
+      const published = options.dashboardReport.publish(args as DashboardReportToolInput);
+      return published.ok ? answer({ status: 'received' }) : refusal(published.error);
+    },
   };
 
-  return SESSION_TOOL_NAMES.map((name) => ({
+  const names: readonly (SessionToolName | typeof DASHBOARD_REPORT_TOOL_NAME)[] =
+    options.dashboardReport === undefined
+      ? SESSION_TOOL_NAMES
+      : [...SESSION_TOOL_NAMES, DASHBOARD_REPORT_TOOL_NAME];
+  return names.map((name) => ({
     name,
-    description: DESCRIPTIONS[name],
-    shape: SHAPES[name],
+    description:
+      name === DASHBOARD_REPORT_TOOL_NAME ? DASHBOARD_REPORT_DESCRIPTION : DESCRIPTIONS[name],
+    shape: name === DASHBOARD_REPORT_TOOL_NAME ? DASHBOARD_REPORT_SHAPE : SHAPES[name],
     call: async (args, extra) => {
       if (!calls.take(sessionId)) {
         log.warn('session-tool-rate-limited', { session: sessionId, tool: name });

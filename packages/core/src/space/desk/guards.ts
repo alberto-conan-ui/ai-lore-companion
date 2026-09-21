@@ -18,6 +18,7 @@ import type {
   ReviewedMark,
   SessionClose,
   SessionProfile,
+  SessionPurpose,
   SessionRecord,
   SessionSpend,
   UnattendedTag,
@@ -116,6 +117,11 @@ export function isSessionSpend(value: unknown): value is SessionSpend {
   );
 }
 
+/** Whether a record's optional companion-owned purpose is understood by this build. */
+export function isSessionPurpose(value: unknown): value is SessionPurpose {
+  return value === 'pm';
+}
+
 /** Whether `value` is a `SessionRecord`. */
 export function isSessionRecord(value: unknown): value is SessionRecord {
   return (
@@ -130,6 +136,7 @@ export function isSessionRecord(value: unknown): value is SessionRecord {
     isOptional(value.issue, isIssueRef) &&
     isOptional(value.unguarded, isStringArray) &&
     isOptional(value.profile, isSessionProfile) &&
+    isOptional(value.purpose, isSessionPurpose) &&
     isOptional(value.params, isStringArray) &&
     isOptional(value.spend, isSessionSpend)
   );

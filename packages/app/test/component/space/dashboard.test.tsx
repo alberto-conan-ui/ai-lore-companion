@@ -136,6 +136,9 @@ const cockpit = {
   spaceRepositoriesRefresh: vi.fn<(arg: unknown) => Promise<SpaceRepositoriesStateResult>>(),
   spaceRepositoriesFocus: vi.fn<(arg: unknown) => Promise<SpaceRepositoriesStateResult>>(),
   onSpaceRepositoriesState: vi.fn(() => () => {}),
+  // The PM report is mounted by Dashboard; keep it empty in Project-model tests.
+  spaceDashboardReport: vi.fn(async () => ({ ok: true, value: { version: 1, report: null } })),
+  onSpaceDashboardReport: vi.fn(() => () => {}),
 };
 
 const push = (payload: SpaceProjectState): void => {

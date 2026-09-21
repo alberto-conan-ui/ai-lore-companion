@@ -43,6 +43,7 @@ import {
 } from '@ai-lore-companion/core';
 import type { SpaceProjectState } from '../../shared/ipc.js';
 import { type SpaceContext, defineSpaceService } from './context.js';
+import { spaceDashboardReport } from './dashboard-report.js';
 import { spaceDesk } from './desk-service.js';
 import { spaceGitHub } from './github-service.js';
 import type { SpaceLog } from './log.js';
@@ -343,6 +344,16 @@ export const spaceProjectRefresh = defineSpaceService<ProjectRefresh>({
       log: context.log,
       space: context.key,
       ...settings,
+    });
+    // Freshness belongs to the source lifecycle, not to whether a Dashboard has
+    // subscribed to reports yet. Ordinary reads/version increments do not stale prose.
+    const reports = context.service(spaceDashboardReport);
+    const initial = refresh.current();
+    let source = `${initial.fetchedAt}|${initial.state}|${initial.failure?.at ?? ''}`;
+    refresh.subscribe((state) => {
+      const next = `${state.fetchedAt}|${state.state}|${state.failure?.at ?? ''}`;
+      if (source !== next) reports.markProjectChanged();
+      source = next;
     });
     // A gate that begins or ends waiting changes Needs you and the gate notes.
     const unsubscribe = broker.subscribe((event) => {

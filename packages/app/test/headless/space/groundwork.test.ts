@@ -13,6 +13,7 @@ import {
 import { addRecentSpace, loadRecentSpaces } from '../../../src/main/space/recents.js';
 import { CONTRACT, SPACE_WINDOW_MODES, isSpaceWindowMode } from '../../../src/shared/ipc.js';
 import { SPACE_COMMANDS_CONTRACT } from '../../../src/shared/ipc/space/commands.contract.js';
+import { SPACE_DASHBOARD_REPORT_CONTRACT } from '../../../src/shared/ipc/space/dashboard-report.contract.js';
 import { SPACE_DIALOGS_CONTRACT } from '../../../src/shared/ipc/space/dialogs.contract.js';
 import { SPACE_FILES_CONTRACT } from '../../../src/shared/ipc/space/files.contract.js';
 import { SPACE_MACHINE_CONTRACT } from '../../../src/shared/ipc/space/machine.contract.js';
@@ -35,6 +36,7 @@ const FRAGMENTS: Record<string, Record<string, Desc>> = {
   machine: SPACE_MACHINE_CONTRACT,
   commands: SPACE_COMMANDS_CONTRACT,
   sessions: SPACE_SESSIONS_CONTRACT,
+  dashboardReport: SPACE_DASHBOARD_REPORT_CONTRACT,
   dialogs: SPACE_DIALOGS_CONTRACT,
   roots: SPACE_ROOTS_CONTRACT,
   files: SPACE_FILES_CONTRACT,

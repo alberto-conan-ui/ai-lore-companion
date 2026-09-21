@@ -38,6 +38,8 @@ export const UI_FILES = {
   'space-window': 'space-window.json',
   'files-window': 'files-window.json',
   'session-engine': 'session-engine.json',
+  /** The per-Space profile (currently an engine-backed profile id) of the automatic PM session. */
+  'pm-profile': 'pm-profile.json',
 } as const;
 
 export type UiConcern = keyof typeof UI_FILES;
@@ -103,6 +105,7 @@ export const UI_SCHEMAS = {
   'space-window': boundsSchema,
   'files-window': boundsSchema,
   'session-engine': z.looseObject({ version, engineId: z.string().min(1).max(256).nullable() }),
+  'pm-profile': z.looseObject({ version, engineId: z.string().min(1).max(256).nullable() }),
 } as const satisfies Record<UiConcern, z.ZodType>;
 
 /**

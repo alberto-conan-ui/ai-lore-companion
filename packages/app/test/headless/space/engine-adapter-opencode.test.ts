@@ -118,6 +118,25 @@ test('launch: args are the ticked parameters only, and env names the config file
   assert.equal(envPermission.edit, 'allow');
 });
 
+test('launch: a native initial prompt uses the interactive --prompt option', () => {
+  const filePaths = sessionFilePaths(paths.sessions, 's-initial-prompt');
+  const launch = opencodeAdapter.launch({
+    sessionId: 's-initial-prompt',
+    spaceRoot: space.root,
+    deskDir: paths.desk,
+    paths: filePaths,
+    python,
+    install,
+    skills: SKILLS,
+    connection: { ...CONNECTION, sessionId: 's-initial-prompt' },
+    repositories: ['app'],
+    instructions: 'Session instructions.\n',
+    paramArgv: ['--model', 'opus'],
+    initialPrompt: 'Update the dashboard.',
+  });
+  assert.deepEqual(launch.args, ['--model', 'opus', '--prompt', 'Update the dashboard.']);
+});
+
 test('launch: opencode.json names the instructions file, the mcp server, and a bash permission map with * first, an allow rule converted from :*, and deny after allow', () => {
   const { launch } = launchFor('s-config');
   const configFile = launch.files.find((file) => file.path === 'opencode/opencode.json');

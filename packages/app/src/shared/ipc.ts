@@ -53,6 +53,7 @@ export * from './ipc/space/setup.types.js';
 export * from './ipc/space/machine.types.js';
 export * from './ipc/space/commands.types.js';
 export * from './ipc/space/sessions.types.js';
+export * from './ipc/space/dashboard-report.types.js';
 export * from './ipc/space/dialogs.types.js';
 export * from './ipc/space/roots.types.js';
 export * from './ipc/space/files.types.js';

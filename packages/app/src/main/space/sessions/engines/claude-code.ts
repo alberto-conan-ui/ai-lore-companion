@@ -41,7 +41,19 @@ const CAPABILITY: EngineAdapter['capability'] = {
 export const claudeCodeAdapter: EngineAdapter = {
   catalogId: 'claude-code',
   capability: CAPABILITY,
+  supportsInitialPrompt: true,
   options: CLAUDE_CODE_OPTIONS,
+  modelArgs: (model) => (model === '' ? [] : ['--model', model]),
+  modelsSelectedBy: (argv) => {
+    const models: string[] = [];
+    for (let index = 0; index < argv.length; index += 1) {
+      const argument = argv[index] as string;
+      if (argument === '--model' && argv[index + 1] !== undefined)
+        models.push(argv[index + 1] as string);
+      else if (argument.startsWith('--model=')) models.push(argument.slice('--model='.length));
+    }
+    return models;
+  },
   skillInvocation: (name) => `/lore:${name}`,
   verbsAre: 'invoked',
   // M14.6: read by a `Stop` hook (`SPEND_ADAPTER`, `adapters.ts`), never by this
@@ -71,6 +83,7 @@ export const claudeCodeAdapter: EngineAdapter = {
         pluginDir: input.install.pluginDir,
         tools: sessionToolNames(input.connection),
         appendSystemPrompt: input.instructions,
+        ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
       }),
       env: {},
       files: [

@@ -1,5 +1,6 @@
 import type { RegisterModule } from '../../ipc/types.js';
 import { registerSpaceCommands } from './commands.js';
+import { registerSpaceDashboardReport } from './dashboard-report.js';
 import { registerSpaceDialogs } from './dialogs.js';
 import { registerSpaceFiles } from './files.js';
 import { registerSpaceMachine } from './machine.js';
@@ -22,6 +23,7 @@ export const SPACE_MODULES: readonly RegisterModule[] = [
   registerSpaceMachine,
   registerSpaceCommands,
   registerSpaceSessions,
+  registerSpaceDashboardReport,
   registerSpaceDialogs,
   registerSpaceRoots,
   registerSpaceFiles,

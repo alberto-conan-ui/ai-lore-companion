@@ -31,6 +31,7 @@ import {
 } from '@ai-lore-companion/core';
 import type { McpHost } from '../../helper/mcp-host.js';
 import { type SpaceContext, defineSpaceService } from '../context.js';
+import { type DashboardReportService, spaceDashboardReport } from '../dashboard-report.js';
 import { spaceDesk } from '../desk-service.js';
 import { sessionBoard } from './board.js';
 import { type DialogBroker, type DialogBrokerOptions, createDialogBroker } from './broker.js';
@@ -43,7 +44,7 @@ import {
   TOKEN_SCHEME,
 } from './constants.js';
 import { admitRequest, issueSessionToken, presentsToken } from './guard.js';
-import { SESSION_TOOL_NAMES, createSessionTools } from './tools.js';
+import { DASHBOARD_REPORT_TOOL_NAME, SESSION_TOOL_NAMES, createSessionTools } from './tools.js';
 
 export type {
   AwaitedAnswer,
@@ -62,8 +63,14 @@ export type {
   WritingLeftAnswer,
   WritingRequestInput,
 } from './broker.js';
-export { SESSION_TOOL_NAMES } from './tools.js';
+export { DASHBOARD_REPORT_TOOL_NAME, SESSION_TOOL_NAMES } from './tools.js';
 export { SESSION_SERVER_NAME } from './constants.js';
+
+/** The one special-purpose session of the thin PM dashboard slice. */
+export type SessionPurpose = 'pm';
+
+/** The companion chooses a purpose before it gives a session its tool list. */
+export type SessionRegistrationOptions = { purpose?: SessionPurpose };
 
 type HostPort = Pick<McpHost, 'listen' | 'endpoint' | 'registerTools' | 'unregister'>;
 
@@ -86,7 +93,10 @@ export type SessionServerFailure = Failure<
 export type SessionServer = {
   readonly broker: DialogBroker;
   /** Put the session on the local server and make its token. */
-  registerSession(sessionId: string): Promise<Result<SessionConnection, SessionServerFailure>>;
+  registerSession(
+    sessionId: string,
+    options?: SessionRegistrationOptions,
+  ): Promise<Result<SessionConnection, SessionServerFailure>>;
   /** Take the session off the local server; its pending tickets are cancelled. */
   unregisterSession(sessionId: string): Promise<void>;
   close(): Promise<void>;
@@ -100,6 +110,8 @@ export type SessionServerOptions = {
   maxCallsPerWindow?: number;
   /** How long the whole body of a request may take. Default: `BODY_READ_TIMEOUT_MS`. */
   bodyTimeoutMs?: number;
+  /** The ephemeral report store of this Space. Required by a PM registration. */
+  dashboardReports?: Pick<DashboardReportService, 'openSession' | 'closeSession' | 'publish'>;
 };
 
 /** A session id is made by the companion. It is part of a URL path and of log lines, so its form is checked. */
@@ -109,19 +121,24 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
   const { log } = options.broker;
   const broker = createDialogBroker(options.broker);
   const registered = new Set<string>();
+  const pmSessions = new Set<string>();
   let inFlight = 0;
   let closed = false;
 
   return {
     broker,
 
-    async registerSession(sessionId) {
+    async registerSession(sessionId, registration = {}) {
       if (closed) return fail('closed', 'The Space is closed.');
       if (!SESSION_ID.test(sessionId)) {
         return fail('invalid-session-id', 'The session id is not one the companion makes.');
       }
       if (registered.has(sessionId)) {
         return fail('already-registered', 'The session is on the local server already.');
+      }
+      const isPm = registration.purpose === 'pm';
+      if (isPm && options.dashboardReports === undefined) {
+        return fail('server-unavailable', 'The dashboard report service is not available.');
       }
       // Taken before the first wait, so that two calls with one id cannot both pass.
       registered.add(sessionId);
@@ -162,6 +179,25 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
           onCall: (phase) => {
             inFlight += phase === 'start' ? 1 : -1;
           },
+          ...(isPm
+            ? {
+                dashboardReport: {
+                  publish: (input) => {
+                    const published = options.dashboardReports?.publish(sessionId, input);
+                    return published?.ok
+                      ? { ok: true }
+                      : {
+                          ok: false,
+                          error: published?.error ?? {
+                            kind: 'session-ended',
+                            message:
+                              'This PM session has ended, so its dashboard report was not accepted.',
+                          },
+                        };
+                  },
+                },
+              }
+            : {}),
         }),
       };
       try {
@@ -169,6 +205,10 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
         await host.registerTools(tools);
       } catch (caught) {
         return unavailable(caught);
+      }
+      if (isPm) {
+        options.dashboardReports?.openSession(sessionId);
+        pmSessions.add(sessionId);
       }
       log.info('session-registered', { session: sessionId });
       return ok({
@@ -179,12 +219,13 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
           name: TOKEN_HEADER,
           value: TOKEN_SCHEME === '' ? token : `${TOKEN_SCHEME} ${token}`,
         },
-        tools: SESSION_TOOL_NAMES,
+        tools: isPm ? [...SESSION_TOOL_NAMES, DASHBOARD_REPORT_TOOL_NAME] : SESSION_TOOL_NAMES,
       });
     },
 
     async unregisterSession(sessionId) {
       if (!registered.delete(sessionId)) return;
+      if (pmSessions.delete(sessionId)) options.dashboardReports?.closeSession(sessionId);
       broker.sessionEnded(sessionId);
       try {
         await (await options.host()).unregister(sessionId);
@@ -206,6 +247,8 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
       await new Promise((resolve) => setTimeout(resolve, 10));
       const sessions = [...registered];
       registered.clear();
+      for (const sessionId of pmSessions) options.dashboardReports?.closeSession(sessionId);
+      pmSessions.clear();
       if (sessions.length === 0) return;
       try {
         const host = await options.host();
@@ -292,6 +335,7 @@ export const sessionServer = defineSpaceService<SessionServer>({
   create: (context: SpaceContext) => {
     // The desk first, so that it is disposed after this service.
     const desk = context.service(spaceDesk);
+    const dashboardReports = context.service(spaceDashboardReport);
     const board = context.service(sessionBoard);
     const { host, limits, awaitMs, maxCallsPerWindow, bodyTimeoutMs, boardWaitMs } = overrides;
     return createSessionServer({
@@ -308,6 +352,7 @@ export const sessionServer = defineSpaceService<SessionServer>({
       ...(awaitMs !== undefined ? { awaitMs } : {}),
       ...(maxCallsPerWindow !== undefined ? { maxCallsPerWindow } : {}),
       ...(bodyTimeoutMs !== undefined ? { bodyTimeoutMs } : {}),
+      dashboardReports,
     });
   },
   dispose: (service) => service.close(),

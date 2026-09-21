@@ -173,6 +173,11 @@ const cockpit = {
   spaceSessionEnginePick: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionReinstall: vi.fn<(arg: unknown) => Promise<SpaceSessionEnginesResult>>(),
   spaceSessionStart: vi.fn(),
+  // PM auto-start is refused by default so these window tests stay about chrome/navigation.
+  spacePmEnsure: vi.fn(async () => ({
+    ok: false,
+    error: { kind: 'pm-unavailable', message: 'PM is disabled for this test.' },
+  })),
   spaceSessionEnd: vi.fn(async () => ({ ok: true })),
   // The channels the cockpit uses to save a layout. The Space window must not call them.
   settingsSetLayout: vi.fn(),
@@ -212,6 +217,9 @@ const cockpit = {
     value: { version: 1, reading: false, model: null, readAt: null, problem: null },
   })),
   onSpaceRepositoriesState: vi.fn(() => () => {}),
+  // Dashboard mounts the PM report; this window fixture keeps it empty.
+  spaceDashboardReport: vi.fn(async () => ({ ok: true, value: { version: 1, report: null } })),
+  onSpaceDashboardReport: vi.fn(() => () => {}),
 };
 
 beforeEach(() => {
@@ -380,7 +388,7 @@ test('error state: a refused Files request shows its message as an alert', async
   });
   renderWindow();
   fireEvent.click(screen.getByTestId('space-rail-files'));
-  const alert = await screen.findByRole('alert');
+  const alert = await screen.findByTestId('space-window-error');
   expect(alert.textContent).toBe('Not from this window.');
 });
 

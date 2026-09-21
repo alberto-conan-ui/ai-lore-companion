@@ -33,6 +33,10 @@ export type AiTabSpaceStart =
  */
 export type AiTabSpace = {
   start: (engineId: string) => Promise<AiTabSpaceStart>;
+  /** Attach a session already started by the Space; never spawn another engine. */
+  existingSession?: { sessionId: string; ptyId: string };
+  /** A role's engine is chosen by main, not this tab's engine picker. */
+  engineLocked?: boolean;
   /** Start once when the tab mounts: a tab made by `+ AI`. A restored tab stays dormant. */
   autoStart: boolean;
   /** The tab's session started (its id) or ended (`null`). */
@@ -85,8 +89,10 @@ export function AiTab({
   /** Set in a Space window only: the guarded start, the header and the Skills column. */
   space?: AiTabSpace;
 }): JSX.Element {
-  const [ptyId, setPtyId] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [ptyId, setPtyId] = useState<string | null>(space?.existingSession?.ptyId ?? null);
+  const [sessionId, setSessionId] = useState<string | null>(
+    space?.existingSession?.sessionId ?? null,
+  );
   /** Why the guarded start refused, shown in the empty state (Space window only). */
   const [startError, setStartError] = useState<string | null>(null);
   const spaceRef = useRef(space);
@@ -98,7 +104,7 @@ export function AiTab({
     engines.find((e) => e.id === engine) ??
     // Fallback: the project's last pick may no longer exist (user removed it
     // in Settings); fall back to the first available so Start stays usable.
-    engines[0] ??
+    (space?.engineLocked ? null : engines[0]) ??
     null;
 
   // Adopt the fallback as the active selection so the dropdown isn't out of
@@ -143,10 +149,10 @@ export function AiTab({
   // A tab made by `+ AI` in a Space window starts once; a restored one waits for Start.
   const autoStarted = useRef(false);
   useEffect(() => {
-    if (autoStarted.current || !spaceRef.current?.autoStart || !selected) return;
+    if (ptyId !== null || autoStarted.current || !spaceRef.current?.autoStart || !selected) return;
     autoStarted.current = true;
     start();
-  }, [selected, start]);
+  }, [selected, start, ptyId]);
 
   // When the PTY exits (the user quits the engine), drop back to empty state
   // with the just-exited badge so the empty body offers Restart.
@@ -172,7 +178,9 @@ export function AiTab({
         onSelect={onEngineChange}
         onStart={start}
         justExited={justExited}
-        {...(space ? { hint: space.hint, error: startError } : {})}
+        {...(space
+          ? { hint: space.hint, error: startError, engineLocked: space.engineLocked }
+          : {})}
       />
     );
   }
@@ -203,6 +211,7 @@ function EmptyState({
   justExited,
   hint,
   error,
+  engineLocked,
 }: {
   engines: readonly EngineEntry[];
   selected: EngineEntry | null;
@@ -215,6 +224,7 @@ function EmptyState({
   hint?: string;
   /** Space window: why the last start was refused. */
   error?: string | null;
+  engineLocked?: boolean | undefined;
 }): JSX.Element {
   if (engines.length === 0) {
     return (
@@ -251,6 +261,7 @@ function EmptyState({
             {justExited ? `↻ Restart ${selected?.name ?? ''}` : '▶ Start AI session'}
           </button>
           <select
+            disabled={engineLocked}
             style={enginePickerStyle}
             value={selected?.id ?? ''}
             onChange={(e) => {

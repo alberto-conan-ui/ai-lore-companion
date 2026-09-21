@@ -2,6 +2,9 @@
 type: index
 ---
 
+- [pm.md](./pm.md): the PM role, its reporting responsibility and its Read only boundaries.
+- [dashboard.md](./dashboard.md): the PM dashboard report, its default sections and project customisation.
+
 # Corpus: default entries
 
 The entries for the terms of the default set: the default layout of the Space's GitHub Project, and what the default way of working adds to a repository and to the Space's folder. The default verbs and processes say "with the default layout" where they use these terms, and these entries are where the Lore describes that layout.

@@ -183,6 +183,15 @@ export function createSpaceSessionsRegister(
       return started;
     });
 
+    reg.handle('spacePmEnsure', async (event, arg): Promise<SpaceSessionStartResult> => {
+      const context = spaceWindowContext(deps, event);
+      if (!context) return notASpaceWindow;
+      const parsed = parseArg(emptySchema, arg);
+      if (!parsed.ok) return parsed;
+      watchHeaders(context);
+      return context.service(spaceSessions).ensurePm();
+    });
+
     reg.handle('spaceSessionEngines', async (event, arg): Promise<SpaceSessionEnginesResult> => {
       const context = spaceWindowContext(deps, event);
       if (!context) return notASpaceWindow;
