@@ -23,18 +23,18 @@
 
 import {
   type CommandRunner,
+  type MirrorCard,
+  type MirrorDrift,
   ROOT_REPOSITORY_TIMEOUT_MS,
   type RepositoriesModel,
   type RepositoriesModelInput,
   type RepositoryRead,
   errorMessage,
-  readRepositoryStateIn,
-  repositoriesModel,
-  readLore,
   generateRepositorySkeleton,
   mirrorDrift,
-  type MirrorDrift,
-  type MirrorCard,
+  readLore,
+  readRepositoryStateIn,
+  repositoriesModel,
 } from '@ai-lore-companion/core';
 import type {
   RootSummary,
@@ -199,11 +199,13 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
         if (now().getTime() >= nextMirrorCheck) {
           nextMirrorCheck = now().getTime() + DEFAULT_REPOSITORY_REFRESH_MS * 2;
           const loreRoot = list.roots.find((summary) => summary.root.kind === 'lore')?.root;
-          if (loreRoot && loreRoot.tracking.tracked) {
+          if (loreRoot?.tracking.tracked) {
             const spaceRoot = loreRoot.tracking.workTree;
             const loreResult = await readLore(spaceRoot);
             if (loreResult.ok) {
-              const mirrors: MirrorCard[] = loreResult.value.parts.mirrors.map((e: any) => e.card);
+              const mirrors: MirrorCard[] = loreResult.value.parts.mirrors.map(
+                (e: { card: MirrorCard }) => e.card,
+              );
               await Promise.allSettled(
                 list.roots.map(async (summary) => {
                   const root = summary.root;

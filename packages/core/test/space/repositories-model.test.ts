@@ -307,7 +307,12 @@ test('mirrorDrift reports not-checked when generated is null', () => {
 });
 
 test('mirrorDrift reports matches when lists match', () => {
-  const result = mirrorDrift({ path: 'p', stored: ['a', 'b'], generated: ['b', 'a'], checkedAt: 'time' });
+  const result = mirrorDrift({
+    path: 'p',
+    stored: ['a', 'b'],
+    generated: ['b', 'a'],
+    checkedAt: 'time',
+  });
   assert.equal(result.state, 'matches');
   assert.equal(result.added, 0);
   assert.equal(result.removed, 0);
@@ -315,9 +320,13 @@ test('mirrorDrift reports matches when lists match', () => {
 });
 
 test('mirrorDrift reports differs with correct added and removed counts', () => {
-  const result = mirrorDrift({ path: 'p', stored: ['a', 'b'], generated: ['b', 'c', 'd'], checkedAt: 'time' });
+  const result = mirrorDrift({
+    path: 'p',
+    stored: ['a', 'b'],
+    generated: ['b', 'c', 'd'],
+    checkedAt: 'time',
+  });
   assert.equal(result.state, 'differs');
   assert.equal(result.added, 2);
   assert.equal(result.removed, 1);
 });
-

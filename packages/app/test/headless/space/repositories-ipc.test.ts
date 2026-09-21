@@ -128,7 +128,7 @@ test('a later state carries a row for the repository and one for the Lore, none 
   assert.deepEqual(
     model.rows.map((row) => row.rootId),
     ['repo:app', 'lore', 'publish:publish'],
-    'the Workbench is not its own row, but publish-area gets its own'
+    'the Workbench is not its own row, but publish-area gets its own',
   );
   const app = model.rows.find((row) => row.rootId === 'repo:app');
   assert.equal(app?.status, 'ready');
@@ -142,7 +142,7 @@ test('a later state carries a row for the repository and one for the Lore, none 
   assert.equal(lore?.status, 'ready');
   assert.equal(lore?.name, 'Lore');
   assert.deepEqual(lore?.alsoCovers, []);
-  
+
   const publish = model.rows.find((row) => row.rootId === 'publish:publish');
   assert.equal(publish?.status, 'ready');
 });

@@ -11,11 +11,17 @@
 export type MirrorDrift = {
   path: string;
   state: 'matches' | 'differs' | 'not-checked' | 'no-mirror';
-  added: number; removed: number;
+  added: number;
+  removed: number;
   checkedAt: string | null;
 };
 
-export function mirrorDrift(arg: { path: string; stored: readonly string[]; generated: readonly string[] | null; checkedAt: string | null }): MirrorDrift {
+export function mirrorDrift(arg: {
+  path: string;
+  stored: readonly string[];
+  generated: readonly string[] | null;
+  checkedAt: string | null;
+}): MirrorDrift {
   if (arg.generated === null) {
     return { path: arg.path, state: 'not-checked', added: 0, removed: 0, checkedAt: arg.checkedAt };
   }
@@ -283,7 +289,8 @@ export function repositoriesModel(input: RepositoriesModelInput): RepositoriesMo
       continue;
     }
     if (root.tracking.tracked) continue;
-    if (root.kind !== 'repository' && root.kind !== 'lore' && root.kind !== 'publish-area') continue;
+    if (root.kind !== 'repository' && root.kind !== 'lore' && root.kind !== 'publish-area')
+      continue;
     sources.push({ rankRoot: root, build: () => untrackedRow(root, input) });
   }
 
