@@ -21,6 +21,7 @@ import {
   AGENTS_COLUMNS,
   type FieldOption,
   type FocusItem,
+  type OpenPullRequest,
   type PlanItem,
   type ProjectSnapshot,
   type SessionIssue,
@@ -39,6 +40,9 @@ export type ProjectCacheFailure = {
 /** What the cache holds. `snapshot` is `null` until a refresh succeeded once. */
 export type ProjectCache = {
   snapshot: ProjectSnapshot | null;
+  /** Optional on caches written before the dashboard redesign. */
+  pullRequests?: OpenPullRequest[];
+  pullRequestsFailure?: ProjectCacheFailure | null;
   /** `null` when the last refresh succeeded, or none failed yet. */
   failure: ProjectCacheFailure | null;
 };
@@ -142,12 +146,30 @@ function isCacheFailure(value: unknown): value is ProjectCacheFailure {
   );
 }
 
+function isOpenPullRequest(value: unknown): value is OpenPullRequest {
+  if (!isJsonObject(value)) return false;
+  return (
+    ['repository', 'title', 'url', 'headBranch', 'baseBranch', 'createdAt', 'updatedAt'].every(
+      (key) => isString(value[key]),
+    ) &&
+    isInteger(value.number) &&
+    typeof value.draft === 'boolean' &&
+    ['passing', 'failing', 'pending', 'none'].includes(String(value.checks)) &&
+    ['approved', 'changes-requested', 'review-required', 'none'].includes(String(value.review)) &&
+    ['mergeable', 'conflicting', 'unknown'].includes(String(value.mergeable))
+  );
+}
+
 /** Whether `value` is the record of the cache file. */
 export function isProjectCacheRecord(value: unknown): value is ProjectCache {
   return (
     isJsonObject(value) &&
     (value.snapshot === null || isProjectSnapshot(value.snapshot)) &&
-    (value.failure === null || isCacheFailure(value.failure))
+    (value.failure === null || isCacheFailure(value.failure)) &&
+    (value.pullRequests === undefined || isListOf(value.pullRequests, isOpenPullRequest)) &&
+    (value.pullRequestsFailure === undefined ||
+      value.pullRequestsFailure === null ||
+      isCacheFailure(value.pullRequestsFailure))
   );
 }
 
@@ -183,7 +205,14 @@ export function readProjectCache(desk: Desk): Result<ProjectCache, DeskFailure> 
     }
   }
 
-  return ok({ snapshot: last.snapshot, failure: last.failure });
+  return ok({
+    snapshot: last.snapshot,
+    failure: last.failure,
+    ...(last.pullRequests === undefined ? {} : { pullRequests: last.pullRequests }),
+    ...(last.pullRequestsFailure === undefined
+      ? {}
+      : { pullRequestsFailure: last.pullRequestsFailure }),
+  });
 }
 
 /**
@@ -205,9 +234,11 @@ function writeProjectCache(
     }
     const found = index < 0 ? undefined : (records[index] as JsonObject & ProjectCache);
     const current: ProjectCache =
-      found === undefined ? { ...EMPTY } : { snapshot: found.snapshot, failure: found.failure };
+      found === undefined
+        ? { ...EMPTY }
+        : { ...found, snapshot: found.snapshot, failure: found.failure };
     const next = change(current);
-    const plain = toPlainJson({ ...(found ?? {}), snapshot: next.snapshot, failure: next.failure });
+    const plain = toPlainJson({ ...(found ?? {}), ...next });
     if (plain === undefined || !isProjectCacheRecord(plain)) {
       return fail('invalid-record', 'the snapshot does not have the shape of the Project cache');
     }
@@ -222,8 +253,9 @@ function writeProjectCache(
 export function recordProjectSnapshot(
   desk: Desk,
   snapshot: ProjectSnapshot,
+  pulls?: { pullRequests: OpenPullRequest[]; pullRequestsFailure: ProjectCacheFailure | null },
 ): Result<ProjectCache, DeskFailure> {
-  return writeProjectCache(desk, () => ({ snapshot, failure: null }));
+  return writeProjectCache(desk, (current) => ({ ...current, snapshot, failure: null, ...pulls }));
 }
 
 /** Record that a refresh failed. The snapshot stays as it was. */
@@ -231,5 +263,5 @@ export function recordProjectFailure(
   desk: Desk,
   failure: ProjectCacheFailure,
 ): Result<ProjectCache, DeskFailure> {
-  return writeProjectCache(desk, (current) => ({ snapshot: current.snapshot, failure }));
+  return writeProjectCache(desk, (current) => ({ ...current, failure }));
 }

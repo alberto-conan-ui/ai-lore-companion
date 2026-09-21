@@ -1,6 +1,20 @@
 /** The Project snapshot, its cache, the Dashboard model, and the sessions' issues on the Agents board. Phase M7.1 owns this file. */
 
 export {
+  type NextAction,
+  type DashboardDraft,
+  type MovingPartition,
+  type DormantAggregate,
+  type SpaceStats,
+  focusAgeMs,
+  nextActionHeadline,
+  rankNextActions,
+  partitionMoving,
+  dormantAggregate,
+  spaceStats,
+} from './dashboard-derivations.js';
+
+export {
   PROJECT_CACHE_FILE,
   type ProjectCache,
   type ProjectCacheFailure,
