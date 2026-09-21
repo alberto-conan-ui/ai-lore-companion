@@ -318,6 +318,10 @@ test('repository-skeleton refuses to guess the default branch of a repository th
   // A remote named origin that was added by hand has no origin/HEAD.
   await seed.git('remote', 'add', 'origin', remote.dir);
   await seed.git('fetch', '--quiet', 'origin');
+  // Newer git writes refs/remotes/origin/HEAD on fetch. This case is about a
+  // repository that has none, so it is removed whatever the host's git did.
+  // `update-ref -d` succeeds when the reference is not there.
+  await seed.git('update-ref', '-d', 'refs/remotes/origin/HEAD');
   await seed.git('checkout', '--quiet', '-b', 'item-12');
   const unknown = await generate(REPOSITORY_SKELETON, [seed.dir], seed.dir);
   assert.equal(unknown.code, 2);
