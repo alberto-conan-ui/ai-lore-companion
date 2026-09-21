@@ -88,7 +88,7 @@ export type FakeProject = {
   views: ProjectViewInfo[];
   /** The `fullName` of each linked repository. */
   linked: string[];
-  items: { id: string; issueId: string; values: Record<string, string> }[];
+  items: { id: string; issueId: string; values: Record<string, string>; valuesAt?: Record<string, string> }[];
 };
 
 /** Everything the fake keeps. Plain data: this is what the state file holds. */
@@ -328,11 +328,20 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     project: FakeProject,
     issue: FakeIssue,
     values: Record<string, string>,
+    valuesAt?: Record<string, string>,
   ): RawProjectIssue {
     const fieldValues: Record<string, string> = {};
+    const fieldValuesAt: Record<string, string> = {};
+    const itemValuesAt = valuesAt ?? {};
     for (const field of project.fields) {
       const option = field.options.find((candidate) => candidate.id === values[field.id]);
-      if (option !== undefined) fieldValues[field.name] = option.name;
+      if (option !== undefined) {
+        fieldValues[field.name] = option.name;
+        const at = itemValuesAt[field.id];
+        if (at !== undefined) {
+          fieldValuesAt[field.name] = at;
+        }
+      }
     }
     const parent = state.issues.find((candidate) => candidate.id === issue.parentId);
     return {
@@ -347,6 +356,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
           ? parent.ref.number
           : null,
       fieldValues,
+      fieldValuesAt,
       subIssues: state.issues
         .filter((candidate) => candidate.parentId === issue.id)
         .map((sub) => ({ issue: sub.ref, title: sub.title, state: sub.state })),
@@ -711,6 +721,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
           return err(notFound(`the option ${arg.option} of the field ${arg.field.name}`));
         }
         item.values[field.id] = option.id;
+        item.valuesAt ??= {};
+        item.valuesAt[field.id] = now().toISOString();
         const issue = state.issues.find((candidate) => candidate.id === item.issueId);
         if (issue !== undefined) issue.updatedAt = now().toISOString();
         return ok(undefined);
@@ -761,7 +773,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
         if (project === null) return missingProject(arg.project);
         const issues = project.items.flatMap((item) => {
           const issue = state.issues.find((candidate) => candidate.id === item.issueId);
-          return issue === undefined ? [] : [rawIssue(project, issue, item.values)];
+          return issue === undefined ? [] : [rawIssue(project, issue, item.values, item.valuesAt)];
         });
         const stageField = project.fields.find((field) => field.name === STAGE_FIELD) ?? null;
         return ok(

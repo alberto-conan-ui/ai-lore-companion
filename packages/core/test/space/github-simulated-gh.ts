@@ -547,7 +547,9 @@ export function createSimulatedGh(fake: FakeGitHub): SimulatedGh {
             const option = field.options.find(
               (candidate) => candidate.id === item.values[field.id],
             );
-            return option === undefined ? [] : [{ name: option.name, field: { name: field.name } }];
+            if (option === undefined) return [];
+            const at = item.valuesAt?.[field.id];
+            return [{ name: option.name, updatedAt: at, field: { name: field.name } }];
           });
           return [
             {

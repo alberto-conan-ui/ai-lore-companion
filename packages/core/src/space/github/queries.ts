@@ -209,6 +209,7 @@ export const READ_PROJECT_QUERY = `query($project: ID!, $stage: String!, $after:
             nodes {
               ... on ProjectV2ItemFieldSingleSelectValue {
                 name
+                updatedAt
                 field { ... on ProjectV2FieldCommon { name } }
               }
             }

@@ -79,16 +79,18 @@ function isPlanItem(value: unknown): value is PlanItem {
     isString(value.title) &&
     (value.state === 'open' || value.state === 'closed') &&
     isStringOrNull(value.status) &&
-    isListOf(value.labels, isString)
+    isListOf(value.labels, isString) &&
+    (value.updatedAt === undefined || isString(value.updatedAt))
   );
 }
 
 function isFocusItem(value: unknown): value is FocusItem {
   if (!isJsonObject(value)) return false;
-  const { stage, kind, items, specUrl } = value;
+  const { stage, stageChangedAt, kind, items, specUrl } = value;
   return (
     isPlanItem(value) &&
     isStringOrNull(stage) &&
+    (stageChangedAt === undefined || isStringOrNull(stageChangedAt)) &&
     isStringOrNull(kind) &&
     isListOf(items, isPlanItem) &&
     isStringOrNull(specUrl)

@@ -91,6 +91,7 @@ function planItem(raw: RawProjectIssue): PlanItem {
     state: raw.state,
     status: raw.fieldValues[STATUS_FIELD] ?? null,
     labels: raw.labels,
+    updatedAt: raw.updatedAt,
   };
 }
 
@@ -126,11 +127,12 @@ function focusItem(raw: RawProjectIssue, onProject: Map<string, RawProjectIssue>
   return {
     ...planItem(raw),
     stage: raw.fieldValues[STAGE_FIELD] ?? null,
+    stageChangedAt: raw.fieldValuesAt[STAGE_FIELD] ?? null,
     kind: raw.labels.find((label) => FOCUS_KIND_LABELS.includes(label)) ?? null,
     items: raw.subIssues.map((sub) => {
       const own = onProject.get(issueKey(sub.issue.repository, sub.issue.number));
       if (own !== undefined) return planItem(own);
-      return { issue: sub.issue, title: sub.title, state: sub.state, status: null, labels: [] };
+      return { issue: sub.issue, title: sub.title, state: sub.state, status: null, labels: [], updatedAt: '' };
     }),
     specUrl: parseSpecLink(raw.body),
   };

@@ -539,6 +539,8 @@ export function gitHubPortContract(
         ]),
         [[focus.number, 'A focus', 'Build', 'feature', 'open']],
       );
+      assert.ok(snapshot.focuses[0]?.updatedAt, 'FocusItem must have updatedAt');
+      assert.ok(snapshot.focuses[0]?.stageChangedAt, 'FocusItem must have stageChangedAt');
       assert.deepEqual(
         snapshot.focuses[0]?.items.map((entry) => [entry.issue.number, entry.state]),
         [
@@ -550,6 +552,8 @@ export function gitHubPortContract(
         snapshot.standalone.map((entry) => entry.issue.number),
         [alone.number],
       );
+      assert.ok(snapshot.standalone[0]?.updatedAt, 'PlanItem standalone must have updatedAt');
+      assert.ok(snapshot.focuses[0]?.items[0]?.updatedAt, 'PlanItem inside focus must have updatedAt');
       assert.deepEqual(snapshot.sessions, []);
     },
   );

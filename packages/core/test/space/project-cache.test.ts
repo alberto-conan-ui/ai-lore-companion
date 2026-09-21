@@ -66,9 +66,11 @@ function snapshot(fetchedAt = NOW): ProjectSnapshot {
         state: 'open',
         status: null,
         labels: ['feature'],
+        updatedAt: NOW,
         stage: 'Spec',
+        stageChangedAt: NOW,
         kind: 'feature',
-        items: [{ issue: ISSUE(2), title: 'An item', state: 'closed', status: 'Done', labels: [] }],
+        items: [{ issue: ISSUE(2), title: 'An item', state: 'closed', status: 'Done', labels: [], updatedAt: NOW }],
         specUrl: null,
       },
     ],
@@ -241,4 +243,18 @@ test('readProject reads a Project of 250 items in three pages of at most 100', a
   assert.equal(read.value.standalone.length, 250);
   assert.equal(read.value.standalone.at(-1)?.issue.number, 250);
   assert.ok(isProjectSnapshot(JSON.parse(JSON.stringify(read.value))));
+});
+
+test('an older cache without updatedAt and stageChangedAt still loads', (t) => {
+  const paths = tempPaths(t);
+  const desk = open(paths);
+  const old = snapshot();
+  delete (old.focuses[0] as any).updatedAt;
+  delete (old.focuses[0] as any).stageChangedAt;
+  delete (old.focuses[0]!.items[0] as any).updatedAt;
+  const fileContent = { version: 1, records: [{ snapshot: old, failure: null }] };
+  writeFileSync(deskFile(paths, 'projectCache'), JSON.stringify(fileContent));
+  const read = must(readProjectCache(desk));
+  assert.equal(read.snapshot?.focuses[0]?.updatedAt, undefined);
+  assert.equal(read.snapshot?.focuses[0]?.stageChangedAt, undefined);
 });

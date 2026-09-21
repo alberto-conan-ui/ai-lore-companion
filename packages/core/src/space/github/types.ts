@@ -136,12 +136,14 @@ export type PlanItem = {
   /** The value of the built-in Status field, or `null`. */
   status: string | null;
   labels: string[];
+  updatedAt: string;
 };
 
 /** A focus: a parent issue with its items (its sub-issues). */
 export type FocusItem = PlanItem & {
   /** The value of the Stage field, or `null`. */
   stage: string | null;
+  stageChangedAt: string | null;
   /** The first of the issue's labels that names a kind, or `null`. */
   kind: string | null;
   items: PlanItem[];
@@ -191,6 +193,7 @@ export type RawProjectIssue = {
   parentNumber: number | null;
   /** The values of the item's single-select fields, by field name. */
   fieldValues: Record<string, string>;
+  fieldValuesAt: Record<string, string>;
   /**
    * The sub-issues, in GitHub's order. Their labels and Status are not here:
    * a sub-issue that is on the Project is also one of the issues read, and the
