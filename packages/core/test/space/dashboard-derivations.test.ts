@@ -9,6 +9,7 @@ import {
   focusAgeMs,
   nextActionHeadline,
   partitionMoving,
+  pullRequestSummary,
   rankNextActions,
   spaceStats,
 } from '../../src/index.js';
@@ -177,6 +178,23 @@ test('ages use Stage changes only, clamp future dates, and ignore unknown ages i
       now,
     ),
     { count: 3, paused: 1, oldestAgeMs: 3 * 86400000, medianAgeMs: 2 * 86400000 },
+  );
+});
+
+test('PR summary keeps mixed CI and review states accurate without zero-count noise', () => {
+  const summary = pullRequestSummary([
+    pull,
+    { ...pull, number: 8, checks: 'pending', review: 'approved' },
+    { ...pull, number: 9, checks: 'none', review: 'review-required' },
+    { ...pull, number: 10, checks: 'passing', review: 'changes-requested' },
+  ]);
+  assert.equal(summary.broken, true);
+  assert.equal(summary.failing, 1);
+  assert.equal(summary.pending, 1);
+  assert.equal(summary.none, 1);
+  assert.equal(
+    summary.aggregate,
+    '1 CI FAILED · 1 RUNNING · 1 NO CI · 1 REVIEWED · 1 CHANGES REQUESTED · 1 REVIEW REQUIRED',
   );
 });
 

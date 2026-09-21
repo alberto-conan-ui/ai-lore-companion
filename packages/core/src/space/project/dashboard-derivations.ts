@@ -27,6 +27,58 @@ export type SpaceStats = {
   openPullRequests: number;
   liveSessions: number;
 };
+export type PullRequestSummary = {
+  total: number;
+  passing: number;
+  failing: number;
+  pending: number;
+  none: number;
+  approved: number;
+  changesRequested: number;
+  reviewRequired: number;
+  aggregate: string;
+  broken: boolean;
+};
+
+/** The PR panel's copy and problem state, computed with the Project snapshot. */
+export function pullRequestSummary(pulls: readonly OpenPullRequest[]): PullRequestSummary {
+  const passing = pulls.filter((pull) => pull.checks === 'passing').length;
+  const failing = pulls.filter((pull) => pull.checks === 'failing').length;
+  const pending = pulls.filter((pull) => pull.checks === 'pending').length;
+  const none = pulls.filter((pull) => pull.checks === 'none').length;
+  const approved = pulls.filter((pull) => pull.review === 'approved').length;
+  const changesRequested = pulls.filter((pull) => pull.review === 'changes-requested').length;
+  const reviewRequired = pulls.filter((pull) => pull.review === 'review-required').length;
+  const reviewParts = [
+    approved === 0 ? '' : `${approved} REVIEWED`,
+    changesRequested === 0 ? '' : `${changesRequested} CHANGES REQUESTED`,
+    reviewRequired === 0 ? '' : `${reviewRequired} REVIEW REQUIRED`,
+  ].filter((part) => part !== '');
+  const review = reviewParts.length === 0 ? 'NONE REVIEWED' : reviewParts.join(' · ');
+  const ciParts = [
+    failing === 0 ? '' : `${failing} CI FAILED`,
+    pending === 0 ? '' : `${pending} RUNNING`,
+    none === 0 ? '' : `${none} NO CI`,
+  ].filter((part) => part !== '');
+  const ci = ciParts.length === 0 ? `${passing} CI PASSED` : ciParts.join(' · ');
+  return {
+    total: pulls.length,
+    passing,
+    failing,
+    pending,
+    none,
+    approved,
+    changesRequested,
+    reviewRequired,
+    aggregate:
+      pulls.length === 0
+        ? 'NO OPEN PULL REQUESTS'
+        : failing > 0
+          ? `${ci} · ${review}`
+          : `${pulls.length} OPEN · ${ci} · ${review}`,
+    broken: failing > 0,
+  };
+}
 
 function sameIssue(a: IssueRef, b: IssueRef): boolean {
   return a.repository === b.repository && a.number === b.number;

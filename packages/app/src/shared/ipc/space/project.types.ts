@@ -12,6 +12,7 @@ import type {
   OpenPullRequest,
   ProjectCacheFailure,
   ProjectSnapshot,
+  PullRequestSummary,
   SpaceStats,
 } from '@ai-lore-companion/core';
 
@@ -53,6 +54,8 @@ export type SpaceProjectState = {
   pullRequests: OpenPullRequest[];
   /** A failed PR read retains the last list without marking a good Project read stale. */
   pullRequestsFailure: ProjectCacheFailure | null;
+  /** Counts and copy for the waiting PR panel, computed with the Project state. */
+  pullRequestSummary?: PullRequestSummary;
   nextActions: NextAction[];
   moving: MovingPartition;
   dormant: DormantAggregate;

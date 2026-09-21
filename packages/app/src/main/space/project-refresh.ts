@@ -41,6 +41,7 @@ import {
   findSpaceProject,
   listSessions,
   partitionMoving,
+  pullRequestSummary,
   rankNextActions,
   readProjectCache,
   recordProjectFailure,
@@ -165,16 +166,15 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
       model,
       pullRequests,
       pullRequestsFailure,
+      pullRequestSummary: pullRequestSummary(pullRequests),
       nextActions: rankNextActions({
         needsYou:
           model?.needsYou ??
-          options
-            .gates()
-            .map((gate) => ({
-              kind: 'gate' as const,
-              ...gate,
-              item: live.find((session) => session.id === gate.sessionId)?.item ?? null,
-            })),
+          options.gates().map((gate) => ({
+            kind: 'gate' as const,
+            ...gate,
+            item: live.find((session) => session.id === gate.sessionId)?.item ?? null,
+          })),
         pulls: pullRequests,
         drafts,
         now: at,
@@ -433,7 +433,13 @@ export const spaceProjectRefresh = defineSpaceService<ProjectRefresh>({
     const reports = context.service(spaceDashboardReport);
     const initial = refresh.current();
     const sourceKey = (state: SpaceProjectState): string =>
-      JSON.stringify([state.fetchedAt, state.state, state.failure?.at, state.pullRequests, state.pullRequestsFailure]);
+      JSON.stringify([
+        state.fetchedAt,
+        state.state,
+        state.failure?.at,
+        state.pullRequests,
+        state.pullRequestsFailure,
+      ]);
     let source = sourceKey(initial);
     refresh.subscribe((state) => {
       const next = sourceKey(state);

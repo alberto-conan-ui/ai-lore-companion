@@ -6,12 +6,14 @@ export {
   type MovingPartition,
   type DormantAggregate,
   type SpaceStats,
+  type PullRequestSummary,
   focusAgeMs,
   nextActionHeadline,
   rankNextActions,
   partitionMoving,
   dormantAggregate,
   spaceStats,
+  pullRequestSummary,
 } from './dashboard-derivations.js';
 
 export {
