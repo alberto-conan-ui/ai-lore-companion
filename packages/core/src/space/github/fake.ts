@@ -43,6 +43,7 @@ import {
   type FieldInfo,
   type LabelSpec,
   type MergedPullRequest,
+  type OpenPullRequest,
   PROJECT_SCOPE,
   type ProjectInfo,
   type ProjectViewInfo,
@@ -106,6 +107,7 @@ export type FakeGitHubState = {
   issues: FakeIssue[];
   projects: FakeProject[];
   pullRequests: { repository: string; pull: MergedPullRequest }[];
+  openPullRequests: { repository: string; pull: OpenPullRequest }[];
 };
 
 /** One operation the fake was asked for, and whether it succeeded. */
@@ -164,6 +166,8 @@ export type FakeGitHub = GitHubPort & {
   signIn(account: string, scopes: string[]): void;
   /** Add a merged pull request to a repository. */
   addMergedPullRequest(repository: string, pull: MergedPullRequest): void;
+  /** Add an open pull request to a repository. */
+  addOpenPullRequest(repository: string, pull: OpenPullRequest): void;
   /** The issue a reference names, or `null`. */
   issue(ref: IssueRef): FakeIssue | null;
   /** Write the state to `path`. */
@@ -200,6 +204,7 @@ function emptyState(options: FakeGitHubOptions): FakeGitHubState {
     issues: [],
     projects: [],
     pullRequests: [],
+    openPullRequests: [],
   };
 }
 
@@ -385,6 +390,10 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     },
     addMergedPullRequest(repository, pull) {
       state.pullRequests.push({ repository, pull });
+      if (options.stateFile !== undefined) save(options.stateFile);
+    },
+    addOpenPullRequest(repository, pull) {
+      state.openPullRequests.push({ repository, pull });
       if (options.stateFile !== undefined) save(options.stateFile);
     },
     issue: (ref) => {
@@ -784,6 +793,18 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
           .sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
         return ok(pulls.slice(0, Math.max(1, Math.floor(arg.limit))));
       }),
+
+    openPullRequests: (arg) =>
+      operate('openPullRequests', false, () => {
+        const known = repositoryFor(arg.repository);
+        if (!known.ok) return known;
+        const pulls = state.openPullRequests
+          .filter((entry) => entry.repository === arg.repository)
+          .map((entry) => ({ ...entry.pull }))
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        return ok(pulls.slice(0, Math.max(1, Math.floor(arg.limit))));
+      }),
   };
   return fake;
 }
+
