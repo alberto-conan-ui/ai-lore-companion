@@ -36,5 +36,18 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - name: Build core (the app build resolves @ai-lore-companion/core from its dist)
+        run: npm run build -w @ai-lore-companion/core
       - name: e2e (Playwright + Electron under xvfb)
         run: xvfb-run --auto-servernum npm run e2e
+      # `trace: 'retain-on-failure'` writes a trace per failed test. Without this
+      # step they stay on the runner and a failure cannot be read without running
+      # the job again.
+      - name: Playwright traces of the failures
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: packages/app/test-results
+          retention-days: 7
+          if-no-files-found: ignore
