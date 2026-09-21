@@ -714,6 +714,13 @@ export function gitHubPortContract(
     assert.equal(offline.kind, 'unreachable');
   });
 
+  run('Criterion 5: openPullRequests of an empty repository returns []', async (subject) => {
+    const { port } = subject;
+    const repository = await space(subject);
+    const pulls = unwrap(await port.openPullRequests({ repository, limit: 10 }));
+    assert.deepEqual(pulls, []);
+  });
+
   run(
     'a rate-limited answer says how long to wait, creates nothing, and the next try succeeds',
     async (subject) => {

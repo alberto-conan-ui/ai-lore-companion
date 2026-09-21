@@ -198,10 +198,4 @@ export { PathIndex, rankPaths } from './search/path-index.js';
 export type { SearchHit } from './search/path-index.js';
 export { normalizeUrl } from './browser/url.js';
 
-export type {
-  OpenPullRequest,
-  PullRequestChecks,
-  PullRequestReview,
-} from './space/index.js';
-
 export * from './space/index.js';

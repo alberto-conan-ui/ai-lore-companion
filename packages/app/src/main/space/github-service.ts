@@ -82,6 +82,7 @@ export function unreachableGitHub(message: string): GitHubPort {
     developBranch: answer,
     readProject: answer,
     mergedPullRequests: answer,
+    openPullRequests: answer,
   };
 }
 

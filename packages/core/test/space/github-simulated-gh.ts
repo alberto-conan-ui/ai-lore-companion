@@ -740,6 +740,7 @@ export function createSimulatedGh(fake: FakeGitHub): SimulatedGh {
                   ? []
                   : [
                       {
+                        __typename: 'CheckRun',
                         conclusion:
                           pull.checks === 'failing'
                             ? 'FAILURE'

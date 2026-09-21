@@ -901,39 +901,44 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
         if (rollup.length > 0) {
           checks = 'passing';
           for (const check of rollup) {
-            const conclusion = text(check, 'conclusion');
-            const status = text(check, 'status');
-            if (conclusion === 'FAILURE' || conclusion === 'TIMED_OUT' || conclusion === 'CANCELLED' || conclusion === 'ACTION_REQUIRED') {
-              checks = 'failing';
-              break;
-            }
-            if (status !== 'COMPLETED') {
-              checks = 'pending';
+            const typename = text(check, '__typename');
+            if (typename === 'CheckRun') {
+              const conclusion = text(check, 'conclusion');
+              const status = text(check, 'status');
+              if (conclusion === 'FAILURE' || conclusion === 'TIMED_OUT' || conclusion === 'CANCELLED' || conclusion === 'ACTION_REQUIRED') {
+                checks = 'failing';
+                break;
+              }
+              if (status !== 'COMPLETED') {
+                checks = 'pending';
+              }
+            } else if (typename === 'StatusContext') {
+              const state = text(check, 'state');
+              if (state === 'ERROR' || state === 'FAILURE') {
+                checks = 'failing';
+                break;
+              }
+              if (state === 'EXPECTED' || state === 'PENDING') {
+                checks = 'pending';
+              }
             }
           }
         }
 
-        let reviewStr = text(node, 'reviewDecision') ?? 'none';
-        if (reviewStr === '' || reviewStr === 'none') {
-          reviewStr = 'none';
-        } else if (reviewStr === 'APPROVED') {
-          reviewStr = 'approved';
-        } else if (reviewStr === 'CHANGES_REQUESTED') {
-          reviewStr = 'changes-requested';
-        } else if (reviewStr === 'REVIEW_REQUIRED') {
-          reviewStr = 'review-required';
-        } else {
-          reviewStr = 'none';
-        }
+        const reviewMapping: Record<string, OpenPullRequest['review']> = {
+          APPROVED: 'approved',
+          CHANGES_REQUESTED: 'changes-requested',
+          REVIEW_REQUIRED: 'review-required',
+        };
+        const reviewDecision = text(node, 'reviewDecision');
+        const review = reviewDecision !== null ? (reviewMapping[reviewDecision] ?? 'none') : 'none';
         
-        let mergeableStr = text(node, 'mergeable') ?? 'unknown';
-        if (mergeableStr === 'MERGEABLE') {
-          mergeableStr = 'mergeable';
-        } else if (mergeableStr === 'CONFLICTING') {
-          mergeableStr = 'conflicting';
-        } else {
-          mergeableStr = 'unknown';
-        }
+        const mergeableMapping: Record<string, OpenPullRequest['mergeable']> = {
+          MERGEABLE: 'mergeable',
+          CONFLICTING: 'conflicting',
+        };
+        const mergeableStr = text(node, 'mergeable');
+        const mergeable = mergeableStr !== null ? (mergeableMapping[mergeableStr] ?? 'unknown') : 'unknown';
 
         const pr: OpenPullRequest = {
           repository: arg.repository,
@@ -946,11 +951,14 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
           createdAt,
           updatedAt,
           checks,
-          review: reviewStr as any,
-          mergeable: mergeableStr as any,
+          review,
+          mergeable,
         };
         return [pr];
       });
+
+      pulls.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
       return ok(pulls);
     },
   };
