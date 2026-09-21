@@ -38,6 +38,13 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Build core (the app build resolves @ai-lore-companion/core from its dist)
         run: npm run build -w @ai-lore-companion/core
+      # Creating a Space commits, and a bare runner has no git identity, so
+      # `git commit` exits 128 with "Author identity unknown". A developer's
+      # machine has one; the runner is given one here.
+      - name: A git identity, which creating a Space needs to commit
+        run: |
+          git config --global user.email "ci@ai-lore.invalid"
+          git config --global user.name "AI-Lore CI"
       - name: e2e (Playwright + Electron under xvfb)
         run: xvfb-run --auto-servernum npm run e2e
       # `trace: 'retain-on-failure'` writes a trace per failed test. Without this

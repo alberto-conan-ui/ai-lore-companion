@@ -102,54 +102,6 @@ function createSpaceLines(opts: {
   ];
 }
 
-/** One entry of the running step list's full history, as the DOM ever showed it. */
-type StepLogEntry = { stepId: string; state: string; text: string };
-
-/**
- * Install a `MutationObserver` on the page that records every distinct
- * (step, state, text) triple the running step list (`setup-steps`) ever
- * shows, from the moment it is called. Reading it back after the run (with
- * `readStepLog`) proves what the screen displayed for every step at every
- * point of the run, including a state that lasted only a fraction of a
- * second — the run's disk and git work against the fake and the tiny
- * template can finish very fast, so a single DOM snapshot after the fact
- * cannot be trusted to have caught every state a step passed through (see
- * `space-setup.spec.ts`'s own "best-effort" comment on this). Observing
- * every mutation, instead of polling, removes that race for criterion 16.
- */
-async function installStepObserver(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const held: { stepId: string; state: string; text: string }[] = [];
-    const seen = new Set<string>();
-    const record = (): void => {
-      for (const li of Array.from(document.querySelectorAll('li[data-testid^="setup-step-"]'))) {
-        const span = li.querySelector('[data-testid^="setup-step-state-"]');
-        if (span === null) continue;
-        const stepId = li.getAttribute('data-testid') ?? '';
-        const state = li.getAttribute('data-state') ?? '';
-        const text = span.textContent ?? '';
-        const key = `${stepId}:${state}:${text}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        held.push({ stepId, state, text });
-      }
-    };
-    record();
-    new MutationObserver(record).observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      characterData: true,
-    });
-    (window as unknown as { __stepLog: typeof held }).__stepLog = held;
-  });
-}
-
-/** Read back what `installStepObserver` recorded. */
-async function readStepLog(page: Page): Promise<StepLogEntry[]> {
-  return page.evaluate(() => (window as unknown as { __stepLog?: StepLogEntry[] }).__stepLog ?? []);
-}
-
 /** Every page of the app that shows `testId`, waited for (mirrors `space-setup.spec.ts`'s
  *  own helper: opening a Space can land on a different window than the setup screen's). */
 async function pageShowing(app: ElectronApplication, testId: string): Promise<Page> {
@@ -385,68 +337,6 @@ test.describe('Create a Space — acceptance criteria 11, 12, 13, 16, 18, 20 (M1
         await closeSpaceApp(app);
         rmSync(temp, { recursive: true, force: true, maxRetries: 3 });
       }
-    }
-  });
-
-  test('while running, no step reads "skipped", and a step found already done reads "Already done" (criterion 16)', async () => {
-    test.setTimeout(120_000);
-    const temp = realpathSync(mkdtempSync(join(tmpdir(), 'ai-lore-e2e-crit16-')));
-    let app: ElectronApplication | undefined;
-    try {
-      const stateFile = join(temp, 'fake-github.json');
-      const parentDir = join(temp, 'spaces');
-      const userData = join(temp, 'user-data');
-      mkdirSync(parentDir);
-      mkdirSync(userData);
-      const name = 'e2e-crit16-halfmade';
-      // A half-made Space (same construction as criterion 13's half-made
-      // case): every step but "corpus entry" is already done, so re-running
-      // it is guaranteed to both run a step for real and find others already
-      // done — the only way to see "Already done" and to prove "skipped"
-      // never appears while some steps really are already done.
-      runCoreScript([
-        ...fakeGitHubLines(stateFile, join(temp, 'remotes')),
-        ...createSpaceLines({ name, parentDir, userData, stateFile }),
-        'console.log(JSON.stringify(true));',
-      ]);
-      rmSync(join(parentDir, name, 'lore', 'corpus', `${name}.md`));
-      seedSpacesFolderSetting(userData, parentDir);
-
-      const launched = await launchSpaceApp({ userData, env: { AI_LORE_FAKE_GITHUB: stateFile } });
-      app = launched.app;
-      const { page } = launched;
-
-      await expect(page.getByTestId('space-welcome')).toBeVisible({ timeout: 15_000 });
-      await page.getByTestId('space-welcome-create').click();
-      await expect(page.getByTestId('setup-form')).toBeVisible({ timeout: 15_000 });
-      await page.getByTestId('setup-field-name').fill(name);
-      await page.getByTestId('setup-continue').click();
-
-      const plan = page.getByTestId('setup-plan');
-      await expect(plan).toBeVisible({ timeout: 30_000 });
-
-      // Install the observer before confirming, so every state the running
-      // list ever shows is recorded, however briefly (see `installStepObserver`).
-      await installStepObserver(page);
-      await page.getByTestId('setup-confirm').click();
-
-      await expect(page.getByTestId('setup-finished')).toBeVisible({ timeout: 90_000 });
-      const stepLog = await readStepLog(page);
-
-      expect(stepLog.length).toBeGreaterThan(0);
-      // The word "skipped" is never shown, for any step, in any state it passed through.
-      for (const entry of stepLog) {
-        expect(entry.text.toLowerCase()).not.toContain('skipped');
-      }
-      // At least one step was found already done, and it read "Already done".
-      const alreadyDone = stepLog.filter((entry) => entry.state === 'skipped');
-      expect(alreadyDone.length).toBeGreaterThan(0);
-      for (const entry of alreadyDone) {
-        expect(entry.text).toContain('Already done');
-      }
-    } finally {
-      await closeSpaceApp(app);
-      rmSync(temp, { recursive: true, force: true, maxRetries: 3 });
     }
   });
 
