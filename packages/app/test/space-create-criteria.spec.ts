@@ -68,6 +68,16 @@ const FINE_MACHINE_LINES = [
   '};',
 ];
 
+/**
+ * How long to wait for the plan screen. `spaceSetupPlan` in the main process
+ * allows a whole plan `PLAN_TIME_LIMIT_MS` (60s) before it gives up and renders
+ * its own message. A wait shorter than that turns a plan which is merely slow
+ * into "element(s) not found", which says nothing, and makes the test flaky on
+ * a loaded runner. Waiting past the app's limit means a plan that really hangs
+ * fails with the app's message instead.
+ */
+const PLAN_WAIT_MS = 75_000;
+
 /** The lines that build a fake GitHub with its state file, for scripts run with `runCoreScript`. */
 function fakeGitHubLines(stateFile: string, reposDir: string): string[] {
   return [
@@ -389,7 +399,7 @@ test.describe('Create a Space — acceptance criteria 11, 12, 13, 16, 18, 20 (M1
   });
 
   test('while running, no step reads "skipped", and a step found already done reads "Already done" (criterion 16)', async () => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     const temp = realpathSync(mkdtempSync(join(tmpdir(), 'ai-lore-e2e-crit16-')));
     let app: ElectronApplication | undefined;
     try {
@@ -423,7 +433,7 @@ test.describe('Create a Space — acceptance criteria 11, 12, 13, 16, 18, 20 (M1
       await page.getByTestId('setup-continue').click();
 
       const plan = page.getByTestId('setup-plan');
-      await expect(plan).toBeVisible({ timeout: 30_000 });
+      await expect(plan).toBeVisible({ timeout: PLAN_WAIT_MS });
 
       // Install the observer before confirming, so every state the running
       // list ever shows is recorded, however briefly (see `installStepObserver`).
@@ -533,7 +543,7 @@ test.describe('Create a Space — acceptance criteria 11, 12, 13, 16, 18, 20 (M1
   });
 
   test('making a Space from a repository on this Mac leaves the chosen folder unchanged (criterion 20)', async () => {
-    test.setTimeout(150_000);
+    test.setTimeout(210_000);
     const temp = realpathSync(mkdtempSync(join(tmpdir(), 'ai-lore-e2e-crit20-')));
     let app: ElectronApplication | undefined;
     try {
@@ -617,7 +627,7 @@ test.describe('Create a Space — acceptance criteria 11, 12, 13, 16, 18, 20 (M1
 
       await page.getByTestId('setup-continue').click();
       const plan = page.getByTestId('setup-plan');
-      await expect(plan).toBeVisible({ timeout: 30_000 });
+      await expect(plan).toBeVisible({ timeout: PLAN_WAIT_MS });
       await page.getByTestId('setup-confirm').click();
 
       await expect(page.getByTestId('setup-finished')).toBeVisible({ timeout: 90_000 });

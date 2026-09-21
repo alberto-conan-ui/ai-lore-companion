@@ -139,7 +139,8 @@ test('the onboarding and first-session flow, screen by screen', async () => {
     // single tick against the fake).
     await page.getByTestId('setup-continue').click();
     await tryShot(page, 'setup-checking', 'checking');
-    await expect(page.getByTestId('setup-plan')).toBeVisible({ timeout: 30_000 });
+    // Past the main process's own 60s plan limit, as in space-create-criteria.spec.ts.
+    await expect(page.getByTestId('setup-plan')).toBeVisible({ timeout: 75_000 });
     await shot(page, 'confirmation');
 
     // The run (best-effort, same reason as checking) and the result.
