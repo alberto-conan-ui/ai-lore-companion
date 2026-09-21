@@ -8,6 +8,36 @@
  * clock, no file system. The same input gives the same rows.
  */
 
+export type MirrorDrift = {
+  path: string;
+  state: 'matches' | 'differs' | 'not-checked' | 'no-mirror';
+  added: number; removed: number;
+  checkedAt: string | null;
+};
+
+export function mirrorDrift(arg: { path: string; stored: readonly string[]; generated: readonly string[] | null; checkedAt: string | null }): MirrorDrift {
+  if (arg.generated === null) {
+    return { path: arg.path, state: 'not-checked', added: 0, removed: 0, checkedAt: arg.checkedAt };
+  }
+  const storedSet = new Set(arg.stored);
+  let added = 0;
+  for (const line of arg.generated) {
+    if (!storedSet.has(line)) added++;
+  }
+  const generatedSet = new Set(arg.generated);
+  let removed = 0;
+  for (const line of arg.stored) {
+    if (!generatedSet.has(line)) removed++;
+  }
+  return {
+    path: arg.path,
+    state: added === 0 && removed === 0 ? 'matches' : 'differs',
+    added,
+    removed,
+    checkedAt: arg.checkedAt,
+  };
+}
+
 import type { DefaultBaseline } from '../baseline/types.js';
 import type {
   Root,
@@ -39,6 +69,8 @@ export type RepositoriesModelInput = {
   reads: Readonly<Record<string, RepositoryRead>>;
   /** `owner/name` per repository root, from the manifest. */
   github: Readonly<Record<string, string>>;
+  /** The mirror drift per root id, if applicable. */
+  mirrors: Readonly<Record<string, MirrorDrift>>;
 };
 
 /** What a row says about the changes of its root. */
@@ -95,6 +127,7 @@ export type RepositoryRow = {
   remote: RootRemoteComparison | null;
   /** `null` until the tracker has read the root, and for an untracked root. */
   changes: RepositoryRowChanges | null;
+  mirror: MirrorDrift | null;
 };
 
 /** The Repositories section's model. */
@@ -178,6 +211,7 @@ function trackedRow(
     operation,
     remote,
     changes,
+    mirror: input.mirrors[owner.id] ?? null,
   };
 }
 
@@ -197,6 +231,7 @@ function untrackedRow(root: Root, input: RepositoriesModelInput): RepositoryRow 
     operation: null,
     remote: null,
     changes: null,
+    mirror: input.mirrors[root.id] ?? null,
   };
 }
 
@@ -216,6 +251,7 @@ export function repositoriesModel(input: RepositoriesModelInput): RepositoriesMo
   const groupOrder: string[] = [];
   const groupMembers = new Map<string, Root[]>();
   for (const root of trackedRoots) {
+    if (root.kind === 'publish-area') continue;
     const workTree = root.tracking.workTree;
     const members = groupMembers.get(workTree);
     if (members === undefined) {
@@ -242,8 +278,12 @@ export function repositoriesModel(input: RepositoriesModelInput): RepositoriesMo
 
   // Rule 4: every remaining untracked repository or Lore root becomes its own row.
   for (const root of kept) {
+    if (root.kind === 'publish-area' && isTracked(root)) {
+      sources.push({ rankRoot: root, build: () => trackedRow(root, [], input) });
+      continue;
+    }
     if (root.tracking.tracked) continue;
-    if (root.kind !== 'repository' && root.kind !== 'lore') continue;
+    if (root.kind !== 'repository' && root.kind !== 'lore' && root.kind !== 'publish-area') continue;
     sources.push({ rankRoot: root, build: () => untrackedRow(root, input) });
   }
 
