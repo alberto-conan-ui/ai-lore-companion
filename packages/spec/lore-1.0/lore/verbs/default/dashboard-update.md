@@ -22,7 +22,7 @@ Read the effective dashboard corpus entry and definition, `lore/corpus/index.md`
 ## Steps
 
 1. Call `get_dashboard_context` to confirm that this companion can read and validate structured definitions. If the tool is unavailable, prepare only a Workbench proposal and report that a compatible companion is needed. Resolve the current definition from the custom file, installed default or companion's packaged default. Make the requested change to that complete definition; an override replaces the whole definition.
-2. Prepare the new JSON in the Workbench if the session is still in Read only. Use version 1, unique component/section IDs, valid references, supported component types and finite limits. Preserve unrelated customisations.
+2. Prepare the new JSON in the Workbench if the session is still in Read only. Use version 2, unique panel and PM-line IDs, the fixed bands and their supported panel kinds, valid panel options and finite limits. Preserve unrelated customisations.
 3. Before writing Lore, call `request_writing` with the Lore target unless this session already holds it. Wait with `await_answer`. On a declined or held claim, keep the proposal in the Workbench and stop without changing Lore.
 4. Run the applicable write-guard and lore-integrity checks. Write the custom JSON and maintain its index line in the same piece of work.
 5. Read `get_dashboard_context` again after the change. Fix invalid-definition diagnostics; displaying a fallback does not mean the custom definition passed validation. If this companion cannot validate structured definitions, leave the change as a Workbench proposal until a compatible companion is available.

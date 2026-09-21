@@ -1460,13 +1460,24 @@ test('dashboard refresh coalesces, uses a native PM prompt, cleans up, and keeps
     ) as {
       definition?: {
         hash?: string;
-        definition?: { components?: Array<{ id: string; source: string; type: string }> };
+        definition?: {
+          bands?: Array<{
+            panels?: Array<{ id: string; kind: string; source: string; pmLine?: { id: string } }>;
+          }>;
+        };
       };
     };
     const definition = dashboard.definition;
     assert.ok(definition?.hash);
-    const components = (definition.definition?.components ?? [])
-      .filter((component) => component.source === 'pm')
+    const components = (definition.definition?.bands ?? [])
+      .flatMap((band) => band.panels ?? [])
+      .flatMap((panel) =>
+        panel.source === 'pm'
+          ? [{ id: panel.id, type: panel.kind }]
+          : panel.pmLine === undefined
+            ? []
+            : [{ id: panel.pmLine.id, type: 'text' }],
+      )
       .map((component) =>
         component.type === 'text'
           ? { id: component.id, type: 'text' as const, text: 'Transient update' }

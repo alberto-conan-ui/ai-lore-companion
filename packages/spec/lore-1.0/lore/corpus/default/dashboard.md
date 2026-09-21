@@ -15,11 +15,11 @@ The dashboard presents this Space's current position, its work and documents to 
 
 The layout and requested content are JSON. The effective definition is `lore/corpus/dashboard.json` when present, otherwise `lore/corpus/default/dashboard.json`. Older Spaces without either use the companion's packaged default. Every definition file in the Lore has a line in its folder's index. A Space override replaces the complete definition; defaults are never edited in place.
 
-Version 1 has `sections` and `components`. Each section has an `id`, `title`, and one to three `columns`; each column lists component IDs in display order. Each component appears exactly once. Components have `id`, `type`, `source` and `title`. PM components may have an `instruction`. `list`, `workbench-docs`, `handovers` and `activity` may specify a `limit` from 1 to 50; `workbench-docs` may specify `recentDays` from 1 to 90.
+Version 2 has ordered `bands`, each with an `id` and `panels`. The fixed band ids are `needs-you`, `moving` and `waiting`; a panel has an id, a kind and a source. Companion panels appear only in their own band: Needs you has next action, documents to review and the publish area; Moving has in progress, queued, dormant and done; Waiting has pull requests, live sessions, the Agents board, Space statistics and handovers. Live sessions and the Agents board remain separate panels.
 
-The PM types are `text`, `metric` and `list`, with source `pm`. The factual types are `plan`, `needs-you`, `agents`, `repositories`, `workbench-docs`, `handovers` and `activity`, with source `companion`. The layout accepts these types only, never executable code, HTML, CSS or arbitrary renderer names. Narrow windows stack the declared columns.
+The PM types are `text`, `metric` and `list`, with source `pm`. A Space may place PM panels, but the shipped default places none. Its two PM text values are lines attached to the next-action and dormant panels. Bounded panels accept a limit from 1 to 50; review documents also accepts `recentDays` from 1 to 90; supported panels declare their order. The definition accepts these panel kinds only, never executable code, HTML, CSS or arbitrary renderer names.
 
-Malformed definitions are diagnosed. The companion keeps the last valid definition for the open Space, or uses the default, and reports the fallback. It does not silently accept a broken override.
+Malformed definitions are diagnosed. Version 1 is rejected with an `unsupported-version` diagnostic and the companion shows a valid version 2 fallback. The companion keeps the last valid definition for the open Space, or uses the default, and reports the fallback rather than silently accepting a broken override.
 
 ## Updating the data
 

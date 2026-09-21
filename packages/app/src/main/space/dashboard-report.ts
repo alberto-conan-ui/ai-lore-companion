@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import type { SessionRecord } from '@ai-lore-companion/core';
 import { listSessions } from '@ai-lore-companion/core';
 import type {
-  DashboardCompanionComponentDefinition,
+  DashboardCompanionPanel,
   DashboardDefinitionDiagnostic,
   DashboardRefreshReason,
   DashboardRefreshState,
@@ -221,30 +221,31 @@ export function createDashboardReportService(
             diagnostic: currentDefinition.diagnostic,
           });
     const definitionChanged = previousDefinitionIdentity !== definitionIdentity;
-    const workbenchComponents = currentDefinition?.definition.components.filter(
-      (component): component is DashboardCompanionComponentDefinition =>
-        component.source === 'companion' && component.type === 'workbench-docs',
+    const panels = currentDefinition?.definition.bands.flatMap((band) => band.panels) ?? [];
+    const workbenchPanels = panels.filter(
+      (panel): panel is DashboardCompanionPanel =>
+        panel.source === 'companion' && panel.kind === 'review-documents',
     );
-    const handoverComponents = currentDefinition?.definition.components.filter(
-      (component): component is DashboardCompanionComponentDefinition =>
-        component.source === 'companion' && component.type === 'handovers',
+    const handoverPanels = panels.filter(
+      (panel): panel is DashboardCompanionPanel =>
+        panel.source === 'companion' && panel.kind === 'handovers',
     );
     const scanLimit = Math.max(
-      ...(workbenchComponents ?? []).map((component) => component.limit ?? 10),
-      ...(handoverComponents ?? []).map((component) => component.limit ?? 10),
+      ...workbenchPanels.map((panel) => panel.limit ?? 10),
+      ...handoverPanels.map((panel) => panel.limit ?? 10),
       10,
     );
     const workbench = await readDashboardWorkbench({
       workbenchRoot,
       sessions: sessions(),
       recentDays:
-        workbenchComponents === undefined || workbenchComponents.length === 0
+        workbenchPanels.length === 0
           ? undefined
-          : Math.max(...workbenchComponents.map((component) => component.recentDays ?? 14)),
+          : Math.max(...workbenchPanels.map((panel) => panel.recentDays ?? 14)),
       limit: scanLimit,
-      windows: workbenchComponents?.map((component) => ({
-        recentDays: component.recentDays ?? 14,
-        limit: component.limit ?? 10,
+      windows: workbenchPanels.map((panel) => ({
+        recentDays: panel.recentDays ?? 14,
+        limit: panel.limit ?? 10,
       })),
       now,
     });
