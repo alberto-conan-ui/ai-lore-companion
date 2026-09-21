@@ -345,7 +345,7 @@ export function createDashboardReportService(
     readContext: () => context,
     readContextForSession(sessionId) {
       const live = liveSessions.get(sessionId);
-      if (live !== undefined && live.requestId === undefined) live.generation = sourceGeneration;
+      if (live !== undefined) live.generation = sourceGeneration;
       return context;
     },
     ready,
@@ -398,7 +398,7 @@ export function createDashboardReportService(
           'request-mismatch',
           'This PM response belongs to an older refresh generation.',
         );
-      if (requestId === undefined && live.generation < sourceGeneration)
+      if (live.generation < sourceGeneration)
         return failure(
           'request-mismatch',
           'This PM response was prepared before the dashboard source changed.',

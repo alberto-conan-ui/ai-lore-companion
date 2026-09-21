@@ -382,3 +382,31 @@ test('polling marks body edits stale, ignores transient activity and rejects lat
   assert.equal(service.publish('refresh', reportInput(service)).ok, false);
   service.dispose();
 });
+
+test('request-bound reports refresh generation on context read but reject later source changes', async () => {
+  const root = await rootWithDefinition(definition());
+  const service = createDashboardReportService({
+    definition: { spaceRoot: root },
+    workbenchRoot: join(root, 'workbench'),
+  });
+  await service.ready();
+
+  const reread = service.request('human').request;
+  service.openSession('refresh-after-attach');
+  assert.equal(service.attachRequest(reread.requestId, 'refresh-after-attach'), true);
+  service.markProjectChanged();
+  assert.ok(service.readContextForSession('refresh-after-attach'));
+  assert.equal(service.publish('refresh-after-attach', reportInput(service)).ok, true);
+  service.closeSession('refresh-after-attach', { preserveReport: true });
+
+  const rejectedRequest = service.request('human').request;
+  service.openSession('refresh-after-read');
+  assert.equal(service.attachRequest(rejectedRequest.requestId, 'refresh-after-read'), true);
+  assert.ok(service.readContextForSession('refresh-after-read'));
+  service.markProjectChanged();
+  const rejected = service.publish('refresh-after-read', reportInput(service));
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.equal(rejected.error.kind, 'request-mismatch');
+  service.failRequest(rejectedRequest.requestId, { kind: 'test-reset', message: 'reset' });
+  service.dispose();
+});
