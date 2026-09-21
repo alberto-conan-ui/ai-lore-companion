@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { type IPty, spawn } from 'node-pty';
 import type { TerminalForegroundStatus } from '../shared/ipc.js';
+import { PTY_FLOW_PAUSE, PTY_FLOW_RESUME } from '../shared/ipc.js';
 
 const execFileP = promisify(execFile);
 
@@ -210,10 +211,10 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
       if (engine) {
         args.unshift('-i');
         const tokens = [engine.binary, ...(engine.args ?? [])].map(quoteForShell);
-        args.push('-c', tokens.join(' '));
+        args.push('-c', `stty -ixon; ${tokens.join(' ')}`);
       } else if (spawnOpts?.command !== undefined) {
         args.unshift('-i');
-        args.push('-c', spawnOpts.command);
+        args.push('-c', `stty -ixon; ${spawnOpts.command}`);
       }
       const pty = spawn(DEFAULT_SHELL, args, {
         // 'xterm-256color' is what node-pty publishes as $TERM. The legacy
@@ -230,11 +231,12 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
           string
         >,
         // Backpressure: with flow control on, node-pty pauses reading from the
-        // child when it receives XOFF (`PTY_FLOW_PAUSE`) on the input path and
-        // resumes on XON (`PTY_FLOW_RESUME`). The renderer sends these as xterm's
-        // parse buffer fills/drains, so a flood can't outrun the UI. Defaults are
-        // XOFF/XON, matching the shared constants.
+        // child when it receives `PTY_FLOW_PAUSE` on the input path and
+        // resumes on `PTY_FLOW_RESUME`. The renderer sends these as xterm's
+        // parse buffer fills/drains, so a flood can't outrun the UI.
         handleFlowControl: true,
+        flowControlPause: PTY_FLOW_PAUSE,
+        flowControlResume: PTY_FLOW_RESUME,
       });
       ptys.set(id, {
         pty,
