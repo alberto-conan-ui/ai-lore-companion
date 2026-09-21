@@ -136,7 +136,7 @@ export type PlanItem = {
   /** The value of the built-in Status field, or `null`. */
   status: string | null;
   labels: string[];
-  updatedAt: string;
+  updatedAt: string | null;
 };
 
 /** A focus: a parent issue with its items (its sub-issues). */

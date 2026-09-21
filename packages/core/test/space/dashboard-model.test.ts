@@ -434,3 +434,19 @@ test('focusCard and itemCard carry stageChangedAt and updatedAt, tolerating null
   const standalone = model.standalone.find((i) => i.issue.number === 3);
   assert.equal(standalone?.updatedAt, '2026-09-18T10:05:00.000Z');
 });
+
+test("Criterion 3: an item's issue changed after its Stage did, explicitly asserting which one the age derives from", () => {
+  const model = dashboardModel({
+    snapshot: snapshot({
+      focuses: [
+        focus(1, 'Build', { stageChangedAt: '2026-09-18T10:00:00.000Z', updatedAt: '2026-09-18T10:05:00.000Z' }),
+      ],
+    }),
+    sessions: [],
+    gates: [],
+    now: NOW,
+  });
+  const build = model.columns.find((c) => c.name === 'Build')?.focuses[0];
+  assert.equal(build?.stageChangedAt, '2026-09-18T10:00:00.000Z');
+  assert.equal(build?.updatedAt, '2026-09-18T10:05:00.000Z');
+});

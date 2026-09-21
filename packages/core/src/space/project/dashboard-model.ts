@@ -79,7 +79,7 @@ export type ItemCard = {
   done: boolean;
   /** Labelled `paused` (a paused focus carried over by migration). */
   paused: boolean;
-  updatedAt: string;
+  updatedAt: string | null;
 };
 
 /** A focus on its Stage column. */
@@ -93,7 +93,7 @@ export type FocusCard = {
   stageChangedAt: string | null;
   kind: string | null;
   specUrl: string | null;
-  updatedAt: string;
+  updatedAt: string | null;
   /** The focus's items, session issues left out. */
   items: ItemCard[];
   itemsDone: number;
@@ -117,7 +117,7 @@ export type BoardRow = {
   attended: boolean;
   person: string;
   machine: string;
-  updatedAt: string;
+  updatedAt: string | null;
   /** Milliseconds since `updatedAt`, or `null` when it cannot be read. */
   idleMs: number | null;
   stale: boolean;

@@ -132,7 +132,7 @@ function focusItem(raw: RawProjectIssue, onProject: Map<string, RawProjectIssue>
     items: raw.subIssues.map((sub) => {
       const own = onProject.get(issueKey(sub.issue.repository, sub.issue.number));
       if (own !== undefined) return planItem(own);
-      return { issue: sub.issue, title: sub.title, state: sub.state, status: null, labels: [], updatedAt: '' };
+      return { issue: sub.issue, title: sub.title, state: sub.state, status: null, labels: [], updatedAt: null };
     }),
     specUrl: parseSpecLink(raw.body),
   };

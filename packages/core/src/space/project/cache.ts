@@ -80,7 +80,7 @@ function isPlanItem(value: unknown): value is PlanItem {
     (value.state === 'open' || value.state === 'closed') &&
     isStringOrNull(value.status) &&
     isListOf(value.labels, isString) &&
-    (value.updatedAt === undefined || isString(value.updatedAt))
+    (value.updatedAt === undefined || isStringOrNull(value.updatedAt))
   );
 }
 
@@ -168,7 +168,22 @@ export function readProjectCache(desk: Desk): Result<ProjectCache, DeskFailure> 
   const records = readDeskRecords(desk, PROJECT_CACHE_FILE);
   if (!records.ok) return records;
   const last = records.value.at(-1);
-  return ok(last === undefined ? { ...EMPTY } : { snapshot: last.snapshot, failure: last.failure });
+  if (last === undefined) return ok({ ...EMPTY });
+
+  if (last.snapshot !== null) {
+    for (const focus of last.snapshot.focuses) {
+      if (focus.updatedAt === undefined) focus.updatedAt = null;
+      if (focus.stageChangedAt === undefined) focus.stageChangedAt = null;
+      for (const item of focus.items) {
+        if (item.updatedAt === undefined) item.updatedAt = null;
+      }
+    }
+    for (const standalone of last.snapshot.standalone) {
+      if (standalone.updatedAt === undefined) standalone.updatedAt = null;
+    }
+  }
+
+  return ok({ snapshot: last.snapshot, failure: last.failure });
 }
 
 /**
