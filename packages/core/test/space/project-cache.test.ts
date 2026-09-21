@@ -255,6 +255,6 @@ test('an older cache without updatedAt and stageChangedAt still loads', (t) => {
   const fileContent = { version: 1, records: [{ snapshot: old, failure: null }] };
   writeFileSync(deskFile(paths, 'projectCache'), JSON.stringify(fileContent));
   const read = must(readProjectCache(desk));
-  assert.equal(read.snapshot?.focuses[0]?.updatedAt, undefined);
-  assert.equal(read.snapshot?.focuses[0]?.stageChangedAt, undefined);
+  assert.equal(read.snapshot?.focuses[0]?.updatedAt, null);
+  assert.equal(read.snapshot?.focuses[0]?.stageChangedAt, null);
 });
