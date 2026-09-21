@@ -215,7 +215,9 @@ function loadState(path: string): FakeGitHubState {
   }
   if (parsed.version !== 1) throw new Error(`FakeGitHub: ${path} has an unknown version`);
   // The file is written by `save` of this module only; its shape is trusted past the version.
-  return parsed as FakeGitHubState;
+  // Keep v1 state files written before open pull requests were added usable.
+  const state = parsed as FakeGitHubState;
+  return { ...state, openPullRequests: state.openPullRequests ?? [] };
 }
 
 /** Build a fake GitHub. With `stateFile`, continue from the file when it exists. */

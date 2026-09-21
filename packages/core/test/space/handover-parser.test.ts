@@ -97,25 +97,114 @@ Action!
   assert.equal(result.nextAction, 'Action!');
 });
 
-test('parses real entries with bold labels', () => {
-  const entry = `
+const JOURNAL_VARIANTS = [
+  {
+    name: 'Markdown labels',
+    entry: `
+## Handover
+
+### Done
+Completed the parser.
+
+### In progress
+Nothing.
+
+### What the next session should do
+Review it.
+`.trim(),
+    expected: {
+      done: 'Completed the parser.',
+      inProgress: 'Nothing.',
+      nextAction: 'Review it.',
+      fallback: false,
+    },
+  },
+  {
+    name: 'alternate Markdown labels',
+    entry: `
+## Handover
+
+### What was done
+Completed the parser.
+
+### What is in progress
+Nothing.
+
+### Next action
+Review it.
+`.trim(),
+    expected: {
+      done: 'Completed the parser.',
+      inProgress: 'Nothing.',
+      nextAction: 'Review it.',
+      fallback: false,
+    },
+  },
+  {
+    name: 'bold labels',
+    entry: `
 ## Handover
 
 **What was done**
-- Implemented the fix for the \`Ctrl+S\` terminal freeze bug in the companion app source code.
-- Guided the Human Lead through compiling and locating the new macOS binary.
+Completed the parser.
 
 **What is in progress**
-- The edits to fix the terminal freeze are sitting **uncommitted** in the working tree. 
+Nothing.
 
 **What the next session should do**
-1. Orient.
-2. Commit the uncommitted flow control fixes.
-`.trim();
+Review it.
+`.trim(),
+    expected: {
+      done: 'Completed the parser.',
+      inProgress: 'Nothing.',
+      nextAction: 'Review it.',
+      fallback: false,
+    },
+  },
+  {
+    name: 'bold prose under a recognized label',
+    entry: `
+## Handover
 
-  const result = parseHandover(entry);
-  assert.equal(result.fallback, false);
-  assert.ok(result.done?.includes('Implemented the fix'));
-  assert.ok(result.inProgress?.includes('terminal freeze'));
-  assert.ok(result.nextAction?.includes('Orient.'));
+**What was done**
+**Everything is done already**
+`.trim(),
+    expected: {
+      done: '**Everything is done already**',
+      inProgress: null,
+      nextAction: null,
+      fallback: false,
+    },
+  },
+  {
+    name: 'a handover without labels',
+    entry: `
+## Handover
+
+The handover is prose.
+It still reaches the fallback.
+`.trim(),
+    expected: {
+      done: null,
+      inProgress: null,
+      nextAction: null,
+      fallback: true,
+    },
+  },
+] as const;
+
+test('parses five portable journal variants', () => {
+  for (const fixture of JOURNAL_VARIANTS) {
+    const result = parseHandover(fixture.entry);
+    assert.deepEqual(
+      {
+        done: result.done,
+        inProgress: result.inProgress,
+        nextAction: result.nextAction,
+        fallback: result.fallback,
+      },
+      fixture.expected,
+      fixture.name,
+    );
+  }
 });

@@ -306,6 +306,22 @@ export type HandoverParts = {
   fallback: boolean;
 };
 
+type HandoverPart = 'done' | 'inProgress' | 'nextAction';
+
+/** The section labels that a journal handover defines. Text merely styled in bold is content. */
+const HANDOVER_PART_BY_LABEL: Readonly<Record<string, HandoverPart>> = {
+  done: 'done',
+  'what was done': 'done',
+  'in progress': 'inProgress',
+  'what is in progress': 'inProgress',
+  'next action': 'nextAction',
+  'what the next session should do': 'nextAction',
+};
+
+function handoverPartOf(label: string): HandoverPart | null {
+  return HANDOVER_PART_BY_LABEL[label.trim().toLowerCase()] ?? null;
+}
+
 export function parseHandover(entry: string): HandoverParts {
   const text = readHandover(entry);
   if (text !== null) {
@@ -314,7 +330,7 @@ export function parseHandover(entry: string): HandoverParts {
     let inProgress: string | null = null;
     let nextAction: string | null = null;
     
-    let currentPart: 'done' | 'inProgress' | 'nextAction' | null = null;
+    let currentPart: HandoverPart | null = null;
     let currentLines: string[] = [];
     
     const savePart = () => {
@@ -332,29 +348,14 @@ export function parseHandover(entry: string): HandoverParts {
     for (const line of lines) {
       const isHeading = /^#{1,6}\s+(.*)$/.exec(line);
       const isBold = /^\*\*([^*]+)\*\*$/.exec(line.trim());
-      if (isHeading || isBold) {
-        const hText = (isHeading ? isHeading[1] : isBold![1])?.toLowerCase() ?? '';
-        if (/\bdone\b/.test(hText) || /what was done/.test(hText)) {
-          savePart();
-          currentPart = 'done';
-          continue;
-        } else if (/\bin progress\b/.test(hText) || /what is in progress/.test(hText)) {
-          savePart();
-          currentPart = 'inProgress';
-          continue;
-        } else if (/next session/.test(hText) || /what.*next/.test(hText) || /next action/.test(hText)) {
-          savePart();
-          currentPart = 'nextAction';
-          continue;
-        } else {
-          // Some other sub-heading inside a part
-          if (currentPart) currentLines.push(line);
-        }
-      } else {
-        if (currentPart) {
-          currentLines.push(line);
-        }
+      const part = handoverPartOf(isHeading ? (isHeading[1] ?? '') : (isBold?.[1] ?? ''));
+      if (part !== null) {
+        savePart();
+        currentPart = part;
+        continue;
       }
+      // A heading or bold sentence that is not one of the defined labels is part content.
+      if (currentPart) currentLines.push(line);
     }
     savePart();
 
