@@ -1,7 +1,6 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
 import type { DockviewApi } from 'dockview';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { flushSync } from 'react-dom';
 import type { SpaceSessionStarted } from '../../../../shared/ipc.js';
 import type { AiTabSpace } from '../../components/AiTab.js';
 import { DockWorkspace } from '../../components/DockWorkspace.js';
@@ -81,6 +80,7 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   const [engines, setEngines] = useState<EngineEntry[]>([]);
   const [pmSession, setPmSession] = useState<SpaceSessionStarted | null>(null);
   const [pmProblem, setPmProblem] = useState<string | null>(null);
+  const [dashboardProblem, setDashboardProblem] = useState<string | null>(null);
   const [pmStarting, setPmStarting] = useState(true);
   const mounted = useRef(false);
   const [rosterOpen, setRosterOpen] = useState(true);
@@ -283,15 +283,18 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   }, []);
 
   const requestPmReport = useCallback((): void => {
-    if (!pmSession) return;
-    // Commit dock visibility before handing keyboard focus to the terminal.
-    flushSync(() => selectTab(PM_TAB_ID));
-    window.cockpit.sendTerminalInput({
-      id: pmSession.ptyId,
-      data: 'You are the PM. Please update the dashboard using report_dashboard.',
-    });
-    if (pmFocus.current?.ptyId === pmSession.ptyId) pmFocus.current.focus();
-  }, [pmSession, selectTab]);
+    // The dashboard and an agent use one guarded operation. The PM's
+    // conversational terminal remains untouched; there is no synthetic Enter.
+    setDashboardProblem(null);
+    void window.cockpit
+      .spaceDashboardRefresh({ reason: 'human' })
+      .then((result) => {
+        if (mounted.current && !result.ok) setDashboardProblem(result.error.message);
+      })
+      .catch((caught: unknown) => {
+        if (mounted.current) setDashboardProblem(String(caught));
+      });
+  }, []);
 
   // A request from the Dashboard (phase M7.4): open an AI tab and start it, or show a session's tab.
   useEffect(() => {
@@ -474,6 +477,9 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       </div>
       <div className="space-sessions-body" data-roster-open={rosterOpen}>
         <div className="space-sessions-roster" hidden={!rosterOpen}>
+          {dashboardProblem ? (
+            <p role="alert">Dashboard update failed: {dashboardProblem}</p>
+          ) : null}
           <SessionRoster
             tabs={tabs}
             sessions={sessionMap}

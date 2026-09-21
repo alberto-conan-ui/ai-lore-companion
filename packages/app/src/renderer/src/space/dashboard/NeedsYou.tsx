@@ -13,6 +13,8 @@ type Props = {
    * action of a review opens the focus's issue on GitHub.
    */
   onOpenFocus?: (focus: IssueRef) => void;
+  /** Definition title when this factual widget is placed in a custom dashboard. */
+  title?: string;
 };
 
 /** The label of each kind of entry: its internal name, in words. */
@@ -29,7 +31,7 @@ export const NEEDS_YOU_LABELS: Record<NeedsYouEntry['kind'], string> = {
  * session opens its tab in Sessions when this window has one, and its issue
  * otherwise.
  */
-export function NeedsYou({ entries, onOpenFocus }: Props): JSX.Element {
+export function NeedsYou({ entries, onOpenFocus, title }: Props): JSX.Element {
   const sessionsWithTab = useSpaceNavStore((state) => state.sessionsWithTab);
   const showSessionTab = useSpaceNavStore((state) => state.showSessionTab);
 
@@ -53,7 +55,7 @@ export function NeedsYou({ entries, onOpenFocus }: Props): JSX.Element {
   return (
     <section className="dashboard-needs" aria-labelledby="needs-you-title" data-testid="needs-you">
       <h2 id="needs-you-title" className="dashboard-heading">
-        Needs you ({entries.length})
+        {title ?? 'Needs you'} ({entries.length})
       </h2>
       {entries.length === 0 ? (
         <p className="dashboard-empty">Nothing needs you.</p>

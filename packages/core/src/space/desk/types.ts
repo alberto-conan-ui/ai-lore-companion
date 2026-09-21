@@ -21,7 +21,7 @@ export type JsonObject = { [key: string]: JsonValue };
 export type SessionMode = 'read-only' | 'writing';
 
 /** Why the companion started a session. Absent records are ordinary Human Lead sessions. */
-export type SessionPurpose = 'pm';
+export type SessionPurpose = 'pm' | 'dashboard-refresh';
 
 /**
  * What a session in Writing may write: the Lore, a publish area, or a

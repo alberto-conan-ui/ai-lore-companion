@@ -137,7 +137,17 @@ const cockpit = {
   spaceRepositoriesFocus: vi.fn<(arg: unknown) => Promise<SpaceRepositoriesStateResult>>(),
   onSpaceRepositoriesState: vi.fn(() => () => {}),
   // The PM report is mounted by Dashboard; keep it empty in Project-model tests.
-  spaceDashboardReport: vi.fn(async () => ({ ok: true, value: { version: 1, report: null } })),
+  spaceDashboardReport: vi.fn(async () => ({
+    ok: true,
+    value: {
+      version: 1,
+      definition: null,
+      context: null,
+      report: null,
+      refresh: { status: 'idle', requestId: null, reason: null, requestedAt: null, failure: null },
+    },
+  })),
+  spaceDashboardRefresh: vi.fn<(arg: unknown) => Promise<unknown>>(),
   onSpaceDashboardReport: vi.fn(() => () => {}),
 };
 
@@ -244,12 +254,12 @@ test('a push older than the shown state is ignored, as pushes can arrive out of 
 
 test('Refresh asks main for a refresh; a refused request is shown', async () => {
   await shown();
-  cockpit.spaceProjectRefresh.mockResolvedValueOnce({
+  cockpit.spaceDashboardRefresh.mockResolvedValueOnce({
     ok: false,
     error: { kind: 'not-a-space-window', message: 'This window shows no Space.' },
   });
   fireEvent.click(screen.getByTestId('dashboard-refresh'));
-  expect(cockpit.spaceProjectRefresh).toHaveBeenCalledWith({});
+  expect(cockpit.spaceDashboardRefresh).toHaveBeenCalledWith({ reason: 'human' });
   expect((await screen.findByTestId('dashboard-problem')).textContent).toBe(
     'This window shows no Space.',
   );
@@ -362,7 +372,9 @@ test('the parts of phase M7.4 are mounted: Start a session, Needs you, the Agent
   const before = (a: Element, b: Element): boolean =>
     (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
   expect(before(needsYou, columns) && before(columns, board) && before(board, start)).toBe(true);
-  expect(screen.getByTestId('pm-report').closest('aside')?.contains(start)).toBe(true);
+  // The literal PM report panel was replaced by typed definition components.
+  expect(screen.queryByTestId('pm-report')).toBeNull();
+  expect(start).toBeTruthy();
 
   // A focus at Review in Needs you opens its sheet.
   fireEvent.click(within(needsYou).getByRole('button', { name: 'Open the focus' }));

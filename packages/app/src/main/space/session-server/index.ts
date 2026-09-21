@@ -24,6 +24,7 @@ import {
   type Failure,
   type Result,
   type SessionCloseCommit,
+  type SessionPurpose,
   fail,
   ok,
   readSessionCloseCommits,
@@ -44,7 +45,13 @@ import {
   TOKEN_SCHEME,
 } from './constants.js';
 import { admitRequest, issueSessionToken, presentsToken } from './guard.js';
-import { DASHBOARD_REPORT_TOOL_NAME, SESSION_TOOL_NAMES, createSessionTools } from './tools.js';
+import {
+  DASHBOARD_CONTEXT_TOOL_NAME,
+  DASHBOARD_REPORT_TOOL_NAME,
+  DASHBOARD_UPDATE_TOOL_NAME,
+  SESSION_TOOL_NAMES,
+  createSessionTools,
+} from './tools.js';
 
 export type {
   AwaitedAnswer,
@@ -63,14 +70,16 @@ export type {
   WritingLeftAnswer,
   WritingRequestInput,
 } from './broker.js';
-export { DASHBOARD_REPORT_TOOL_NAME, SESSION_TOOL_NAMES } from './tools.js';
+export {
+  DASHBOARD_CONTEXT_TOOL_NAME,
+  DASHBOARD_REPORT_TOOL_NAME,
+  DASHBOARD_UPDATE_TOOL_NAME,
+  SESSION_TOOL_NAMES,
+} from './tools.js';
 export { SESSION_SERVER_NAME } from './constants.js';
 
-/** The one special-purpose session of the thin PM dashboard slice. */
-export type SessionPurpose = 'pm';
-
 /** The companion chooses a purpose before it gives a session its tool list. */
-export type SessionRegistrationOptions = { purpose?: SessionPurpose };
+export type SessionRegistrationOptions = { purpose?: SessionPurpose; requestId?: string };
 
 type HostPort = Pick<McpHost, 'listen' | 'endpoint' | 'registerTools' | 'unregister'>;
 
@@ -99,6 +108,31 @@ export type SessionServer = {
   ): Promise<Result<SessionConnection, SessionServerFailure>>;
   /** Take the session off the local server; its pending tickets are cancelled. */
   unregisterSession(sessionId: string): Promise<void>;
+  /** Install the Space's refresh queue after the server has been constructed. */
+  setDashboardUpdateHandler(
+    handler: ((requesterSessionId: string) => unknown | Promise<unknown>) | null,
+  ): void;
+  /** Install the effective-definition reader after the server has been constructed. */
+  setDashboardContextProvider(provider: (() => unknown | Promise<unknown>) | null): void;
+  /** Advance the context generation when a new refresh request is admitted. */
+  markDashboardRefreshRequested(): void;
+  /** Return the current effective dashboard context without registering a tool call. */
+  getDashboardContext(): unknown | Promise<unknown>;
+  /** The dashboard service adapter used by refresh orchestration. */
+  getDashboardService(): DashboardReportService | null;
+  /** Observe accepted/rejected PM reports so a transient refresh can settle. */
+  setDashboardReportObserver(
+    observer: ((sessionId: string, input: unknown, result: unknown) => void) | null,
+  ): void;
+  /** Reject a transient report before it can reach the shared report store. */
+  setDashboardReportGuard(
+    guard:
+      | ((
+          sessionId: string,
+          input: unknown,
+        ) => { ok: true } | { ok: false; error: { kind: string; message: string } })
+      | null,
+  ): void;
   close(): Promise<void>;
 };
 
@@ -111,7 +145,7 @@ export type SessionServerOptions = {
   /** How long the whole body of a request may take. Default: `BODY_READ_TIMEOUT_MS`. */
   bodyTimeoutMs?: number;
   /** The ephemeral report store of this Space. Required by a PM registration. */
-  dashboardReports?: Pick<DashboardReportService, 'openSession' | 'closeSession' | 'publish'>;
+  dashboardReports?: DashboardReportService;
 };
 
 /** A session id is made by the companion. It is part of a URL path and of log lines, so its form is checked. */
@@ -121,7 +155,21 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
   const { log } = options.broker;
   const broker = createDialogBroker(options.broker);
   const registered = new Set<string>();
-  const pmSessions = new Set<string>();
+  const pmSessions = new Map<string, SessionPurpose>();
+  let dashboardUpdateHandler: ((requesterSessionId: string) => unknown | Promise<unknown>) | null =
+    null;
+  let dashboardContextProvider: (() => unknown | Promise<unknown>) | null = null;
+  let dashboardGeneration = 0;
+  const contextGeneration = new Map<string, number>();
+  let dashboardReportObserver:
+    | ((sessionId: string, input: unknown, result: unknown) => void)
+    | null = null;
+  let dashboardReportGuard:
+    | ((
+        sessionId: string,
+        input: unknown,
+      ) => { ok: true } | { ok: false; error: { kind: string; message: string } })
+    | null = null;
   let inFlight = 0;
   let closed = false;
 
@@ -136,7 +184,7 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
       if (registered.has(sessionId)) {
         return fail('already-registered', 'The session is on the local server already.');
       }
-      const isPm = registration.purpose === 'pm';
+      const isPm = registration.purpose === 'pm' || registration.purpose === 'dashboard-refresh';
       if (isPm && options.dashboardReports === undefined) {
         return fail('server-unavailable', 'The dashboard report service is not available.');
       }
@@ -179,11 +227,45 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
           onCall: (phase) => {
             inFlight += phase === 'start' ? 1 : -1;
           },
+          purpose: registration.purpose,
+          dashboardContext: {
+            read: async () => {
+              contextGeneration.set(sessionId, dashboardGeneration);
+              const value =
+                (await dashboardContextProvider?.()) ?? options.dashboardReports?.read?.() ?? null;
+              // A context refresh can advance the report store's source
+              // generation. Bind conversational PM evidence without
+              // registering ordinary sessions as report sources.
+              options.dashboardReports?.readContextForSession(sessionId);
+              return value;
+            },
+          },
+          ...(registration.purpose === undefined && dashboardUpdateHandler !== null
+            ? { dashboardUpdate: { request: () => dashboardUpdateHandler?.(sessionId) } }
+            : {}),
           ...(isPm
             ? {
                 dashboardReport: {
                   publish: (input) => {
+                    const readGeneration = contextGeneration.get(sessionId);
+                    if (
+                      registration.purpose === 'pm' &&
+                      readGeneration !== undefined &&
+                      readGeneration < dashboardGeneration
+                    ) {
+                      return {
+                        ok: false,
+                        error: {
+                          kind: 'request-mismatch',
+                          message:
+                            'This PM report used dashboard evidence from before a newer refresh. Read get_dashboard_context again and retry.',
+                        },
+                      };
+                    }
+                    const permitted = dashboardReportGuard?.(sessionId, input);
+                    if (permitted?.ok === false) return permitted;
                     const published = options.dashboardReports?.publish(sessionId, input);
+                    dashboardReportObserver?.(sessionId, input, published);
                     return published?.ok
                       ? { ok: true }
                       : {
@@ -207,8 +289,8 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
         return unavailable(caught);
       }
       if (isPm) {
-        options.dashboardReports?.openSession(sessionId);
-        pmSessions.add(sessionId);
+        options.dashboardReports?.openSession(sessionId, registration.requestId);
+        pmSessions.set(sessionId, registration.purpose ?? 'pm');
       }
       log.info('session-registered', { session: sessionId });
       return ok({
@@ -219,13 +301,58 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
           name: TOKEN_HEADER,
           value: TOKEN_SCHEME === '' ? token : `${TOKEN_SCHEME} ${token}`,
         },
-        tools: isPm ? [...SESSION_TOOL_NAMES, DASHBOARD_REPORT_TOOL_NAME] : SESSION_TOOL_NAMES,
+        tools: isPm
+          ? [...SESSION_TOOL_NAMES, DASHBOARD_CONTEXT_TOOL_NAME, DASHBOARD_REPORT_TOOL_NAME]
+          : [
+              ...SESSION_TOOL_NAMES,
+              DASHBOARD_CONTEXT_TOOL_NAME,
+              ...(dashboardUpdateHandler !== null ? [DASHBOARD_UPDATE_TOOL_NAME] : []),
+            ],
       });
+    },
+
+    setDashboardUpdateHandler(handler) {
+      dashboardUpdateHandler = handler;
+    },
+
+    setDashboardContextProvider(provider) {
+      dashboardContextProvider = provider;
+    },
+
+    markDashboardRefreshRequested() {
+      dashboardGeneration += 1;
+    },
+
+    getDashboardContext() {
+      return dashboardContextProvider?.() ?? options.dashboardReports?.read?.() ?? null;
+    },
+
+    getDashboardService(): DashboardReportService | null {
+      return options.dashboardReports ?? null;
+    },
+
+    setDashboardReportObserver(observer) {
+      dashboardReportObserver = observer;
+    },
+
+    setDashboardReportGuard(guard) {
+      dashboardReportGuard = guard;
     },
 
     async unregisterSession(sessionId) {
       if (!registered.delete(sessionId)) return;
-      if (pmSessions.delete(sessionId)) options.dashboardReports?.closeSession(sessionId);
+      if (pmSessions.has(sessionId)) {
+        const purpose = pmSessions.get(sessionId);
+        pmSessions.delete(sessionId);
+        // A transient refresh is deliberately short-lived: once its report has
+        // been accepted, ending that plumbing session must not stale the value
+        // it produced. Conversational PMs retain the existing session-ended
+        // freshness behavior.
+        options.dashboardReports?.closeSession(sessionId, {
+          preserveReport: purpose === 'dashboard-refresh',
+        });
+      }
+      contextGeneration.delete(sessionId);
       broker.sessionEnded(sessionId);
       try {
         await (await options.host()).unregister(sessionId);
@@ -247,7 +374,12 @@ export function createSessionServer(options: SessionServerOptions): SessionServe
       await new Promise((resolve) => setTimeout(resolve, 10));
       const sessions = [...registered];
       registered.clear();
-      for (const sessionId of pmSessions) options.dashboardReports?.closeSession(sessionId);
+      contextGeneration.clear();
+      for (const [sessionId, purpose] of pmSessions) {
+        options.dashboardReports?.closeSession(sessionId, {
+          preserveReport: purpose === 'dashboard-refresh',
+        });
+      }
       pmSessions.clear();
       if (sessions.length === 0) return;
       try {
@@ -338,7 +470,7 @@ export const sessionServer = defineSpaceService<SessionServer>({
     const dashboardReports = context.service(spaceDashboardReport);
     const board = context.service(sessionBoard);
     const { host, limits, awaitMs, maxCallsPerWindow, bodyTimeoutMs, boardWaitMs } = overrides;
-    return createSessionServer({
+    const server = createSessionServer({
       host: host ?? appHost,
       broker: {
         desk: () => desk.open(),
@@ -354,6 +486,11 @@ export const sessionServer = defineSpaceService<SessionServer>({
       ...(bodyTimeoutMs !== undefined ? { bodyTimeoutMs } : {}),
       dashboardReports,
     });
+    server.setDashboardContextProvider(async () => {
+      await dashboardReports.refreshContext();
+      return dashboardReports.read();
+    });
+    return server;
   },
   dispose: (service) => service.close(),
 });

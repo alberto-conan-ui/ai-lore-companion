@@ -20,6 +20,8 @@ import { useRepositoriesState } from './useRepositoriesState.js';
 type Props = {
   /** `Date.now()` at this render, from the Dashboard's own age tick, so the remote line's age stays current. */
   now: number;
+  /** Definition title when this factual widget is placed in a custom dashboard. */
+  title?: string;
 };
 
 /**
@@ -33,7 +35,7 @@ type Props = {
  * Renders its heading and one line before `useRepositoriesState` gets its
  * first answer, so the section does not delay the Dashboard's first paint.
  */
-export function Repositories({ now }: Props): JSX.Element {
+export function Repositories({ now, title }: Props): JSX.Element {
   const { repositories } = useRepositoriesState();
   const model = repositories?.model ?? null;
 
@@ -44,7 +46,7 @@ export function Repositories({ now }: Props): JSX.Element {
       data-testid="dashboard-repositories"
     >
       <h2 id="repositories-title" className="dashboard-heading">
-        Repositories
+        {title ?? 'Repositories'}
       </h2>
       {model === null ? (
         <p className="dashboard-empty" data-testid="dashboard-repositories-reading">

@@ -79,6 +79,9 @@ export const PYTHON_PROBE_TIMEOUT_MS = 10_000;
 /** The refusals of one session that are copied into the log when it ends. */
 export const MAX_LOGGED_REFUSALS = 200;
 
+/** Maximum time a transient PM dashboard refresh may remain pending. */
+export const DASHBOARD_REFRESH_TIMEOUT_MS = 120_000;
+
 /**
  * The timeouts of the spend hook, in seconds (M14.6, `profile-shape-architecture.md`
  * 3.6). A `Stop` hook, not a before-write hook: it never blocks anything, so

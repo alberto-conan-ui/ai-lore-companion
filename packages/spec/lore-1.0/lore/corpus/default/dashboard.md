@@ -9,21 +9,34 @@ points_at:
 
 ## What it means
 
-The dashboard helps the Human Lead see the project's current position at a glance. It combines the companion's factual project views with a PM-authored report. The PM report is an interpretation with stated evidence, not a replacement for the plan or the Agents board.
+The dashboard presents this Space's current position, its work and documents to review. It combines factual companion components with typed values authored by the PM. PM interpretation does not replace the Project, desk records or files.
 
-## Default report
+## Definition
 
-Use these four short sections:
+The layout and requested content are JSON. The effective definition is `lore/corpus/dashboard.json` when present, otherwise `lore/corpus/default/dashboard.json`. Older Spaces without either use the companion's packaged default. Every definition file in the Lore has a line in its folder's index. A Space override replaces the complete definition; defaults are never edited in place.
 
-- Current position: the present goal and what the available evidence says is working.
-- Active work: what is being worked on now and what has recently been verified.
-- Blockers: what prevents progress, who or what can unblock it, and unknowns.
-- Decisions needed: the specific decisions the Human Lead needs to make; say when none are known.
+Version 1 has `sections` and `components`. Each section has an `id`, `title`, and one to three `columns`; each column lists component IDs in display order. Each component appears exactly once. Components have `id`, `type`, `source` and `title`. PM components may have an `instruction`. `list`, `workbench-docs`, `handovers` and `activity` may specify a `limit` from 1 to 50; `workbench-docs` may specify `recentDays` from 1 to 90.
 
-Prefer concise plain text or Markdown. Name relevant issues, files or tests and distinguish observed facts from proposals. Do not invent progress, test results, dates, completion or a fresh GitHub reading. If a source cannot be read, report that limitation instead of guessing.
+The PM types are `text`, `metric` and `list`, with source `pm`. The factual types are `plan`, `needs-you`, `agents`, `repositories`, `workbench-docs`, `handovers` and `activity`, with source `companion`. The layout accepts these types only, never executable code, HTML, CSS or arbitrary renderer names. Narrow windows stack the declared columns.
 
-## Updating and customising
+Malformed definitions are diagnosed. The companion keeps the last valid definition for the open Space, or uses the default, and reports the fallback. It does not silently accept a broken override.
 
-The Human Lead asks the PM in Sessions, for example: "You are the PM. Please update the dashboard." The PM calls report_dashboard with its report and a short basis describing the sources it actually used. The companion identifies the submitting session and the receipt time and displays the latest accepted report. The report is held only while this Space remains open; it is not a published spec or a journal.
+## Updating the data
 
-A Space customises the report by adding lore/corpus/dashboard.md and its index line. That entry replaces this default. The PM follows the effective entry supplied at launch. Changing this definition is a Lore write and needs the Human Lead's confirmed claim; the PM does not change it while reporting.
+The Refresh button and the verb `dashboard-refresh` request the same update. An ordinary agent uses `request_dashboard_update`. Concurrent requests coalesce. The companion uses the configured PM profile for a guarded transient refresh run and preserves the conversational PM session.
+
+A PM first calls `get_dashboard_context` to read the effective definition, its hash, current request information and available Workbench evidence. It reads relevant sources, then calls `report_dashboard` with `definitionHash`, the requested typed component values and a short `basis` naming sources actually used. A transient run also supplies the request identity as the tool schema specifies. Follow the current tool schema for exact field names.
+
+Return every PM component once. Text contains text; a metric contains a finite number or short string and an optional unit; a list contains items with IDs, labels and optional value/status text. If evidence is unavailable, return the component's explicit unavailable form and reason. Do not supply companion components or layout. Do not send the old Markdown report: it is no longer the reporting format.
+
+The app validates IDs, types, completeness and definition hash before accepting the whole update. Invalid data leaves the previous snapshot intact. Receipt time and session identity come from the app; the PM's basis does not establish trusted freshness. Data is retained while the Space is open. Source or definition changes can make PM values outdated, and failed updates display their reason. Completing a transient run does not itself invalidate its accepted data.
+
+## Workbench and review access
+
+The default lists recent Markdown drafts and specs from `workbench/drafts/`, with at most ten entries from the last fourteen days. Recency uses creation time when available and an explicitly labelled modification-time fallback. Drafts are review candidates, not proof of readiness or approval. The list includes quick access to each file in the Files window.
+
+Recent journal entries show their handovers and quick access. They record previous sessions, not live activity. Current local sessions include Read only sessions, which can produce Workbench drafts without claiming a target. Workbench evidence is private to this desk and is not published to GitHub by reporting.
+
+## Changing the dashboard
+
+Use `dashboard-update` to adapt the JSON and `dashboard-reset` to restore the default. Both write to the custom Lore layer and need a confirmed Lore claim. Use `dashboard-refresh` to update data in Read only. Report sources and limitations; never invent progress, verification, dates or approval.

@@ -1,0 +1,312 @@
+import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, test } from 'node:test';
+import type { SessionRecord } from '@ai-lore-companion/core';
+import {
+  readDashboardDefinition,
+  validateDashboardReport,
+} from '../../../src/main/space/dashboard-definition.js';
+import {
+  type DashboardReportService,
+  createDashboardReportService,
+} from '../../../src/main/space/dashboard-report.js';
+import { readDashboardWorkbench } from '../../../src/main/space/dashboard-workbench.js';
+import type { DashboardDefinition } from '../../../src/shared/ipc/space/dashboard-report.types.js';
+
+const roots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+async function rootWithDefinition(definition: DashboardDefinition): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'ai-lore-dashboard-definition-'));
+  roots.push(root);
+  await mkdir(join(root, 'lore', 'corpus', 'default'), { recursive: true });
+  await mkdir(join(root, 'workbench', 'drafts'), { recursive: true });
+  await mkdir(join(root, 'workbench', 'journal'), { recursive: true });
+  await writeFile(join(root, 'lore', 'corpus', 'dashboard.json'), JSON.stringify(definition));
+  return root;
+}
+
+function definition(options: { secondWorkbench?: boolean } = {}): DashboardDefinition {
+  const components = [
+    { id: 'position', type: 'text' as const, source: 'pm' as const, title: 'Position' },
+    {
+      id: 'review',
+      type: 'workbench-docs' as const,
+      source: 'companion' as const,
+      title: 'Review',
+      limit: 3,
+      recentDays: 14,
+    },
+  ];
+  if (options.secondWorkbench) {
+    components.push({
+      id: 'wide-review',
+      type: 'workbench-docs' as const,
+      source: 'companion' as const,
+      title: 'Wide review',
+      limit: 10,
+      recentDays: 60,
+    });
+  }
+  return {
+    version: 1,
+    sections: [
+      {
+        id: 'main',
+        title: 'Main',
+        columns: [components.map((component) => component.id)],
+      },
+    ],
+    components,
+  };
+}
+
+function reportInput(
+  service: DashboardReportService,
+  text = 'current',
+): {
+  definitionHash: string;
+  components: [{ id: string; type: 'text'; text: string }];
+} {
+  const resolved = service.definition();
+  assert.ok(resolved);
+  return {
+    definitionHash: resolved.hash,
+    components: [{ id: 'position', type: 'text', text }],
+  };
+}
+
+test('definition resolution prefers a custom file and retains the last valid definition on fallback', async () => {
+  const root = await rootWithDefinition(definition());
+  const first = await readDashboardDefinition({ spaceRoot: root });
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  assert.equal(first.value.source, 'space');
+
+  const service = createDashboardReportService({
+    definition: { spaceRoot: root, templateDir: join(root, 'missing-template') },
+    workbenchRoot: join(root, 'workbench'),
+  });
+  await service.ready();
+  assert.equal(service.definition()?.hash, first.value.hash);
+  await writeFile(join(root, 'lore', 'corpus', 'dashboard.json'), '{ broken');
+  await writeFile(
+    join(root, 'lore', 'corpus', 'default', 'dashboard.json'),
+    JSON.stringify({
+      ...definition(),
+      components: [definition().components[0]],
+      sections: [{ id: 'main', title: 'Fallback', columns: [['position']] }],
+    }),
+  );
+  const fallback = await readDashboardDefinition({ spaceRoot: root });
+  assert.equal(fallback.ok, true);
+  if (fallback.ok) {
+    assert.equal(fallback.value.source, 'installed-default');
+    assert.ok(fallback.value.diagnostic);
+  }
+
+  await service.refreshContext();
+  assert.equal(service.definition()?.hash, first.value.hash);
+  service.dispose();
+});
+
+test('definition and PM validation reject unsupported, duplicate, incomplete and obsolete data', async () => {
+  const root = await rootWithDefinition(definition());
+  const resolved = await readDashboardDefinition({ spaceRoot: root });
+  assert.equal(resolved.ok, true);
+  if (!resolved.ok) return;
+  const valid = {
+    definitionHash: resolved.value.hash,
+    components: [{ id: 'position', type: 'text' as const, text: 'ok' }],
+    basis: 'line one\n\tline two',
+  };
+  assert.equal(validateDashboardReport(resolved.value, valid).ok, true);
+  assert.equal(
+    validateDashboardReport(resolved.value, {
+      ...valid,
+      components: [{ id: 'position', type: 'text' as const, text: 'line one\n\tline two' }],
+    }).ok,
+    true,
+  );
+  assert.equal(
+    validateDashboardReport(resolved.value, { ...valid, extra: true } as never).ok,
+    false,
+  );
+  assert.equal(
+    validateDashboardReport(resolved.value, { ...valid, definitionHash: 'old' }).ok,
+    false,
+  );
+  assert.equal(
+    validateDashboardReport(resolved.value, {
+      definitionHash: resolved.value.hash,
+      components: [
+        { id: 'position', type: 'text', text: 'a' },
+        { id: 'position', type: 'text', text: 'b' },
+      ],
+    }).ok,
+    false,
+  );
+
+  const badDefinition = {
+    ...definition(),
+    components: [{ ...definition().components[0], bogus: true }],
+  };
+  await writeFile(join(root, 'lore', 'corpus', 'dashboard.json'), JSON.stringify(badDefinition));
+  const rejected = await readDashboardDefinition({ spaceRoot: root });
+  assert.equal(rejected.ok, true);
+  if (rejected.ok) assert.ok(rejected.value.diagnostic);
+
+  const badLimit: DashboardDefinition = {
+    version: 1,
+    sections: [{ id: 'main', title: 'Main', columns: [['position']] }],
+    components: [{ id: 'position', type: 'text', source: 'pm', title: 'Position', limit: 2 }],
+  };
+  await writeFile(join(root, 'lore', 'corpus', 'dashboard.json'), JSON.stringify(badLimit));
+  const ignoredLimit = await readDashboardDefinition({ spaceRoot: root });
+  assert.equal(ignoredLimit.ok, true);
+  if (ignoredLimit.ok) assert.ok(ignoredLimit.value.diagnostic);
+});
+
+test('duplicate list item IDs and multiple Workbench windows are bounded and merged', async () => {
+  const wide = definition({ secondWorkbench: true });
+  const root = await rootWithDefinition(wide);
+  const resolved = await readDashboardDefinition({ spaceRoot: root });
+  assert.equal(resolved.ok, true);
+  if (!resolved.ok) return;
+  assert.equal(
+    validateDashboardReport(resolved.value, {
+      definitionHash: resolved.value.hash,
+      components: [
+        {
+          id: 'position',
+          type: 'text',
+          text: 'ok',
+        },
+      ],
+    }).ok,
+    true,
+  );
+  const listDefinition: DashboardDefinition = {
+    version: 1,
+    sections: [{ id: 'main', title: 'Main', columns: [['items']] }],
+    components: [{ id: 'items', type: 'list', source: 'pm', title: 'Items', limit: 5 }],
+  };
+  const listRoot = await rootWithDefinition(listDefinition);
+  const listResolved = await readDashboardDefinition({ spaceRoot: listRoot });
+  assert.equal(listResolved.ok, true);
+  if (!listResolved.ok) return;
+  assert.equal(
+    validateDashboardReport(listResolved.value, {
+      definitionHash: listResolved.value.hash,
+      components: [
+        {
+          id: 'items',
+          type: 'list',
+          items: [
+            { id: 'same', label: 'one' },
+            { id: 'same', label: 'two' },
+          ],
+        },
+      ],
+    }).ok,
+    false,
+  );
+
+  for (let index = 0; index < 5; index += 1)
+    await writeFile(join(root, 'workbench', 'drafts', `doc-${index}.md`), `# Document ${index}\n`);
+  const snapshot = await readDashboardWorkbench({
+    workbenchRoot: join(root, 'workbench'),
+    recentDays: 60,
+    limit: 10,
+  });
+  assert.equal(snapshot.documents.length, 5);
+  assert.equal(
+    snapshot.documents.every((document) => document.reviewCandidate === true),
+    true,
+  );
+});
+
+test('Workbench reads a handover at the end of a bounded long journal and rejects escapes', async () => {
+  const root = await rootWithDefinition(definition());
+  const longPrefix = 'x'.repeat(180 * 1024);
+  await writeFile(
+    join(root, 'workbench', 'journal', 's-123.md'),
+    `${longPrefix}\n## Handover\nKeep this evidence.\n`,
+  );
+  const outside = await mkdtemp(join(tmpdir(), 'ai-lore-dashboard-outside-'));
+  roots.push(outside);
+  await writeFile(join(outside, 'secret.md'), '# Secret\n');
+  await symlink(outside, join(root, 'workbench', 'drafts', 'outside'));
+  const snapshot = await readDashboardWorkbench({
+    workbenchRoot: join(root, 'workbench'),
+    limit: 10,
+  });
+  assert.equal(snapshot.handovers[0]?.text, 'Keep this evidence.');
+  assert.equal(
+    snapshot.documents.some((document) => document.path.includes('secret')),
+    false,
+  );
+  assert.equal(
+    snapshot.problems.some((problem) => problem.kind === 'unsafe-path'),
+    true,
+  );
+});
+
+test('polling marks body edits stale, ignores transient activity and rejects late request generations', async () => {
+  const root = await rootWithDefinition(definition());
+  const draft = join(root, 'workbench', 'drafts', 'draft.md');
+  await writeFile(draft, '# Draft\nfirst\n');
+  let purpose: SessionRecord['purpose'] = 'dashboard-refresh';
+  const service = createDashboardReportService({
+    definition: { spaceRoot: root },
+    workbenchRoot: join(root, 'workbench'),
+    pollIntervalMs: 250,
+    sessions: () => [
+      {
+        id: 'refresh-session',
+        engine: 'test',
+        attended: true,
+        purpose,
+        mode: 'read-only',
+        startedAt: '2026-09-21T00:00:00.000Z',
+      },
+    ],
+  });
+  await service.ready();
+  service.openSession('pm');
+  assert.equal(service.publish('pm', reportInput(service)).ok, true);
+  purpose = 'dashboard-refresh';
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(service.read().report?.stale, false);
+  await writeFile(
+    join(root, 'lore', 'corpus', 'dashboard.json'),
+    JSON.stringify({
+      ...definition(),
+      components: [
+        { ...definition().components[0], title: 'Changed position' },
+        definition().components[1],
+      ],
+    }),
+  );
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(service.read().report?.staleReason, 'definition-changed');
+  service.openSession('pm-after-definition');
+  assert.equal(service.publish('pm-after-definition', reportInput(service)).ok, true);
+  await writeFile(draft, '# Draft\nsecond body\n');
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  assert.equal(service.read().report?.staleReason, 'workbench-changed');
+
+  const request = service.request('human').request;
+  service.openSession('refresh', request.requestId);
+  const late = service.publish('refresh', { ...reportInput(service), definitionHash: 'late' });
+  assert.equal(late.ok, false);
+  if (!late.ok) assert.equal(late.error.kind, 'request-mismatch');
+  service.failRequest(request.requestId, { kind: 'timeout', message: 'late' });
+  assert.equal(service.publish('refresh', reportInput(service)).ok, false);
+  service.dispose();
+});

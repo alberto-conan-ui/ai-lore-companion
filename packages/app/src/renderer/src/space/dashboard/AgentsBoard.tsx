@@ -8,6 +8,8 @@ import { BOARD_COLUMNS, durationText, issueName, openIssue } from './agentsText.
 type Props = {
   /** The rows of the Dashboard's model (`model.board`), one per session issue. */
   board: readonly BoardRow[];
+  /** Definition title when this factual widget is placed in a custom dashboard. */
+  title?: string;
 };
 
 /**
@@ -17,7 +19,7 @@ type Props = {
  * it is stale (in words, not by colour only), a pending gate with an action
  * that opens its dialog, and a link to the issue.
  */
-export function AgentsBoard({ board }: Props): JSX.Element {
+export function AgentsBoard({ board, title }: Props): JSX.Element {
   return (
     <section
       className="dashboard-section"
@@ -25,7 +27,8 @@ export function AgentsBoard({ board }: Props): JSX.Element {
       data-testid="agents-board"
     >
       <h2 id="agents-board-title" className="dashboard-heading">
-        Agents board <span className="dashboard-heading-count">· {board.length} sessions</span>
+        {title ?? 'Agents board'}{' '}
+        <span className="dashboard-heading-count">· {board.length} sessions</span>
       </h2>
       <div className="dashboard-agents">
         {BOARD_COLUMNS.map((column) => {

@@ -39,15 +39,24 @@ import {
   splitParamText,
   startSession,
 } from '@ai-lore-companion/core';
+import type { DashboardRefreshReason } from '../../../shared/ipc/space/dashboard-report.types.js';
 import type { SpaceContext } from '../context.js';
 import { defineSpaceService } from '../context.js';
+import type { DashboardReportService } from '../dashboard-report.js';
 import { spaceDesk } from '../desk-service.js';
+import { spaceProjectRefresh } from '../project-refresh.js';
+import { spaceRepositories } from '../repositories.js';
 import { boardWithin, sessionBoard } from '../session-server/board.js';
 import { BOARD_UPDATE_WAIT_MS } from '../session-server/constants.js';
 import { sessionCloseCommits, sessionServer } from '../session-server/index.js';
 import { loreTemplateDir } from '../template-dir.js';
 import { spaceUi } from '../ui-store.js';
-import { MAX_LOGGED_REFUSALS, REQUIRED_CHECKS, SESSION_ID_ENV } from './constants.js';
+import {
+  DASHBOARD_REFRESH_TIMEOUT_MS,
+  MAX_LOGGED_REFUSALS,
+  REQUIRED_CHECKS,
+  SESSION_ID_ENV,
+} from './constants.js';
 import { paramEffect } from './engine-options.js';
 import { adapterFor } from './engines/index.js';
 import { sessionInstructions } from './engines/instructions.js';
@@ -83,6 +92,14 @@ export type StartedSessionResult =
   | { ok: true; value: StartedSession }
   | { ok: false; error: SessionStartFailure };
 
+export type DashboardUpdateResult = {
+  requestId: string;
+  definitionHash: string;
+  status: 'requested' | 'updating' | 'updated' | 'failed';
+  coalesced?: boolean;
+  message?: string;
+};
+
 /** What is ready for a start: the engine, `python3` and the install. */
 export type SessionReadiness =
   | {
@@ -104,6 +121,11 @@ export type SpaceSessions = {
   start(engineId: string, params: readonly string[]): Promise<StartedSessionResult>;
   /** Ensure this window-owned Space has one automatic PM session. */
   ensurePm(): Promise<StartedSessionResult>;
+  /** Queue one transient guarded PM refresh; concurrent requests share the pending request. */
+  requestDashboardUpdate(
+    requesterSessionId?: string,
+    reason?: DashboardRefreshReason,
+  ): Promise<DashboardUpdateResult>;
   /** End a session of this service. `false` when it has no such session. The engine is stopped. */
   end(sessionId: string): Promise<boolean>;
   /** The ids of the sessions running now. */
@@ -121,6 +143,8 @@ export type SpaceSessionParts = {
   newId: () => string;
   /** Whether `engine` is installed and signed in (A.10). Default: `probeEngineOfApp`. */
   probeEngine: (engine: EngineEntry) => Promise<EngineCheck>;
+  /** Timeout for a transient dashboard refresh; tests use a short bound. */
+  dashboardRefreshTimeoutMs?: number;
 };
 
 let parts: SpaceSessionParts | null = null;
@@ -155,7 +179,21 @@ const NO_SPEND: SessionSpend = { source: 'none' };
 
 /** The first user turn of every new PM process. The CLI submits it after its own startup UI. */
 export const PM_INITIAL_PROMPT =
-  'You are the PM. Please update the dashboard using report_dashboard.';
+  'You are the PM. Read get_dashboard_context first, then update the dashboard by calling report_dashboard with complete typed values.';
+
+function isPmPurpose(purpose: SessionPurpose | undefined): boolean {
+  return purpose === 'pm' || purpose === 'dashboard-refresh';
+}
+
+type RefreshRun = {
+  requestId: string;
+  definitionHash: string;
+  requesterSessionId?: string;
+  sessionId: string | null;
+  timer: ReturnType<typeof setTimeout> | null;
+  starting: Promise<void> | null;
+  done: boolean;
+};
 
 function optionWithValue(argv: readonly string[], long: string, short?: string): boolean {
   if (argv.length === 1 && argv[0]?.startsWith(`${long}=`)) return true;
@@ -261,7 +299,108 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
   const live = new Map<string, Live>();
   let pmSessionId: string | null = null;
   let pmStarting: Promise<StartedSessionResult> | null = null;
+  let refreshRun: RefreshRun | null = null;
   let disposing = false;
+
+  type DashboardServiceLike = Pick<
+    DashboardReportService,
+    'definition' | 'refreshContext' | 'request' | 'attachRequest' | 'beginRequest' | 'failRequest'
+  >;
+
+  const dashboardService = (): DashboardServiceLike => {
+    const service = server.getDashboardService();
+    if (service === null) throw new Error('The dashboard report service is unavailable.');
+    return service;
+  };
+
+  function failRefresh(run: RefreshRun, kind: string, message: string): void {
+    if (run.done) return;
+    run.done = true;
+    if (run.timer !== null) clearTimeout(run.timer);
+    dashboardService().failRequest(run.requestId, { kind, message });
+    if (refreshRun === run) refreshRun = null;
+    // `failRefresh` can run from `finish` itself. Deferring the end lets
+    // `ended` publish its in-flight promise before we try to end the same
+    // entry again.
+    if (run.sessionId !== null) setImmediate(() => void end(run.sessionId as string));
+  }
+
+  function observeDashboardReport(sessionId: string, input: unknown, result: unknown): void {
+    const run = refreshRun;
+    if (run === null || run.done) return;
+    if (run.sessionId !== sessionId) return;
+    if (result === null || typeof result !== 'object') return;
+    if ((result as { ok?: unknown }).ok !== true) {
+      const error = (result as { error?: { kind?: unknown; message?: unknown } }).error;
+      failRefresh(
+        run,
+        typeof error?.kind === 'string' ? error.kind : 'invalid-report',
+        typeof error?.message === 'string'
+          ? error.message
+          : 'The PM dashboard report was rejected.',
+      );
+      return;
+    }
+    if (
+      input === null ||
+      typeof input !== 'object' ||
+      (input as { definitionHash?: unknown }).definitionHash !== run.definitionHash
+    ) {
+      failRefresh(
+        run,
+        'stale-definition',
+        'The dashboard definition changed while the refresh was running.',
+      );
+      return;
+    }
+    run.done = true;
+    if (run.timer !== null) clearTimeout(run.timer);
+    if (refreshRun === run) refreshRun = null;
+    // Let the MCP response leave the process before unregistering the transient session.
+    setImmediate(() => void end(sessionId));
+  }
+
+  function guardDashboardReport(
+    sessionId: string,
+    input: unknown,
+  ): { ok: true } | { ok: false; error: { kind: string; message: string } } {
+    const run = refreshRun;
+    if (run === null || run.done) return { ok: true };
+    if (run.sessionId !== sessionId) {
+      return {
+        ok: false,
+        error: {
+          kind: 'request-mismatch',
+          message: 'This dashboard refresh session is not the current transient request.',
+        },
+      };
+    }
+    if (
+      input === null ||
+      typeof input !== 'object' ||
+      (input as { definitionHash?: unknown }).definitionHash !== run.definitionHash
+    ) {
+      failRefresh(
+        run,
+        'stale-definition',
+        'This dashboard refresh used an obsolete definition. Request a new update.',
+      );
+      return {
+        ok: false,
+        error: {
+          kind: 'stale-definition',
+          message: 'This dashboard refresh used an obsolete definition. Request a new update.',
+        },
+      };
+    }
+    return { ok: true };
+  }
+
+  server.setDashboardReportObserver(observeDashboardReport);
+  server.setDashboardReportGuard(guardDashboardReport);
+  server.setDashboardUpdateHandler((requesterSessionId) =>
+    requestDashboardUpdate(requesterSessionId),
+  );
 
   const cleanup = (async () => {
     const opened = desk.open();
@@ -327,6 +466,13 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
   }
 
   async function finish(sessionId: string, entry: Live): Promise<void> {
+    if (entry.purpose === 'dashboard-refresh' && refreshRun?.sessionId === sessionId) {
+      failRefresh(
+        refreshRun,
+        'engine-exited',
+        'The transient PM refresh session ended before it reported dashboard data.',
+      );
+    }
     const refusals = await readNotedRefusals(entry.paths, MAX_LOGGED_REFUSALS);
     for (const refusal of refusals) {
       context.log.info('write-guard-refused', {
@@ -388,6 +534,8 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
     engineId: string,
     params: readonly string[],
     purpose?: SessionPurpose,
+    requestId?: string,
+    onSessionId?: (sessionId: string) => void,
   ): Promise<StartedSessionResult> {
     await cleanup;
     if (disposing) {
@@ -426,7 +574,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
       context.log.warn('session-not-started', { space: context.key, kind: 'engine-not-supported' });
       return { ok: false, error: { kind: 'engine-not-supported', message } };
     }
-    if (purpose === 'pm' && !adapter.supportsInitialPrompt) {
+    if (isPmPurpose(purpose) && !adapter.supportsInitialPrompt) {
       return {
         ok: false,
         error: {
@@ -459,7 +607,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
       };
     }
     const unguarded = [...checked.value.unguarded, ...modelEffect.options];
-    if (purpose === 'pm' && unguarded.length > 0) {
+    if (isPmPurpose(purpose) && unguarded.length > 0) {
       return {
         ok: false,
         error: {
@@ -468,7 +616,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
         },
       };
     }
-    if (purpose === 'pm') {
+    if (isPmPurpose(purpose)) {
       const conflicting = pmInitialPromptParamConflict(adapter, params);
       if (conflicting !== null) {
         return {
@@ -481,7 +629,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
       }
     }
     const engineArgs = [...modelArgs, ...checked.value.argv];
-    const pmCorpus = purpose === 'pm' ? await pmCorpusPaths(context.root) : null;
+    const pmCorpus = isPmPurpose(purpose) ? await pmCorpusPaths(context.root) : null;
     if (pmCorpus !== null && !pmCorpus.ok) {
       return {
         ok: false,
@@ -504,6 +652,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
       };
     }
     const sessionId = use.newId();
+    onSessionId?.(sessionId);
     const recorded = startSession(opened.value, {
       id: sessionId,
       engine: engine.id,
@@ -535,10 +684,9 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
           kind: undone.error.kind,
         });
     };
-    const connection =
-      purpose === 'pm'
-        ? await server.registerSession(sessionId, { purpose })
-        : await server.registerSession(sessionId);
+    const connection = isPmPurpose(purpose)
+      ? await server.registerSession(sessionId, { purpose, ...(requestId ? { requestId } : {}) })
+      : await server.registerSession(sessionId);
     if (!connection.ok) {
       undoRecord();
       return {
@@ -556,7 +704,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
       spaceRoot: context.root,
       skills,
       adapter,
-      ...(purpose === 'pm' ? { purpose, pmCorpusPaths: pmCorpus?.value ?? [] } : {}),
+      ...(isPmPurpose(purpose) ? { purpose, pmCorpusPaths: pmCorpus?.value ?? [] } : {}),
     });
     let launch: ReturnType<typeof adapter.launch>;
     try {
@@ -572,7 +720,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
         repositories,
         instructions,
         paramArgv: engineArgs,
-        ...(purpose === 'pm' ? { initialPrompt: PM_INITIAL_PROMPT } : {}),
+        ...(isPmPurpose(purpose) ? { initialPrompt: PM_INITIAL_PROMPT } : {}),
       });
     } catch (caught) {
       await server.unregisterSession(sessionId);
@@ -656,6 +804,160 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
     return (engine.params ?? []).filter((param) => param.defaultOn).map((param) => param.text);
   }
 
+  async function choosePmEngine(): Promise<
+    { ok: true; engine: EngineEntry } | { ok: false; error: SessionStartFailure }
+  > {
+    const ui = context.service(spaceUi);
+    const bound = ui.read('pm-profile').state?.engineId;
+    const explicit = typeof bound === 'string' ? bound : null;
+    if (explicit !== null) {
+      const engine = use.engines().find((candidate) => candidate.id === explicit);
+      if (engine === undefined)
+        return {
+          ok: false,
+          error: {
+            kind: 'engine-not-found',
+            message: `No PM session was started: the configured engine "${explicit}" is not available.`,
+          },
+        };
+      return { ok: true, engine };
+    }
+    const remembered = ui.read('session-engine').state?.engineId;
+    if (typeof remembered === 'string' && (await readiness(remembered)).ok) {
+      const engine = use.engines().find((candidate) => candidate.id === remembered);
+      if (engine !== undefined && adapterFor(engine)?.supportsInitialPrompt === true)
+        return { ok: true, engine };
+    }
+    for (const candidate of use.engines()) {
+      if (
+        adapterFor(candidate)?.supportsInitialPrompt === true &&
+        (await readiness(candidate.id)).ok
+      )
+        return { ok: true, engine: candidate };
+    }
+    return {
+      ok: false,
+      error: {
+        kind: 'engine-not-supported',
+        message:
+          'No PM session was started: no configured engine is ready for a guarded Space session.',
+      },
+    };
+  }
+
+  async function runDashboardRefresh(run: RefreshRun): Promise<void> {
+    const selected = await choosePmEngine();
+    if (!selected.ok) {
+      failRefresh(run, selected.error.kind, selected.error.message);
+      return;
+    }
+    if (run.done) return;
+    dashboardService().beginRequest(run.requestId);
+    const started = await start(
+      selected.engine.id,
+      defaultParams(selected.engine),
+      'dashboard-refresh',
+      run.requestId,
+      (sessionId) => {
+        run.sessionId = sessionId;
+      },
+    );
+    if (!started.ok) {
+      failRefresh(run, started.error.kind, started.error.message);
+      return;
+    }
+    if (run.done) {
+      await end(started.value.sessionId);
+      return;
+    }
+    run.sessionId ??= started.value.sessionId;
+    if (!dashboardService().attachRequest(run.requestId, run.sessionId)) {
+      failRefresh(run, 'request-mismatch', 'The dashboard refresh is no longer current.');
+      await end(run.sessionId);
+      return;
+    }
+  }
+
+  async function requestDashboardUpdate(
+    requesterSessionId?: string,
+    reason: DashboardRefreshReason = 'agent',
+  ): Promise<DashboardUpdateResult> {
+    const current = refreshRun;
+    if (current !== null && !current.done)
+      return {
+        requestId: current.requestId,
+        definitionHash: current.definitionHash,
+        status: 'updating',
+        coalesced: true,
+      };
+    const service = dashboardService();
+    const sourceRefreshes = await Promise.allSettled([
+      context.service(spaceProjectRefresh).refresh(),
+      context.service(spaceRepositories).refresh(),
+    ]);
+    for (const [index, source] of sourceRefreshes.entries()) {
+      if (source.status === 'rejected') {
+        context.log.warn('dashboard-source-refresh-failed', {
+          space: context.key,
+          source: index === 0 ? 'project' : 'repositories',
+          message: describe(source.reason),
+        });
+      }
+    }
+    try {
+      await service.refreshContext();
+    } catch (caught) {
+      return {
+        requestId: '',
+        definitionHash: '',
+        status: 'failed',
+        message: `The dashboard context could not be refreshed: ${describe(caught)}.`,
+      };
+    }
+    const definitionHash = service.definition()?.hash;
+    if (typeof definitionHash !== 'string') {
+      return {
+        requestId: '',
+        definitionHash: '',
+        status: 'failed',
+        message: 'The effective dashboard definition is unavailable; the refresh could not start.',
+      };
+    }
+    const requested = service.request(reason);
+    if (requested.coalesced && refreshRun !== null)
+      return {
+        requestId: requested.request.requestId,
+        definitionHash: requested.request.definitionHash ?? definitionHash,
+        status: 'updating',
+        coalesced: true,
+      };
+    server.markDashboardRefreshRequested();
+    const run: RefreshRun = {
+      requestId: requested.request.requestId,
+      definitionHash: requested.request.definitionHash ?? definitionHash,
+      requesterSessionId,
+      sessionId: null,
+      timer: null,
+      starting: null,
+      done: false,
+    };
+    run.timer = setTimeout(() => {
+      if (run.done) return;
+      failRefresh(run, 'timeout', 'The PM dashboard refresh timed out before it reported data.');
+    }, use.dashboardRefreshTimeoutMs ?? DASHBOARD_REFRESH_TIMEOUT_MS);
+    refreshRun = run;
+    run.starting = runDashboardRefresh(run).catch((caught: unknown) => {
+      failRefresh(run, 'start-failed', describe(caught));
+    });
+    void run.starting;
+    return {
+      requestId: run.requestId,
+      definitionHash: run.definitionHash,
+      status: 'requested',
+      coalesced: requested.coalesced,
+    };
+  }
+
   async function ensurePm(): Promise<StartedSessionResult> {
     if (pmSessionId !== null) {
       const entry = live.get(pmSessionId);
@@ -734,15 +1036,25 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
     readiness,
     start: (engineId, params) => start(engineId, params),
     ensurePm,
+    requestDashboardUpdate,
     end,
     live: () => [...live.keys()],
     async dispose() {
       disposing = true;
+      const closingRefresh = refreshRun;
+      if (closingRefresh !== null && !closingRefresh.done) {
+        failRefresh(
+          closingRefresh,
+          'space-closed',
+          'The Space closed before the dashboard refresh completed.',
+        );
+      }
       // A start that is awaiting readiness/files must finish its rollback before
       // the context releases the server and desk used by that rollback.
       await pmStarting?.catch((caught: unknown) => {
         context.log.warn('pm-start-ended-during-close', { message: describe(caught) });
       });
+      await closingRefresh?.starting;
       await Promise.all([...live.keys()].map((id) => end(id)));
     },
   };

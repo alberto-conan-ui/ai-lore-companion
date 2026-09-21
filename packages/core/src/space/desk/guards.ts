@@ -119,7 +119,7 @@ export function isSessionSpend(value: unknown): value is SessionSpend {
 
 /** Whether a record's optional companion-owned purpose is understood by this build. */
 export function isSessionPurpose(value: unknown): value is SessionPurpose {
-  return value === 'pm';
+  return value === 'pm' || value === 'dashboard-refresh';
 }
 
 /** Whether `value` is a `SessionRecord`. */
