@@ -1,11 +1,14 @@
 import type { EngineEntry } from '@ai-lore-companion/core';
 import type { DockviewApi } from 'dockview';
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import type { SpaceSessionStarted } from '../../../../shared/ipc.js';
 import type { AiTabSpace } from '../../components/AiTab.js';
 import { DockWorkspace } from '../../components/DockWorkspace.js';
 import type { PanelId, WorkspaceTab } from '../../components/TabbedPanel.js';
 import { type NewTabContext, TAB_KINDS, type TabRenderContext } from '../../components/tabKinds.js';
+import { SessionRoster } from './SessionRoster.js';
+import './sessions.css';
 import { SessionHeader } from '../session-header/SessionHeader.js';
 import { SkillsColumn } from '../skills/SkillsColumn.js';
 import { secondaryButtonStyle } from '../styles.js';
@@ -80,6 +83,14 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   const [pmProblem, setPmProblem] = useState<string | null>(null);
   const [pmStarting, setPmStarting] = useState(true);
   const mounted = useRef(false);
+  const [rosterOpen, setRosterOpen] = useState(true);
+  const [activeTab, setActiveTab] = useState('');
+  const [sessionMap, setSessionMap] = useState<ReadonlyMap<string, string>>(new Map());
+  const [restartPending, setRestartPending] = useState<number | null>(null);
+  /** Closing the PM invalidates any in-flight ensure or restart. */
+  const pmGeneration = useRef(0);
+  const pmFocus = useRef<{ ptyId: string; focus: () => void } | null>(null);
+  const pmBusy = useRef(false);
   const { choice, pick, reinstall, refresh } = useEngineChoice();
   /** AI tabs made by `+ AI` that have not started yet. */
   const pendingStart = useRef(new Set<string>());
@@ -89,19 +100,35 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
   tabsRef.current = tabs;
   /** The dock's API, to show a tab asked for from the Dashboard. */
   const dockApi = useRef<DockviewApi | null>(null);
+  const dockContainer = useRef<HTMLDivElement | null>(null);
+  const screen = useSpaceNavStore((state) => state.screen);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rosterOpen changes the measured dock width.
+  useEffect(() => {
+    if (screen !== 'sessions') return;
+    // A queued Dockview overlay measurement can run while this screen is hidden.
+    // Refresh its content bounds after showing the screen or changing roster width.
+    const frame = requestAnimationFrame(() => {
+      const bounds = dockContainer.current?.getBoundingClientRect();
+      if (bounds?.width && bounds.height)
+        dockApi.current?.layout(bounds.width, bounds.height, true);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [screen, rosterOpen]);
   const sessionsRequest = useSpaceNavStore((state) => state.sessionsRequest);
   const sessionsRequestHandled = useSpaceNavStore((state) => state.sessionsRequestHandled);
   const setSessionsWithTab = useSpaceNavStore((state) => state.setSessionsWithTab);
   const reportSessions = useCallback((): void => {
     setSessionsWithTab([...sessionByTab.current.values()]);
+    setSessionMap(new Map(sessionByTab.current));
   }, [setSessionsWithTab]);
 
   const ensurePm = useCallback(async (): Promise<void> => {
+    const generation = pmGeneration.current;
     setPmStarting(true);
     setPmProblem(null);
     try {
       const started = await window.cockpit.spacePmEnsure({});
-      if (!mounted.current) return;
+      if (!mounted.current || generation !== pmGeneration.current) return;
       if (!started.ok) {
         setPmProblem(started.error.message);
         return;
@@ -125,9 +152,10 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
             ],
       );
     } catch (caught) {
-      if (mounted.current) setPmProblem(`PM could not start: ${String(caught)}`);
+      if (mounted.current && generation === pmGeneration.current)
+        setPmProblem(`PM could not start: ${String(caught)}`);
     } finally {
-      if (mounted.current) setPmStarting(false);
+      if (mounted.current && generation === pmGeneration.current) setPmStarting(false);
     }
   }, [reportSessions]);
 
@@ -199,11 +227,71 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
         reportSessions();
       }
       pendingStart.current.delete(tabId);
-      if (tabId === PM_TAB_ID) setPmSession(null);
+      if (tabId === PM_TAB_ID) {
+        pmGeneration.current += 1;
+        setRestartPending(null);
+        setPmStarting(false);
+        setPmSession(null);
+      }
       setTabs((prev) => withoutTab(prev, tabId));
     },
     [tabs, endSession, reportSessions],
   );
+
+  const restartPm = useCallback(async (): Promise<void> => {
+    if (pmBusy.current) return;
+    pmBusy.current = true;
+    const generation = pmGeneration.current;
+    setPmStarting(true);
+    setPmProblem(null);
+    const sessionId = sessionByTab.current.get(PM_TAB_ID);
+    try {
+      if (sessionId) {
+        const ended = await window.cockpit.spaceSessionEnd({ sessionId });
+        if (!mounted.current || generation !== pmGeneration.current) return;
+        if (!ended.ok) {
+          setPmProblem(ended.error.message);
+          setPmStarting(false);
+          return;
+        }
+      }
+      if (!mounted.current || generation !== pmGeneration.current) return;
+      sessionByTab.current.delete(PM_TAB_ID);
+      reportSessions();
+      setPmSession(null);
+      setTabs((previous) => withoutTab(previous, PM_TAB_ID));
+      setRestartPending(generation);
+    } catch (caught) {
+      if (mounted.current && generation === pmGeneration.current) {
+        setPmProblem(`PM could not restart: ${String(caught)}`);
+        setPmStarting(false);
+      }
+    } finally {
+      pmBusy.current = false;
+    }
+  }, [reportSessions]);
+
+  useEffect(() => {
+    if (restartPending === null || tabs.some((tab) => tab.id === PM_TAB_ID)) return;
+    setRestartPending(null);
+    if (restartPending !== pmGeneration.current) return;
+    void ensurePm();
+  }, [restartPending, tabs, ensurePm]);
+
+  const selectTab = useCallback((id: string): void => {
+    dockApi.current?.getPanel(id)?.api.setActive();
+  }, []);
+
+  const requestPmReport = useCallback((): void => {
+    if (!pmSession) return;
+    // Commit dock visibility before handing keyboard focus to the terminal.
+    flushSync(() => selectTab(PM_TAB_ID));
+    window.cockpit.sendTerminalInput({
+      id: pmSession.ptyId,
+      data: 'You are the PM. Please update the dashboard using report_dashboard.',
+    });
+    if (pmFocus.current?.ptyId === pmSession.ptyId) pmFocus.current.focus();
+  }, [pmSession, selectTab]);
 
   // A request from the Dashboard (phase M7.4): open an AI tab and start it, or show a session's tab.
   useEffect(() => {
@@ -267,28 +355,10 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
       header: (sessionId) => (
         <SessionHeader sessionId={sessionId} engineName={engineName(tab.engine ?? '')} />
       ),
-      sidebar: (ptyId, focusPty) => (
-        <>
-          {tab.id === PM_TAB_ID ? (
-            <button
-              type="button"
-              style={secondaryButtonStyle}
-              data-testid="pm-dashboard-request"
-              title="The PM receives an initial dashboard request automatically. Insert a follow-up request, then press Enter to send it."
-              onClick={() => {
-                window.cockpit.sendTerminalInput({
-                  id: ptyId,
-                  data: 'You are the PM. Please update the dashboard using report_dashboard.',
-                });
-                focusPty();
-              }}
-            >
-              Draft follow-up dashboard request
-            </button>
-          ) : null}
-          <SkillsColumn ptyId={ptyId} focusPty={focusPty} engineId={tab.engine ?? null} />
-        </>
-      ),
+      sidebar: (ptyId, focusPty) => {
+        if (tab.id === PM_TAB_ID) pmFocus.current = { ptyId, focus: focusPty };
+        return <SkillsColumn ptyId={ptyId} focusPty={focusPty} engineId={tab.engine ?? null} />;
+      },
       hint: AI_TAB_HINT,
     }),
     [engineName, endSession, refresh, reportSessions, choice, tickedParams, pmSession],
@@ -296,6 +366,11 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
 
   const onDockApi = useCallback((api: DockviewApi): void => {
     dockApi.current = api;
+    setActiveTab(api.activePanel?.id ?? '');
+  }, []);
+
+  const onDockLayoutChange = useCallback((): void => {
+    setActiveTab(dockApi.current?.activePanel?.id ?? '');
   }, []);
 
   const renameTab = useCallback((tabId: string, name: string): void => {
@@ -366,75 +441,24 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
     [tabs],
   );
 
-  const pmNotice = (
-    <div data-testid="pm-status" style={emptyTextStyle}>
-      {pmStarting ? (
-        'Starting PM…'
-      ) : pmProblem !== null ? (
-        <span role="alert">{pmProblem}</span>
-      ) : null}
-      {!pmStarting && !tabs.some((tab) => tab.id === PM_TAB_ID) ? (
+  return (
+    <section
+      className="space-sessions"
+      aria-label="Sessions"
+      data-testid={tabs.length === 0 ? 'space-sessions-empty' : 'space-sessions'}
+    >
+      <div className="space-sessions-toolbar">
         <button
           type="button"
-          style={secondaryButtonStyle}
-          data-testid="pm-retry"
-          onClick={() => void ensurePm()}
+          data-testid="session-roster-toggle"
+          aria-expanded={rosterOpen}
+          aria-controls="session-roster"
+          onClick={() => setRosterOpen((open) => !open)}
         >
-          {pmProblem ? 'Retry PM' : 'Start PM'}
+          {rosterOpen ? 'Hide roster' : 'Show roster'}
         </button>
-      ) : null}
-    </div>
-  );
-
-  // The dock's creators are in the header of a tab group, and with no tab there is no
-  // group. The same creators are offered here until the first tab exists.
-  if (tabs.length === 0) {
-    return (
-      <section style={emptyStyle} aria-label="Sessions" data-testid="space-sessions-empty">
-        <h2 style={emptyTitleStyle}>Sessions</h2>
-        {pmNotice}
-        <p style={emptyTextStyle}>No tab is open. A shell starts in the Space's folder.</p>
         <EngineStartControl
-          choice={choice}
-          onStart={startEngine}
-          onPick={pick}
-          onReinstall={reinstall}
-          onRefresh={refresh}
-          menu="always"
-          buttonTestId="new-ai"
-          noteTestId={AI_NOTE_ID}
-          menuTestId="space-sessions-engine-menu"
-          ticked={ticked}
-          onTickedChange={setTickedParams}
-        />
-        <p style={emptyTextStyle}>Other tabs:</p>
-        <div style={emptyActionsStyle}>
-          <button
-            type="button"
-            style={secondaryButtonStyle}
-            data-testid="new-shell"
-            onClick={() => newTabCtx.onNewShell()}
-          >
-            Terminal
-          </button>
-          <button
-            type="button"
-            style={secondaryButtonStyle}
-            data-testid="new-browser"
-            onClick={() => newTabCtx.onNewBrowser()}
-          >
-            Web page
-          </button>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section style={dockStyle} aria-label="Sessions" data-testid="space-sessions">
-      <div style={aiCompactRowStyle}>
-        {pmNotice}
-        <EngineStartControl
+          compact
           choice={choice}
           onStart={startEngine}
           onPick={pick}
@@ -448,60 +472,61 @@ export function SpaceSessions({ spaceRoot, initialTabs }: Props): JSX.Element {
           onTickedChange={setTickedParams}
         />
       </div>
-      <DockWorkspace
-        panels={panels}
-        renderCtx={renderCtx}
-        newTabCtx={newTabCtx}
-        onCloseTab={closeTab}
-        onRenameTab={renameTab}
-        onApi={onDockApi}
-      />
+      <div className="space-sessions-body" data-roster-open={rosterOpen}>
+        <div className="space-sessions-roster" hidden={!rosterOpen}>
+          <SessionRoster
+            tabs={tabs}
+            sessions={sessionMap}
+            engines={engines}
+            activeTab={activeTab}
+            pmTabId={PM_TAB_ID}
+            pmSession={pmSession}
+            pmStarting={pmStarting}
+            pmProblem={pmProblem}
+            onSelect={selectTab}
+            onClose={closeTab}
+            onEnsurePm={() => void ensurePm()}
+            onRestartPm={() => void restartPm()}
+            onRequest={requestPmReport}
+          />
+        </div>
+        <div className="space-sessions-dock" ref={dockContainer}>
+          {tabs.length === 0 ? (
+            <div className="space-sessions-empty">
+              <h2>Sessions</h2>
+              <p>No tab is open. A shell starts in the Space's folder.</p>
+              <div className="session-roster-actions">
+                <button
+                  type="button"
+                  style={secondaryButtonStyle}
+                  data-testid="new-shell"
+                  onClick={() => newTabCtx.onNewShell()}
+                >
+                  Terminal
+                </button>
+                <button
+                  type="button"
+                  style={secondaryButtonStyle}
+                  data-testid="new-browser"
+                  onClick={() => newTabCtx.onNewBrowser()}
+                >
+                  Web page
+                </button>
+              </div>
+            </div>
+          ) : (
+            <DockWorkspace
+              panels={panels}
+              renderCtx={renderCtx}
+              newTabCtx={newTabCtx}
+              onCloseTab={closeTab}
+              onRenameTab={renameTab}
+              onApi={onDockApi}
+              onLayoutChange={onDockLayoutChange}
+            />
+          )}
+        </div>
+      </div>
     </section>
   );
 }
-
-const aiCompactRowStyle: React.CSSProperties = {
-  flexShrink: 0,
-  padding: '0.4rem 0.9rem',
-  borderBottom: '1px solid var(--color-border)',
-};
-
-const dockStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  flex: 1,
-  minWidth: 0,
-  minHeight: 0,
-};
-
-const emptyStyle: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  gap: '0.5rem',
-  flex: 1,
-  minWidth: 0,
-  minHeight: 0,
-  padding: '1.5rem',
-  textAlign: 'center',
-};
-
-const emptyTitleStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: '1rem',
-  fontWeight: 600,
-  color: 'var(--color-text)',
-};
-
-const emptyTextStyle: React.CSSProperties = {
-  margin: 0,
-  fontSize: '0.85rem',
-  color: 'var(--color-text-secondary)',
-};
-
-const emptyActionsStyle: React.CSSProperties = {
-  display: 'flex',
-  gap: '0.5rem',
-  marginTop: '0.4rem',
-};

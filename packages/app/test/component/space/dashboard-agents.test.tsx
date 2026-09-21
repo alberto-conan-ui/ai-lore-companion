@@ -137,6 +137,8 @@ const ENTRIES: NeedsYouEntry[] = [
 const ENGINE = { id: 'claude-code', name: 'Claude Code', binary: 'claude' };
 
 const cockpit = {
+  spaceDashboardReport: vi.fn(async () => ({ ok: true, value: { version: 1, report: null } })),
+  onSpaceDashboardReport: vi.fn(() => () => {}),
   urlOpenExternal: vi.fn(),
   enginesList: vi.fn(async () => [ENGINE]),
   onEnginesChanged: vi.fn(() => () => {}),
@@ -227,7 +229,7 @@ test('the Agents board has the four columns, a row per session, stale in words a
   expect(cockpit.urlOpenExternal).toHaveBeenLastCalledWith(ref(1).url);
 });
 
-test('Needs you lists its entries in order, labelled by kind, with one action each', () => {
+test('Needs you lists its entries in order, with the gate question and one action each', () => {
   const onOpenFocus = vi.fn();
   useSpaceNavStore.setState({ sessionsWithTab: ['s-8'] });
   render(<NeedsYou entries={ENTRIES} onOpenFocus={onOpenFocus} />);
@@ -238,9 +240,7 @@ test('Needs you lists its entries in order, labelled by kind, with one action ea
     'Stale session',
     'Stale session',
   ]);
-  expect(items[0]?.textContent).toContain(
-    `The process specify asks at the step confirm: Is the draft agreed? The session is on ${REPO}#12.`,
-  );
+  expect(items[0]?.textContent).toContain('Is the draft agreed?');
   expect(items[2]?.textContent).toContain(
     `The session issue ${REPO}#8 is in Writing with no change on GitHub for 2 days.`,
   );
@@ -359,3 +359,61 @@ test('a row whose local session is unguarded shows the Unguarded line', () => {
     'Unguarded: started with --dangerously-skip-permissions.',
   );
 });
+
+test('a noisy Needs you band retains every decision and its keyboard reachable action', () => {
+  const entries: NeedsYouEntry[] = Array.from({ length: 7 }, (_, index) => ({
+    kind: 'review',
+    focus: ref(100 + index),
+    title: `Review ${index + 1}`,
+  }));
+  const open = vi.fn();
+  render(<NeedsYou entries={entries} onOpenFocus={open} />);
+  expect(screen.getAllByRole('listitem')).toHaveLength(7);
+  const last = screen.getAllByRole('button', { name: 'Open the focus' })[6];
+  last.focus();
+  expect(document.activeElement).toBe(last);
+  fireEvent.click(last);
+  expect(open).toHaveBeenCalledWith(ref(106));
+});
+
+test('Agents rows show recorded repository branches and unknown idle honestly', () => {
+  render(
+    <AgentsBoard
+      board={[
+        row(1, 'Writing', {
+          targets: [
+            { kind: 'repository', name: 'companion', branch: 'feature/dashboard' },
+            { kind: 'lore' },
+          ],
+          idleMs: null,
+        }),
+      ]}
+    />,
+  );
+  expect(screen.getByTestId('agents-row-targets-1').textContent).toBe(
+    'Targets recorded on issue: companion · feature/dashboard, the Lore',
+  );
+  expect(screen.getByText('GitHub idle: unknown')).toBeTruthy();
+});
+
+test.each(['Read only', 'Done'] as const)(
+  'an Agents row in %s labels retained targets as issue records',
+  (column) => {
+    render(
+      <AgentsBoard
+        board={[
+          row(7, column, {
+            targets: [
+              { kind: 'repository', name: 'companion', branch: 'finished-work' },
+              { kind: 'lore' },
+            ],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('agents-row-targets-7').textContent).toBe(
+      'Targets recorded on issue: companion · finished-work, the Lore',
+    );
+    expect(screen.getByTestId('agents-row-7').textContent).not.toContain('Writes to:');
+  },
+);

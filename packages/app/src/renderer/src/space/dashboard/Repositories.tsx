@@ -1,5 +1,6 @@
 import type { RepositoryRow } from '@ai-lore-companion/core';
-import type { CSSProperties, JSX } from 'react';
+import type { JSX } from 'react';
+import './dashboard.css';
 import { linkStyle } from './FocusesByStage.js';
 import {
   branchText,
@@ -38,23 +39,23 @@ export function Repositories({ now }: Props): JSX.Element {
 
   return (
     <section
-      style={sectionStyle}
+      className="dashboard-section"
       aria-labelledby="repositories-title"
       data-testid="dashboard-repositories"
     >
-      <h2 id="repositories-title" style={headingStyle}>
+      <h2 id="repositories-title" className="dashboard-heading">
         Repositories
       </h2>
       {model === null ? (
-        <p style={emptyStyle} data-testid="dashboard-repositories-reading">
+        <p className="dashboard-empty" data-testid="dashboard-repositories-reading">
           {repositories?.problem ?? readingSectionText()}
         </p>
       ) : model.rows.length === 0 ? (
-        <p style={emptyStyle} data-testid="dashboard-repositories-empty">
+        <p className="dashboard-empty" data-testid="dashboard-repositories-empty">
           {noRepositoryText()}
         </p>
       ) : (
-        <ul style={listStyle}>
+        <ul className="dashboard-repository-list">
           {model.rows.map((row) => (
             <RepositoryRowItem key={row.rootId} row={row} now={now} />
           ))}
@@ -71,13 +72,13 @@ function RepositoryRowItem({ row, now }: { row: RepositoryRow; now: number }): J
 
   return (
     <li
-      style={itemStyle}
+      className="dashboard-repository-row"
       data-testid="repository-row"
       data-root-id={row.rootId}
       data-status={row.status}
       data-kind={row.kind}
     >
-      <p style={nameLineStyle}>
+      <p className="dashboard-repository-name">
         <button
           type="button"
           style={{ ...linkStyle, marginTop: 0, fontWeight: 600 }}
@@ -87,47 +88,47 @@ function RepositoryRowItem({ row, now }: { row: RepositoryRow; now: number }): J
           {row.name}
         </button>
         {row.github !== null ? (
-          <span style={secondaryStyle}>{githubSuffix(row.github)}</span>
+          <span className="dashboard-muted">{githubSuffix(row.github)}</span>
         ) : null}
       </p>
       {row.status === 'reading' ? (
-        <p style={lineStyle} data-testid="repository-row-reading">
+        <p className="dashboard-repository-detail" data-testid="repository-row-reading">
           {readingRowText()}
         </p>
       ) : null}
       {row.status === 'untracked' ? (
-        <p style={lineStyle} data-testid="repository-row-untracked">
+        <p className="dashboard-repository-detail" data-testid="repository-row-untracked">
           {untrackedRowText(row.notKnown ?? '')}
         </p>
       ) : null}
       {row.status === 'failed' ? (
-        <p style={lineStyle} data-testid="repository-row-failed">
+        <p className="dashboard-repository-detail" data-testid="repository-row-failed">
           {failedRowText(row.notKnown ?? '')}
         </p>
       ) : null}
       {row.status === 'ready' ? (
         <>
           {row.head !== null ? (
-            <p style={lineStyle} data-testid="repository-row-branch">
+            <p className="dashboard-repository-detail" data-testid="repository-row-branch">
               {branchText(row.head)}
             </p>
           ) : null}
           {row.operation !== null ? (
-            <p style={lineStyle} data-testid="repository-row-operation">
+            <p className="dashboard-repository-detail" data-testid="repository-row-operation">
               {operationText(row.operation, row.head)}
             </p>
           ) : null}
           {row.changes !== null ? (
-            <p style={lineStyle} data-testid="repository-row-uncommitted">
+            <p className="dashboard-repository-detail" data-testid="repository-row-uncommitted">
               {uncommittedText(row.changes)}
             </p>
           ) : null}
           {row.remote !== null ? (
-            <p style={lineStyle} data-testid="repository-row-remote">
+            <p className="dashboard-repository-detail" data-testid="repository-row-remote">
               {remoteText(row.head, row.remote, now)}
             </p>
           ) : null}
-          <p style={lineStyle} data-testid="repository-row-changes">
+          <p className="dashboard-repository-detail" data-testid="repository-row-changes">
             {changesText(row.changes, row.status)}
           </p>
         </>
@@ -135,40 +136,3 @@ function RepositoryRowItem({ row, now }: { row: RepositoryRow; now: number }): J
     </li>
   );
 }
-
-const sectionStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: '0.5rem' };
-const headingStyle: CSSProperties = {
-  margin: 0,
-  fontSize: '0.95rem',
-  color: 'var(--color-text-bright)',
-};
-const emptyStyle: CSSProperties = {
-  margin: 0,
-  fontSize: '0.85rem',
-  color: 'var(--color-text-muted)',
-};
-const listStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.4rem',
-  margin: 0,
-  padding: 0,
-  listStyle: 'none',
-};
-const itemStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '0.15rem',
-  padding: '0.45rem 0.6rem',
-  border: '1px solid var(--color-border)',
-  borderRadius: '5px',
-};
-const nameLineStyle: CSSProperties = {
-  margin: 0,
-  display: 'flex',
-  alignItems: 'baseline',
-  gap: '0.2rem',
-  flexWrap: 'wrap',
-};
-const secondaryStyle: CSSProperties = { fontSize: '0.8rem', color: 'var(--color-text-secondary)' };
-const lineStyle: CSSProperties = { margin: 0, fontSize: '0.8rem', color: 'var(--color-text)' };

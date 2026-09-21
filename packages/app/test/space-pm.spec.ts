@@ -150,18 +150,16 @@ test('opening a Space starts one interactive PM and its MCP reply reaches the da
     ).toBe(1);
     expect(readFileSync(launches, 'utf8').trim().split('\n')).toHaveLength(1);
 
-    // Ending PM and ensuring it again starts one fresh native initial turn.
+    // Restarting from the roster starts one replacement and one fresh native initial turn.
     const firstAttachment = attachments[0];
     if (!firstAttachment.ok) throw new Error(firstAttachment.error.message);
     const previousSessionId = firstAttachment.value.sessionId;
-    await page.evaluate(
-      (sessionId) => window.cockpit.spaceSessionEnd({ sessionId }),
-      previousSessionId,
-    );
+    await page.getByTestId('space-rail-sessions').click();
+    await page.getByTestId('pm-restart').click();
+    await expect.poll(() => readFileSync(launches, 'utf8').trim().split('\n').length).toBe(2);
     const restarted = await page.evaluate(() => window.cockpit.spacePmEnsure({}));
     expect(restarted.ok).toBe(true);
     expect(restarted.ok ? restarted.value.sessionId : '').not.toBe(previousSessionId);
-    await expect.poll(() => readFileSync(launches, 'utf8').trim().split('\n').length).toBe(2);
     await expect.poll(() => readFileSync(reportCalls, 'utf8').trim().split('\n').length).toBe(3);
     expect(readFileSync(reportCalls, 'utf8').trim().split('\n')).toEqual(['1', '2', '1']);
     await closeSpaceApp(app);

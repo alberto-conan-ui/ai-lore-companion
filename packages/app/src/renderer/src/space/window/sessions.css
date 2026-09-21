@@ -1,0 +1,231 @@
+.space-sessions {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  container-type: inline-size;
+}
+.space-sessions-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-panel);
+}
+.session-roster button,
+.space-sessions-toolbar > button {
+  font: inherit;
+}
+.space-sessions-toolbar > button,
+.session-roster-actions button,
+.session-roster-report button {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  padding: 4px 10px;
+  background: var(--color-raised);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+}
+.space-sessions button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.space-sessions button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.space-sessions-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+.space-sessions-roster {
+  width: clamp(260px, 27%, 352px);
+  flex-shrink: 0;
+  min-height: 0;
+}
+.space-sessions-roster[hidden] {
+  display: none;
+}
+.space-sessions-dock {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.session-roster {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-panel);
+  border-right: 1px solid var(--color-border);
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+.session-roster-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.session-roster h2,
+.session-roster h3 {
+  margin: 0;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: .06em;
+  font-weight: 700;
+}
+.session-roster h3 {
+  color: var(--color-text-muted);
+}
+.session-roster-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+}
+.session-roster-card {
+  border: 1px solid var(--color-border-strong);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--color-inset);
+  overflow-wrap: anywhere;
+}
+.session-roster-card[data-active="true"] {
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-raised);
+}
+.session-roster-pm {
+  border-color: var(--color-purple-border);
+  background: var(--color-raised);
+}
+.session-roster-pm .session-roster-select strong {
+  color: var(--color-purple);
+}
+.session-roster-select {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.session-roster-select strong {
+  font-size: 12.5px;
+  color: var(--color-text);
+}
+.session-roster code {
+  font-size: 10.5px;
+  overflow-wrap: anywhere;
+}
+.session-roster-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.session-roster-pill {
+  display: inline-block;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+}
+.session-roster-target {
+  border-left: 2px solid var(--color-purple-border);
+  padding-left: 6px;
+  font-size: 10.5px;
+}
+.session-roster-meta {
+  color: var(--color-text-muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+  margin: 0;
+}
+.session-roster-warning {
+  color: var(--color-warn-fg);
+}
+.session-roster-report {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  background: var(--color-shell);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 8px;
+  margin: 8px 0;
+}
+.session-roster-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+.session-roster-engines {
+  margin-top: auto;
+  border-top: 1px solid var(--color-border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.space-sessions-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+.space-sessions-empty h2 {
+  font-size: 15px;
+}
+@container (max-width: 960px) {
+  .space-sessions-roster {
+    width: 260px;
+  }
+}
+@container (max-width: 760px) {
+  .space-sessions-body {
+    flex-direction: column;
+  }
+  .space-sessions-roster {
+    width: 100%;
+    max-height: 42%;
+    flex-shrink: 1;
+    flex-basis: 260px;
+  }
+  .session-roster {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .session-roster-content {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+    align-items: start;
+  }
+  .session-roster-content > h3 {
+    grid-column: 1 / -1;
+  }
+  .space-sessions-dock {
+    flex-basis: 0;
+  }
+}
