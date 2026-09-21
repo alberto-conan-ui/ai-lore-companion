@@ -159,16 +159,29 @@ export const spaceGitHub = defineSpaceService<SpaceGitHub>({
   id: 'github',
   create: (context) => {
     let port: GitHubPort | null = null;
+    let creating: Promise<GitHubPort> | null = null;
     return {
       async port() {
-        if (port === null) {
-          port = await createAppGitHubPort({
+        if (port !== null) return port;
+        if (creating === null) {
+          creating = createAppGitHubPort({
             runner: context.runner,
             log: context.log,
             space: context.key,
           });
         }
-        return port;
+        const pending = creating;
+        try {
+          const created = await pending;
+          // `use` may replace the port while the default is being built. Do not
+          // let that in-flight build put its stale port back in service.
+          if (port === null) port = created;
+          return port;
+        } finally {
+          // A rejected build must be retryable. The identity check keeps an
+          // older waiter from clearing a newer build if that ever changes.
+          if (creating === pending) creating = null;
+        }
       },
       use(replacement) {
         port = replacement;
