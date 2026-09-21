@@ -210,7 +210,10 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
                 list.roots.map(async (summary) => {
                   const root = summary.root;
                   if (root.kind !== 'repository' && root.kind !== 'publish-area') return;
-                  const payloadPath = `repos/${root.name}`;
+                  const payloadPath =
+                    root.name === 'ai-lore-companion' || root.name === 'publish'
+                      ? root.name
+                      : `repos/${root.name}`;
                   const card = mirrors.find((m: MirrorCard) => m.payload === payloadPath);
                   const mirrorPath = `lore/mirrors/${root.name}.md`;
                   if (!card) {
@@ -224,12 +227,31 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
                     return;
                   }
                   try {
-                    const generatedResult = await generateRepositorySkeleton({
-                      spaceRoot,
-                      runner: options.runner,
-                      name: root.name,
+                    const scriptPath = spaceRoot + '/' + card.generator;
+                    const args = [scriptPath, payloadPath];
+                    let run = await options.runner.run('python3', args, {
+                      cwd: spaceRoot,
+                      timeoutMs: 120000,
                     });
-                    const generated = generatedResult.ok ? generatedResult.value : null;
+                    let generated: string[] | null = null;
+                    if (run.code === 0 && run.failure === undefined) {
+                      let lines = run.stdout.split('\n').filter((line: string) => line !== '');
+                      if (lines.length > 2000) {
+                        const depthArgs = [scriptPath, payloadPath, '--depth', '2'];
+                        const depthRun = await options.runner.run('python3', depthArgs, {
+                          cwd: spaceRoot,
+                          timeoutMs: 120000,
+                        });
+                        if (depthRun.code === 0 && depthRun.failure === undefined) {
+                          lines = depthRun.stdout.split('\n').filter((line: string) => line !== '');
+                        } else {
+                          throw new Error('Depth run failed');
+                        }
+                      }
+                      generated = lines;
+                    } else {
+                      throw new Error('Run failed');
+                    }
                     cachedMirrors[root.id] = mirrorDrift({
                       path: mirrorPath,
                       stored: card.skeleton,
