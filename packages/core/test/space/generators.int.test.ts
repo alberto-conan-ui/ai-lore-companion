@@ -320,8 +320,9 @@ test('repository-skeleton refuses to guess the default branch of a repository th
   await seed.git('fetch', '--quiet', 'origin');
   // Newer git writes refs/remotes/origin/HEAD on fetch. This case is about a
   // repository that has none, so it is removed whatever the host's git did.
-  // `update-ref -d` succeeds when the reference is not there.
-  await seed.git('update-ref', '-d', 'refs/remotes/origin/HEAD');
+  // `--no-deref` removes the symbolic reference itself and not the branch it
+  // names, and `-d` succeeds when the reference is not there at all.
+  await seed.git('update-ref', '--no-deref', '-d', 'refs/remotes/origin/HEAD');
   await seed.git('checkout', '--quiet', '-b', 'item-12');
   const unknown = await generate(REPOSITORY_SKELETON, [seed.dir], seed.dir);
   assert.equal(unknown.code, 2);
