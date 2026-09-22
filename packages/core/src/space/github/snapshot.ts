@@ -87,6 +87,30 @@ export function parseSpecLink(body: string): string | null {
   return SPEC_BLOCK.exec(body)?.[1] ?? null;
 }
 
+/**
+ * A markdown heading whose text begins with "Acceptance" — "## Acceptance
+ * criteria", "## Acceptance", "### Acceptance Criteria".
+ */
+const CRITERIA_HEADING = /^\s{0,3}#{1,6}\s+acceptance\b/im;
+
+/**
+ * Whether the body names acceptance criteria.
+ *
+ * This is a heuristic and not a reading of the criteria themselves. It answers
+ * one question: could anyone check this work against what its ticket says? A
+ * focus whose criteria live somewhere else — an archive, a brief, a spec a
+ * reader has to go and find — can never be computed as done, and the honest
+ * answer is to say so rather than to leave it out of the reckoning. The Space's
+ * own #1 was exactly that: its eight criteria were in a v0.8 archive, so
+ * nothing could ever have said it was finished.
+ *
+ * It does not say the criteria are met. Whether a criterion is met is written
+ * in a report, by a session, in prose, and nothing here reads that.
+ */
+export function bodyNamesCriteria(body: string): boolean {
+  return CRITERIA_HEADING.test(body);
+}
+
 function isAgentsColumn(value: string | undefined): value is AgentsColumn {
   return AGENTS_COLUMNS.some((column) => column === value);
 }
@@ -139,9 +163,17 @@ function focusItem(raw: RawProjectIssue, onProject: Map<string, RawProjectIssue>
     items: raw.subIssues.map((sub) => {
       const own = onProject.get(issueKey(sub.issue.repository, sub.issue.number));
       if (own !== undefined) return planItem(own);
-      return { issue: sub.issue, title: sub.title, state: sub.state, status: null, labels: [], updatedAt: null };
+      return {
+        issue: sub.issue,
+        title: sub.title,
+        state: sub.state,
+        status: null,
+        labels: [],
+        updatedAt: null,
+      };
     }),
     specUrl: parseSpecLink(raw.body),
+    criteriaOnTicket: bodyNamesCriteria(raw.body),
   };
 }
 

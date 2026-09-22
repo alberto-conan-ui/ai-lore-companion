@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   type DashboardModel,
   type FocusCard,
+  type NeedsYouEntry,
   type OpenPullRequest,
   type SessionRecord,
   dormantAggregate,
@@ -31,6 +32,7 @@ function focus(number: number, overrides: Partial<FocusCard> = {}): FocusCard {
     stageChangedAt: '2026-09-20T12:00:00Z',
     kind: null,
     specUrl: null,
+    criteriaOnTicket: true,
     updatedAt: now,
     items: [],
     itemsDone: 0,
@@ -208,6 +210,38 @@ test('PR summary keeps mixed CI and review states accurate without zero-count no
   assert.equal(
     summary.aggregate,
     '1 CI FAILED · 1 RUNNING · 1 NO CI · 1 REVIEWED · 1 CHANGES REQUESTED · 1 REVIEW REQUIRED',
+  );
+});
+
+test('the Done-call prompt is ranked beside a review, and says when it cannot be told', () => {
+  const ready: NeedsYouEntry = {
+    kind: 'ready-for-done',
+    focus: issue(1),
+    title: 'Finished focus',
+    criteriaOnTicket: true,
+  };
+  const uncomputable: NeedsYouEntry = {
+    kind: 'ready-for-done',
+    focus: issue(2),
+    title: 'No criteria here',
+    criteriaOnTicket: false,
+  };
+
+  assert.equal(
+    nextActionHeadline(ready),
+    '#1 is finished — your Done call: Finished focus',
+  );
+  assert.equal(
+    nextActionHeadline(uncomputable),
+    '#2 has no criteria on its ticket, so done cannot be told: No criteria here',
+  );
+
+  // It reaches the band at all: the Needs you band renders `nextActions`, so an
+  // entry that ranking drops is an entry nobody ever sees.
+  const ranked = rankNextActions({ needsYou: [ready], pulls: [], drafts: [], now });
+  assert.deepEqual(
+    ranked.map((entry) => entry.kind),
+    ['ready-for-done'],
   );
 });
 

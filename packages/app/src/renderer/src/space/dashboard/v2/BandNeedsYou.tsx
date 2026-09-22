@@ -162,7 +162,8 @@ function NextActionCard({
   const broken = action.kind === 'failing-pull-request';
   const openPrimary = (): void => {
     if (action.kind === 'gate') openDialogTicket(action.ticket);
-    else if (action.kind === 'review') {
+    // The Done call is made on the focus, so it opens the focus, as a review does.
+    else if (action.kind === 'review' || action.kind === 'ready-for-done') {
       const focus = findFocus(project, action.focus.repository, action.focus.number);
       if (focus === null) void window.cockpit.urlOpenExternal(action.focus.url);
       else onOpenFocus(focus);
@@ -182,7 +183,8 @@ function NextActionCard({
         void window.cockpit.urlOpenExternal(
           `https://github.com/${action.item.repository}/issues/${action.item.number}`,
         );
-    } else if (action.kind === 'review') void window.cockpit.urlOpenExternal(action.focus.url);
+    } else if (action.kind === 'review' || action.kind === 'ready-for-done')
+      void window.cockpit.urlOpenExternal(action.focus.url);
     else if (action.kind === 'failing-pull-request')
       void window.cockpit.urlOpenExternal(action.pull.url);
     else if (action.kind === 'stale-session') void window.cockpit.urlOpenExternal(action.issue.url);
@@ -195,7 +197,7 @@ function NextActionCard({
   const primary =
     action.kind === 'gate'
       ? 'Open gate'
-      : action.kind === 'review'
+      : action.kind === 'review' || action.kind === 'ready-for-done'
         ? 'Open focus'
         : action.kind === 'draft'
           ? 'Open draft'
@@ -203,7 +205,7 @@ function NextActionCard({
   const source =
     action.kind === 'gate'
       ? `${action.process} gate`
-      : action.kind === 'review'
+      : action.kind === 'review' || action.kind === 'ready-for-done'
         ? `${action.focus.repository}#${action.focus.number}`
         : action.kind === 'draft'
           ? 'LOCAL WORKBENCH'
