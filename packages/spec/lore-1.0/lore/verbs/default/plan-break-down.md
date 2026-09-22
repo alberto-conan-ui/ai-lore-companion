@@ -47,7 +47,7 @@ This verb does not move the unit of work to its next stage. The process plan mak
 
 ## Contracts
 
-- spec-before-breakdown, `lore/contracts/core/spec-before-breakdown.md`. Its rule is that a unit of work that has a spec has no breakdown until the spec is agreed, and that the criteria of every piece are drawn from the spec. This contract has only a rule, so no script refuses the write. The session checks the rule itself in step 2.
+- spec-before-breakdown, `lore/contracts/default/spec-before-breakdown.md`. Its rule is that a unit of work that has a spec has no breakdown until the spec is agreed, and that the criteria of every piece are drawn from the spec. This contract has only a rule, so no script refuses the write. The session checks the rule itself in step 2.
 - stage-gate, `lore/contracts/core/stage-gate.md`. Its rule is that moving a unit of work from one stage to the next is the Human Lead's explicit yes. This verb moves no stage.
 
 ## What it refuses

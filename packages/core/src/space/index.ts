@@ -31,3 +31,4 @@ export * from './claims/index.js';
 export * from './project/index.js';
 export * from './legacy/index.js';
 export * from './migrate/index.js';
+export * from './upgrade/index.js';
