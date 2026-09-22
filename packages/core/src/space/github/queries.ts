@@ -9,7 +9,15 @@
 const REPOSITORY_FIELDS = 'id nameWithOwner url isPrivate';
 const PROJECT_FIELDS = 'id number title url';
 const SINGLE_SELECT_FIELDS = 'id name options { id name color description }';
-const VIEW_FIELDS = 'id number name layout filter';
+// `groupByFields` and `verticalGroupByFields` are read-only on ProjectV2View:
+// no mutation input sets them. They can be read, which is what lets a by-hand
+// grouping step be checked instead of merely repeated. Each is a connection
+// over ProjectV2FieldConfiguration, a union whose members all implement
+// ProjectV2FieldCommon, so one inline fragment covers every member.
+const VIEW_GROUPING = `
+  groupByFields(first: 1) { nodes { ... on ProjectV2FieldCommon { name } } }
+  verticalGroupByFields(first: 1) { nodes { ... on ProjectV2FieldCommon { name } } }`;
+const VIEW_FIELDS = `id number name layout filter${VIEW_GROUPING}`;
 
 /** A repository by owner and name. */
 export const REPOSITORY_QUERY = `query($owner: String!, $name: String!) {
@@ -200,6 +208,7 @@ export const READ_PROJECT_QUERY = `query($project: ID!, $stage: String!, $after:
       stage: field(name: $stage) {
         ... on ProjectV2SingleSelectField { id name options { id name } }
       }
+      views(first: 50) { nodes { ${VIEW_FIELDS} } }
       items(first: 100, after: $after) {
         pageInfo { hasNextPage endCursor }
         nodes {

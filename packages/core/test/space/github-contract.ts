@@ -194,12 +194,15 @@ export function gitHubPortContract(
         await port.ensureSingleSelectField({
           project,
           name: STAGE_FIELD,
-          options: ['Done', 'Spec', 'Review'],
+          // One option that exists and two that do not, named from the
+          // layout rather than spelled out, so renaming a stage cannot make
+          // this assert something about options nobody ships.
+          options: [DEFAULT_STAGES[4] as string, DEFAULT_STAGES[0] as string, DEFAULT_STAGES[3] as string],
         }),
       );
       assert.deepEqual(
         grown.options.map((option) => option.name),
-        [...three, 'Done', 'Review'],
+        [...three, DEFAULT_STAGES[4], DEFAULT_STAGES[3]],
       );
       assert.deepEqual(grown.options.slice(0, 3), first.options, 'existing options keep their ids');
       const snapshot = unwrap(await port.readProject({ project }));

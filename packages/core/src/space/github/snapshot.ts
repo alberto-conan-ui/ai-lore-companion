@@ -17,9 +17,11 @@
 
 import { isWriteTarget } from '../desk/guards.js';
 import type { WriteTarget } from '../desk/types.js';
+import { viewDrift } from './views.js';
 import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
+  DEFAULT_VIEWS,
   type AgentsColumn,
   FOCUS_LEVEL,
   type FieldInfo,
@@ -28,6 +30,7 @@ import {
   LEVEL_FIELD,
   type PlanItem,
   type ProjectInfo,
+  type ProjectViewInfo,
   type ProjectSnapshot,
   type RawProjectIssue,
   SESSION_LABEL,
@@ -182,6 +185,13 @@ export function buildProjectSnapshot(arg: {
   project: ProjectInfo;
   stageField: FieldInfo | null;
   issues: readonly RawProjectIssue[];
+  /**
+   * The Project's views, checked against the default layout. Setup announced
+   * its by-hand grouping steps once and nothing looked again, so this Space's
+   * Project sat ungrouped and mis-filtered from creation until 2026-09-22
+   * without anything saying so. Every read reports it now.
+   */
+  views?: readonly ProjectViewInfo[];
   /** ISO 8601. */
   fetchedAt: string;
 }): ProjectSnapshot {
@@ -210,6 +220,7 @@ export function buildProjectSnapshot(arg: {
     if (level === FOCUS_LEVEL) focuses.push(focusItem(raw, onProject));
     else standalone.push(planItem(raw));
   }
+  if (arg.views !== undefined) problems.push(...viewDrift(DEFAULT_VIEWS, arg.views));
   const { owner, number, title, url } = arg.project;
   return {
     fetchedAt: arg.fetchedAt,

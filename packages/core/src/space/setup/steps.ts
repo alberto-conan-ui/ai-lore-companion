@@ -20,6 +20,7 @@ import type { GitHubError } from '../github/errors.js';
 import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
+  DEFAULT_VIEWS,
   DEFAULT_STAGES,
   KIND_LABELS,
   LEVEL_FIELD,
@@ -30,6 +31,7 @@ import {
   type RepositoryInfo,
   SESSION_LABEL,
   STAGE_FIELD,
+  STATUS_FIELD,
 } from '../github/types.js';
 import { installClaudeCode, planClaudeCodeInstall } from '../install/writer.js';
 import { deskPaths } from '../layout/desk-paths.js';
@@ -81,25 +83,13 @@ export const SETUP_LABELS: readonly LabelSpec[] = [
   },
 ];
 
-/** The view of the items, whose grouping the API cannot set. */
-const ITEMS_VIEW = 'Items by focus';
-
-/** The three views of the default Project layout. */
-export const SETUP_VIEWS: readonly ProjectViewSpec[] = [
-  {
-    name: 'Focuses by Stage',
-    layout: 'board',
-    filter: `-label:${SESSION_LABEL}`,
-    columnField: STAGE_FIELD,
-  },
-  { name: ITEMS_VIEW, layout: 'table', filter: `-label:${SESSION_LABEL}` },
-  {
-    name: 'Agents board',
-    layout: 'board',
-    filter: `label:${SESSION_LABEL}`,
-    columnField: AGENTS_FIELD,
-  },
-];
+/**
+ * The views of the default Project layout that exist from setup.
+ *
+ * Defined in the github layer beside the fields they filter on, because the
+ * snapshot checks a Project against them and must not import setup to do it.
+ */
+export const SETUP_VIEWS = DEFAULT_VIEWS;
 
 /** The message of the Space repository's first commit. */
 export const FIRST_COMMIT_MESSAGE = 'Scaffold the Space';
@@ -601,22 +591,23 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
         byHand.push(...view.value.byHand);
         const url =
           view.value.view !== null ? `${project.url}/views/${view.value.view.number}` : null;
-        if (spec.layout === 'board' && spec.columnField !== undefined) {
+        // The grouping of "Items by focus" used to be a named special case
+        // here, pushed whether or not it was already set. Both groupings are
+        // spec fields now, and `ensureProjectView` reports only the ones a
+        // reading of the view says are still outstanding.
+        if (spec.columnField !== undefined) {
           viewSettings.push({
             view: spec.name,
             setting: `Set "Column by" to the field "${spec.columnField}".`,
             url,
           });
         }
-        if (spec.name === ITEMS_VIEW) {
+        if (spec.groupField !== undefined) {
           viewSettings.push({
-            view: ITEMS_VIEW,
-            setting: 'Set "Group by" to "Parent issue".',
+            view: spec.name,
+            setting: `Set "Group by" to the field "${spec.groupField}".`,
             url,
           });
-          byHand.push(
-            `On GitHub, open the view "${ITEMS_VIEW}" of the Project, open the view's menu, and set "Group by" to "Parent issue". The GitHub API cannot set it.`,
-          );
         }
       }
       ctx.byHand.splice(0, ctx.byHand.length, ...byHand);

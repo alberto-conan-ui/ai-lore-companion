@@ -518,12 +518,15 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
           name: STATUS_FIELD,
           options: DEFAULT_STATUS_OPTIONS.map((name) => ({ id: nextId('OPT'), name })),
         };
+        // GitHub gives a new Project this unfiltered, ungrouped table.
         const view: ProjectViewInfo = {
           id: nextId('PVTV'),
           number: 1,
           name: 'View 1',
           layout: 'table',
           filter: '',
+          columnField: null,
+          groupField: null,
         };
         state.projects.push({
           info,
@@ -569,6 +572,9 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
             name: arg.spec.name,
             layout: arg.spec.layout,
             filter: '',
+            // A view the API creates has no grouping: that is the by-hand step.
+            columnField: null,
+            groupField: null,
           };
           project.views.push(view);
         }
@@ -792,6 +798,9 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
             project: project.info,
             stageField: stageField === null ? null : structuredClone(stageField),
             issues,
+            // The fake reports the same view drift as the gh adapter, so a
+            // test cannot pass against one and fail against the other.
+            views: structuredClone(project.views),
             fetchedAt: now().toISOString(),
           }),
         );

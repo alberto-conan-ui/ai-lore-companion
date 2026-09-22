@@ -12,6 +12,7 @@ export {
   AGENTS_FIELD,
   type AgentsColumn,
   DEFAULT_STAGES,
+  DEFAULT_VIEWS,
   type EnsuredProjectView,
   FOCUS_LEVEL,
   KIND_LABELS,
@@ -80,7 +81,7 @@ export {
   parseSessionBlock,
   parseSpecLink,
 } from './snapshot.js';
-export { describeViewByHand, viewStepsByHand } from './views.js';
+export { describeViewByHand, viewDrift, viewStepsByHand } from './views.js';
 export {
   GRAPHQL_ARGS,
   type GhCliOptions,

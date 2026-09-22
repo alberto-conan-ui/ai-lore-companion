@@ -201,7 +201,21 @@ function parseView(node: unknown): ProjectViewInfo | null {
     (key) => LAYOUTS[key] === at(node, 'layout'),
   );
   if (id === null || number === null || name === null || layout === undefined) return null;
-  return { id, number, name, layout, filter: text(node, 'filter') ?? '' };
+  return {
+    id,
+    number,
+    name,
+    layout,
+    filter: text(node, 'filter') ?? '',
+    columnField: groupingField(node, 'verticalGroupByFields'),
+    groupField: groupingField(node, 'groupByFields'),
+  };
+}
+
+/** The name of the one field a view groups by on `key`, or null when it groups by none. */
+function groupingField(node: unknown, key: 'groupByFields' | 'verticalGroupByFields'): string | null {
+  const first = list(node, key, 'nodes')[0];
+  return first === undefined ? null : text(first, 'name');
 }
 
 function parseIssueRef(node: unknown, repository: string): IssueRef | null {
@@ -811,6 +825,8 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
     async readProject(arg) {
       const issues: RawProjectIssue[] = [];
       let stageField: FieldInfo | null = null;
+      // The views do not paginate with the items; the first page carries them.
+      let views: ProjectViewInfo[] | null = null;
       let after: string | null = null;
       for (;;) {
         const data = await graphql(
@@ -828,6 +844,9 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
           return err(notFound(`the Project ${arg.project.owner}/${arg.project.number}`));
         }
         stageField ??= parseField(at(node, 'stage'));
+        views ??= list(node, 'views', 'nodes')
+          .map(parseView)
+          .filter((view): view is ProjectViewInfo => view !== null);
         for (const item of list(node, 'items', 'nodes')) {
           const raw = parseProjectItem(item);
           if (raw !== null) issues.push(raw);
@@ -840,6 +859,7 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
           project: arg.project,
           stageField,
           issues,
+          views: views ?? [],
           fetchedAt: now().toISOString(),
         }),
       );
