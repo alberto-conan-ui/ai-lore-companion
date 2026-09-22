@@ -12,6 +12,13 @@ export type DashboardDraft = { path: string; title: string; at: string };
 export type MovingPartition = {
   inProgress: FocusCard[];
   queued: FocusCard[];
+  /**
+   * Roots with no Stage at all. Nobody has said where these are in their life,
+   * which is not the same as a decision to park them — that is `dormant`. They
+   * were counted together until issue #108, so eight live tickets, one of them
+   * blocking nearly everything, read as dormant.
+   */
+  untriaged: FocusCard[];
   dormant: FocusCard[];
   done: FocusCard[];
 };
@@ -157,13 +164,28 @@ export function rankNextActions(input: {
     .map(({ action }) => ({ ...action, headline: nextActionHeadline(action) }));
 }
 
-/** Done wins over paused; every focus appears exactly once. */
+/**
+ * Sort the roots by what is happening to them. Done wins, then parked, then
+ * untriaged; every focus appears exactly once.
+ *
+ * Activity comes from `Status` and from the sessions that are live, and not
+ * from the Stage (issue #108). `Stage` says how far the work has got; `Status`
+ * says whether a desk is on it. Reading `Build` as "in progress" made #38 and
+ * #42 look busy while nothing had touched them for a day, because a root sits
+ * at Build for as long as its breakdown takes, whoever is or is not working.
+ */
 export function partitionMoving(input: {
   model: DashboardModel | null;
   now: string;
   sessions?: readonly SessionRecord[];
 }): MovingPartition {
-  const result: MovingPartition = { inProgress: [], queued: [], dormant: [], done: [] };
+  const result: MovingPartition = {
+    inProgress: [],
+    queued: [],
+    untriaged: [],
+    dormant: [],
+    done: [],
+  };
   const liveItems = (input.sessions ?? [])
     .filter((session) => session.closedAt === undefined)
     .flatMap((session) => (session.item === undefined ? [] : [session.item]));
@@ -171,17 +193,23 @@ export function partitionMoving(input: {
     if (row.local !== null && !row.local.closed && row.local.item !== null)
       liveItems.push(row.local.item);
   }
+  const worked = (focus: FocusCard): boolean =>
+    liveItems.some(
+      (issue) =>
+        sameIssue(issue, focus.issue) || focus.items.some((item) => sameIssue(item.issue, issue)),
+    );
   for (const focus of focusesOf(input.model)) {
     if (focus.done) result.done.push(focus);
-    else if (focus.stage === null || focus.labels.includes('paused')) result.dormant.push(focus);
-    else if (
-      focus.stage === 'Build' ||
-      liveItems.some(
-        (issue) =>
-          sameIssue(issue, focus.issue) || focus.items.some((item) => sameIssue(item.issue, issue)),
-      )
-    )
-      result.inProgress.push(focus);
+    // Parked wins over untriaged: someone saying "not now" is a decision, and
+    // it stays one whether or not the work also has a Stage.
+    // `Paused` is the Status that says so. The `paused` label predates it and
+    // is still read, so a root labelled but not yet re-typed is not lost.
+    else if (focus.status === 'Paused' || focus.labels.includes('paused'))
+      result.dormant.push(focus);
+    // No Stage is nobody having triaged it, which is not a decision to park it.
+    else if (focus.stage === null) result.untriaged.push(focus);
+    // A desk is on it: either the Project says so, or a live session holds it.
+    else if (focus.status === 'In Progress' || worked(focus)) result.inProgress.push(focus);
     else result.queued.push(focus);
   }
   for (const list of Object.values(result))
@@ -203,7 +231,9 @@ export function dormantAggregate(focuses: readonly FocusCard[], now: string): Do
         : ((ages[middle - 1] as number) + (ages[middle] as number)) / 2;
   return {
     count: focuses.length,
-    paused: focuses.filter((focus) => focus.labels.includes('paused')).length,
+    paused: focuses.filter(
+      (focus) => focus.status === 'Paused' || focus.labels.includes('paused'),
+    ).length,
     oldestAgeMs: ages.at(-1) ?? null,
     medianAgeMs: median,
   };

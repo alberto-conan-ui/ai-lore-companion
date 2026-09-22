@@ -447,7 +447,13 @@ test('draft actions and gates remain available without a Project snapshot', asyn
       state.nextActions.map((action) => action.kind),
       ['gate', 'draft'],
     );
-    assert.deepEqual(state.moving, { inProgress: [], queued: [], dormant: [], done: [] });
+    assert.deepEqual(state.moving, {
+      inProgress: [],
+      queued: [],
+      untriaged: [],
+      dormant: [],
+      done: [],
+    });
     assert.deepEqual(state.pullRequests, []);
     assert.equal(state.stats.openPullRequests, 0);
   } finally {

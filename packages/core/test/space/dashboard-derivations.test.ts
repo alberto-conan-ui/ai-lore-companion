@@ -104,9 +104,14 @@ test('next action ranks gates, failing PRs, reviews, stale sessions and drafts w
   for (const action of actions) assert.equal(nextActionHeadline(action), action.headline);
 });
 
-test('partition is exclusive: done beats paused, paused beats Build, and a live child session makes a focus active', () => {
-  const active = focus(1, { stage: 'Build' });
+test('partition is exclusive: activity comes from Status and live sessions, never from the Stage', () => {
+  // At Build with nothing on it. Before issue #108 the Stage alone made this
+  // read as in progress, which is why two focuses looked busy for a day after
+  // the last desk left them.
+  const stagedOnly = focus(1, { stage: 'Build' });
+  const active = focus(7, { stage: 'Build', status: 'In Progress' });
   const paused = focus(2, { stage: 'Build', labels: ['paused'] });
+  const pausedByStatus = focus(8, { stage: 'Build', status: 'Paused' });
   const done = focus(3, { labels: ['paused'], done: true });
   const unstaged = focus(4, { stage: null });
   const queued = focus(5);
@@ -129,19 +134,27 @@ test('partition is exclusive: done beats paused, paused beats Build, and a live 
     startedAt: now,
     item: child.issue,
   };
-  const all = [active, paused, done, unstaged, queued, withSession];
+  const all = [stagedOnly, active, paused, pausedByStatus, done, unstaged, queued, withSession];
   const result = partitionMoving({ model: model(all), now, sessions: [session] });
   assert.deepEqual(
     result.inProgress.map((entry) => entry.issue.number),
-    [1, 6],
+    [7, 6],
+    'the Status says so, or a live session holds it',
   );
   assert.deepEqual(
     result.queued.map((entry) => entry.issue.number),
-    [5],
+    [1, 5],
+    'a focus at Build with no desk on it is queued, not in progress',
   );
   assert.deepEqual(
     result.dormant.map((entry) => entry.issue.number),
-    [2, 4],
+    [2, 8],
+    'parked, by the label or by the Status',
+  );
+  assert.deepEqual(
+    result.untriaged.map((entry) => entry.issue.number),
+    [4],
+    'no Stage is untriaged, and not the same as parked',
   );
   assert.deepEqual(
     result.done.map((entry) => entry.issue.number),
@@ -198,11 +211,44 @@ test('PR summary keeps mixed CI and review states accurate without zero-count no
   );
 });
 
+test('parked beats untriaged: a focus with no Stage that was parked is parked', () => {
+  // Someone saying "not now" is a decision, and it stays one whether or not
+  // the work also has a Stage. Reading it as untriaged would lose that.
+  const parkedWithNoStage = focus(1, { stage: null, labels: ['paused'] });
+  const justNoStage = focus(2, { stage: null });
+
+  const result = partitionMoving({ model: model([parkedWithNoStage, justNoStage]), now });
+
+  assert.deepEqual(
+    result.dormant.map((entry) => entry.issue.number),
+    [1],
+  );
+  assert.deepEqual(
+    result.untriaged.map((entry) => entry.issue.number),
+    [2],
+  );
+});
+
+test('the parked count reads the Status as well as the label', () => {
+  // `Status: Paused` is what says a root is parked now. The `paused` label
+  // predates it and is still read, so a root labelled but not yet re-typed is
+  // not lost from the count.
+  const byLabel = focus(1, { labels: ['paused'] });
+  const byStatus = focus(2, { status: 'Paused' });
+  const neither = focus(3, { status: 'Todo' });
+
+  const aggregate = dormantAggregate([byLabel, byStatus, neither], now);
+
+  assert.equal(aggregate.count, 3, 'the count is every focus it was given');
+  assert.equal(aggregate.paused, 2, 'parked by the label, or by the Status');
+});
+
 test('an empty Space has empty actions and partitions, unknown dormant age and zero counts', () => {
   assert.deepEqual(rankNextActions({ needsYou: [], pulls: [], drafts: [], now }), []);
   assert.deepEqual(partitionMoving({ model: null, now }), {
     inProgress: [],
     queued: [],
+    untriaged: [],
     dormant: [],
     done: [],
   });

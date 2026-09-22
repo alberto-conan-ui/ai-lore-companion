@@ -98,6 +98,9 @@ function seedDashboardRun(busy = false): DashboardRun {
       // Stage, the kind label or the sub-issues any more. Without a Level every
       // issue here reads as an item and the Dashboard renders no focuses.
       "const level = must(await fake.ensureSingleSelectField({ project, name: core.LEVEL_FIELD, options: [...core.LEVEL_VALUES] }), 'Level');",
+      // Activity is read from Status, not from the Stage, so the fixture has to
+      // say which roots a desk is actually on.
+      "const status = must(await fake.ensureSingleSelectField({ project, name: core.STATUS_FIELD, options: ['Todo', 'In Progress', 'Paused', 'Done'] }), 'Status');",
       'must(await fake.ensureLabels({ repository, labels: [',
       "  { name: core.SESSION_LABEL, color: 'ededed', description: 'A session' },",
       "  { name: 'feature', color: 'ededed', description: 'A feature' },",
@@ -115,17 +118,19 @@ function seedDashboardRun(busy = false): DashboardRun {
       "must(await fake.setSingleSelect({ project, item: placed[focus.number], field: level, option: core.FOCUS_LEVEL }), 'Level of the focus');",
       "must(await fake.setSingleSelect({ project, item: placed[standalone.number], field: level, option: 'Item' }), 'Level of the standalone item');",
       "must(await fake.setSingleSelect({ project, item: placed[focus.number], field: stage, option: 'Build' }), 'Stage of the focus');",
+      "must(await fake.setSingleSelect({ project, item: placed[focus.number], field: status, option: 'In Progress' }), 'Status of the focus');",
       "must(await fake.closeIssue({ issue: first }), 'close');",
-      "const addFocus = async (title, stageName, labels = ['feature']) => {",
+      "const addFocus = async (title, stageName, labels = ['feature'], statusName = null) => {",
       "  const created = await issue(title, core.formatSpecLink('https://example.test/spec'), labels);",
       '  const projectItem = must(await fake.addIssueToProject({ project, issue: created }), `place ${title}`);',
       '  must(await fake.setSingleSelect({ project, item: projectItem, field: level, option: core.FOCUS_LEVEL }), `level ${title}`);',
       '  if (stageName !== null) must(await fake.setSingleSelect({ project, item: projectItem, field: stage, option: stageName }), `stage ${title}`);',
+      '  if (statusName !== null) must(await fake.setSingleSelect({ project, item: projectItem, field: status, option: statusName }), `status ${title}`);',
       '  return created;',
       '};',
       'if (o.busy) {',
-      "  await addFocus('Build fixture 2', 'Build');",
-      "  await addFocus('Build fixture 3', 'Build');",
+      "  await addFocus('Build fixture 2', 'Build', ['feature'], 'In Progress');",
+      "  await addFocus('Build fixture 3', 'Build', ['feature'], 'In Progress');",
       '  for (let index = 1; index <= 6; index += 1)',
       "    await addFocus(`Review fixture ${index}: a decision with enough detail to wrap`, 'Review');",
       "  await addFocus('Dormant fixture', null, ['feature', 'paused']);",
@@ -455,7 +460,7 @@ test.describe('the Dashboard', () => {
       );
       await reviewBacklog.click();
       const dormantSheet = page.getByTestId('dashboard-dormant-sheet');
-      await expect(dormantSheet).toContainText('DORMANT FOCUSES');
+      await expect(dormantSheet).toContainText('UNTRIAGED AND PARKED');
       await dormantSheet.getByRole('button', { name: 'Close', exact: true }).click();
       await expect(
         page.getByTestId('dashboard-v2-overflow').filter({ hasText: 'drafts' }),
