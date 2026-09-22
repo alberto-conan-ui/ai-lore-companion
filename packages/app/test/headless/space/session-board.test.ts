@@ -343,6 +343,48 @@ test('a session names the tickets it worked through the tool, and they reach its
   assert.equal((worked?.comments ?? []).filter((text) => text.startsWith('Worked on by')).length, 1);
 });
 
+test('a root a session works goes to In Progress, and to Paused when it releases', async () => {
+  const root = await fake.createIssue({
+    repository: SPACE_REPOSITORY,
+    title: 'A root the session works',
+    body: '',
+    labels: [],
+  });
+  assert.ok(root.ok);
+  // Status belongs to the plan, and the companion says nothing about work the
+  // plan does not carry — so the root has to be on the Project.
+  assert.ok((await fake.addIssueToProject({ project, issue: root.value })).ok);
+  const client = await connect(await start('s-activity'));
+  const board = context.service(sessionBoard);
+  assert.equal((await boardWithin(board.started('s-activity'), 2000))?.updated, true);
+
+  const granted = await enter(client, {
+    targets: [LORE],
+    item: root.value.number,
+    reason: 'Work the root.',
+  });
+  assert.equal(granted.granted, true);
+
+  const statusOf = async (): Promise<string | null> => {
+    const read = await fake.readProject({ project });
+    assert.ok(read.ok);
+    const standalone = read.value.standalone.find(
+      (entry) => entry.issue.number === root.value.number,
+    );
+    const focus = read.value.focuses.find((entry) => entry.issue.number === root.value.number);
+    return standalone?.status ?? focus?.status ?? null;
+  };
+
+  assert.equal(await statusOf(), 'In Progress', 'a desk is on it now');
+
+  await call(client, 'leave_writing');
+  assert.equal(
+    await statusOf(),
+    'Paused',
+    'started, unfinished, and no desk on it — never back to Todo',
+  );
+});
+
 test('a session with a profile names it in the issue body; the marker and the title are unchanged (M14.4)', async () => {
   const item = await fake.createIssue({
     repository: SPACE_REPOSITORY,

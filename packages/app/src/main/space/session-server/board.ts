@@ -36,6 +36,9 @@ import {
   drainPendingWrites,
   formatEntryComment,
   listPendingWrites,
+  listSessions,
+  rootsOf,
+  syncRootStatus,
   queuePendingWrite,
   formatSessionBackLink,
   describeGitHubFailure,
@@ -313,6 +316,67 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
     };
   };
 
+  /**
+   * Set the `Status` of every root this session works, from whether a session
+   * is on it now.
+   *
+   * `Status` was maintained by hand, and a hand-maintained activity field goes
+   * stale exactly the way the first one did. The companion already knows when
+   * a session claims and releases, so it says.
+   *
+   * A root is busy while **any** open session in Writing names it, not only
+   * this one: two sessions on one focus, one of them finishing, must not make
+   * the focus look idle.
+   *
+   * Best effort, always. Failing to set an activity field must never be what
+   * breaks a claim or a close.
+   */
+  const syncActivity = async (sessionId: string, leaving: boolean): Promise<void> => {
+    try {
+      const desk = openDesk();
+      const record = getSession(desk, sessionId);
+      if (!record.ok || record.value === null) return;
+      const mine = touchedBy(record.value);
+      if (mine.length === 0) return;
+      const where = await place();
+      const snapshot = await where.github.readProject({ project: where.project });
+      if (!snapshot.ok) return;
+      const others = listSessions(desk);
+      const busy = new Set<number>();
+      if (others.ok) {
+        for (const other of others.value) {
+          if (other.id === sessionId && leaving) continue;
+          if (other.closedAt !== undefined || other.mode !== 'writing') continue;
+          for (const number of rootsOf(snapshot.value, touchedBy(other))) busy.add(number);
+        }
+      }
+      const roots = new Map<number, boolean>();
+      for (const root of rootsOf(snapshot.value, mine)) roots.set(root, busy.has(root));
+      const synced = await syncRootStatus(where, desk, { snapshot: snapshot.value, roots });
+      if (synced.ok) {
+        for (const entry of synced.value) {
+          log.info('board-status', {
+            root: entry.root.number,
+            wrote: 'write' in entry.decision ? entry.decision.write : null,
+            left: 'leave' in entry.decision ? entry.decision.leave : null,
+          });
+        }
+      }
+    } catch (caught) {
+      log.info('board-status-failed', {
+        session: sessionId,
+        reason: caught instanceof Error ? caught.message : String(caught),
+      });
+    }
+  };
+
+  /** The issues a session named: where it was pointed, and where it went. */
+  const touchedBy = (record: SessionRecord): number[] => {
+    const numbers = (record.tickets ?? []).map((ticket) => ticket.number);
+    if (record.item !== undefined) numbers.push(record.item.number);
+    return [...new Set(numbers)];
+  };
+
   const started: SessionBoard['started'] = (sessionId) =>
     serial(() =>
       run('board-session-started', sessionId, async () => {
@@ -380,6 +444,7 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
           });
           if (!commented.ok) return gitHubFailed(commented.error);
         }
+        await syncActivity(sessionId, record.value.mode !== 'writing');
         return issue;
       }),
     );
@@ -431,6 +496,7 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
             }
           }
         }
+        await syncActivity(sessionId, false);
         return put.value.issue;
       });
       return note ?? boardFailed('nothing was updated');
@@ -443,6 +509,7 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
         if (issue === undefined) return null;
         const moved = await moveSessionIssue(await place(), issue, 'Read only');
         if (!moved.ok) gitHubFailed(moved.error);
+        await syncActivity(sessionId, true);
         return issue;
       }),
     );
@@ -498,6 +565,7 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
             done.error,
           );
         }
+        await syncActivity(sessionId, true);
         return issue;
       }),
     );

@@ -182,6 +182,8 @@ export type FakeGitHub = GitHubPort & {
 };
 
 const DEFAULT_SCOPES = ['gist', PROJECT_SCOPE, 'read:org', 'repo', 'workflow'];
+// GitHub's own three, as a new Project really arrives. `Paused` is not here:
+// setup adds it, and a fixture that seeded it would hide a setup that did not.
 const DEFAULT_STATUS_OPTIONS = ['Todo', 'In Progress', 'Done'];
 
 /** The operations that need the `project` scope. */

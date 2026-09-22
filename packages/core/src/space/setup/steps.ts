@@ -32,6 +32,7 @@ import {
   SESSION_LABEL,
   STAGE_FIELD,
   STATUS_FIELD,
+  STATUS_VALUES,
 } from '../github/types.js';
 import { installClaudeCode, planClaudeCodeInstall } from '../install/writer.js';
 import { deskPaths } from '../layout/desk-paths.js';
@@ -529,6 +530,7 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
       { what: `Make sure the field ${LEVEL_FIELD} has the values ${LEVEL_VALUES.join(', ')}.` },
       { what: `Make sure the field ${STAGE_FIELD} has the values ${DEFAULT_STAGES.join(', ')}.` },
       { what: `Make sure the field ${AGENTS_FIELD} has the values ${AGENTS_COLUMNS.join(', ')}.` },
+      { what: `Make sure the field ${STATUS_FIELD} has the values ${STATUS_VALUES.join(', ')}.` },
       {
         what: `Make sure the repository has the labels ${SETUP_LABELS.map((label) => label.name).join(', ')}.`,
         count: SETUP_LABELS.length,
@@ -572,6 +574,15 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
         options: [...AGENTS_COLUMNS],
       });
       if (!agents.ok) return gitHubFail(agents.error);
+      // `Status` is GitHub's own field and arrives with three values. `Paused`
+      // is the one this layout adds, and the companion cannot tell a root
+      // nobody is on from one nobody has started without it.
+      const status = await github.ensureSingleSelectField({
+        project,
+        name: STATUS_FIELD,
+        options: [...STATUS_VALUES],
+      });
+      if (!status.ok) return gitHubFail(status.error);
       const labels = await github.ensureLabels({
         repository: ctx.repositoryName,
         labels: SETUP_LABELS.map((label) => ({ ...label })),

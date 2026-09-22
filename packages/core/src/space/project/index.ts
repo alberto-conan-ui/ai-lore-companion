@@ -78,3 +78,11 @@ export {
 } from './session-issue.js';
 
 export { type DrainReport, describePendingWrite, drainPendingWrites } from './pending.js';
+export {
+  type ActivityDecision,
+  type ActivityInput,
+  type StatusWrite,
+  decideStatus,
+  rootKey,
+} from './activity.js';
+export { type StatusSync, rootsOf, syncRootStatus } from './activity-sync.js';

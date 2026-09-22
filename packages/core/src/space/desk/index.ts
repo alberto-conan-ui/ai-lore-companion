@@ -77,6 +77,13 @@ export {
   queuePendingWrite,
   recordPendingAttempt,
 } from './pending-writes.js';
+export {
+  STATUS_WRITES_FILE,
+  listStatusWrites,
+  rememberStatusWrite,
+  rememberStatusOverridden,
+  statusWriteOf,
+} from './status-writes.js';
 export { addClaims, listClaims, releaseClaim, releaseClaims, sameWriteTarget } from './claims.js';
 // Phase M4.2: the steps of a session's life, which apply a decision of `space/claims`.
 export {

@@ -124,6 +124,27 @@ export type SessionPatch = {
 };
 
 /**
+ * What the companion last set a root's `Status` to, kept in
+ * `status-writes.json`.
+ *
+ * It exists so a value the Human Lead set by hand can be told from one the
+ * companion wrote, without asking GitHub when a value last changed: whether
+ * re-setting a single-select to what it already is moves its `updatedAt` was
+ * never established, so a rule built on that timestamp would be a rule nobody
+ * has checked. What the companion last wrote is a fact it owns.
+ */
+export type StatusWrite = {
+  /** The root, as `owner/name#number`. */
+  key: string;
+  /** The value the companion last wrote. */
+  set: string;
+  /** ISO 8601. */
+  setAt: string;
+  /** ISO 8601, present once a value the companion did not write was seen. */
+  overriddenAt?: string;
+};
+
+/**
  * A write to GitHub that did not land, kept in `pending-writes.json` until it
  * does.
  *
