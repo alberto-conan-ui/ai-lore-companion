@@ -334,15 +334,34 @@ test('gitHubStepError adds the guidance sentence for each kind', () => {
   assert.match(gitHubStepError(gitHubRateLimited(null)).message, /in a few minutes/);
 });
 
-test('the default layout has the labels of the kinds and of a session, and three views', () => {
+test('the default layout has the labels of the kinds and of a session, and four views', () => {
   assert.deepEqual(
     SETUP_LABELS.map((label) => label.name),
     ['feature', 'document', 'investigation', 'bug', 'maintenance', 'session'],
   );
   assert.ok(SETUP_LABELS.every((label) => /^[0-9a-f]{6}$/.test(label.color)));
+  // The old set filtered on the session label alone, so "Focuses by Stage"
+  // showed every issue of the Project and did not display Stage. These select
+  // on what the Project records.
   assert.deepEqual(
-    SETUP_VIEWS.map((view) => `${view.name}:${view.layout}:${view.columnField ?? ''}`),
-    ['Focuses by Stage:board:Stage', 'Items by focus:table:', 'Agents board:board:Agents'],
+    SETUP_VIEWS.map(
+      (view) => `${view.name}:${view.layout}:${view.columnField ?? ''}:${view.groupField ?? ''}`,
+    ),
+    [
+      'The plan:board:Status:Level',
+      'Under a parent:table::Parent issue',
+      'Backlog:table::',
+      'Agents board:board:Agents:',
+    ],
+  );
+  assert.deepEqual(
+    SETUP_VIEWS.map((view) => view.filter ?? ''),
+    [
+      'is:open no:parent-issue -stage:Backlog -label:session',
+      '-no:parent-issue',
+      'is:open stage:Backlog',
+      'label:session',
+    ],
   );
 });
 

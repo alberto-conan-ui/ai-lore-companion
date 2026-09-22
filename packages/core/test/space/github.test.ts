@@ -50,6 +50,7 @@ import {
   parseSpecLink,
   retryAfterSeconds,
   splitRepositoryName,
+  viewDrift,
   viewStepsByHand,
 } from '../../src/index.js';
 import * as Q from '../../src/space/github/queries.js';
@@ -361,6 +362,10 @@ test('ensureProjectView creates a missing view, sets its filter, and says what i
     name: 'Agents',
     layout: 'board',
     filter: 'label:session',
+    // A view the API has just created is grouped by nothing, which is why the
+    // column below comes back as a step for the Human Lead.
+    columnField: null,
+    groupField: null,
   });
   assert.equal(result.value.created, true);
   assert.equal(result.value.byHand.length, 1);
@@ -1353,7 +1358,11 @@ test('the spec link is written and read back', () => {
 });
 
 test('the default layout names five stages, four Agents columns and five kinds', () => {
-  assert.deepEqual(DEFAULT_STAGES, ['Spec', 'Plan', 'Build', 'Review', 'Done']);
+  // `Spec` and `Plan` are one value: a unit of work is broken down while its
+  // spec is still being written, so the two were never separable. `Backlog`
+  // holds what is recorded and not yet on the plan, and the plan view filters
+  // on it by name.
+  assert.deepEqual(DEFAULT_STAGES, ['Backlog', 'Spec and Planning', 'Build', 'Review', 'Done']);
   assert.deepEqual(AGENTS_COLUMNS, ['Read only', 'Writing', 'Blocked', 'Done']);
   assert.deepEqual(KIND_LABELS, ['feature', 'document', 'investigation', 'bug', 'maintenance']);
 });
@@ -1361,26 +1370,30 @@ test('the default layout names five stages, four Agents columns and five kinds',
 // ---------- views ----------
 
 test('what the API cannot set on a view is a sentence for the Human Lead', () => {
-  const view = {
+  const ungrouped = {
     id: 'v',
     number: 2,
-    name: 'Focuses by Stage',
+    name: 'The plan',
     layout: 'board' as const,
     filter: '',
+    columnField: null,
+    groupField: null,
   };
   const board = {
-    name: 'Focuses by Stage',
+    name: 'The plan',
     layout: 'board' as const,
-    filter: '-label:session',
-    columnField: 'Stage',
+    filter: 'no:parent-issue',
+    columnField: 'Status',
+    groupField: 'Level',
   };
-  assert.deepEqual(viewStepsByHand(board, view), [
-    'On GitHub, open the view "Focuses by Stage" of the Project, open the view\'s menu, and set "Column by" to the field "Stage". The GitHub API cannot set it.',
+  assert.deepEqual(viewStepsByHand(board, ungrouped), [
+    'On GitHub, open the view "The plan" of the Project, open the view\'s menu, and set "Column by" to the field "Status". The GitHub API cannot set it.',
+    'On GitHub, open the view "The plan" of the Project, open the view\'s menu, and set "Group by" to the field "Level". The GitHub API cannot set it.',
   ]);
-  assert.deepEqual(viewStepsByHand({ name: 'Items', layout: 'table' }, view), []);
+  assert.deepEqual(viewStepsByHand({ name: 'Items', layout: 'table' }, ungrouped), []);
   assert.equal(
     describeViewByHand(board),
-    'On GitHub, add a view named "Focuses by Stage" with the board layout, the filter -label:session, "Column by" set to the field "Stage".',
+    'On GitHub, add a view named "The plan" with the board layout, the filter no:parent-issue, "Column by" set to the field "Status", "Group by" set to the field "Level".',
   );
   assert.equal(
     describeViewByHand({ name: 'Items', layout: 'table' }),
@@ -1388,6 +1401,83 @@ test('what the API cannot set on a view is a sentence for the Human Lead', () =>
   );
 });
 
+// The defect this guards: setup emitted its grouping sentences unconditionally
+// and showed them once, so a grouping that had been done was asked for again
+// and one that had not was never asked for twice.
+test('a grouping that is already set is not asked for again', () => {
+  const spec = {
+    name: 'The plan',
+    layout: 'board' as const,
+    columnField: 'Status',
+    groupField: 'Level',
+  };
+  const done = {
+    id: 'v',
+    number: 2,
+    name: 'The plan',
+    layout: 'board' as const,
+    filter: '',
+    columnField: 'Status',
+    groupField: 'Level',
+  };
+  assert.deepEqual(viewStepsByHand(spec, done), []);
+  assert.deepEqual(viewStepsByHand(spec, { ...done, columnField: 'Stage' }), [
+    'On GitHub, open the view "The plan" of the Project, open the view\'s menu, and set "Column by" to the field "Status" (it is "Stage"). The GitHub API cannot set it.',
+  ]);
+});
+
+test('viewDrift reports a missing view, a changed filter and a grouping never set', () => {
+  const specs = [
+    {
+      name: 'The plan',
+      layout: 'board' as const,
+      filter: 'no:parent-issue',
+      columnField: 'Status',
+    },
+    { name: 'Backlog', layout: 'table' as const, filter: 'stage:Backlog' },
+  ];
+  const drift = viewDrift(specs, [
+    {
+      id: 'v',
+      number: 1,
+      name: 'The plan',
+      layout: 'board' as const,
+      filter: '-label:session',
+      columnField: null,
+      groupField: null,
+    },
+  ]);
+  assert.deepEqual(drift, [
+    'The view "The plan" of the Project has the filter -label:session, and the default layout gives it no:parent-issue.',
+    'On GitHub, open the view "The plan" of the Project, open the view\'s menu, and set "Column by" to the field "Status". The GitHub API cannot set it.',
+    'The Project has no view named "Backlog". On GitHub, add a view named "Backlog" with the table layout, the filter stage:Backlog.',
+  ]);
+});
+
+test('viewDrift is silent when every view matches the default layout, and ignores views the layout does not name', () => {
+  const specs = [{ name: 'Backlog', layout: 'table' as const, filter: 'stage:Backlog' }];
+  const views = [
+    {
+      id: 'v',
+      number: 1,
+      name: 'Backlog',
+      layout: 'table' as const,
+      filter: 'stage:Backlog',
+      columnField: null,
+      groupField: null,
+    },
+    {
+      id: 'w',
+      number: 2,
+      name: "Focus #62 — a view of the Space's own",
+      layout: 'board' as const,
+      filter: 'parent-issue:owner/repo#62',
+      columnField: null,
+      groupField: null,
+    },
+  ];
+  assert.deepEqual(viewDrift(specs, views), []);
+});
 test('ensureProjectView on a host without the view mutations gives the whole view by hand, not a failure', async () => {
   const spec = { name: 'Agents', layout: 'board', filter: 'label:session' } as const;
   const absent = { code: 1, stderr: S.SCHEMA_ABSENCE_STDERR };

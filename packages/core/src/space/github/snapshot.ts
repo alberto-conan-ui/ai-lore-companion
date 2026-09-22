@@ -21,6 +21,7 @@ import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
   type AgentsColumn,
+  DEFAULT_VIEWS,
   FOCUS_LEVEL,
   type FieldInfo,
   type FocusItem,
@@ -29,12 +30,14 @@ import {
   type PlanItem,
   type ProjectInfo,
   type ProjectSnapshot,
+  type ProjectViewInfo,
   type RawProjectIssue,
   SESSION_LABEL,
   STAGE_FIELD,
   STATUS_FIELD,
   type SessionIssue,
 } from './types.js';
+import { viewDrift } from './views.js';
 
 /** What a session issue's body records about the session, in its hidden block. */
 export type SessionBlock = {
@@ -182,6 +185,13 @@ export function buildProjectSnapshot(arg: {
   project: ProjectInfo;
   stageField: FieldInfo | null;
   issues: readonly RawProjectIssue[];
+  /**
+   * The Project's views, checked against the default layout. Setup announced
+   * its by-hand grouping steps once and nothing looked again, so this Space's
+   * Project sat ungrouped and mis-filtered from creation until 2026-09-22
+   * without anything saying so. Every read reports it now.
+   */
+  views?: readonly ProjectViewInfo[];
   /** ISO 8601. */
   fetchedAt: string;
 }): ProjectSnapshot {
@@ -210,6 +220,7 @@ export function buildProjectSnapshot(arg: {
     if (level === FOCUS_LEVEL) focuses.push(focusItem(raw, onProject));
     else standalone.push(planItem(raw));
   }
+  if (arg.views !== undefined) problems.push(...viewDrift(DEFAULT_VIEWS, arg.views));
   const { owner, number, title, url } = arg.project;
   return {
     fetchedAt: arg.fetchedAt,

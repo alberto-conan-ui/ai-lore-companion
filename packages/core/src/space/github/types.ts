@@ -62,8 +62,28 @@ export const LEVEL_VALUES: readonly string[] = [FOCUS_LEVEL, 'Item'];
 /** The single-select field whose values are the Dashboard's columns. */
 export const STAGE_FIELD = 'Stage';
 
-/** The values of the Stage field in the default layout, in order. */
-export const DEFAULT_STAGES: readonly string[] = ['Spec', 'Plan', 'Build', 'Review', 'Done'];
+/**
+ * The values of the Stage field in the default layout, in order.
+ *
+ * `Spec` and `Plan` were merged into one value: a unit of work may be broken
+ * down while its spec is still being written, so the two were never separable
+ * in practice. `Backlog` was added in front, for work that is recorded and not
+ * yet on the plan; the default plan view filters it out with `-stage:Backlog`,
+ * which needs the value to exist.
+ *
+ * `ensureSingleSelectField` only adds options it does not find. A Project
+ * created before this change keeps its old values and gains these, so it ends
+ * with both sets. Renaming the old values on an existing Project is a
+ * migration and is not done here: an option carries its id, and recreating one
+ * loses every item's value for the field.
+ */
+export const DEFAULT_STAGES: readonly string[] = [
+  'Backlog',
+  'Spec and Planning',
+  'Build',
+  'Review',
+  'Done',
+];
 
 /** The single-select field that holds the column of a session issue on the Agents board. */
 export const AGENTS_FIELD = 'Agents';
@@ -76,6 +96,57 @@ export type AgentsColumn = (typeof AGENTS_COLUMNS)[number];
 
 /** The built-in single-select field of a Project that holds an item's status. */
 export const STATUS_FIELD = 'Status';
+
+/** The view of everything that belongs to a root, grouped by the root it belongs to. */
+const UNDER_PARENT_VIEW = 'Under a parent';
+
+/** The Project's built-in field naming an issue's parent, which the table groups by. */
+const PARENT_FIELD = 'Parent issue';
+
+/** The Stage value for work that is recorded and not yet on the plan. */
+const BACKLOG_STAGE = 'Backlog';
+
+/**
+ * The views of the default Project layout that exist from setup.
+ *
+ * The set a Space starts with used to be "Focuses by Stage", "Items by focus"
+ * and "Agents board", the first two filtered on the session label alone. That
+ * filter removes session issues and nothing else, so both views showed every
+ * issue of the Project mixed together — roots, their children and the backlog
+ * — and the one named after Stage did not display Stage. What a reader saw on
+ * GitHub and what the Dashboard computed could not agree.
+ *
+ * They select on `Level` and `Stage` now, which the Project records, so a
+ * filter can name exactly what the Dashboard names.
+ *
+ * A per-focus view is not here: one is created with each focus and removed
+ * with it, so it belongs to the verb that opens a unit of work and not to
+ * setup.
+ */
+export const DEFAULT_VIEWS: readonly ProjectViewSpec[] = [
+  {
+    // Every root, whatever its Level: a focus with a breakdown and a piece of
+    // standalone work are both entry points to the plan.
+    name: 'The plan',
+    layout: 'board',
+    filter: `is:open no:parent-issue -stage:Backlog -label:${SESSION_LABEL}`,
+    columnField: STATUS_FIELD,
+    groupField: LEVEL_FIELD,
+  },
+  {
+    name: UNDER_PARENT_VIEW,
+    layout: 'table',
+    filter: '-no:parent-issue',
+    groupField: PARENT_FIELD,
+  },
+  { name: 'Backlog', layout: 'table', filter: `is:open stage:${BACKLOG_STAGE}` },
+  {
+    name: 'Agents board',
+    layout: 'board',
+    filter: `label:${SESSION_LABEL}`,
+    columnField: AGENTS_FIELD,
+  },
+];
 
 /** The scope `gh` needs for every Project operation. */
 export const PROJECT_SCOPE = 'project';
@@ -132,15 +203,35 @@ export type ProjectViewSpec = {
    * cannot set it, so `ensureProjectView` reports it as a step done by hand.
    */
   columnField?: string;
+  /**
+   * The field the view groups by: the swimlanes of a board, or the grouping of
+   * a table. The API cannot set this either, and it is reported the same way.
+   */
+  groupField?: string;
 };
 
-/** A view of a Project. */
+/**
+ * A view of a Project.
+ *
+ * `columnField` and `groupField` are what the API can **read** of a view's
+ * grouping, and they are the whole reason a by-hand step can be re-offered
+ * rather than announced once: `groupByFields` and `verticalGroupByFields` are
+ * read-only on `ProjectV2View`, but they are not write-only-absent. Before
+ * this, `ProjectViewInfo` carried neither, so setup emitted its grouping
+ * sentences every time and nothing could tell whether they had been done.
+ *
+ * Either is `null` when the view has no such grouping.
+ */
 export type ProjectViewInfo = {
   id: string;
   number: number;
   name: string;
   layout: ProjectViewLayout;
   filter: string;
+  /** The field giving a board its columns: GraphQL's `verticalGroupByFields`. */
+  columnField: string | null;
+  /** The field the view groups by: GraphQL's `groupByFields`. */
+  groupField: string | null;
 };
 
 /** What `ensureProjectView` gives: the view, and what is left for the Human Lead to do on GitHub. */
