@@ -344,3 +344,50 @@ test('Space counts exclude done focuses and closed sessions and deduplicate shar
     liveSessions: 0,
   });
 });
+
+// ---------- what the Project says about itself that is wrong ----------
+
+test("a Project problem reaches Needs you, because nothing else will ever raise it", () => {
+  const message =
+    'The view "Agents board" of the Project has the filter (none), and the default layout gives it label:session.';
+  const problem: NeedsYouEntry = { kind: 'project-problem', messages: [message] };
+  // Each message is written where it is computed, beside the thing that
+  // noticed, so one problem's headline is that message.
+  assert.equal(nextActionHeadline(problem), message);
+  // Several are one entry, not one each: forty issues with no Level would
+  // otherwise bury everything else in the band.
+  assert.equal(
+    nextActionHeadline({ kind: 'project-problem', messages: [message, 'b', 'c'] }),
+    `${message} (and 2 more about the Project)`,
+  );
+
+  const ranked = rankNextActions({ needsYou: [problem], pulls: [], drafts: [], now });
+  assert.deepEqual(
+    ranked.map((entry) => entry.kind),
+    ['project-problem'],
+    'it reaches the band at all — an entry ranking drops is one nobody sees',
+  );
+});
+
+test('a Project problem ranks below a review and behind an idle session, but it ranks', () => {
+  const problem: NeedsYouEntry = { kind: 'project-problem', messages: ['a view has drifted'] };
+  const review: NeedsYouEntry = { kind: 'review', focus: issue(1), title: 'A finished focus' };
+  const idle: NeedsYouEntry = {
+    kind: 'stale-session',
+    issue: issue(9),
+    column: 'Writing',
+    idleMs: 60_000,
+    sessionId: 's-1',
+  };
+  const ranked = rankNextActions({
+    needsYou: [idle, problem, review],
+    pulls: [],
+    drafts: [],
+    now,
+  });
+  assert.deepEqual(
+    ranked.map((entry) => entry.kind),
+    ['review', 'stale-session', 'project-problem'],
+    'nothing is blocked on it, so a session actually sitting idle is asked about first',
+  );
+});

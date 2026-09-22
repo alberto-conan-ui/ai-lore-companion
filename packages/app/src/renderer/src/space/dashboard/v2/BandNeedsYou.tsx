@@ -71,6 +71,12 @@ export function BandNeedsYou({
   );
 }
 
+/** The Space's Project on GitHub, which is where a problem with it is fixed. */
+function openProject(project: SpaceProjectState | null): void {
+  const url = project?.snapshot?.project.url;
+  if (url !== undefined) void window.cockpit.urlOpenExternal(url);
+}
+
 function renderCompanionPanel(input: {
   panel: DashboardCompanionPanel;
   documents: readonly DashboardWorkbenchDocument[];
@@ -174,6 +180,9 @@ function NextActionCard({
       });
     else if (action.kind === 'failing-pull-request')
       void window.cockpit.urlOpenExternal(action.pull.url);
+    // A problem with the Project is fixed on the Project, and a view's
+    // grouping cannot be set anywhere else: the GitHub API refuses it.
+    else if (action.kind === 'project-problem') openProject(project);
     else void window.cockpit.urlOpenExternal(action.issue.url);
   };
   const openSecondary = (): void => {
@@ -188,6 +197,7 @@ function NextActionCard({
     else if (action.kind === 'failing-pull-request')
       void window.cockpit.urlOpenExternal(action.pull.url);
     else if (action.kind === 'stale-session') void window.cockpit.urlOpenExternal(action.issue.url);
+    else if (action.kind === 'project-problem') openProject(project);
     else
       void window.cockpit.spaceNavigate({
         to: 'space-files',
@@ -201,7 +211,9 @@ function NextActionCard({
         ? 'Open focus'
         : action.kind === 'draft'
           ? 'Open draft'
-          : 'Open';
+          : action.kind === 'project-problem'
+            ? 'Open the Project'
+            : 'Open';
   const source =
     action.kind === 'gate'
       ? `${action.process} gate`
@@ -211,7 +223,9 @@ function NextActionCard({
           ? 'LOCAL WORKBENCH'
           : action.kind === 'failing-pull-request'
             ? `PULL REQUEST #${action.pull.number}`
-            : `SESSION ISSUE #${action.issue.number}`;
+            : action.kind === 'project-problem'
+              ? 'THE PROJECT'
+              : `SESSION ISSUE #${action.issue.number}`;
   const secondary =
     action.kind === 'gate' && action.item === null ? 'View sessions' : 'Open source';
   return (

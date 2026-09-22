@@ -4,7 +4,10 @@ import type { OpenPullRequest } from '../github/types.js';
 import type { DashboardModel, FocusCard, NeedsYouEntry } from './dashboard-model.js';
 
 type ActionData =
-  | Extract<NeedsYouEntry, { kind: 'gate' | 'review' | 'stale-session' | 'ready-for-done' }>
+  | Extract<
+      NeedsYouEntry,
+      { kind: 'gate' | 'review' | 'stale-session' | 'ready-for-done' | 'project-problem' }
+    >
   | { kind: 'failing-pull-request'; pull: OpenPullRequest }
   | { kind: 'draft'; path: string; title: string };
 export type NextAction = ActionData & { headline: string };
@@ -135,6 +138,15 @@ export function nextActionHeadline(action: ActionData): string {
       }
       return `#${action.focus.number} has no Goals on its ticket, so done cannot be told: ${action.title}`;
     }
+    case 'project-problem': {
+      // Each message says what is wrong and what to do about it, written where
+      // it is computed, beside the thing that noticed. The headline is the
+      // first of them, with a count when there are more, so one line says both
+      // what to do and how much there is.
+      const [first = 'The Project has a problem'] = action.messages;
+      const rest = action.messages.length - 1;
+      return rest > 0 ? `${first} (and ${rest} more about the Project)` : first;
+    }
     case 'stale-session':
       return `Check the idle session #${action.issue.number}`;
     case 'draft':
@@ -172,6 +184,13 @@ export function rankNextActions(input: {
           input.focuses?.find((focus) => sameIssue(focus.issue, action.focus))?.stageChangedAt,
         ),
       });
+    // Beside an idle session, and after it: nothing is blocked on the Project
+    // being wrong about itself, and `now` is the newest `at` there is, so a
+    // session that has actually been sitting idle is asked about first. It
+    // stays visible until the Human Lead fixes it, because nothing else will
+    // ever raise it.
+    else if (action.kind === 'project-problem')
+      entries.push({ action, priority: 3, at: time(input.now) });
     else entries.push({ action, priority: 3, at: time(input.now) - action.idleMs });
   }
   for (const pull of input.pulls)
