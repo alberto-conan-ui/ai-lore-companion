@@ -8,6 +8,8 @@
  */
 
 import type {
+  PendingWrite,
+  StatusWrite,
   Claim,
   DeskOwner,
   FirstSeen,
@@ -150,6 +152,34 @@ export function isClaim(value: unknown): value is Claim {
     isWriteTarget(value.target) &&
     isTimestamp(value.claimedAt)
   );
+}
+
+/** Whether `value` is a `StatusWrite`. */
+export function isStatusWrite(value: unknown): value is StatusWrite {
+  return (
+    isJsonObject(value) &&
+    isText(value.key) &&
+    isText(value.set) &&
+    isTimestamp(value.setAt) &&
+    isOptional(value.overriddenAt, isTimestamp)
+  );
+}
+
+/** Whether `value` is a `PendingWrite`. */
+export function isPendingWrite(value: unknown): value is PendingWrite {
+  if (
+    !isJsonObject(value) ||
+    !isText(value.id) ||
+    !isText(value.sessionId) ||
+    !isTimestamp(value.queuedAt) ||
+    typeof value.attempts !== 'number'
+  ) {
+    return false;
+  }
+  if (value.kind === 'session-issue') return isText(value.column) && isJsonObject(value.content);
+  if (value.kind === 'comment') return isIssueRef(value.issue) && isText(value.body);
+  if (value.kind === 'move') return isIssueRef(value.issue) && isText(value.column);
+  return false;
 }
 
 /** Whether `value` is a `GateAnswer`. */

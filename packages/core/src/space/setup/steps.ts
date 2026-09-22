@@ -21,13 +21,18 @@ import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
   DEFAULT_STAGES,
-  FOCUS_KIND_LABELS,
+  DEFAULT_VIEWS,
+  KIND_LABELS,
+  LEVEL_FIELD,
+  LEVEL_VALUES,
   type LabelSpec,
   type ProjectInfo,
   type ProjectViewSpec,
   type RepositoryInfo,
   SESSION_LABEL,
   STAGE_FIELD,
+  STATUS_FIELD,
+  STATUS_VALUES,
 } from '../github/types.js';
 import { installClaudeCode, planClaudeCodeInstall } from '../install/writer.js';
 import { deskPaths } from '../layout/desk-paths.js';
@@ -67,10 +72,10 @@ export const ALWAYS_RUN_STEP_IDS: readonly string[] = ['machine-check', 'project
 
 /** The labels setup creates in the Space repository: the kinds of a focus, and the mark of a session issue. */
 export const SETUP_LABELS: readonly LabelSpec[] = [
-  ...FOCUS_KIND_LABELS.map((name) => ({
+  ...KIND_LABELS.map((name) => ({
     name,
     color: '1d76db',
-    description: `A focus of the kind ${name}`,
+    description: `Work of the kind ${name}`,
   })),
   {
     name: SESSION_LABEL,
@@ -79,25 +84,13 @@ export const SETUP_LABELS: readonly LabelSpec[] = [
   },
 ];
 
-/** The view of the items, whose grouping the API cannot set. */
-const ITEMS_VIEW = 'Items by focus';
-
-/** The three views of the default Project layout. */
-export const SETUP_VIEWS: readonly ProjectViewSpec[] = [
-  {
-    name: 'Focuses by Stage',
-    layout: 'board',
-    filter: `-label:${SESSION_LABEL}`,
-    columnField: STAGE_FIELD,
-  },
-  { name: ITEMS_VIEW, layout: 'table', filter: `-label:${SESSION_LABEL}` },
-  {
-    name: 'Agents board',
-    layout: 'board',
-    filter: `label:${SESSION_LABEL}`,
-    columnField: AGENTS_FIELD,
-  },
-];
+/**
+ * The views of the default Project layout that exist from setup.
+ *
+ * Defined in the github layer beside the fields they filter on, because the
+ * snapshot checks a Project against them and must not import setup to do it.
+ */
+export const SETUP_VIEWS = DEFAULT_VIEWS;
 
 /** The message of the Space repository's first commit. */
 export const FIRST_COMMIT_MESSAGE = 'Scaffold the Space';
@@ -523,8 +516,8 @@ export function projectStep(): Step<CreateSpaceContext> {
 }
 
 /**
- * The Project's layout: the Stage field, the Agents field, the labels, the
- * link to the repository and the three views. The port has no read for the
+ * The Project's layout: the Level field, the Stage field, the Agents field,
+ * the labels, the link to the repository and the three views. The port has no read for the
  * labels, the link or the views, so this step is never skipped; each of the
  * port's `ensure…` operations checks before it acts, and a second run creates
  * nothing twice. What the API cannot set is gathered in `ctx.byHand`.
@@ -534,8 +527,10 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
     id: 'project-layout',
     title: 'Set up the Project',
     describe: async (ctx) => [
+      { what: `Make sure the field ${LEVEL_FIELD} has the values ${LEVEL_VALUES.join(', ')}.` },
       { what: `Make sure the field ${STAGE_FIELD} has the values ${DEFAULT_STAGES.join(', ')}.` },
       { what: `Make sure the field ${AGENTS_FIELD} has the values ${AGENTS_COLUMNS.join(', ')}.` },
+      { what: `Make sure the field ${STATUS_FIELD} has the values ${STATUS_VALUES.join(', ')}.` },
       {
         what: `Make sure the repository has the labels ${SETUP_LABELS.map((label) => label.name).join(', ')}.`,
         count: SETUP_LABELS.length,
@@ -558,6 +553,15 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
           `The Project "${ctx.name}" of ${ctx.owner} was not found on GitHub.`,
         );
       }
+      // The category is recorded and not derived, so that a GitHub filter can
+      // select exactly what the Dashboard computes. Without this field every
+      // issue reads as an item and the snapshot reports each one.
+      const level = await github.ensureSingleSelectField({
+        project,
+        name: LEVEL_FIELD,
+        options: [...LEVEL_VALUES],
+      });
+      if (!level.ok) return gitHubFail(level.error);
       const stage = await github.ensureSingleSelectField({
         project,
         name: STAGE_FIELD,
@@ -570,6 +574,15 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
         options: [...AGENTS_COLUMNS],
       });
       if (!agents.ok) return gitHubFail(agents.error);
+      // `Status` is GitHub's own field and arrives with three values. `Paused`
+      // is the one this layout adds, and the companion cannot tell a root
+      // nobody is on from one nobody has started without it.
+      const status = await github.ensureSingleSelectField({
+        project,
+        name: STATUS_FIELD,
+        options: [...STATUS_VALUES],
+      });
+      if (!status.ok) return gitHubFail(status.error);
       const labels = await github.ensureLabels({
         repository: ctx.repositoryName,
         labels: SETUP_LABELS.map((label) => ({ ...label })),
@@ -589,22 +602,23 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
         byHand.push(...view.value.byHand);
         const url =
           view.value.view !== null ? `${project.url}/views/${view.value.view.number}` : null;
-        if (spec.layout === 'board' && spec.columnField !== undefined) {
+        // The grouping of "Items by focus" used to be a named special case
+        // here, pushed whether or not it was already set. Both groupings are
+        // spec fields now, and `ensureProjectView` reports only the ones a
+        // reading of the view says are still outstanding.
+        if (spec.columnField !== undefined) {
           viewSettings.push({
             view: spec.name,
             setting: `Set "Column by" to the field "${spec.columnField}".`,
             url,
           });
         }
-        if (spec.name === ITEMS_VIEW) {
+        if (spec.groupField !== undefined) {
           viewSettings.push({
-            view: ITEMS_VIEW,
-            setting: 'Set "Group by" to "Parent issue".',
+            view: spec.name,
+            setting: `Set "Group by" to the field "${spec.groupField}".`,
             url,
           });
-          byHand.push(
-            `On GitHub, open the view "${ITEMS_VIEW}" of the Project, open the view's menu, and set "Group by" to "Parent issue". The GitHub API cannot set it.`,
-          );
         }
       }
       ctx.byHand.splice(0, ctx.byHand.length, ...byHand);

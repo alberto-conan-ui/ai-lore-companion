@@ -88,8 +88,20 @@ export type SessionRecord = {
   closedAt?: string;
   /** The item or focus the session is on, when it is on one. */
   item?: IssueRef;
-  /** The session's own issue, created when it first enters Writing. */
+  /**
+   * The session's own issue. Created when the session starts, in Read only,
+   * and not when it first writes: a session that only reads can restructure
+   * the whole plan, and one did — 38 issues created and 37 closed in Read
+   * only, with nothing on the board to say who had done it.
+   */
   issue?: IssueRef;
+  /**
+   * Every ticket the session has done substantive work on, in the order it
+   * first touched them. `item` is where the session was pointed; this is where
+   * it went. A session issue used to carry one `Item:` line, and a session
+   * that touched six tickets had nowhere to say so.
+   */
+  tickets?: IssueRef[];
   /** The options that changed the guard when the session started. Absent when none. */
   unguarded?: string[];
   /** The profile the session ran. Absent on a record written before M14. */
@@ -106,8 +118,69 @@ export type SessionPatch = {
   closedAt?: string;
   item?: IssueRef;
   issue?: IssueRef;
+  /** Replaces the list whole: the board holds the order and appends to it. */
+  tickets?: IssueRef[];
   spend?: SessionSpend;
 };
+
+/**
+ * What the companion last set a root's `Status` to, kept in
+ * `status-writes.json`.
+ *
+ * It exists so a value the Human Lead set by hand can be told from one the
+ * companion wrote, without asking GitHub when a value last changed: whether
+ * re-setting a single-select to what it already is moves its `updatedAt` was
+ * never established, so a rule built on that timestamp would be a rule nobody
+ * has checked. What the companion last wrote is a fact it owns.
+ */
+export type StatusWrite = {
+  /** The root, as `owner/name#number`. */
+  key: string;
+  /** The value the companion last wrote. */
+  set: string;
+  /** ISO 8601. */
+  setAt: string;
+  /** ISO 8601, present once a value the companion did not write was seen. */
+  overriddenAt?: string;
+};
+
+/**
+ * A write to GitHub that did not land, kept in `pending-writes.json` until it
+ * does.
+ *
+ * It states what the Project **should say**, not the call that failed to say
+ * it, so replaying it more than once is safe. The three shapes are everything
+ * the companion writes to the board: a session's issue, a comment, and a move
+ * between columns.
+ */
+export type PendingWrite = {
+  /**
+   * The caller's id for this intent. A second statement of the same intent —
+   * the same session's issue, say — replaces the first rather than queuing
+   * twice, because only the newest is worth replaying.
+   */
+  id: string;
+  /** The session the write belongs to, for reporting what of its work is outstanding. */
+  sessionId: string;
+  /** ISO 8601. */
+  queuedAt: string;
+  /** How often it has been tried, the attempt that queued it included. */
+  attempts: number;
+  /** Why the last attempt failed, as a sentence. */
+  lastError?: string;
+  /** ISO 8601, absent until it has been retried. */
+  lastTriedAt?: string;
+} & (
+  | {
+      /** The session's issue should say this and be in this column. Idempotent: found by its marker. */
+      kind: 'session-issue';
+      column: string;
+      /** `SessionIssueContent`, carried as recorded JSON so the desk file stays plain data. */
+      content: JsonObject;
+    }
+  | { kind: 'comment'; issue: IssueRef; body: string }
+  | { kind: 'move'; issue: IssueRef; column: string }
+);
 
 /** A write target held by a session. Kept in `claims.json`. */
 export type Claim = { sessionId: string; target: WriteTarget; claimedAt: string };

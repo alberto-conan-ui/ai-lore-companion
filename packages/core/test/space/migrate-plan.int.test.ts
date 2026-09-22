@@ -433,6 +433,10 @@ test('a half-done migration: the plan says which steps are done, from the ledger
     '# Contracts',
     '',
     '- [core/](./core/index.md): the contracts that AI-Lore itself fixes.',
+    // The template ships a `default/` folder for contracts, and the scaffold
+    // keeps an index that is already there, so this stand-in for step 6's
+    // output has to name it or lore-integrity finds a folder with no line.
+    '- [default/](./default/index.md): the contracts that ship with AI-Lore and that the Space may replace.',
   ];
   for (const card of ctx.targets.contracts) {
     const file = card.to.split('/').pop() ?? '';

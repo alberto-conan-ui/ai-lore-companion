@@ -1,96 +1,32 @@
 {
-  "version": 1,
-  "sections": [
-    {
-      "id": "attention",
-      "title": "Needs you",
-      "columns": [["needs-you"]]
-    },
-    {
-      "id": "overview",
-      "title": "Current position",
-      "columns": [["position", "plan"], ["blockers", "decisions"]]
-    },
-    {
-      "id": "workbench",
-      "title": "Workbench",
-      "columns": [["review-documents"], ["handovers", "activity"]]
-    },
-    {
-      "id": "resources",
-      "title": "Sessions and repositories",
-      "columns": [["agents"], ["repositories"]]
-    }
-  ],
-  "components": [
+  "version": 2,
+  "bands": [
     {
       "id": "needs-you",
-      "type": "needs-you",
-      "source": "companion",
-      "title": "Needs your attention"
+      "panels": [
+        { "id": "next-action", "kind": "next-action", "source": "companion", "pmLine": { "id": "next-action-note", "instruction": "One line of context for the next action: what is at stake, or why it is next. No provenance, no session identifiers." } },
+        { "id": "review-documents", "kind": "review-documents", "source": "companion", "limit": 10, "recentDays": 14, "order": "newest" },
+        { "id": "publish-area", "kind": "publish-area", "source": "companion" }
+      ]
     },
     {
-      "id": "position",
-      "type": "text",
-      "source": "pm",
-      "title": "Current position",
-      "instruction": "Summarise the present goal and evidence of progress. Include relevant Workbench work, distinguish observed facts from proposals, and state missing sources."
+      "id": "moving",
+      "panels": [
+        { "id": "in-progress", "kind": "in-progress", "source": "companion", "limit": 10, "order": "age" },
+        { "id": "queued", "kind": "queued", "source": "companion", "limit": 10, "order": "age" },
+        { "id": "dormant", "kind": "dormant", "source": "companion", "pmLine": { "id": "dormant-note", "instruction": "Characterise the dormant group in one line: what it is and how long it has been idle. Say only what the sources support." } },
+        { "id": "done-line", "kind": "done-line", "source": "companion" }
+      ]
     },
     {
-      "id": "plan",
-      "type": "plan",
-      "source": "companion",
-      "title": "Where everything stands"
-    },
-    {
-      "id": "blockers",
-      "type": "list",
-      "source": "pm",
-      "title": "Blockers",
-      "limit": 8,
-      "instruction": "List evidenced blockers, what can unblock each, and unresolved unknowns. Return an empty list when none are known."
-    },
-    {
-      "id": "decisions",
-      "type": "list",
-      "source": "pm",
-      "title": "Decisions needed",
-      "limit": 8,
-      "instruction": "List concrete decisions needed from the Human Lead, with the relevant issue or document named in the text. Return an empty list when none are known."
-    },
-    {
-      "id": "review-documents",
-      "type": "workbench-docs",
-      "source": "companion",
-      "title": "Documents to review",
-      "limit": 10,
-      "recentDays": 14
-    },
-    {
-      "id": "handovers",
-      "type": "handovers",
-      "source": "companion",
-      "title": "Recent handovers",
-      "limit": 5
-    },
-    {
-      "id": "activity",
-      "type": "activity",
-      "source": "companion",
-      "title": "Current local sessions",
-      "limit": 10
-    },
-    {
-      "id": "agents",
-      "type": "agents",
-      "source": "companion",
-      "title": "Agents board"
-    },
-    {
-      "id": "repositories",
-      "type": "repositories",
-      "source": "companion",
-      "title": "Repositories"
+      "id": "waiting",
+      "panels": [
+        { "id": "pull-requests", "kind": "pull-requests", "source": "companion", "limit": 10, "order": "state" },
+        { "id": "live-sessions", "kind": "live-sessions", "source": "companion", "limit": 10, "order": "newest" },
+        { "id": "agents-board", "kind": "agents-board", "source": "companion", "limit": 10, "order": "newest" },
+        { "id": "space-stats", "kind": "space-stats", "source": "companion" },
+        { "id": "handovers", "kind": "handovers", "source": "companion", "limit": 5, "order": "newest" }
+      ]
     }
   ]
 }

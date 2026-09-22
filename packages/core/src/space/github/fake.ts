@@ -43,6 +43,7 @@ import {
   type FieldInfo,
   type LabelSpec,
   type MergedPullRequest,
+  type OpenPullRequest,
   PROJECT_SCOPE,
   type ProjectInfo,
   type ProjectViewInfo,
@@ -88,7 +89,12 @@ export type FakeProject = {
   views: ProjectViewInfo[];
   /** The `fullName` of each linked repository. */
   linked: string[];
-  items: { id: string; issueId: string; values: Record<string, string> }[];
+  items: {
+    id: string;
+    issueId: string;
+    values: Record<string, string>;
+    valuesAt?: Record<string, string>;
+  }[];
 };
 
 /** Everything the fake keeps. Plain data: this is what the state file holds. */
@@ -106,6 +112,7 @@ export type FakeGitHubState = {
   issues: FakeIssue[];
   projects: FakeProject[];
   pullRequests: { repository: string; pull: MergedPullRequest }[];
+  openPullRequests: { repository: string; pull: OpenPullRequest }[];
 };
 
 /** One operation the fake was asked for, and whether it succeeded. */
@@ -164,6 +171,8 @@ export type FakeGitHub = GitHubPort & {
   signIn(account: string, scopes: string[]): void;
   /** Add a merged pull request to a repository. */
   addMergedPullRequest(repository: string, pull: MergedPullRequest): void;
+  /** Add an open pull request to a repository. */
+  addOpenPullRequest(repository: string, pull: OpenPullRequest): void;
   /** The issue a reference names, or `null`. */
   issue(ref: IssueRef): FakeIssue | null;
   /** Write the state to `path`. */
@@ -173,6 +182,8 @@ export type FakeGitHub = GitHubPort & {
 };
 
 const DEFAULT_SCOPES = ['gist', PROJECT_SCOPE, 'read:org', 'repo', 'workflow'];
+// GitHub's own three, as a new Project really arrives. `Paused` is not here:
+// setup adds it, and a fixture that seeded it would hide a setup that did not.
 const DEFAULT_STATUS_OPTIONS = ['Todo', 'In Progress', 'Done'];
 
 /** The operations that need the `project` scope. */
@@ -200,6 +211,7 @@ function emptyState(options: FakeGitHubOptions): FakeGitHubState {
     issues: [],
     projects: [],
     pullRequests: [],
+    openPullRequests: [],
   };
 }
 
@@ -210,7 +222,9 @@ function loadState(path: string): FakeGitHubState {
   }
   if (parsed.version !== 1) throw new Error(`FakeGitHub: ${path} has an unknown version`);
   // The file is written by `save` of this module only; its shape is trusted past the version.
-  return parsed as FakeGitHubState;
+  // Keep v1 state files written before open pull requests were added usable.
+  const state = parsed as FakeGitHubState;
+  return { ...state, openPullRequests: state.openPullRequests ?? [] };
 }
 
 /** Build a fake GitHub. With `stateFile`, continue from the file when it exists. */
@@ -328,11 +342,20 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     project: FakeProject,
     issue: FakeIssue,
     values: Record<string, string>,
+    valuesAt?: Record<string, string>,
   ): RawProjectIssue {
     const fieldValues: Record<string, string> = {};
+    const fieldValuesAt: Record<string, string> = {};
+    const itemValuesAt = valuesAt ?? {};
     for (const field of project.fields) {
       const option = field.options.find((candidate) => candidate.id === values[field.id]);
-      if (option !== undefined) fieldValues[field.name] = option.name;
+      if (option !== undefined) {
+        fieldValues[field.name] = option.name;
+        const at = itemValuesAt[field.id];
+        if (at !== undefined) {
+          fieldValuesAt[field.name] = at;
+        }
+      }
     }
     const parent = state.issues.find((candidate) => candidate.id === issue.parentId);
     return {
@@ -347,6 +370,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
           ? parent.ref.number
           : null,
       fieldValues,
+      fieldValuesAt,
       subIssues: state.issues
         .filter((candidate) => candidate.parentId === issue.id)
         .map((sub) => ({ issue: sub.ref, title: sub.title, state: sub.state })),
@@ -385,6 +409,10 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
     },
     addMergedPullRequest(repository, pull) {
       state.pullRequests.push({ repository, pull });
+      if (options.stateFile !== undefined) save(options.stateFile);
+    },
+    addOpenPullRequest(repository, pull) {
+      state.openPullRequests.push({ repository, pull });
       if (options.stateFile !== undefined) save(options.stateFile);
     },
     issue: (ref) => {
@@ -497,12 +525,15 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
           name: STATUS_FIELD,
           options: DEFAULT_STATUS_OPTIONS.map((name) => ({ id: nextId('OPT'), name })),
         };
+        // GitHub gives a new Project this unfiltered, ungrouped table.
         const view: ProjectViewInfo = {
           id: nextId('PVTV'),
           number: 1,
           name: 'View 1',
           layout: 'table',
           filter: '',
+          columnField: null,
+          groupField: null,
         };
         state.projects.push({
           info,
@@ -548,6 +579,9 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
             name: arg.spec.name,
             layout: arg.spec.layout,
             filter: '',
+            // A view the API creates has no grouping: that is the by-hand step.
+            columnField: null,
+            groupField: null,
           };
           project.views.push(view);
         }
@@ -711,6 +745,8 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
           return err(notFound(`the option ${arg.option} of the field ${arg.field.name}`));
         }
         item.values[field.id] = option.id;
+        item.valuesAt ??= {};
+        item.valuesAt[field.id] = now().toISOString();
         const issue = state.issues.find((candidate) => candidate.id === item.issueId);
         if (issue !== undefined) issue.updatedAt = now().toISOString();
         return ok(undefined);
@@ -761,7 +797,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
         if (project === null) return missingProject(arg.project);
         const issues = project.items.flatMap((item) => {
           const issue = state.issues.find((candidate) => candidate.id === item.issueId);
-          return issue === undefined ? [] : [rawIssue(project, issue, item.values)];
+          return issue === undefined ? [] : [rawIssue(project, issue, item.values, item.valuesAt)];
         });
         const stageField = project.fields.find((field) => field.name === STAGE_FIELD) ?? null;
         return ok(
@@ -769,6 +805,9 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
             project: project.info,
             stageField: stageField === null ? null : structuredClone(stageField),
             issues,
+            // The fake reports the same view drift as the gh adapter, so a
+            // test cannot pass against one and fail against the other.
+            views: structuredClone(project.views),
             fetchedAt: now().toISOString(),
           }),
         );
@@ -782,6 +821,17 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
           .filter((entry) => entry.repository === arg.repository)
           .map((entry) => ({ ...entry.pull }))
           .sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
+        return ok(pulls.slice(0, Math.max(1, Math.floor(arg.limit))));
+      }),
+
+    openPullRequests: (arg) =>
+      operate('openPullRequests', false, () => {
+        const known = repositoryFor(arg.repository);
+        if (!known.ok) return known;
+        const pulls = state.openPullRequests
+          .filter((entry) => entry.repository === arg.repository)
+          .map((entry) => ({ ...entry.pull }))
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         return ok(pulls.slice(0, Math.max(1, Math.floor(arg.limit))));
       }),
   };

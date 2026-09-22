@@ -3,7 +3,7 @@ type: corpus
 term: breakdown
 points_at:
   - lore/verbs/default/plan-break-down.md
-  - lore/contracts/core/spec-before-breakdown.md
+  - lore/contracts/default/spec-before-breakdown.md
 ---
 
 # Breakdown
@@ -22,4 +22,4 @@ A breakdown is kept on the plan, on GitHub. With the default Project layout, the
 
 ## What acts on it
 
-With the default set, the verb plan-break-down proposes the pieces of work, each with its criteria, and states any part of the spec that no piece covers. The Human Lead edits the list and confirms it, and the verb then writes the breakdown to the plan. The process plan runs that verb, and the Human Lead's confirmation of the breakdown is the gate of that process. The core contract spec-before-breakdown guards the breakdown. In the first build it has only a rule.
+With the default set, the verb plan-break-down proposes the pieces of work, each with its criteria, and states any part of the spec that no piece covers. The Human Lead edits the list and confirms it, and the verb then writes the breakdown to the plan. The process plan runs that verb, and the Human Lead's confirmation of the breakdown is the gate of that process. The contract spec-before-breakdown, which ships as a default, guards the breakdown. In the first build it has only a rule.

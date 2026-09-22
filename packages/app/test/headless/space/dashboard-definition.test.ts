@@ -31,38 +31,36 @@ async function rootWithDefinition(definition: DashboardDefinition): Promise<stri
   return root;
 }
 
-function definition(options: { secondWorkbench?: boolean } = {}): DashboardDefinition {
-  const components = [
-    { id: 'position', type: 'text' as const, source: 'pm' as const, title: 'Position' },
-    {
-      id: 'review',
-      type: 'workbench-docs' as const,
-      source: 'companion' as const,
-      title: 'Review',
-      limit: 3,
-      recentDays: 14,
-    },
-  ];
-  if (options.secondWorkbench) {
-    components.push({
-      id: 'wide-review',
-      type: 'workbench-docs' as const,
-      source: 'companion' as const,
-      title: 'Wide review',
-      limit: 10,
-      recentDays: 60,
-    });
-  }
+function definition(): DashboardDefinition {
   return {
-    version: 1,
-    sections: [
+    version: 2,
+    bands: [
       {
-        id: 'main',
-        title: 'Main',
-        columns: [components.map((component) => component.id)],
+        id: 'needs-you',
+        panels: [
+          {
+            id: 'next',
+            kind: 'next-action',
+            source: 'companion',
+            pmLine: { id: 'position', instruction: 'Explain the present position.' },
+          },
+          {
+            id: 'review',
+            kind: 'review-documents',
+            source: 'companion',
+            limit: 3,
+            recentDays: 14,
+            order: 'newest',
+          },
+        ],
+      },
+      {
+        id: 'waiting',
+        panels: [
+          { id: 'handover', kind: 'handovers', source: 'companion', limit: 5, order: 'newest' },
+        ],
       },
     ],
-    components,
   };
 }
 
@@ -97,11 +95,7 @@ test('definition resolution prefers a custom file and retains the last valid def
   await writeFile(join(root, 'lore', 'corpus', 'dashboard.json'), '{ broken');
   await writeFile(
     join(root, 'lore', 'corpus', 'default', 'dashboard.json'),
-    JSON.stringify({
-      ...definition(),
-      components: [definition().components[0]],
-      sections: [{ id: 'main', title: 'Fallback', columns: [['position']] }],
-    }),
+    JSON.stringify(definition()),
   );
   const fallback = await readDashboardDefinition({ spaceRoot: root });
   assert.equal(fallback.ok, true);
@@ -112,6 +106,25 @@ test('definition resolution prefers a custom file and retains the last valid def
 
   await service.refreshContext();
   assert.equal(service.definition()?.hash, first.value.hash);
+  service.dispose();
+});
+
+test('a v1 replacement keeps the accepted definition and exposes its diagnostic on state', async () => {
+  const root = await rootWithDefinition(definition());
+  const service = createDashboardReportService({
+    definition: { spaceRoot: root, templateDir: join(root, 'missing-template') },
+    workbenchRoot: join(root, 'workbench'),
+  });
+  await service.ready();
+  const accepted = service.definition();
+  assert.ok(accepted);
+  await writeFile(
+    join(root, 'lore', 'corpus', 'dashboard.json'),
+    JSON.stringify({ version: 1, sections: [], components: [] }),
+  );
+  await service.refreshContext();
+  assert.equal(service.definition()?.hash, accepted.hash);
+  assert.equal(service.read().definition?.diagnostic?.kind, 'unsupported-version');
   service.dispose();
 });
 
@@ -153,8 +166,13 @@ test('definition and PM validation reject unsupported, duplicate, incomplete and
   );
 
   const badDefinition = {
-    ...definition(),
-    components: [{ ...definition().components[0], bogus: true }],
+    version: 2,
+    bands: [
+      {
+        id: 'needs-you',
+        panels: [{ id: 'next', kind: 'next-action', source: 'companion', bogus: true }],
+      },
+    ],
   };
   await writeFile(join(root, 'lore', 'corpus', 'dashboard.json'), JSON.stringify(badDefinition));
   const rejected = await readDashboardDefinition({ spaceRoot: root });
@@ -162,9 +180,13 @@ test('definition and PM validation reject unsupported, duplicate, incomplete and
   if (rejected.ok) assert.ok(rejected.value.diagnostic);
 
   const badLimit: DashboardDefinition = {
-    version: 1,
-    sections: [{ id: 'main', title: 'Main', columns: [['position']] }],
-    components: [{ id: 'position', type: 'text', source: 'pm', title: 'Position', limit: 2 }],
+    version: 2,
+    bands: [
+      {
+        id: 'needs-you',
+        panels: [{ id: 'position', kind: 'text', source: 'pm', title: 'Position', limit: 2 }],
+      },
+    ],
   };
   await writeFile(join(root, 'lore', 'corpus', 'dashboard.json'), JSON.stringify(badLimit));
   const ignoredLimit = await readDashboardDefinition({ spaceRoot: root });
@@ -172,9 +194,8 @@ test('definition and PM validation reject unsupported, duplicate, incomplete and
   if (ignoredLimit.ok) assert.ok(ignoredLimit.value.diagnostic);
 });
 
-test('duplicate list item IDs and multiple Workbench windows are bounded and merged', async () => {
-  const wide = definition({ secondWorkbench: true });
-  const root = await rootWithDefinition(wide);
+test('duplicate list item IDs and Workbench reads are bounded', async () => {
+  const root = await rootWithDefinition(definition());
   const resolved = await readDashboardDefinition({ spaceRoot: root });
   assert.equal(resolved.ok, true);
   if (!resolved.ok) return;
@@ -192,9 +213,13 @@ test('duplicate list item IDs and multiple Workbench windows are bounded and mer
     true,
   );
   const listDefinition: DashboardDefinition = {
-    version: 1,
-    sections: [{ id: 'main', title: 'Main', columns: [['items']] }],
-    components: [{ id: 'items', type: 'list', source: 'pm', title: 'Items', limit: 5 }],
+    version: 2,
+    bands: [
+      {
+        id: 'needs-you',
+        panels: [{ id: 'items', kind: 'list', source: 'pm', title: 'Items', limit: 5 }],
+      },
+    ],
   };
   const listRoot = await rootWithDefinition(listDefinition);
   const listResolved = await readDashboardDefinition({ spaceRoot: listRoot });
@@ -257,6 +282,30 @@ test('Workbench reads a handover at the end of a bounded long journal and reject
   );
 });
 
+test('handover sheets retain text beyond the old preview limit and the whole fallback note', async () => {
+  const root = await rootWithDefinition(definition());
+  const done = `${'A detailed implementation note. '.repeat(200)}The final evidence.`;
+  const fallback =
+    '# An unstructured note\nOpening line.\nSecond line.\nThird line.\nFourth line must survive.';
+  await writeFile(
+    join(root, 'workbench', 'journal', 'parts.md'),
+    `# Session\n## Handover\n### Done\n${done}\n### In progress\nVerification.\n### What the next session should do\nReview the result.`,
+  );
+  await writeFile(join(root, 'workbench', 'journal', 'fallback.md'), fallback);
+  const snapshot = await readDashboardWorkbench({
+    workbenchRoot: join(root, 'workbench'),
+    limit: 10,
+  });
+  assert.equal(
+    snapshot.handovers.find((entry) => entry.path.endsWith('parts.md'))?.parts.done,
+    done,
+  );
+  assert.equal(
+    snapshot.handovers.find((entry) => entry.path.endsWith('fallback.md'))?.parts.text,
+    fallback,
+  );
+});
+
 test('polling marks body edits stale, ignores transient activity and rejects late request generations', async () => {
   const root = await rootWithDefinition(definition());
   const draft = join(root, 'workbench', 'drafts', 'draft.md');
@@ -286,10 +335,33 @@ test('polling marks body edits stale, ignores transient activity and rejects lat
   await writeFile(
     join(root, 'lore', 'corpus', 'dashboard.json'),
     JSON.stringify({
-      ...definition(),
-      components: [
-        { ...definition().components[0], title: 'Changed position' },
-        definition().components[1],
+      version: 2,
+      bands: [
+        {
+          id: 'needs-you',
+          panels: [
+            {
+              id: 'next',
+              kind: 'next-action',
+              source: 'companion',
+              pmLine: { id: 'position', instruction: 'Changed position.' },
+            },
+            {
+              id: 'review',
+              kind: 'review-documents',
+              source: 'companion',
+              limit: 3,
+              recentDays: 14,
+              order: 'newest',
+            },
+          ],
+        },
+        {
+          id: 'waiting',
+          panels: [
+            { id: 'handover', kind: 'handovers', source: 'companion', limit: 5, order: 'newest' },
+          ],
+        },
       ],
     }),
   );
@@ -308,5 +380,33 @@ test('polling marks body edits stale, ignores transient activity and rejects lat
   if (!late.ok) assert.equal(late.error.kind, 'request-mismatch');
   service.failRequest(request.requestId, { kind: 'timeout', message: 'late' });
   assert.equal(service.publish('refresh', reportInput(service)).ok, false);
+  service.dispose();
+});
+
+test('request-bound reports refresh generation on context read but reject later source changes', async () => {
+  const root = await rootWithDefinition(definition());
+  const service = createDashboardReportService({
+    definition: { spaceRoot: root },
+    workbenchRoot: join(root, 'workbench'),
+  });
+  await service.ready();
+
+  const reread = service.request('human').request;
+  service.openSession('refresh-after-attach');
+  assert.equal(service.attachRequest(reread.requestId, 'refresh-after-attach'), true);
+  service.markProjectChanged();
+  assert.ok(service.readContextForSession('refresh-after-attach'));
+  assert.equal(service.publish('refresh-after-attach', reportInput(service)).ok, true);
+  service.closeSession('refresh-after-attach', { preserveReport: true });
+
+  const rejectedRequest = service.request('human').request;
+  service.openSession('refresh-after-read');
+  assert.equal(service.attachRequest(rejectedRequest.requestId, 'refresh-after-read'), true);
+  assert.ok(service.readContextForSession('refresh-after-read'));
+  service.markProjectChanged();
+  const rejected = service.publish('refresh-after-read', reportInput(service));
+  assert.equal(rejected.ok, false);
+  if (!rejected.ok) assert.equal(rejected.error.kind, 'request-mismatch');
+  service.failRequest(rejectedRequest.requestId, { kind: 'test-reset', message: 'reset' });
   service.dispose();
 });

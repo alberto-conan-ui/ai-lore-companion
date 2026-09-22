@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 
 // Phase M7.4: the Dashboard's Agents board, Needs you and Start a session, with the real gate
@@ -42,19 +42,22 @@ vi.mock('../../../src/renderer/src/components/DockWorkspace.js', async () => {
   };
 });
 
-import type { BoardRow, NeedsYouEntry } from '@ai-lore-companion/core';
-import { AgentsBoard } from '../../../src/renderer/src/space/dashboard/AgentsBoard.js';
-import { NeedsYou } from '../../../src/renderer/src/space/dashboard/NeedsYou.js';
 import { StartSession } from '../../../src/renderer/src/space/dashboard/StartSession.js';
+import { BandNeedsYou } from '../../../src/renderer/src/space/dashboard/v2/BandNeedsYou.js';
+import { WaitingBand } from '../../../src/renderer/src/space/dashboard/v2/WaitingBand.js';
 import { SpaceDialogs } from '../../../src/renderer/src/space/dialogs/SpaceDialogs.js';
 import { SpaceSessions } from '../../../src/renderer/src/space/window/SpaceSessions.js';
 import { useSpaceNavStore } from '../../../src/renderer/src/space/window/spaceNavStore.js';
+import type {
+  DashboardPanel,
+  DashboardReportState,
+  SpaceProjectState,
+} from '../../../src/shared/ipc.js';
 import type {
   PendingDialog,
   SpaceEngineChoice,
   SpaceSessionEnginesResult,
 } from '../../../src/shared/ipc.js';
-
 /** A ready `SpaceEngineChoice`: one engine, startable. */
 function readyChoice(engineId = 'claude-code', name = 'Claude Code'): SpaceEngineChoice {
   return {
@@ -62,47 +65,6 @@ function readyChoice(engineId = 'claude-code', name = 'Claude Code'): SpaceEngin
     engineId,
     buttonName: name,
     refusal: null,
-  };
-}
-
-const REPO = 'fake-human/dash-space';
-const ref = (number: number) => ({
-  repository: REPO,
-  number,
-  url: `https://github.com/${REPO}/issues/${number}`,
-});
-const DAY = 24 * 60 * 60 * 1000;
-
-function row(number: number, column: BoardRow['column'], extra: Partial<BoardRow> = {}): BoardRow {
-  return {
-    issue: ref(number),
-    title: `The claude-code session that started at 2026-09-18T0${number}:00:00.000Z`,
-    column,
-    targets: [],
-    attended: true,
-    person: 'fake-human',
-    machine: 'desk-1',
-    updatedAt: '2026-09-18T09:00:00.000Z',
-    idleMs: 1000,
-    stale: false,
-    local: null,
-    gateTicket: null,
-    ...extra,
-  };
-}
-
-/** A `BoardRow.local` fixture, `unguarded: []` unless given. */
-function local(
-  extra: Partial<NonNullable<BoardRow['local']>> = {},
-): NonNullable<BoardRow['local']> {
-  return {
-    sessionId: 's-1',
-    engine: 'claude-code',
-    startedAt: '2026-09-18T01:00:00.000Z',
-    closed: false,
-    item: null,
-    unguarded: [],
-    ...extra,
   };
 }
 
@@ -117,22 +79,6 @@ const GATE: PendingDialog = {
   question: 'Is the draft agreed?',
   bearsOn: 'workbench/spec.md',
 };
-
-const ENTRIES: NeedsYouEntry[] = [
-  {
-    kind: 'gate',
-    ticket: GATE_TICKET,
-    sessionId: 's-1',
-    askedAt: GATE.askedAt,
-    process: 'specify',
-    step: 'confirm',
-    question: 'Is the draft agreed?',
-    item: ref(12),
-  },
-  { kind: 'review', focus: ref(3), title: 'A focus' },
-  { kind: 'stale-session', issue: ref(8), column: 'Writing', idleMs: 2 * DAY, sessionId: 's-8' },
-  { kind: 'stale-session', issue: ref(9), column: 'Blocked', idleMs: 30 * 60_000, sessionId: null },
-];
 
 const ENGINE = { id: 'claude-code', name: 'Claude Code', binary: 'claude' };
 
@@ -198,104 +144,150 @@ beforeEach(() => {
 
 afterEach(() => cleanup());
 
-test('the Agents board has the four columns, a row per session, stale in words and links to issues', () => {
-  render(
-    <AgentsBoard
-      board={[
-        row(1, 'Writing', {
+const WAITING_PANELS = [
+  { id: 'pulls', kind: 'pull-requests', source: 'companion' },
+  { id: 'sessions', kind: 'live-sessions', source: 'companion' },
+  { id: 'agents', kind: 'agents-board', source: 'companion' },
+  { id: 'stats', kind: 'space-stats', source: 'companion' },
+] as unknown as DashboardPanel[];
+
+function reportState(): DashboardReportState {
+  return {
+    version: 1,
+    definition: null,
+    context: {
+      observedAt: '2026-09-18T09:00:00.000Z',
+      documents: [],
+      handovers: [],
+      activity: [],
+      problems: [],
+    },
+    report: null,
+    refresh: { status: 'idle', requestId: null, reason: null, requestedAt: null, failure: null },
+  };
+}
+
+function projectState(overrides: Partial<SpaceProjectState> = {}): SpaceProjectState {
+  return {
+    version: 1,
+    snapshot: null,
+    fetchedAt: null,
+    state: 'fresh',
+    failure: null,
+    refreshing: false,
+    model: { columns: [], unstaged: [], standalone: [], needsYou: [], board: [] },
+    pullRequests: [],
+    pullRequestsFailure: null,
+    nextActions: [],
+    moving: { inProgress: [], queued: [], untriaged: [], dormant: [], done: [] },
+    dormant: { count: 0, paused: 0, oldestAgeMs: null, medianAgeMs: null },
+    stats: { focusesOpen: 0, itemsOpen: 0, openPullRequests: 0, liveSessions: 0 },
+    ...overrides,
+  } as SpaceProjectState;
+}
+
+test('WaitingBand keeps live activity separate from Agents board and uses readable states', () => {
+  const report = reportState();
+  report.context = {
+    observedAt: '2026-09-18T09:00:00.000Z',
+    documents: [],
+    handovers: [],
+    activity: [
+      { id: 'live-1', startedAt: '2026-09-18T09:00:00.000Z', mode: 'writing', purpose: 'testing' },
+    ],
+    problems: [],
+  };
+  const project = projectState({
+    model: {
+      columns: [],
+      unstaged: [],
+      standalone: [],
+      needsYou: [],
+      board: [
+        {
+          issue: {
+            repository: 'fake-human/dash-space',
+            number: 4,
+            url: 'https://github.com/fake-human/dash-space/issues/4',
+          },
+          title: 'session issue',
+          column: 'Blocked',
+          targets: [],
+          attended: true,
+          person: '',
+          machine: '',
+          updatedAt: null,
+          idleMs: null,
           stale: true,
-          idleMs: 2 * DAY,
-          local: local({ item: ref(12) }),
-          gateTicket: GATE_TICKET,
-        }),
-        row(2, 'Read only'),
-        row(4, 'Done'),
-      ]}
+          local: null,
+          gateTicket: null,
+        },
+      ],
+    },
+  });
+  render(
+    <WaitingBand
+      panels={WAITING_PANELS}
+      project={project}
+      reportState={report}
+      now={Date.parse('2026-09-18T10:00:00.000Z')}
     />,
   );
-  const headings = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
-  expect(headings).toEqual(['Read only (1)', 'Writing (1)', 'Blocked (0)', 'Done (1)']);
-  const writing = within(screen.getByTestId('agents-column-writing'));
-  expect(
-    writing.getByText('The claude-code session that started at 2026-09-18T01:00:00.000Z'),
-  ).toBeTruthy();
-  expect(screen.getByTestId('agents-row-stale-1').textContent).toBe(
-    'Stale: no change on GitHub for 2 days.',
-  );
-  expect(screen.queryByTestId('agents-row-stale-2')).toBeNull();
-  expect(within(screen.getByTestId('agents-column-blocked')).getByText('No session.')).toBeTruthy();
-  expect(screen.getByTestId('agents-row-2').textContent).toContain(
-    'Item: not recorded on this desk',
-  );
-
-  // A row is named by its engine and start time, never by the session's id.
-  expect(screen.getByTestId('agents-board').textContent).not.toContain('s-1');
-  // Buttons, never links: nothing on the board can open GitHub inside the app.
-  expect(screen.queryAllByRole('link')).toEqual([]);
-  fireEvent.click(writing.getByRole('button', { name: `${REPO}#12` }));
-  expect(cockpit.urlOpenExternal).toHaveBeenLastCalledWith(ref(12).url);
-  fireEvent.click(writing.getByRole('button', { name: `Issue ${REPO}#1` }));
-  expect(cockpit.urlOpenExternal).toHaveBeenLastCalledWith(ref(1).url);
+  expect(screen.getByText('WRITING')).toBeTruthy();
+  expect(screen.getByText('BLOCKED')).toBeTruthy();
+  expect(screen.queryByText('NO OPEN PULL REQUESTS')).toBeTruthy();
 });
 
-test('Needs you lists its entries in order, with the gate question and one action each', () => {
-  const onOpenFocus = vi.fn();
-  useSpaceNavStore.setState({ sessionsWithTab: ['s-8'] });
-  render(<NeedsYou entries={ENTRIES} onOpenFocus={onOpenFocus} />);
-  const items = screen.getAllByRole('listitem');
-  expect(items.map((item) => item.firstChild?.textContent)).toEqual([
-    'Gate',
-    'Review',
-    'Stale session',
-    'Stale session',
-  ]);
-  expect(items[0]?.textContent).toContain('Is the draft agreed?');
-  expect(items[2]?.textContent).toContain(
-    `The session issue ${REPO}#8 is in Writing with no change on GitHub for 2 days.`,
-  );
-  expect(items.map((item) => within(item).getByRole('button').textContent)).toEqual([
-    'Open the gate dialog',
-    'Open the focus',
-    'Open its tab',
-    'Open its issue',
-  ]);
-
-  fireEvent.click(within(items[1] as HTMLElement).getByRole('button'));
-  expect(onOpenFocus).toHaveBeenCalledWith(ref(3));
-  fireEvent.click(within(items[3] as HTMLElement).getByRole('button'));
-  expect(cockpit.urlOpenExternal).toHaveBeenLastCalledWith(ref(9).url);
-  fireEvent.click(within(items[2] as HTMLElement).getByRole('button'));
-  expect(useSpaceNavStore.getState().screen).toBe('sessions');
-  expect(useSpaceNavStore.getState().sessionsRequest).toMatchObject({
-    kind: 'show-session',
-    sessionId: 's-8',
+test('the Needs you gate still opens the real gate dialog from the v2 band', async () => {
+  const project = projectState({
+    model: {
+      columns: [],
+      unstaged: [],
+      standalone: [],
+      board: [],
+      needsYou: [
+        {
+          kind: 'gate',
+          ticket: GATE_TICKET,
+          sessionId: 's-1',
+          askedAt: GATE.askedAt,
+          process: GATE.process,
+          step: GATE.step,
+          question: GATE.question,
+          item: null,
+        },
+      ],
+    },
+    nextActions: [
+      {
+        kind: 'gate',
+        ticket: GATE_TICKET,
+        sessionId: 's-1',
+        askedAt: GATE.askedAt,
+        process: GATE.process,
+        step: GATE.step,
+        question: GATE.question,
+        item: null,
+        headline: GATE.question,
+      },
+    ],
   });
-});
-
-test('a review with no focus sheet opens the focus issue; nothing pending says so', () => {
-  const { unmount } = render(<NeedsYou entries={[ENTRIES[1] as NeedsYouEntry]} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Open the focus' }));
-  expect(cockpit.urlOpenExternal).toHaveBeenLastCalledWith(ref(3).url);
-  unmount();
-  render(<NeedsYou entries={[]} />);
-  expect(screen.getByText('Nothing needs you.')).toBeTruthy();
-});
-
-test('the gate of Needs you opens the gate dialog of its ticket', async () => {
   render(
     <>
-      <NeedsYou entries={ENTRIES} />
+      <BandNeedsYou
+        panels={[{ id: 'next', kind: 'next-action', source: 'companion' }]}
+        project={project}
+        reportState={reportState()}
+        repositories={null}
+        now={Date.parse(GATE.askedAt)}
+        onOpenFocus={vi.fn()}
+      />
       <SpaceDialogs />
     </>,
   );
-  // The oldest request opens on its own; closing it answers nothing.
-  const dialog = await screen.findByTestId('gate-dialog');
-  fireEvent.keyDown(dialog, { key: 'Escape' });
-  await waitFor(() => expect(screen.queryByTestId('gate-dialog')).toBeNull());
-
-  fireEvent.click(screen.getByRole('button', { name: 'Open the gate dialog' }));
   expect(await screen.findByTestId('gate-dialog')).toBeTruthy();
-  expect(cockpit.spaceDialogAnswerGate).not.toHaveBeenCalled();
+  fireEvent.keyDown(screen.getByTestId('gate-dialog'), { key: 'Escape' });
+  await waitFor(() => expect(screen.queryByTestId('gate-dialog')).toBeNull());
 });
 
 test('Start a session is disabled with the reason while a session cannot start', async () => {
@@ -353,76 +345,3 @@ test('Start a session shows Sessions, opens an AI tab there and starts its guard
   );
   await waitFor(() => expect(useSpaceNavStore.getState().sessionsWithTab).toEqual(['s-1']));
 });
-
-test('a row whose local session is unguarded shows the Unguarded line', () => {
-  render(
-    <AgentsBoard
-      board={[
-        row(1, 'Writing', {
-          local: local({ unguarded: ['--dangerously-skip-permissions'] }),
-        }),
-      ]}
-    />,
-  );
-  expect(screen.getByTestId('agents-row-unguarded-1').textContent).toBe(
-    'Unguarded: started with --dangerously-skip-permissions.',
-  );
-});
-
-test('a noisy Needs you band retains every decision and its keyboard reachable action', () => {
-  const entries: NeedsYouEntry[] = Array.from({ length: 7 }, (_, index) => ({
-    kind: 'review',
-    focus: ref(100 + index),
-    title: `Review ${index + 1}`,
-  }));
-  const open = vi.fn();
-  render(<NeedsYou entries={entries} onOpenFocus={open} />);
-  expect(screen.getAllByRole('listitem')).toHaveLength(7);
-  const last = screen.getAllByRole('button', { name: 'Open the focus' })[6];
-  last.focus();
-  expect(document.activeElement).toBe(last);
-  fireEvent.click(last);
-  expect(open).toHaveBeenCalledWith(ref(106));
-});
-
-test('Agents rows show recorded repository branches and unknown idle honestly', () => {
-  render(
-    <AgentsBoard
-      board={[
-        row(1, 'Writing', {
-          targets: [
-            { kind: 'repository', name: 'companion', branch: 'feature/dashboard' },
-            { kind: 'lore' },
-          ],
-          idleMs: null,
-        }),
-      ]}
-    />,
-  );
-  expect(screen.getByTestId('agents-row-targets-1').textContent).toBe(
-    'Targets recorded on issue: companion · feature/dashboard, the Lore',
-  );
-  expect(screen.getByText('GitHub idle: unknown')).toBeTruthy();
-});
-
-test.each(['Read only', 'Done'] as const)(
-  'an Agents row in %s labels retained targets as issue records',
-  (column) => {
-    render(
-      <AgentsBoard
-        board={[
-          row(7, column, {
-            targets: [
-              { kind: 'repository', name: 'companion', branch: 'finished-work' },
-              { kind: 'lore' },
-            ],
-          }),
-        ]}
-      />,
-    );
-    expect(screen.getByTestId('agents-row-targets-7').textContent).toBe(
-      'Targets recorded on issue: companion · finished-work, the Lore',
-    );
-    expect(screen.getByTestId('agents-row-7').textContent).not.toContain('Writes to:');
-  },
-);

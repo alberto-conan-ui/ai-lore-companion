@@ -33,7 +33,7 @@ The session can be in Read only for the whole process. The process writes only t
 
 This step uses no verb.
 
-The session reads the unit of work, its agreed spec and its existing breakdown. If the unit of work has no agreed spec, the process stops and the session says so. The core contract spec-before-breakdown gives the reason: a unit of work that is being specified has no breakdown until its spec is agreed, and its breakdown and criteria are drawn from that spec.
+The session reads the unit of work, its agreed spec and its existing breakdown. If the unit of work has no agreed spec, the process stops and the session says so. The contract spec-before-breakdown gives the reason: a unit of work that is being specified has no breakdown until its spec is agreed, and its breakdown and criteria are drawn from that spec.
 
 ### break-down
 

@@ -32,12 +32,16 @@ test.describe('the Space window', () => {
       await expect(page.getByTestId('space-name')).toHaveText('e2e-space');
       await expect(page.getByTestId('space-root')).toHaveText(fixture.root);
 
-      // The rail: the four entries, named as they are inside; the window opens on Sessions.
+      // The rail: the four entries, named as they are inside; the window opens on Dashboard.
       const rail = page.getByRole('navigation', { name: 'Space' });
       for (const label of ['Dashboard', 'Sessions', 'Files', 'Search']) {
         await expect(rail.getByRole('button', { name: label })).toBeVisible();
       }
-      await expect(page.getByTestId('space-rail-sessions')).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByTestId('space-rail-dashboard')).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      await page.getByTestId('space-rail-sessions').click();
 
       // `+ AI` is disabled while the guarded start is not ready, and the sentence says why.
       const empty = page.getByTestId('space-sessions-empty');

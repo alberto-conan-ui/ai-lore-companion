@@ -1,140 +1,168 @@
-import type { DashboardModel, FocusCard } from '@ai-lore-companion/core';
+import type { FocusCard } from '@ai-lore-companion/core';
 import { type JSX, useEffect, useState } from 'react';
-import './dashboard.css';
-import { errorAreaStyle, secondaryButtonStyle } from '../styles.js';
-import { AgentsBoard } from './AgentsBoard.js';
-import { DashboardDefinitionRenderer } from './DashboardDefinition.js';
 import { FocusSheet } from './FocusSheet.js';
-import { FocusesByStage } from './FocusesByStage.js';
-import { NeedsYou } from './NeedsYou.js';
-import { Repositories } from './Repositories.js';
 import { StartSession } from './StartSession.js';
 import { stateSentence } from './dashboardText.js';
+import { relativeTime } from './format.js';
 import { useDashboardDefinition } from './useDashboardDefinition.js';
 import { useProjectState } from './useProjectState.js';
+import { useRepositoriesState } from './useRepositoriesState.js';
+import { DashboardContent } from './v2/DashboardContent.js';
 
-/** How often the ages in the state line are written again. */
-const AGE_TICK_MS = 30 * 1000;
-
-/** Project and repository facts beside the PM's separately sourced interpretation. */
-type Props = {
-  /** Whether the Space window opened with `init.justCreated` (M9.10). */
-  justCreated?: boolean;
-};
-
-export function Dashboard({ justCreated }: Props = {}): JSX.Element {
-  const { project, problem, requested } = useProjectState();
+/** The existing state hooks keep out-of-order pushes from replacing newer data. */
+export function Dashboard({ justCreated = false }: { justCreated?: boolean } = {}): JSX.Element {
+  const project = useProjectState();
+  const repositories = useRepositoriesState();
   const dashboard = useDashboardDefinition();
-  const [, setTick] = useState(0);
-  const [openUrl, setOpenUrl] = useState<string | null>(null);
-
-  // The ages are computed at each render; the tick renders again as time passes.
+  const [now, setNow] = useState(Date.now());
+  const [focusUrl, setFocusUrl] = useState<string | null>(null);
+  const [details, setDetails] = useState(false);
   useEffect(() => {
-    const timer = window.setInterval(() => setTick((tick) => tick + 1), AGE_TICK_MS);
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, []);
-
-  const now = Date.now();
-  const model = project?.model ?? null;
-  const openFocus = model === null || openUrl === null ? null : findFocus(model, openUrl);
-  // Keep factual views available while the definition loads or cannot be read.
-  const dashboardReady = dashboard.state?.definition != null;
-  const refreshing = requested || project?.refreshing === true || dashboard.refreshing;
-
-  return (
-    <main className="dashboard" aria-label="Dashboard" data-testid="dashboard">
-      <div className="dashboard-state-row">
-        <p
-          className="dashboard-state-line"
-          aria-live="polite"
-          data-testid="dashboard-state"
-          data-state={project?.state ?? ''}
-          data-refreshing={refreshing ? 'true' : 'false'}
-        >
-          {project === null ? (
-            'Reading the state of the Project from the companion.'
-          ) : (
-            <>
-              <strong data-testid="dashboard-state-name">{project.state}</strong>
-              {refreshing ? ', refreshing' : ''}.{' '}
-              <span data-testid="dashboard-state-sentence">{stateSentence(project, now)}</span>
-            </>
-          )}
-        </p>
-        <button
-          type="button"
-          style={secondaryButtonStyle}
-          onClick={dashboard.refresh}
-          disabled={refreshing}
-          data-testid="dashboard-refresh"
-        >
-          {refreshing ? 'Refreshing' : 'Refresh'}
-        </button>
-      </div>
-      {problem !== null || dashboard.problem !== null ? (
-        <p style={errorAreaStyle} role="alert" data-testid="dashboard-problem">
-          {problem ?? dashboard.problem}
-        </p>
-      ) : null}
-      {!dashboardReady && dashboard.state !== null ? (
-        <DashboardDefinitionRenderer
-          state={dashboard.state}
-          model={model}
-          now={now}
-          onOpenFocus={(focus) => setOpenUrl(focus.issue.url)}
-        />
-      ) : null}
-      {!dashboardReady && model !== null ? (
-        <NeedsYou entries={model.needsYou} onOpenFocus={(focus) => setOpenUrl(focus.url)} />
-      ) : null}
-      {dashboardReady ? (
-        <DashboardDefinitionRenderer
-          state={dashboard.state as NonNullable<typeof dashboard.state>}
-          model={model}
-          now={now}
-          onOpenFocus={(focus) => setOpenUrl(focus.issue.url)}
-        />
-      ) : (
-        <div className="dashboard-body">
-          <div className="dashboard-facts" data-testid="dashboard-facts">
-            <section className="dashboard-section" aria-labelledby="dashboard-focuses-heading">
-              <h2 id="dashboard-focuses-heading" className="dashboard-heading">
-                Where everything stands
-              </h2>
-              {project !== null && model === null ? (
-                <p className="dashboard-empty" data-testid="dashboard-no-model">
-                  No Project has been read from GitHub for this Space yet, so there is nothing to
-                  show.
-                  {refreshing ? ' A refresh is running.' : ' Refresh reads it now.'}
-                </p>
-              ) : null}
-              {model !== null ? (
-                <FocusesByStage model={model} onOpen={(focus) => setOpenUrl(focus.issue.url)} />
-              ) : null}
-            </section>
-            {model !== null ? <AgentsBoard board={model.board} /> : null}
-            <Repositories now={now} />
-          </div>
-          <aside className="dashboard-pm-rail" aria-label="Sessions">
-            <div className="dashboard-start-foot">
-              <StartSession justCreated={justCreated === true} />
-            </div>
-          </aside>
-        </div>
-      )}
-      {dashboardReady ? <StartSession justCreated={justCreated === true} /> : null}
-      {openFocus !== null ? (
-        <FocusSheet focus={openFocus} onClose={() => setOpenUrl(null)} />
-      ) : null}
-    </main>
+  const state = dashboard.state;
+  const model = project.project?.model;
+  const focuses = [
+    ...(model?.columns.flatMap((column) => column.focuses) ?? []),
+    ...(model?.unstaged ?? []),
+  ];
+  const openFocus: FocusCard | null = focuses.find((focus) => focus.issue.url === focusUrl) ?? null;
+  const refreshing =
+    project.requested ||
+    project.project?.refreshing === true ||
+    repositories.requested ||
+    dashboard.refreshing;
+  const refresh = (): void => {
+    project.refresh();
+    repositories.refresh();
+    dashboard.refresh();
+  };
+  const problem = project.problem ?? repositories.problem ?? dashboard.problem;
+  const diagnostic = state?.definition?.diagnostic;
+  const pm = state?.report;
+  const showUpdate = Boolean(
+    pm ||
+      state?.definition?.source === 'packaged-default' ||
+      ['requested', 'updating', 'failed'].includes(state?.refresh.status ?? 'idle'),
   );
-}
+  const boardUrl = project.project?.snapshot?.project.url;
+  const header = (
+    <>
+      <div className="dashboard-v2-title-row">
+        <div>
+          <h1>Dashboard</h1>
+          <p
+            className="dashboard-v2-muted"
+            data-testid="dashboard-state"
+            data-state={project.project?.state ?? ''}
+            data-refreshing={String(refreshing)}
+          >
+            <span data-testid="dashboard-state-name">{project.project?.state ?? 'Reading'}</span>
+            {refreshing ? ' · refreshing' : ''}
+            {project.project?.fetchedAt
+              ? ` · read ${relativeTime(project.project.fetchedAt, now)}`
+              : ''}
+            {showUpdate ? ' · ' : ''}
+            <span
+              className="dashboard-v2-muted"
+              aria-live="polite"
+              data-testid="dashboard-refresh-status"
+              data-refresh-status={state?.refresh.status ?? 'idle'}
+            >
+              {state?.refresh.status === 'requested' || state?.refresh.status === 'updating'
+                ? 'Updating dashboard data.'
+                : state?.refresh.status === 'failed'
+                  ? 'Dashboard update failed.'
+                  : pm
+                    ? `Updated ${relativeTime(pm.receivedAt, now)}${pm.stale ? ' · interpretation may be out of date' : ''}`
+                    : ''}
+              {state?.definition?.source === 'packaged-default'
+                ? ' Using the packaged default dashboard definition.'
+                : ''}
+            </span>
+          </p>
+        </div>
+        <div className="dashboard-v2-header-actions">
+          <button
+            type="button"
+            data-testid="dashboard-refresh"
+            onClick={refresh}
+            disabled={refreshing}
+          >
+            {refreshing ? 'Refreshing' : 'Refresh'}
+          </button>
+          <button
+            type="button"
+            aria-expanded={details}
+            onClick={() => setDetails((value) => !value)}
+          >
+            Details
+          </button>
+          <StartSession justCreated={justCreated} />
+        </div>
+      </div>
 
-/** The focus of a card as the current model has it, so an open sheet follows the pushes. */
-function findFocus(model: DashboardModel, url: string): FocusCard | null {
-  for (const column of model.columns) {
-    const found = column.focuses.find((focus) => focus.issue.url === url);
-    if (found) return found;
-  }
-  return model.unstaged.find((focus) => focus.issue.url === url) ?? null;
+      {problem ? (
+        <p role="alert" data-testid="dashboard-problem">
+          {problem}
+        </p>
+      ) : null}
+      {diagnostic ? (
+        <p role="alert" data-testid="dashboard-definition-diagnostic">
+          {diagnostic.message} Showing a valid fallback definition.
+        </p>
+      ) : null}
+      {state !== null && state.definition === null ? (
+        <p role="alert" data-testid="dashboard-definition-diagnostic">
+          No valid dashboard definition is available.
+        </p>
+      ) : null}
+      {state?.refresh.failure ? (
+        <p role="alert" data-testid="dashboard-refresh-failure">
+          {state.refresh.failure.message} Previous accepted dashboard data is retained.
+        </p>
+      ) : null}
+      {details ? (
+        <div className="dashboard-v2-details" data-testid="dashboard-details">
+          {project.project ? (
+            <p data-testid="dashboard-state-sentence">{stateSentence(project.project, now)}</p>
+          ) : null}
+          {pm ? (
+            <>
+              <p>
+                Accepted {new Date(pm.receivedAt).toLocaleString()} from {pm.sessionId}.
+              </p>
+              <p>{pm.basis ? `Sources named by PM: ${pm.basis}` : 'No sources were named.'}</p>
+            </>
+          ) : (
+            <p>No PM interpretation has been accepted.</p>
+          )}
+          {state?.context?.problems.map((entry, index) => (
+            <p key={`${entry.kind}-${index}`}>{entry.message}</p>
+          ))}
+        </div>
+      ) : null}
+    </>
+  );
+  return (
+    <div className="dashboard-v2-host" data-testid="dashboard">
+      <DashboardContent
+        project={project.project}
+        repositories={repositories.repositories}
+        reportState={state}
+        now={now}
+        header={header}
+        onOpenFocus={(focus) => setFocusUrl(focus.issue.url)}
+        onOpenBoard={
+          boardUrl
+            ? () => {
+                void window.cockpit.urlOpenExternal(boardUrl);
+              }
+            : undefined
+        }
+      />
+      {openFocus ? <FocusSheet focus={openFocus} onClose={() => setFocusUrl(null)} /> : null}
+    </div>
+  );
 }

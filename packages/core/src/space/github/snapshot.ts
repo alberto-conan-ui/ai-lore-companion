@@ -4,10 +4,15 @@
  *
  * The sorting rules (architecture document, section 3.6): an issue labelled
  * `session` is a session issue; an issue with a parent on the same Project is
- * listed under that focus and not by itself; of the rest, an issue is a focus
- * when it has a Stage, a kind label or sub-issues, and a standalone item
- * otherwise. The gh adapter and `FakeGitHub` both sort with
- * `buildProjectSnapshot`, so they cannot differ.
+ * listed under that focus and not by itself; of the rest, the Project's own
+ * `Level` field says whether an issue is a focus or an item.
+ *
+ * The category used to be derived here — a focus when the issue had a Stage,
+ * or a kind label, or sub-issues. No GitHub filter expresses that, so the
+ * Dashboard and GitHub could not show the same set. An issue with no `Level`
+ * is read as an item and named in `problems`, so a hole in the Project is
+ * visible rather than guessed at. The gh adapter and `FakeGitHub` both sort
+ * with `buildProjectSnapshot`, so they cannot differ.
  */
 
 import { isWriteTarget } from '../desk/guards.js';
@@ -16,18 +21,23 @@ import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
   type AgentsColumn,
-  FOCUS_KIND_LABELS,
+  DEFAULT_VIEWS,
+  FOCUS_LEVEL,
   type FieldInfo,
   type FocusItem,
+  KIND_LABELS,
+  LEVEL_FIELD,
   type PlanItem,
   type ProjectInfo,
   type ProjectSnapshot,
+  type ProjectViewInfo,
   type RawProjectIssue,
   SESSION_LABEL,
   STAGE_FIELD,
   STATUS_FIELD,
   type SessionIssue,
 } from './types.js';
+import { viewDrift } from './views.js';
 
 /** What a session issue's body records about the session, in its hidden block. */
 export type SessionBlock = {
@@ -80,6 +90,72 @@ export function parseSpecLink(body: string): string | null {
   return SPEC_BLOCK.exec(body)?.[1] ?? null;
 }
 
+/**
+ * A markdown heading whose text begins with "Acceptance" — "## Acceptance
+ * criteria", "## Acceptance", "### Acceptance Criteria".
+ */
+const CRITERIA_HEADING = /^\s{0,3}#{1,6}\s+acceptance\b/im;
+
+/**
+ * Whether the body names acceptance criteria.
+ *
+ * This is a heuristic and not a reading of the criteria themselves. It answers
+ * one question: could anyone check this work against what its ticket says? A
+ * focus whose criteria live somewhere else — an archive, a brief, a spec a
+ * reader has to go and find — can never be computed as done, and the honest
+ * answer is to say so rather than to leave it out of the reckoning. The Space's
+ * own #1 was exactly that: its eight criteria were in a v0.8 archive, so
+ * nothing could ever have said it was finished.
+ *
+ * It does not say the criteria are met. Whether a criterion is met is written
+ * in a report, by a session, in prose, and nothing here reads that.
+ */
+export function bodyNamesCriteria(body: string): boolean {
+  return CRITERIA_HEADING.test(body);
+}
+
+/** A markdown heading whose text is "Goals" — "## Goals", "### Goals". */
+const GOALS_HEADING = /^\s{0,3}(#{1,6})\s+goals\s*$/im;
+
+/** A numbered or bulleted line, which is how a Goal is written. */
+const GOAL_LINE = /^\s{0,3}(?:[-*+]|\d{1,3}[.)])\s+(\S.*)$/;
+
+/**
+ * The Goals a focus carries: a short list, in plain English, of what it must
+ * deliver.
+ *
+ * Goals are not acceptance criteria. Criteria belong to an item and name their
+ * evidence; Goals belong to the focus and say what it is for. They are what
+ * the Human Lead checks at the gate, so the Done call is computed from these
+ * and not from the criteria heading.
+ *
+ * A Goal is checkable **by reading**, so nothing here says a Goal is met — it
+ * cannot be told by running something, and pretending otherwise would put a
+ * machine's opinion where the Human Lead's belongs. What this gives is the
+ * list to check, and the ability to say when there is none.
+ *
+ * The lines are taken from under the heading, up to the next heading of the
+ * same level or higher. Prose under the heading is skipped: only list items
+ * are Goals, which is how every focus of this Space writes them.
+ */
+export function bodyGoals(body: string): string[] {
+  const match = GOALS_HEADING.exec(body);
+  if (match === null) return [];
+  const level = (match[1] ?? '#').length;
+  const lines = body.slice(match.index + match[0].length).split('\n');
+  const goals: string[] = [];
+  for (const line of lines) {
+    const heading = /^\s{0,3}(#{1,6})\s/.exec(line);
+    if (heading !== null && (heading[1]?.length ?? 7) <= level) break;
+    // A horizontal rule ends the section too: this Space's focuses put one
+    // between the Goals and what follows.
+    if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) break;
+    const item = GOAL_LINE.exec(line);
+    if (item !== null) goals.push((item[1] ?? '').trim());
+  }
+  return goals;
+}
+
 function isAgentsColumn(value: string | undefined): value is AgentsColumn {
   return AGENTS_COLUMNS.some((column) => column === value);
 }
@@ -91,6 +167,7 @@ function planItem(raw: RawProjectIssue): PlanItem {
     state: raw.state,
     status: raw.fieldValues[STATUS_FIELD] ?? null,
     labels: raw.labels,
+    updatedAt: raw.updatedAt,
   };
 }
 
@@ -126,13 +203,23 @@ function focusItem(raw: RawProjectIssue, onProject: Map<string, RawProjectIssue>
   return {
     ...planItem(raw),
     stage: raw.fieldValues[STAGE_FIELD] ?? null,
-    kind: raw.labels.find((label) => FOCUS_KIND_LABELS.includes(label)) ?? null,
+    stageChangedAt: raw.fieldValuesAt[STAGE_FIELD] ?? null,
+    kind: raw.labels.find((label) => KIND_LABELS.includes(label)) ?? null,
     items: raw.subIssues.map((sub) => {
       const own = onProject.get(issueKey(sub.issue.repository, sub.issue.number));
       if (own !== undefined) return planItem(own);
-      return { issue: sub.issue, title: sub.title, state: sub.state, status: null, labels: [] };
+      return {
+        issue: sub.issue,
+        title: sub.title,
+        state: sub.state,
+        status: null,
+        labels: [],
+        updatedAt: null,
+      };
     }),
     specUrl: parseSpecLink(raw.body),
+    criteriaOnTicket: bodyNamesCriteria(raw.body),
+    goals: bodyGoals(raw.body),
   };
 }
 
@@ -141,6 +228,13 @@ export function buildProjectSnapshot(arg: {
   project: ProjectInfo;
   stageField: FieldInfo | null;
   issues: readonly RawProjectIssue[];
+  /**
+   * The Project's views, checked against the default layout. Setup announced
+   * its by-hand grouping steps once and nothing looked again, so this Space's
+   * Project sat ungrouped and mis-filtered from creation until 2026-09-22
+   * without anything saying so. Every read reports it now.
+   */
+  views?: readonly ProjectViewInfo[];
   /** ISO 8601. */
   fetchedAt: string;
 }): ProjectSnapshot {
@@ -151,6 +245,7 @@ export function buildProjectSnapshot(arg: {
   const focuses: FocusItem[] = [];
   const standalone: PlanItem[] = [];
   const sessions: SessionIssue[] = [];
+  const problems: string[] = [];
   for (const raw of arg.issues) {
     if (raw.labels.includes(SESSION_LABEL)) {
       sessions.push(sessionIssue(raw));
@@ -159,13 +254,16 @@ export function buildProjectSnapshot(arg: {
     const underFocus =
       raw.parentNumber !== null && onProject.has(key(raw.issue.repository, raw.parentNumber));
     if (underFocus) continue;
-    const isFocus =
-      raw.fieldValues[STAGE_FIELD] !== undefined ||
-      raw.subIssues.length > 0 ||
-      raw.labels.some((label) => FOCUS_KIND_LABELS.includes(label));
-    if (isFocus) focuses.push(focusItem(raw, onProject));
+    const level = raw.fieldValues[LEVEL_FIELD];
+    if (level === undefined) {
+      problems.push(
+        `${key(raw.issue.repository, raw.issue.number)} has no value for the field ${LEVEL_FIELD}, so it is read as an item.`,
+      );
+    }
+    if (level === FOCUS_LEVEL) focuses.push(focusItem(raw, onProject));
     else standalone.push(planItem(raw));
   }
+  if (arg.views !== undefined) problems.push(...viewDrift(DEFAULT_VIEWS, arg.views));
   const { owner, number, title, url } = arg.project;
   return {
     fetchedAt: arg.fetchedAt,
@@ -174,5 +272,6 @@ export function buildProjectSnapshot(arg: {
     focuses,
     standalone,
     sessions,
+    problems,
   };
 }

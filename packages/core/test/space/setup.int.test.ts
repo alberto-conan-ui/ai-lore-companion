@@ -32,7 +32,12 @@ import {
   execFileRunner,
 } from '../../src/space/exec/index.js';
 import { parseLoreFrontmatter } from '../../src/space/frontmatter/index.js';
-import { AGENTS_COLUMNS, DEFAULT_STAGES, type GitHubPort } from '../../src/space/github/index.js';
+import {
+  AGENTS_COLUMNS,
+  DEFAULT_STAGES,
+  DEFAULT_VIEWS,
+  type GitHubPort,
+} from '../../src/space/github/index.js';
 import { claudeCodeInstallPaths } from '../../src/space/install/index.js';
 import { deskPaths } from '../../src/space/layout/index.js';
 import { readLore } from '../../src/space/lore/index.js';
@@ -246,18 +251,30 @@ test('createSpace ends with a pushed repository, a Project with five stages and 
   // "View 1" is the view GitHub gives every new Project; setup leaves it.
   assert.deepEqual(
     project.views.map((view) => view.name),
-    ['View 1', 'Focuses by Stage', 'Items by focus', 'Agents board'],
+    ['View 1', ...DEFAULT_VIEWS.map((view) => view.name)],
   );
   const labels = state.repositories.find((entry) => entry.info.fullName === `${OWNER}/demo-space`);
   assert.deepEqual(labels?.labels.map((label) => label.name).sort(), [
+    'bug',
     'document',
     'feature',
     'investigation',
+    'maintenance',
     'session',
   ]);
-  // What the API cannot set comes back as steps by hand.
-  assert.equal(report.byHand.length, 3);
-  assert.ok(report.byHand.some((step) => step.includes('"Column by"') && step.includes('Stage')));
+  // What the API cannot set comes back as steps by hand: one per grouping the
+  // default layout names, and none for a view that names no grouping.
+  const groupings = DEFAULT_VIEWS.flatMap((view) =>
+    [view.columnField, view.groupField].filter((field) => field !== undefined),
+  );
+  assert.equal(report.byHand.length, groupings.length);
+  for (const field of groupings) {
+    assert.ok(
+      report.byHand.some((step) => step.includes(`the field "${field}"`)),
+      field,
+    );
+  }
+  assert.ok(report.byHand.some((step) => step.includes('"Column by"')));
   assert.ok(report.byHand.some((step) => step.includes('"Group by"')));
 
   // The manifest, the corpus entry and the mirror.
@@ -309,7 +326,9 @@ test('createSpace ends with a pushed repository, a Project with five stages and 
   assert.ok(again.ok, again.ok ? '' : again.error.message);
   assert.deepEqual(again.value.completed, ['machine-check', 'project-layout']);
   assert.equal(writes(fake, 'createRepository') + writes(fake, 'createProject'), 0);
-  assert.equal(fake.state().projects[0]?.views.length, 4);
+  // GitHub's own "View 1", plus the views of the default layout: a second run
+  // finds each by name and creates none of them twice.
+  assert.equal(fake.state().projects[0]?.views.length, 1 + DEFAULT_VIEWS.length);
   assert.deepEqual(await git.head(space), head);
 });
 
@@ -530,7 +549,7 @@ test('views the host cannot create come back whole as steps by hand', async (t) 
     fake.state().projects[0]?.views.map((view) => view.name),
     ['View 1'],
   );
-  for (const name of ['Focuses by Stage', 'Items by focus', 'Agents board']) {
+  for (const name of ['The plan', 'Backlog', 'Agents board']) {
     assert.ok(
       result.value.byHand.some((step) => step.includes(`add a view named "${name}"`)),
       name,
@@ -538,10 +557,13 @@ test('views the host cannot create come back whole as steps by hand', async (t) 
   }
 });
 
-test('report.viewSettings has three entries, each with a link to its view', async (t) => {
+test('report.viewSettings has one entry per grouping the API cannot set, each with a link to its view', async (t) => {
   const { fake, deps, form } = bench(t);
   const result = await createSpace(form, deps);
   assert.ok(result.ok, result.ok ? '' : result.error.message);
+  // "The plan" needs both a column and a grouping and "Agents board" a
+  // column. "Backlog" is a plain table and needs nothing, so it contributes
+  // no setting.
   assert.equal(result.value.viewSettings.length, 3);
   const project = fake.state().projects[0];
   assert.ok(project !== undefined);
@@ -555,12 +577,12 @@ test('report.viewSettings has three entries, each with a link to its view', asyn
   }
   assert.ok(
     result.value.viewSettings.some(
-      (setting) => setting.view === 'Focuses by Stage' && setting.setting.includes('"Column by"'),
+      (setting) => setting.view === 'The plan' && setting.setting.includes('"Column by"'),
     ),
   );
   assert.ok(
     result.value.viewSettings.some(
-      (setting) => setting.view === 'Items by focus' && setting.setting.includes('"Group by"'),
+      (setting) => setting.view === 'The plan' && setting.setting.includes('"Group by"'),
     ),
   );
 });
@@ -876,7 +898,8 @@ test('create: an answer lost at each GitHub write is repaired by the second run,
     assert.deepEqual(b.fake.state().repositories, state.repositories, 'labels');
     const labels = state.repositories[0]?.labels.map((label) => label.name) ?? [];
     assert.equal(new Set(labels).size, labels.length);
-    assert.equal(labels.length, 4);
+    // Five kinds and the session label.
+    assert.equal(labels.length, 6);
   }
 });
 

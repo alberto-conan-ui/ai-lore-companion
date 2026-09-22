@@ -21,7 +21,7 @@ This is all of the core:
 - The index convention: every folder in the Lore has an [index file](./index-file.md). The convention is core, and the content of an index is not.
 - The core entries of the corpus, one per term that AI-Lore itself defines. This entry is one of them.
 - The five authoring verbs: verb-add, process-add, contract-add, corpus-add and payload-add. Because they cannot be replaced, a Space whose own files are broken can be repaired with them.
-- Five contracts: write-guard, lore-integrity, journal-append-forward, spec-before-breakdown and stage-gate.
+- Four contracts: write-guard, lore-integrity, journal-append-forward and stage-gate.
 
 No process is core, and `lore/processes/core/` is empty. No mirror is core, because a mirror describes one of the Space's own payloads. The core has no plan, because the plan is on the Space's GitHub Project and not in files.
 

@@ -14,14 +14,76 @@ export const SESSION_LABEL = 'session';
 /** The label of a paused focus carried over by migration. */
 export const PAUSED_LABEL = 'paused';
 
-/** The labels that say what kind a focus is (product document: a feature, a document, an investigation). */
-export const FOCUS_KIND_LABELS: readonly string[] = ['feature', 'document', 'investigation'];
+/**
+ * The labels that say what kind of work a root is. The kind belongs to the
+ * root and its children inherit it, so it is not repeated on every item.
+ *
+ * Only the `kind` of a focus is read from this list. **Whether an issue is a
+ * focus comes from {@link LEVEL_FIELD} and never from here.** The two
+ * questions were once decided by this one list, so a root labelled `bug` was
+ * read as an item only because `bug` happened not to be in it — and adding it
+ * would silently have turned every bug into a focus. The name no longer says
+ * `FOCUS_`, so there is nothing here to reach for when the focus test is next
+ * looked at.
+ */
+export const KIND_LABELS: readonly string[] = [
+  'feature',
+  'document',
+  'investigation',
+  'bug',
+  'maintenance',
+];
+
+/**
+ * The single-select field on the Project that records whether an issue is a
+ * focus or an item.
+ *
+ * The companion used to derive this: an issue was a focus when it had a Stage,
+ * **or** a kind label, **or** sub-issues. No GitHub filter can express a
+ * three-way disjunction over a field, a label set and a relation, so the
+ * Dashboard could show eight focuses while every GitHub view showed fifty-eight
+ * mixed cards. The two could not agree by construction. The Project records the
+ * category now, and the companion reads it.
+ */
+export const LEVEL_FIELD = 'Level';
+
+/**
+ * The value of {@link LEVEL_FIELD} that marks a focus. The field's other value
+ * is `Item`, and nothing names it: anything that is not exactly `Focus` is read
+ * as an item, an issue with no value at all included. Such an issue is also
+ * reported in {@link ProjectSnapshot.problems}, so a hole in the Project is
+ * visible rather than guessed at.
+ */
+export const FOCUS_LEVEL = 'Focus';
+
+/** The values of {@link LEVEL_FIELD}, in order: a root with children, and one without. */
+export const LEVEL_VALUES: readonly string[] = [FOCUS_LEVEL, 'Item'];
 
 /** The single-select field whose values are the Dashboard's columns. */
 export const STAGE_FIELD = 'Stage';
 
-/** The values of the Stage field in the default layout, in order. */
-export const DEFAULT_STAGES: readonly string[] = ['Spec', 'Plan', 'Build', 'Review', 'Done'];
+/**
+ * The values of the Stage field in the default layout, in order.
+ *
+ * `Spec` and `Plan` were merged into one value: a unit of work may be broken
+ * down while its spec is still being written, so the two were never separable
+ * in practice. `Backlog` was added in front, for work that is recorded and not
+ * yet on the plan; the default plan view filters it out with `-stage:Backlog`,
+ * which needs the value to exist.
+ *
+ * `ensureSingleSelectField` only adds options it does not find. A Project
+ * created before this change keeps its old values and gains these, so it ends
+ * with both sets. Renaming the old values on an existing Project is a
+ * migration and is not done here: an option carries its id, and recreating one
+ * loses every item's value for the field.
+ */
+export const DEFAULT_STAGES: readonly string[] = [
+  'Backlog',
+  'Spec and Planning',
+  'Build',
+  'Review',
+  'Done',
+];
 
 /** The single-select field that holds the column of a session issue on the Agents board. */
 export const AGENTS_FIELD = 'Agents';
@@ -34,6 +96,71 @@ export type AgentsColumn = (typeof AGENTS_COLUMNS)[number];
 
 /** The built-in single-select field of a Project that holds an item's status. */
 export const STATUS_FIELD = 'Status';
+
+/**
+ * The values of {@link STATUS_FIELD}, in order. `Status` is GitHub's own field
+ * and a new Project arrives with `Todo`, `In Progress` and `Done`; `Paused` is
+ * the one this layout adds, so setup makes sure it exists.
+ *
+ * `Status` is the **activity** axis and answers one question: is a desk on
+ * this now. It used to carry two meanings at once with the lifecycle, and a
+ * focus nobody had touched for a day still read as busy.
+ *
+ * - `Todo` — no session has yet worked it. It never means anything else, so
+ *   nothing ever moves a root back to it.
+ * - `In Progress` — a desk is on it **now**.
+ * - `Paused` — started, unfinished, and no desk on it.
+ * - `Done` — finished. Only the Human Lead sets it: it is the Done call.
+ */
+export const STATUS_VALUES = ['Todo', 'In Progress', 'Paused', 'Done'] as const;
+
+/** One value of the Status field. */
+export type StatusValue = (typeof STATUS_VALUES)[number];
+
+/** The Stage value for work that is recorded and not yet on the plan. */
+const BACKLOG_STAGE = 'Backlog';
+
+/**
+ * The views of the default Project layout that exist from setup.
+ *
+ * The set a Space starts with used to be "Focuses by Stage", "Items by focus"
+ * and "Agents board", the first two filtered on the session label alone. That
+ * filter removes session issues and nothing else, so both views showed every
+ * issue of the Project mixed together — roots, their children and the backlog
+ * — and the one named after Stage did not display Stage. What a reader saw on
+ * GitHub and what the Dashboard computed could not agree.
+ *
+ * They select on `Level` and `Stage` now, which the Project records, so a
+ * filter can name exactly what the Dashboard names.
+ *
+ * A per-focus view is not here: one is created with each focus and removed
+ * with it, so it belongs to the verb that opens a unit of work and not to
+ * setup.
+ *
+ * A view of everything under a parent, grouped by its root, was in this set
+ * and is not any more. The Human Lead removed it from this Space's Project on
+ * 2026-09-22 as pointless: a focus's own view already shows its items, and a
+ * flat list of every child of every root answers no question anyone asks. A
+ * default that a Space deletes on sight is a default that should not ship.
+ */
+export const DEFAULT_VIEWS: readonly ProjectViewSpec[] = [
+  {
+    // Every root, whatever its Level: a focus with a breakdown and a piece of
+    // standalone work are both entry points to the plan.
+    name: 'The plan',
+    layout: 'board',
+    filter: `is:open no:parent-issue -stage:Backlog -label:${SESSION_LABEL}`,
+    columnField: STATUS_FIELD,
+    groupField: LEVEL_FIELD,
+  },
+  { name: 'Backlog', layout: 'table', filter: `is:open stage:${BACKLOG_STAGE}` },
+  {
+    name: 'Agents board',
+    layout: 'board',
+    filter: `label:${SESSION_LABEL}`,
+    columnField: AGENTS_FIELD,
+  },
+];
 
 /** The scope `gh` needs for every Project operation. */
 export const PROJECT_SCOPE = 'project';
@@ -90,15 +217,35 @@ export type ProjectViewSpec = {
    * cannot set it, so `ensureProjectView` reports it as a step done by hand.
    */
   columnField?: string;
+  /**
+   * The field the view groups by: the swimlanes of a board, or the grouping of
+   * a table. The API cannot set this either, and it is reported the same way.
+   */
+  groupField?: string;
 };
 
-/** A view of a Project. */
+/**
+ * A view of a Project.
+ *
+ * `columnField` and `groupField` are what the API can **read** of a view's
+ * grouping, and they are the whole reason a by-hand step can be re-offered
+ * rather than announced once: `groupByFields` and `verticalGroupByFields` are
+ * read-only on `ProjectV2View`, but they are not write-only-absent. Before
+ * this, `ProjectViewInfo` carried neither, so setup emitted its grouping
+ * sentences every time and nothing could tell whether they had been done.
+ *
+ * Either is `null` when the view has no such grouping.
+ */
 export type ProjectViewInfo = {
   id: string;
   number: number;
   name: string;
   layout: ProjectViewLayout;
   filter: string;
+  /** The field giving a board its columns: GraphQL's `verticalGroupByFields`. */
+  columnField: string | null;
+  /** The field the view groups by: GraphQL's `groupByFields`. */
+  groupField: string | null;
 };
 
 /** What `ensureProjectView` gives: the view, and what is left for the Human Lead to do on GitHub. */
@@ -136,17 +283,31 @@ export type PlanItem = {
   /** The value of the built-in Status field, or `null`. */
   status: string | null;
   labels: string[];
+  updatedAt: string | null;
 };
 
 /** A focus: a parent issue with its items (its sub-issues). */
 export type FocusItem = PlanItem & {
   /** The value of the Stage field, or `null`. */
   stage: string | null;
+  stageChangedAt: string | null;
   /** The first of the issue's labels that names a kind, or `null`. */
   kind: string | null;
   items: PlanItem[];
   /** The address of the published spec, read from the issue's body, or `null`. */
   specUrl: string | null;
+  /**
+   * Whether the issue's body names acceptance criteria. A heuristic: it says
+   * that the work could be checked against its own ticket, not that it has
+   * been. Readiness cannot be computed without it.
+   */
+  criteriaOnTicket: boolean;
+  /**
+   * The Goals the focus carries: what it must deliver, in plain English, as
+   * the Human Lead checks them at the gate. Empty when the ticket names none,
+   * and a focus with none is reported as uncomputable rather than skipped.
+   */
+  goals: string[];
 };
 
 /** A session issue: one row of the Agents board. */
@@ -173,6 +334,13 @@ export type ProjectSnapshot = {
   focuses: FocusItem[];
   standalone: PlanItem[];
   sessions: SessionIssue[];
+  /**
+   * One sentence per issue on the Project that could not be read with
+   * confidence — today, an issue with no value for {@link LEVEL_FIELD}. Empty
+   * when the Project is complete. The Dashboard shows these rather than letting
+   * a missing field pass as a deliberate answer.
+   */
+  problems: string[];
 };
 
 /**
@@ -191,10 +359,28 @@ export type RawProjectIssue = {
   parentNumber: number | null;
   /** The values of the item's single-select fields, by field name. */
   fieldValues: Record<string, string>;
+  fieldValuesAt: Record<string, string>;
   /**
    * The sub-issues, in GitHub's order. Their labels and Status are not here:
    * a sub-issue that is on the Project is also one of the issues read, and the
    * snapshot takes both from there, which keeps the reading query cheap.
    */
   subIssues: { issue: IssueRef; title: string; state: 'open' | 'closed' }[];
+};
+
+export type PullRequestChecks = 'passing' | 'failing' | 'pending' | 'none';
+export type PullRequestReview = 'approved' | 'changes-requested' | 'review-required' | 'none';
+export type OpenPullRequest = {
+  repository: string;
+  number: number;
+  title: string;
+  url: string;
+  headBranch: string;
+  baseBranch: string;
+  draft: boolean;
+  createdAt: string;
+  updatedAt: string;
+  checks: PullRequestChecks;
+  review: PullRequestReview;
+  mergeable: 'mergeable' | 'conflicting' | 'unknown';
 };

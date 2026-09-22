@@ -12,8 +12,12 @@ export {
   AGENTS_FIELD,
   type AgentsColumn,
   DEFAULT_STAGES,
+  DEFAULT_VIEWS,
   type EnsuredProjectView,
-  FOCUS_KIND_LABELS,
+  FOCUS_LEVEL,
+  KIND_LABELS,
+  LEVEL_FIELD,
+  LEVEL_VALUES,
   type FieldInfo,
   type FieldOption,
   type FocusItem,
@@ -35,6 +39,9 @@ export {
   STAGE_FIELD,
   STATUS_FIELD,
   type SessionIssue,
+  type OpenPullRequest,
+  type PullRequestChecks,
+  type PullRequestReview,
 } from './types.js';
 export {
   type GhApiResponse,
@@ -68,13 +75,14 @@ export {
 } from './validate.js';
 export {
   type SessionBlock,
+  bodyGoals,
   buildProjectSnapshot,
   formatSessionBlock,
   formatSpecLink,
   parseSessionBlock,
   parseSpecLink,
 } from './snapshot.js';
-export { describeViewByHand, viewStepsByHand } from './views.js';
+export { describeViewByHand, viewDrift, viewStepsByHand } from './views.js';
 export {
   GRAPHQL_ARGS,
   type GhCliOptions,

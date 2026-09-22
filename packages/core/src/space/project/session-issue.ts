@@ -56,6 +56,12 @@ export type SessionIssueContent = {
   targets: readonly WriteTarget[];
   /** The item the session is on, when it named one. */
   item?: IssueRef;
+  /**
+   * Every ticket the session has done substantive work on. `item` is where the
+   * session was pointed; these are where it went, and they are what makes
+   * traceability run both ways.
+   */
+  tickets?: readonly IssueRef[];
   attended: boolean;
   /** The GitHub account of the person, or empty. */
   person: string;
@@ -115,6 +121,11 @@ export function formatSessionIssueBody(content: SessionIssueContent): string {
     '',
     'Write targets:',
     ...targets,
+    '',
+    'Tickets this session touched:',
+    ...(content.tickets === undefined || content.tickets.length === 0
+      ? ['- none yet']
+      : content.tickets.map((ticket) => `- ${ticket.url}`)),
     '',
     formatSessionBlock({
       targets: [...content.targets],
@@ -226,47 +237,101 @@ export type LocalFolder = { path: string; as: string };
 const HANDOVER_HEAD = '## Handover\n\n';
 const HANDOVER_CUT =
   '\n\n(The handover is longer than GitHub accepts in a comment. The rest is in the journal entry on the desk.)';
+const ENTRY_HEAD =
+  "## The session's journal entry\n\n_The write-ahead copy. The record of each piece of work is on its own ticket._\n\n";
 
 /**
- * The comment that carries a handover. Each folder of `local` (the Space, the
- * desk, the home folder) is replaced by its stand-in wherever it appears, the
- * longest first, so that no path of this machine reaches GitHub; a handover
- * longer than GitHub accepts is cut and says so.
+ * The comment that carries a handover to the ticket of the work it concerns.
+ * Each folder of `local` (the Space, the desk, the home folder) is replaced by
+ * its stand-in wherever it appears, the longest first, so that no path of this
+ * machine reaches GitHub; a handover longer than GitHub accepts is cut and
+ * says so.
  */
 export function formatHandoverComment(
   handover: string,
   local: readonly LocalFolder[] = [],
 ): string {
-  let text = handover.trim();
+  return withoutLocalPaths(handover, local, HANDOVER_HEAD);
+}
+
+/**
+ * The comment that carries the whole journal entry to the session's own issue.
+ *
+ * The whole entry, not only its `## Handover` section. "What it learned that a
+ * later session needs" and "Corrections to earlier records" never reached
+ * GitHub, and those are the parts a later session most needs — two of them, in
+ * this Space, had to be learned twice because they sat in a journal on one
+ * desk.
+ */
+export function formatEntryComment(entry: string, local: readonly LocalFolder[] = []): string {
+  return withoutLocalPaths(entry, local, ENTRY_HEAD);
+}
+
+function withoutLocalPaths(body: string, local: readonly LocalFolder[], head: string): string {
+  let text = body.trim();
   const folders = local
     .filter((folder) => folder.path.length > 1)
     .sort((a, b) => b.path.length - a.path.length);
   for (const folder of folders) text = text.split(folder.path).join(folder.as);
-  const room = ISSUE_BODY_MAX - HANDOVER_HEAD.length - 1;
+  const room = ISSUE_BODY_MAX - head.length - 1;
   if (text.length > room) text = `${text.slice(0, room - HANDOVER_CUT.length)}${HANDOVER_CUT}`;
-  return `${HANDOVER_HEAD}${text}\n`;
+  return `${head}${text}\n`;
 }
 
 /**
- * The session closed: the handover, when there is one, is written as a comment
- * on the issue, and the issue moves to Done. The issue stays open. The
- * companion does this, and the verb session-close does not (its card says so),
- * so the handover is written once.
+ * The session closed: the whole journal entry is written as a comment on the
+ * issue, and the issue moves to Done. The issue stays open.
+ *
+ * Two things changed here on 2026-09-22, and both come from one defect.
+ *
+ * **It is the whole entry, not the handover.** Only `## Handover` used to be
+ * published, so what the session learned and what it corrected stayed on one
+ * desk.
+ *
+ * **The handover is no longer written here at all.** It used to be copied onto
+ * the session's issue — a throwaway that the plan model states is "never a
+ * focus or an item" — so the most valuable artefact for continuity landed
+ * where nobody looks for a piece of work. The richest handover of 2026-09-21
+ * is on session issue #57 and not on the ticket where that work continues. The
+ * verb session-close sends a handover to the ticket of each piece of work it
+ * concerns; this issue carries the entry as the write-ahead copy.
+ *
+ * The two do not overlap: different text, in different places, each where it
+ * is looked for.
  */
 export async function closeSessionIssue(
   place: SessionIssuePlace,
   issue: IssueRef,
-  handover: string | null,
+  entry: string | null,
   local: readonly LocalFolder[] = [],
 ): Promise<GitHubResult<void>> {
-  if (handover !== null && handover.trim() !== '') {
+  if (entry !== null && entry.trim() !== '') {
     const commented = await place.github.comment({
       issue,
-      body: formatHandoverComment(handover, local),
+      body: formatEntryComment(entry, local),
     });
     if (!commented.ok) return commented;
   }
   return moveSessionIssue(place, issue, 'Done');
+}
+
+/**
+ * A back-link from a ticket to the session that worked on it.
+ *
+ * Traceability used to run one way, and only for a session that wrote. Given a
+ * ticket, there was no way to learn which sessions had touched it.
+ *
+ * One comment per ticket, not per edit: a comment on every field change would
+ * have put about fifty comments on this Space's tickets in one afternoon and
+ * buried the conversation. The session issue is the index; this says where the
+ * index is.
+ */
+export function formatSessionBackLink(session: {
+  issue: IssueRef;
+  engine: string;
+  startedAt: string;
+}): string {
+  return `Worked on by the ${session.engine} session that started at ${session.startedAt} — ${session.issue.url}\n`;
 }
 
 const BRANCH_EXISTS = /already exists/i;
@@ -294,6 +359,92 @@ export async function developItemBranch(
     return ok({ branch: arg.name, existed: true });
   }
   return made;
+}
+
+export type HandoverParts = {
+  done: string | null;
+  inProgress: string | null;
+  nextAction: string | null;
+  /** The whole `## Handover` body, or the entry's opening lines when it has none. */
+  text: string;
+  /** True when no part was recognised and `text` is the fallback. */
+  fallback: boolean;
+};
+
+type HandoverPart = 'done' | 'inProgress' | 'nextAction';
+
+/** The section labels that a journal handover defines. Text merely styled in bold is content. */
+const HANDOVER_PART_BY_LABEL: Readonly<Record<string, HandoverPart>> = {
+  done: 'done',
+  'what was done': 'done',
+  'in progress': 'inProgress',
+  'what is in progress': 'inProgress',
+  'next action': 'nextAction',
+  'what the next session should do': 'nextAction',
+};
+
+function handoverPartOf(label: string): HandoverPart | null {
+  return HANDOVER_PART_BY_LABEL[label.trim().toLowerCase()] ?? null;
+}
+
+export function parseHandover(entry: string): HandoverParts {
+  const text = readHandover(entry);
+  if (text !== null) {
+    const lines = text.split('\n');
+    let done: string | null = null;
+    let inProgress: string | null = null;
+    let nextAction: string | null = null;
+    
+    let currentPart: HandoverPart | null = null;
+    let currentLines: string[] = [];
+    
+    const savePart = () => {
+      if (currentPart && currentLines.length > 0) {
+        const joined = currentLines.join('\n').trim();
+        if (joined !== '') {
+          if (currentPart === 'done') done = joined;
+          else if (currentPart === 'inProgress') inProgress = joined;
+          else if (currentPart === 'nextAction') nextAction = joined;
+        }
+      }
+      currentLines = [];
+    };
+
+    for (const line of lines) {
+      const isHeading = /^#{1,6}\s+(.*)$/.exec(line);
+      const isBold = /^\*\*([^*]+)\*\*$/.exec(line.trim());
+      const part = handoverPartOf(isHeading ? (isHeading[1] ?? '') : (isBold?.[1] ?? ''));
+      if (part !== null) {
+        savePart();
+        currentPart = part;
+        continue;
+      }
+      // A heading or bold sentence that is not one of the defined labels is part content.
+      if (currentPart) currentLines.push(line);
+    }
+    savePart();
+
+    if (done !== null || inProgress !== null || nextAction !== null) {
+      return { done, inProgress, nextAction, text, fallback: false };
+    }
+  }
+
+  // fallback
+  const lines = entry.split('\n');
+  const fallbackLines: string[] = [];
+  for (const line of lines) {
+    if (/^#{1,6}\s/.test(line)) continue; // skip headings
+    if (line.trim() === '') continue; // skip empty lines
+    fallbackLines.push(line);
+    if (fallbackLines.length >= 3) break;
+  }
+  return {
+    done: null,
+    inProgress: null,
+    nextAction: null,
+    text: text ?? fallbackLines.join('\n'),
+    fallback: true
+  };
 }
 
 /**

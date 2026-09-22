@@ -79,6 +79,7 @@ export type ItemCard = {
   done: boolean;
   /** Labelled `paused` (a paused focus carried over by migration). */
   paused: boolean;
+  updatedAt: string | null;
 };
 
 /** A focus on its Stage column. */
@@ -89,8 +90,14 @@ export type FocusCard = {
   status: string | null;
   labels: string[];
   stage: string | null;
+  stageChangedAt: string | null;
   kind: string | null;
   specUrl: string | null;
+  /** Whether the issue's body names acceptance criteria. See `bodyNamesCriteria`. */
+  criteriaOnTicket: boolean;
+  /** The Goals the focus carries, which are what the Human Lead checks at the gate. */
+  goals: string[];
+  updatedAt: string | null;
   /** The focus's items, session issues left out. */
   items: ItemCard[];
   itemsDone: number;
@@ -114,7 +121,7 @@ export type BoardRow = {
   attended: boolean;
   person: string;
   machine: string;
-  updatedAt: string;
+  updatedAt: string | null;
   /** Milliseconds since `updatedAt`, or `null` when it cannot be read. */
   idleMs: number | null;
   stale: boolean;
@@ -147,6 +154,34 @@ export type NeedsYouEntry =
       item: IssueRef | null;
     }
   | { kind: 'review'; focus: IssueRef; title: string }
+  | {
+      /**
+       * Every item of this focus is closed, so it is waiting for the Human
+       * Lead's Done call. Only the prompt is automated: nothing here moves a
+       * Stage, which stays the Human Lead's explicit yes under stage-gate.
+       */
+      kind: 'ready-for-done';
+      focus: IssueRef;
+      title: string;
+      /**
+       * `false` when the focus's body names no acceptance criteria, so whether
+       * the work is *done* cannot be checked against its own ticket. Such a
+       * focus is reported as uncomputable rather than left out of the
+       * reckoning: silence reads as "not ready", which is how #1 sat finished
+       * and unnoticed for two days.
+       */
+      criteriaOnTicket: boolean;
+      /**
+       * The Goals to check at the gate. Empty when the focus names none, and
+       * such a focus is reported as uncomputable rather than left out: silence
+       * reads as "not ready", which is how #1 sat finished and unnoticed for
+       * two days.
+       *
+       * Nothing here says a Goal is met. A Goal is checkable by reading, and
+       * whether it is met is the Human Lead's to say at the gate.
+       */
+      goals: string[];
+    }
   | {
       kind: 'stale-session';
       issue: IssueRef;
@@ -182,6 +217,7 @@ function itemCard(item: PlanItem): ItemCard {
     labels: item.labels,
     done: isDone(item),
     paused: item.labels.includes(PAUSED_LABEL),
+    updatedAt: item.updatedAt,
   };
 }
 
@@ -194,8 +230,12 @@ function focusCard(focus: FocusItem, gateNote: string | null): FocusCard {
     status: focus.status,
     labels: focus.labels,
     stage: focus.stage,
+    stageChangedAt: focus.stageChangedAt,
     kind: focus.kind,
     specUrl: focus.specUrl,
+    criteriaOnTicket: focus.criteriaOnTicket,
+    goals: focus.goals,
+    updatedAt: focus.updatedAt,
     items,
     itemsDone: items.filter((item) => item.done).length,
     itemsTotal: items.length,
@@ -289,6 +329,28 @@ export function dashboardModel(input: DashboardInput): DashboardModel {
       .flatMap((column) => column.focuses)
       .filter((card) => card.state === 'open')
       .map((card): NeedsYouEntry => ({ kind: 'review', focus: card.issue, title: card.title })),
+    // Every item closed and the focus still open: the work is finished and the
+    // record has not moved. Nothing prompted this before — the only prompt in
+    // the Lore fires inside the `work` process, when a session happens to run
+    // it on the last item, so a focus finished by an earlier session carried
+    // nothing forward. A focus already at Review has its own entry above.
+    ...columns
+      .filter((column) => column.name !== REVIEW_STAGE)
+      .flatMap((column) => column.focuses)
+      .concat(unstaged)
+      .filter(
+        (card) =>
+          card.state === 'open' && card.itemsTotal > 0 && card.itemsDone === card.itemsTotal,
+      )
+      .map(
+        (card): NeedsYouEntry => ({
+          kind: 'ready-for-done',
+          focus: card.issue,
+          title: card.title,
+          criteriaOnTicket: card.criteriaOnTicket,
+          goals: card.goals,
+        }),
+      ),
     ...board
       .filter((row) => row.stale)
       .sort((a, b) => (b.idleMs ?? 0) - (a.idleMs ?? 0))

@@ -16,7 +16,7 @@ import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expect, test } from '@playwright/test';
 import type { ElectronApplication, Page } from 'playwright';
-import { closeSpaceApp, launchSpaceApp } from './space-fixture';
+import { closeSpaceApp, launchSpaceApp, makeSpaceE2eFixture } from './space-fixture';
 
 // The Dashboard, end to end (phase M7.5), against core's FakeGitHub, with detection
 // routing on. Nothing here reaches live GitHub: the app runs with `COCKPIT_E2E=1` and
@@ -83,19 +83,30 @@ function seedDashboardRun(busy = false): DashboardRun {
       "const core = await import('@ai-lore-companion/core');",
       "const testing = await import('@ai-lore-companion/core/testing');",
       "const { join } = await import('node:path');",
+      "const { writeFileSync } = await import('node:fs');",
       `const o = ${JSON.stringify(options)};`,
-      `const space = await testing.makeSpaceFixture({ templateDir: ${JSON.stringify(LORE_TEMPLATE_DIR)}, name: o.name, owner: o.owner, project: 1 });`,
+      `const space = await testing.makeSpaceFixture({ templateDir: ${JSON.stringify(LORE_TEMPLATE_DIR)}, name: o.name, owner: o.owner, project: 1, repositories: ['app'] });`,
       'const must = (result, what) => { if (!result.ok) throw new Error(`${what}: ${result.error.message}`); return result.value; };',
       "const fake = testing.createFakeGitHub({ stateFile: o.stateFile, reposDir: join(o.temp, 'remotes') });",
-      'const repository = `${o.owner}/${o.name}`;',
-      "must(await fake.createRepository({ owner: o.owner, name: o.name, private: true }), 'repository');",
+      'const repository = `${o.owner}/app`;',
+      "must(await fake.createRepository({ owner: o.owner, name: 'app', private: true }), 'repository');",
+      "must(await fake.createRepository({ owner: o.owner, name: o.name, private: true }), 'Space repository');",
       "const project = must(await fake.createProject({ owner: o.owner, title: o.name }), 'project');",
       "const stage = must(await fake.ensureSingleSelectField({ project, name: 'Stage', options: o.stages }), 'Stage');",
-      "must(await fake.ensureSingleSelectField({ project, name: core.AGENTS_FIELD, options: [...core.AGENTS_COLUMNS] }), 'Agents');",
+      "const agentsField = must(await fake.ensureSingleSelectField({ project, name: core.AGENTS_FIELD, options: [...core.AGENTS_COLUMNS] }), 'Agents');",
+      // The Project says which issues are focuses; nothing is derived from the
+      // Stage, the kind label or the sub-issues any more. Without a Level every
+      // issue here reads as an item and the Dashboard renders no focuses.
+      "const level = must(await fake.ensureSingleSelectField({ project, name: core.LEVEL_FIELD, options: [...core.LEVEL_VALUES] }), 'Level');",
+      // Activity is read from Status, not from the Stage, so the fixture has to
+      // say which roots a desk is actually on.
+      "const status = must(await fake.ensureSingleSelectField({ project, name: core.STATUS_FIELD, options: ['Todo', 'In Progress', 'Paused', 'Done'] }), 'Status');",
       'must(await fake.ensureLabels({ repository, labels: [',
       "  { name: core.SESSION_LABEL, color: 'ededed', description: 'A session' },",
       "  { name: 'feature', color: 'ededed', description: 'A feature' },",
+      "  { name: 'paused', color: 'ededed', description: 'A paused focus' },",
       "] }), 'labels');",
+      "must(await fake.ensureLabels({ repository: `${o.owner}/${o.name}`, labels: [{ name: core.SESSION_LABEL, color: 'ededed', description: 'A session' }] }), 'Space session label');",
       'const issue = async (title, body, labels) => must(await fake.createIssue({ repository, title, body, labels }), title);',
       "const focus = await issue('Dashboard focus', core.formatSpecLink('https://example.test/spec'), ['feature']);",
       "const first = await issue('First item', 'Done already.', []);",
@@ -104,12 +115,36 @@ function seedDashboardRun(busy = false): DashboardRun {
       'for (const child of [first, second]) must(await fake.addSubIssue({ parent: focus, child }), `sub-issue ${child.number}`);',
       'const placed = {};',
       'for (const one of [focus, first, second, standalone]) placed[one.number] = must(await fake.addIssueToProject({ project, issue: one }), `project item ${one.number}`);',
+      "must(await fake.setSingleSelect({ project, item: placed[focus.number], field: level, option: core.FOCUS_LEVEL }), 'Level of the focus');",
+      "must(await fake.setSingleSelect({ project, item: placed[standalone.number], field: level, option: 'Item' }), 'Level of the standalone item');",
       "must(await fake.setSingleSelect({ project, item: placed[focus.number], field: stage, option: 'Build' }), 'Stage of the focus');",
+      "must(await fake.setSingleSelect({ project, item: placed[focus.number], field: status, option: 'In Progress' }), 'Status of the focus');",
       "must(await fake.closeIssue({ issue: first }), 'close');",
-      'if (o.busy) for (let index = 1; index <= 6; index += 1) {',
-      "  const review = await issue(`Review fixture ${index}: a decision with enough detail to wrap`, 'Ready for review.', ['feature']);",
-      "  const placed = must(await fake.addIssueToProject({ project, issue: review }), 'place review');",
-      "  must(await fake.setSingleSelect({ project, item: placed, field: stage, option: 'Review' }), 'review stage');",
+      "const addFocus = async (title, stageName, labels = ['feature'], statusName = null) => {",
+      "  const created = await issue(title, core.formatSpecLink('https://example.test/spec'), labels);",
+      '  const projectItem = must(await fake.addIssueToProject({ project, issue: created }), `place ${title}`);',
+      '  must(await fake.setSingleSelect({ project, item: projectItem, field: level, option: core.FOCUS_LEVEL }), `level ${title}`);',
+      '  if (stageName !== null) must(await fake.setSingleSelect({ project, item: projectItem, field: stage, option: stageName }), `stage ${title}`);',
+      '  if (statusName !== null) must(await fake.setSingleSelect({ project, item: projectItem, field: status, option: statusName }), `status ${title}`);',
+      '  return created;',
+      '};',
+      'if (o.busy) {',
+      "  await addFocus('Build fixture 2', 'Build', ['feature'], 'In Progress');",
+      "  await addFocus('Build fixture 3', 'Build', ['feature'], 'In Progress');",
+      '  for (let index = 1; index <= 6; index += 1)',
+      "    await addFocus(`Review fixture ${index}: a decision with enough detail to wrap`, 'Review');",
+      "  await addFocus('Dormant fixture', null, ['feature', 'paused']);",
+      '  for (let index = 1; index <= 4; index += 1)',
+      "    fake.addOpenPullRequest(repository, { repository, number: 100 + index, title: `Open pull request ${index}`, url: `https://github.com/${repository}/pull/${100 + index}`, headBranch: `fixture-${index}`, baseBranch: 'main', draft: index === 4, createdAt: `2026-09-0${index}T00:00:00Z`, updatedAt: `2026-09-1${index}T00:00:00Z`, checks: ['failing', 'passing', 'pending', 'none'][index - 1], review: ['none', 'approved', 'review-required', 'changes-requested'][index - 1], mergeable: 'unknown' });",
+      '  for (let index = 1; index <= 4; index += 1)',
+      '    writeFileSync(join(space.paths.drafts, `review-fixture-${index}.md`), `# Review fixture ${index}\\n\\nReady for a decision.\\n`);',
+      '  for (let index = 1; index <= 6; index += 1)',
+      '    writeFileSync(join(space.paths.journal, `2026-09-1${index}-fixture-session-${index}.md`), `# Handover fixture ${index}\\n\\n## Next action\\nContinue fixture handover ${index}.\\n\\n## What happened\\nPrepared the populated dashboard.\\n\\n## Where things stand\\nThe fixture is ready for review.\\n`);',
+      '  for (let index = 1; index <= 4; index += 1) {',
+      "    const agent = await issue(`Agent fixture ${index}`, 'A Project-only session fixture.', [core.SESSION_LABEL]);",
+      '    const projectItem = must(await fake.addIssueToProject({ project, issue: agent }), `place agent ${index}`);',
+      "    must(await fake.setSingleSelect({ project, item: projectItem, field: agentsField, option: index === 1 ? 'Blocked' : 'Read only' }), `agent ${index}`);",
+      '  }',
       '}',
       'fake.save(o.stateFile);',
       "const lore = must(await core.readLore(space.root), 'lore');",
@@ -146,7 +181,7 @@ function seedDashboardRun(busy = false): DashboardRun {
         "const allowed = args.indexOf('--allowedTools');",
         "const initialPrompt = allowed > 0 ? args[allowed - 1] : '';",
         '(async () => {',
-        `if (initialPrompt.includes('Read get_dashboard_context first, then update the dashboard by calling report_dashboard with complete typed values.')) { const { Client } = await import(${JSON.stringify(pathToFileURL(join(sdkRoot, 'client/index.js')).href)}); const { StreamableHTTPClientTransport } = await import(${JSON.stringify(pathToFileURL(join(sdkRoot, 'client/streamableHttp.js')).href)}); const config = JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')); const server = Object.values(config.mcpServers)[0]; const client = new Client({name:'dashboard-e2e',version:'1.0'}); await client.connect(new StreamableHTTPClientTransport(new URL(server.url), {requestInit:{headers:server.headers}})); const context = await client.callTool({name:'get_dashboard_context',arguments:{}}); const text = context.content?.[0]?.text ?? '{}'; const dashboard = JSON.parse(text); await client.callTool({name:'report_dashboard',arguments:{definitionHash:dashboard.definition?.hash,components:[{id:'position',type:'text',text:'Current position: dashboard fixture report'},{id:'blockers',type:'list',items:[]},{id:'decisions',type:'list',items:[]}],basis:'Deterministic dashboard E2E fixture.'}}); await client.close(); }`,
+        `if (initialPrompt.includes('Read get_dashboard_context first, then update the dashboard by calling report_dashboard with complete typed values.')) { const { Client } = await import(${JSON.stringify(pathToFileURL(join(sdkRoot, 'client/index.js')).href)}); const { StreamableHTTPClientTransport } = await import(${JSON.stringify(pathToFileURL(join(sdkRoot, 'client/streamableHttp.js')).href)}); const config = JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')); const server = Object.values(config.mcpServers)[0]; const client = new Client({name:'dashboard-e2e',version:'1.0'}); await client.connect(new StreamableHTTPClientTransport(new URL(server.url), {requestInit:{headers:server.headers}})); const context = await client.callTool({name:'get_dashboard_context',arguments:{}}); const text = context.content?.[0]?.text ?? '{}'; const dashboard = JSON.parse(text); await client.callTool({name:'report_dashboard',arguments:{definitionHash:dashboard.definition?.hash,components:[{id:'next-action-note',type:'text',text:'The current action unblocks the fixture.'},{id:'dormant-note',type:'text',text:'The dormant work needs review.'}],basis:'Deterministic dashboard E2E fixture.'}}); await client.close(); }`,
         'setInterval(() => undefined, 1000);',
         '})().catch((error) => { console.error(error); process.exit(1); });',
         '',
@@ -252,7 +287,8 @@ async function refresh(page: Page): Promise<void> {
 
 /** Start a session from the Dashboard; Sessions is shown with the session's header. */
 async function startSession(page: Page): Promise<void> {
-  const start = page.getByTestId('dashboard-start-session');
+  await page.getByTestId('space-rail-sessions').click();
+  const start = page.getByRole('button', { name: 'Start a Claude Code session', exact: true });
   await expect(start).toBeEnabled({ timeout: 15_000 });
   await start.click();
   await expect(page.getByTestId('space-rail-sessions')).toHaveAttribute('aria-current', 'page');
@@ -262,6 +298,68 @@ async function startSession(page: Page): Promise<void> {
 }
 
 test.describe('the Dashboard', () => {
+  test('keeps the three v2 bands useful in an empty Space at a narrow viewport', async () => {
+    test.setTimeout(90_000);
+    const fixture = makeSpaceE2eFixture('e2e-dashboard-empty');
+    let app: ElectronApplication | undefined;
+    try {
+      const launched = await launchSpaceApp({ root: fixture.root, userData: fixture.userData });
+      app = launched.app;
+      const page = launched.page;
+      const viewport = { width: 1000, height: 800 };
+      await launched.app.evaluate(({ BrowserWindow }, size) => {
+        BrowserWindow.getAllWindows()[0]?.setContentSize(size.width, size.height);
+      }, viewport);
+      await page.setViewportSize(viewport);
+      await showDashboard(page);
+
+      await expect(page.getByRole('heading', { name: 'NEEDS YOU' })).toBeVisible();
+      await expect(page.getByTestId('dashboard-v2-needs-you')).toContainText('NOTHING NEEDS YOU');
+      await expect(page.getByRole('heading', { name: 'WHAT IS MOVING' })).toBeVisible();
+      await expect(page.getByText('Nothing is in progress.')).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'WHAT IS WAITING' })).toBeVisible();
+      await expect(page.getByText('NO OPEN PULL REQUESTS')).toBeVisible();
+      await expect(page.getByText('No session is running on this desk.')).toBeVisible();
+      await expect(page.getByText('No session issue is open.')).toBeVisible();
+      await expect(page.getByText('No handover has been written in this Space yet.')).toBeVisible();
+      expect(
+        await page
+          .getByTestId('dashboard-v2')
+          .evaluate((node) => node.scrollWidth <= node.clientWidth),
+      ).toBe(true);
+      await page.screenshot({ path: test.info().outputPath('dashboard-empty-1000.png') });
+    } finally {
+      await closeSpaceApp(app);
+      fixture.cleanup();
+    }
+  });
+
+  test('shows a v1-definition fallback diagnostic without replacing the v2 dashboard', async () => {
+    test.setTimeout(90_000);
+    const run = seedDashboardRun();
+    let app: ElectronApplication | undefined;
+    try {
+      writeFileSync(
+        join(run.seeded.root, 'lore', 'corpus', 'dashboard.json'),
+        JSON.stringify({ version: 1, sections: [], components: [] }),
+      );
+      const launched = await launchSpaceApp({
+        root: run.seeded.root,
+        userData: run.userData,
+        env: run.env,
+      });
+      app = launched.app;
+      await showDashboard(launched.page);
+      await expect(launched.page.getByTestId('dashboard-definition-diagnostic')).toContainText(
+        'The Dashboard requires version 2',
+      );
+      await expect(launched.page.getByTestId('dashboard-v2')).toBeVisible();
+    } finally {
+      await closeSpaceApp(app);
+      run.cleanup();
+    }
+  });
+
   test('shows recent Workbench documents and opens exact paths in the shared Files window', async () => {
     test.setTimeout(120_000);
     const run = seedDashboardRun();
@@ -284,12 +382,14 @@ test.describe('the Dashboard', () => {
       writeFileSync(secondPath, '# Beta notes\n\nA second recent proposal.\n');
 
       // The Workbench poll supplies context changes without a PM report request.
-      const documents = page.getByTestId('dashboard-component-review-documents');
-      const first = documents.getByRole('button', { name: 'Alpha review spec', exact: true });
-      const second = documents.getByRole('button', { name: 'Beta notes', exact: true });
+      const documents = page
+        .getByRole('heading', { name: 'drafts awaiting your review' })
+        .locator('xpath=ancestor::article');
+      const first = documents.getByRole('button', { name: /Alpha review spec/ });
+      const second = documents.getByRole('button', { name: /Beta notes/ });
       await expect(first).toBeVisible({ timeout: 15_000 });
       await expect(second).toBeVisible({ timeout: 15_000 });
-      await expect(documents).toContainText(/spec · .* \((creation|modification)\)/);
+      await expect(documents).toContainText('LOCAL WORKBENCH');
 
       // The first click opens the Files window and preserves the exact relative path.
       const filesOpened = app.waitForEvent('window');
@@ -335,12 +435,80 @@ test.describe('the Dashboard', () => {
       await page.setViewportSize({ width: 1440, height: 900 });
       await showDashboard(page);
       await refresh(page);
-      await expect(page.getByTestId('needs-you').getByRole('listitem')).toHaveCount(6);
-      // Even the last entry in a crowded band remains keyboard reachable.
-      const lastReview = page.getByTestId('needs-you-5').getByRole('button');
-      await page.getByTestId('needs-you-4').getByRole('button').focus();
-      await page.keyboard.press('Tab');
-      await expect(lastReview).toBeFocused();
+      await expect(page.getByRole('heading', { name: 'NEEDS YOU' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'WHAT IS MOVING' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'WHAT IS WAITING' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'HANDOVERS' })).toBeVisible();
+      await expect(page.getByText('3 IN PROGRESS · 6 QUEUED')).toBeVisible();
+      await expect(
+        page.getByTestId('dashboard-v2-overflow').filter({ hasText: 'queued' }),
+      ).toContainText('+3 more');
+      const dormant = page.locator('.dashboard-v2-dormant-row');
+      const reviewBacklog = dormant.getByRole('button', { name: /Review backlog/ });
+      await expect(reviewBacklog).toBeVisible();
+      const [dormantBounds, backlogBounds] = await Promise.all([
+        dormant.boundingBox(),
+        reviewBacklog.boundingBox(),
+      ]);
+      expect(dormantBounds).not.toBeNull();
+      expect(backlogBounds).not.toBeNull();
+      expect((backlogBounds?.x ?? 0) + (backlogBounds?.width ?? 0)).toBeLessThanOrEqual(
+        (dormantBounds?.x ?? 0) + (dormantBounds?.width ?? 0),
+      );
+      expect((backlogBounds?.y ?? 0) + (backlogBounds?.height ?? 0)).toBeLessThanOrEqual(
+        (dormantBounds?.y ?? 0) + (dormantBounds?.height ?? 0),
+      );
+      await reviewBacklog.click();
+      const dormantSheet = page.getByTestId('dashboard-dormant-sheet');
+      await expect(dormantSheet).toContainText('UNTRIAGED AND PARKED');
+      await dormantSheet.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(
+        page.getByTestId('dashboard-v2-overflow').filter({ hasText: 'drafts' }),
+      ).toContainText('+1 more drafts');
+      await expect(
+        page.getByTestId('dashboard-v2-overflow').filter({ hasText: 'pull requests' }),
+      ).toContainText('+1 more pull requests');
+      await expect(
+        page.getByTestId('dashboard-v2-overflow').filter({ hasText: 'handovers' }),
+      ).toContainText('+1 more handovers');
+      const agentsPanel = page
+        .getByRole('heading', { name: 'AGENTS BOARD', exact: true })
+        .locator('xpath=ancestor::article');
+      await expect(agentsPanel).toContainText('4 SESSIONS');
+      await expect(agentsPanel.getByRole('button', { name: /\+1 more sessions/ })).toBeVisible();
+      await expect(page.locator('.dashboard-v2-draft-row')).toHaveCount(3);
+      await expect(page.getByRole('link', { name: /Open pull request/ })).toHaveCount(3);
+      await expect(page.getByTestId('handover-card')).toHaveCount(5);
+      const clippedWaitingPanels = Object.fromEntries(
+        await Promise.all(
+          ['PULL REQUESTS', 'LIVE SESSIONS', 'AGENTS BOARD'].map(async (name) => {
+            const panel = page
+              .getByRole('heading', { name, exact: true })
+              .locator('xpath=ancestor::article');
+            return [
+              name,
+              await panel.evaluate((node) => {
+                const bottom = node.getBoundingClientRect().bottom;
+                return [...node.children]
+                  .filter((child) => child.getBoundingClientRect().bottom > bottom + 1)
+                  .map((child) => child.textContent?.trim().slice(0, 80) ?? child.tagName);
+              }),
+            ] as const;
+          }),
+        ),
+      );
+      expect(clippedWaitingPanels).toEqual({
+        'PULL REQUESTS': [],
+        'LIVE SESSIONS': [],
+        'AGENTS BOARD': [],
+      });
+      await page.getByTestId('handover-card').first().click();
+      await expect(page.getByTestId('handover-sheet')).toBeVisible();
+      await page.getByTestId('handover-sheet-close').click();
+      // A focus card is keyboard reachable even when the queued rows are capped.
+      const focus = page.locator('.dashboard-v2-moving-row').first();
+      await expect(focus).toBeVisible();
+      await focus.focus();
       await page.keyboard.press('Enter');
       await expect(page.getByTestId('dashboard-focus-sheet')).toBeVisible();
       await page.getByTestId('dashboard-sheet-close').click();
@@ -390,15 +558,14 @@ test.describe('the Dashboard', () => {
         definitionHash,
         components: [
           {
-            id: 'position',
+            id: 'next-action-note',
             type: 'text',
-            text: 'Current position: one Build focus and six focuses awaiting review.',
+            text: 'Three Build focuses and six focuses awaiting review.',
           },
-          { id: 'blockers', type: 'list', items: [] },
           {
-            id: 'decisions',
-            type: 'list',
-            items: [{ id: 'review', label: 'Review the six completed proposals.' }],
+            id: 'dormant-note',
+            type: 'text',
+            text: 'The unstaged work needs review before the next release.',
           },
         ],
         basis: 'Isolated E2E Project fixture and its local session records.',
@@ -407,16 +574,16 @@ test.describe('the Dashboard', () => {
       for (const viewport of [
         { width: 1440, height: 900 },
         { width: 1000, height: 800 },
+        { width: 800, height: 800 },
       ]) {
         await launched.app.evaluate(({ BrowserWindow }, size) => {
           BrowserWindow.getAllWindows()[0]?.setContentSize(size.width, size.height);
         }, viewport);
         await page.setViewportSize(viewport);
         await page.getByTestId('space-rail-dashboard').click();
-        await expect(page.getByTestId('dashboard-component-position')).toContainText(
-          'Current position',
-        );
-        for (const action of [lastReview, page.getByTestId('dashboard-component-position')]) {
+        const pmLine = page.getByText('Three Build focuses and six focuses awaiting review.');
+        await expect(pmLine).toBeVisible();
+        for (const action of [focus, pmLine]) {
           await action.scrollIntoViewIfNeeded();
           const bounds = await action.boundingBox();
           expect(bounds).not.toBeNull();
@@ -426,15 +593,62 @@ test.describe('the Dashboard', () => {
         }
         await page.getByTestId('dashboard').evaluate((node) => {
           node.scrollTop = 0;
-          const pending = node.querySelector('.dashboard-needs-list');
-          if (pending) pending.scrollTop = 0;
         });
         expect(
           await page
-            .getByTestId('dashboard')
+            .getByTestId('dashboard-v2')
             .evaluate((node) => node.scrollWidth <= node.clientWidth),
         ).toBe(true);
-        await page.screenshot({ path: test.info().outputPath(`dashboard-${viewport.width}.png`) });
+        if (viewport.width === 1440) {
+          const dashboard = page.getByTestId('dashboard-v2');
+          await page.screenshot({ path: test.info().outputPath('dashboard-1440.png') });
+          const geometry = await dashboard.evaluate((node) => {
+            const rect = (element: Element) => {
+              const { x, y, width, height } = element.getBoundingClientRect();
+              return {
+                x,
+                y,
+                width,
+                height,
+                scrollHeight: element.scrollHeight,
+                clientHeight: element.clientHeight,
+              };
+            };
+            return {
+              dashboard: rect(node),
+              bands: [
+                ...node.querySelectorAll(
+                  '.dashboard-v2-band-needs-you, .dashboard-v2-band-moving, .dashboard-v2-waiting-band, .dashboard-v2-handovers',
+                ),
+              ].map(rect),
+            };
+          });
+          await test.info().attach('dashboard-1440-geometry', {
+            body: JSON.stringify(geometry, null, 2),
+            contentType: 'application/json',
+          });
+          expect(
+            geometry.dashboard.scrollHeight <= geometry.dashboard.clientHeight + 1,
+            JSON.stringify(geometry),
+          ).toBe(true);
+          expect(
+            await dashboard.locator('*').evaluateAll((nodes) =>
+              nodes
+                .filter((node) => {
+                  const style = getComputedStyle(node);
+                  return (
+                    (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+                    node.scrollHeight > node.clientHeight + 1
+                  );
+                })
+                .map((node) => node.className),
+            ),
+          ).toEqual([]);
+        } else {
+          await page.screenshot({
+            path: test.info().outputPath(`dashboard-${viewport.width}.png`),
+          });
+        }
         await page.getByTestId('space-rail-sessions').click();
         await expect(page.getByTestId('session-roster')).toBeVisible();
         await expect(page.locator('[data-testid="session-header-mode"]:visible')).toHaveText(
@@ -484,51 +698,29 @@ test.describe('the Dashboard', () => {
       await refresh(page);
       const state = page.getByTestId('dashboard-state');
       await expect(state).toHaveAttribute('data-state', 'fresh');
+      await page.getByRole('button', { name: 'Details', exact: true }).click();
       await expect(page.getByTestId('dashboard-state-sentence')).toContainText(
         'Read from GitHub at',
       );
 
-      // The columns are the Stage options in their order, the sixth included.
-      const columns = page.getByTestId('dashboard-column');
-      await expect(columns).toHaveCount(STAGES.length);
-      const stages = await columns.evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute('data-stage')),
-      );
-      expect(stages).toEqual(STAGES);
-
-      // The focus card at Build: kind, item progress, spec link.
-      const card = page.getByTestId('dashboard-focus-card');
+      // The moving band carries the staged focus and opens the existing focus sheet.
+      const card = page.locator('.dashboard-v2-moving-row').filter({ hasText: 'Dashboard focus' });
       await expect(card).toHaveCount(1);
-      await expect(card).toContainText(`#${run.seeded.focus} Dashboard focus`);
+      await expect(card).toContainText(`#${run.seeded.focus}`);
       await expect(card).toContainText('Build');
-      await expect(card.getByTestId('dashboard-focus-kind')).toHaveText('kind feature');
-      await expect(card.getByTestId('dashboard-focus-items')).toHaveText('1 of 2 items done');
-      await expect(card.getByTestId('dashboard-focus-spec')).toBeVisible();
-
-      // The standalone item is beside the columns and never a focus.
-      const standalone = page.getByTestId('dashboard-standalone-item');
-      await expect(standalone).toHaveCount(1);
-      await expect(standalone).toContainText(`#${run.seeded.standalone} A standalone item`);
-      await expect(page.getByTestId('dashboard-focus-card')).toHaveCount(1);
-
-      // The focus sheet lists the items with their state.
-      await card.getByTestId('dashboard-focus-open').click();
+      await card.click();
       const sheet = page.getByTestId('dashboard-focus-sheet');
       await expect(sheet).toBeVisible();
       await expect(sheet.getByTestId('dashboard-sheet-item')).toHaveCount(2);
       await sheet.getByTestId('dashboard-sheet-close').click();
       await expect(sheet).toHaveCount(0);
 
-      // The Agents board has no session yet.
-      await expect(page.getByTestId('agents-column-writing')).toContainText('No session.');
+      // The Agents board is distinct from live sessions and starts empty.
+      await expect(
+        page.getByRole('heading', { name: 'AGENTS BOARD' }).locator('xpath=ancestor::article'),
+      ).toContainText('No session issue is open.');
 
-      // The start control's readiness block (M10.9 item 6, 3.6): the stand-in Claude Code
-      // is installed and signed in, so it reads the Lore as Claude Code does.
-      await expect(page.getByTestId('dashboard-start-session-lore')).toHaveText(
-        'Reads the Lore as Claude Code does: yes',
-      );
-
-      // Start a session from the Dashboard: the guarded start runs the stand-in engine.
+      // Starting a session is a Sessions action even though the Dashboard opens first.
       await startSession(page);
       let mcpFile: string | null = null;
       await expect
@@ -555,15 +747,19 @@ test.describe('the Dashboard', () => {
       await writingDialog.getByTestId('writing-confirm').click();
       await expect(writingDialog).toHaveCount(0, { timeout: 10_000 });
 
-      // After a refresh the session's issue is on the Agents board, in Writing, named by
-      // its engine and start time, never by the session's id.
+      // After a refresh, both distinct waiting panels reflect the session.
       await page.getByTestId('space-rail-dashboard').click();
-      const writingColumn = page.getByTestId('agents-column-writing');
+      const agents = page
+        .getByRole('heading', { name: 'AGENTS BOARD' })
+        .locator('xpath=ancestor::article');
+      const live = page
+        .getByRole('heading', { name: 'LIVE SESSIONS' })
+        .locator('xpath=ancestor::article');
       await expect
         .poll(
           async () => {
             await refresh(page);
-            return writingColumn.getByRole('listitem').count();
+            return agents.getByText(/WRITING/).count();
           },
           { timeout: 30_000 },
         )
@@ -571,8 +767,9 @@ test.describe('the Dashboard', () => {
       // The catalog merge (M9.4) normalises the stand-in `claude` entry's id
       // and name to the catalog's own (`default.claude` / "Claude Code"),
       // keeping its stored absolute binary path — the stand-in still runs.
-      await expect(writingColumn).toContainText(/The default\.claude session that started at /);
-      await expect(page.getByTestId('agents-board')).not.toContainText(sessionId);
+      await expect(agents).toContainText(/The default\.claude session that started at /);
+      await expect(agents).not.toContainText(sessionId);
+      await expect(live).toContainText('WRITING');
 
       // A gate the session asks is first in Needs you, and its action opens its dialog.
       const gate = callSessionTool(mcp, 'request_gate', {
@@ -585,10 +782,9 @@ test.describe('the Dashboard', () => {
       await expect(gateDialog).toBeVisible({ timeout: 10_000 });
       await gateDialog.getByRole('button', { name: 'Close without answering' }).click();
       await expect(gateDialog).toHaveCount(0);
-      const first = page.getByTestId('needs-you-0');
-      await expect(first).toContainText('Gate');
-      await expect(first).toContainText('Is the end-to-end draft agreed?');
-      await first.getByRole('button', { name: 'Open the gate dialog' }).click();
+      const nextAction = page.locator('.dashboard-v2-next-action');
+      await expect(nextAction).toContainText('Is the end-to-end draft agreed?');
+      await nextAction.getByRole('button', { name: 'Open gate' }).click();
       await expect(gateDialog).toBeVisible();
       await expect(gateDialog.getByTestId('gate-question')).toHaveText(
         'Is the end-to-end draft agreed?',
@@ -631,15 +827,14 @@ test.describe('the Dashboard', () => {
       await showDashboard(page);
       await refresh(page);
       await expect(page.getByTestId('dashboard-state')).toHaveAttribute('data-state', 'offline');
+      await page.getByRole('button', { name: 'Details', exact: true }).click();
       const sentence = page.getByTestId('dashboard-state-sentence');
       await expect(sentence).toContainText('GitHub could not be reached.');
       await expect(sentence).toContainText('The last good read is from');
       await expect(sentence).toContainText(/ago\.$/);
 
-      // The cache is shown as it was.
-      await expect(page.getByTestId('dashboard-column')).toHaveCount(STAGES.length);
-      await expect(page.getByTestId('dashboard-focus-card')).toContainText('Dashboard focus');
-      await expect(page.getByTestId('dashboard-standalone-item')).toHaveCount(1);
+      // The cached Project remains visible through the moving band.
+      await expect(page.locator('.dashboard-v2-moving-row')).toContainText('Dashboard focus');
 
       // Start a session does not need GitHub.
       await startSession(page);
@@ -666,16 +861,23 @@ test.describe('the Dashboard', () => {
       const page = launched.page;
       await showDashboard(page);
 
-      // Tick the one optional parameter (unticked by default) before starting.
-      const param = page.getByTestId('dashboard-start-session-param-0');
+      // Sessions owns starting AI now that the Dashboard opens a Space.
+      await page.getByTestId('space-rail-sessions').click();
+      await page.getByRole('button', { name: 'Options and readiness', exact: true }).click();
+      const param = page.getByTestId('new-ai-param-0');
       await expect(param).toBeVisible({ timeout: 15_000 });
       await expect(param).not.toBeChecked();
       await param.check();
-      await expect(page.getByTestId('dashboard-start-session-unguarded-note')).toContainText(
+      await expect(page.getByTestId('new-ai-unguarded-note')).toContainText(
         'This session will be unguarded',
       );
 
-      await startSession(page);
+      await page
+        .getByRole('button', { name: 'Start an unguarded Claude Code session', exact: true })
+        .click();
+      await expect(page.locator('[data-testid="session-header"]:visible')).toBeVisible({
+        timeout: 15_000,
+      });
       await expect
         .poll(() => sessionMcpFile(run.seeded.sessionsDir) !== null, { timeout: 10_000 })
         .toBe(true);

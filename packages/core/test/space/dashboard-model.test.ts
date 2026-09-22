@@ -29,6 +29,7 @@ const item = (number: number, extra: Partial<PlanItem> = {}): PlanItem => ({
   state: 'open',
   status: null,
   labels: [],
+  updatedAt: NOW,
   ...extra,
 });
 
@@ -39,9 +40,12 @@ const focus = (
 ): FocusItem => ({
   ...item(number),
   stage,
+  stageChangedAt: stage === null ? null : NOW,
   kind: 'feature',
+  goals: [],
   items: [],
   specUrl: null,
+  criteriaOnTicket: true,
   ...extra,
 });
 
@@ -61,6 +65,7 @@ const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Done'];
 
 function snapshot(extra: Partial<ProjectSnapshot> = {}, stages = STAGES): ProjectSnapshot {
   return {
+    problems: [],
     fetchedAt: NOW,
     project: {
       owner: 'octo',
@@ -403,4 +408,98 @@ test('1,000 items are modelled quickly', () => {
   );
   assert.equal(model.board.length, 50);
   assert.ok(elapsed < 200, `took ${elapsed} ms`);
+});
+
+test('focusCard and itemCard carry stageChangedAt and updatedAt, tolerating nulls', () => {
+  const model = dashboardModel({
+    snapshot: snapshot({
+      focuses: [
+        focus(1, 'Build', {
+          stageChangedAt: '2026-09-18T10:00:00.000Z',
+          updatedAt: '2026-09-18T10:05:00.000Z',
+        }),
+        focus(2, null, { stageChangedAt: null, updatedAt: '2026-09-18T10:05:00.000Z' }),
+      ],
+      standalone: [item(3, { updatedAt: '2026-09-18T10:05:00.000Z' })],
+    }),
+    sessions: [],
+    gates: [],
+    now: NOW,
+  });
+
+  const build = model.columns.find((c) => c.name === 'Build')?.focuses[0];
+  assert.equal(build?.stageChangedAt, '2026-09-18T10:00:00.000Z');
+  assert.equal(build?.updatedAt, '2026-09-18T10:05:00.000Z');
+
+  const unstaged = model.unstaged.find((f) => f.issue.number === 2);
+  assert.equal(unstaged?.stageChangedAt, null);
+  assert.equal(unstaged?.updatedAt, '2026-09-18T10:05:00.000Z');
+
+  const standalone = model.standalone.find((i) => i.issue.number === 3);
+  assert.equal(standalone?.updatedAt, '2026-09-18T10:05:00.000Z');
+});
+
+test("Criterion 3: an item's issue changed after its Stage did, explicitly asserting which one the age derives from", () => {
+  const model = dashboardModel({
+    snapshot: snapshot({
+      focuses: [
+        focus(1, 'Build', {
+          stageChangedAt: '2026-09-18T10:00:00.000Z',
+          updatedAt: '2026-09-18T10:05:00.000Z',
+        }),
+      ],
+    }),
+    sessions: [],
+    gates: [],
+    now: NOW,
+  });
+  const build = model.columns.find((c) => c.name === 'Build')?.focuses[0];
+  assert.equal(build?.stageChangedAt, '2026-09-18T10:00:00.000Z');
+  assert.equal(build?.updatedAt, '2026-09-18T10:05:00.000Z');
+});
+
+test('a focus whose items are all closed waits for the Done call', () => {
+  // The defect this answers: #1 sat at Build with every stage finished for two
+  // days, because the only prompt in the Lore fires inside the `work` process
+  // when a session happens to run it on the last item. A focus finished by an
+  // earlier session carried nothing forward.
+  const done = item(2, { state: 'closed' });
+  const finished = focus(1, 'Build', { items: [done], criteriaOnTicket: true });
+  const stillGoing = focus(3, 'Build', { items: [item(4)], criteriaOnTicket: true });
+  const noItems = focus(5, 'Build', { items: [], criteriaOnTicket: true });
+
+  const model = dashboardModel({
+    snapshot: snapshot({ focuses: [finished, stillGoing, noItems] }),
+    sessions: [],
+    gates: [],
+    now: NOW,
+  });
+  const ready = model.needsYou.filter((entry) => entry.kind === 'ready-for-done');
+
+  assert.deepEqual(
+    ready.map((entry) => (entry.kind === 'ready-for-done' ? entry.focus.number : null)),
+    [1],
+    'only the focus whose every item is closed',
+  );
+});
+
+test('a focus with no criteria on its ticket is reported as uncomputable, not left out', () => {
+  // #1's eight criteria were in a v0.8 archive, so nothing could ever have
+  // computed that it was finished. Silence reads as "not ready", which is the
+  // wrong answer; the right one is to say the question cannot be answered.
+  const finished = focus(1, 'Build', {
+    items: [item(2, { state: 'closed' })],
+    criteriaOnTicket: false,
+  });
+
+  const model = dashboardModel({
+    snapshot: snapshot({ focuses: [finished] }),
+    sessions: [],
+    gates: [],
+    now: NOW,
+  });
+  const [entry] = model.needsYou.filter((one) => one.kind === 'ready-for-done');
+
+  assert.ok(entry, 'it appears rather than being silently omitted');
+  assert.equal(entry?.kind === 'ready-for-done' && entry.criteriaOnTicket, false);
 });

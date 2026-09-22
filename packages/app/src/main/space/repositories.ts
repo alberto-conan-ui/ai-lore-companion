@@ -23,11 +23,14 @@
 
 import {
   type CommandRunner,
+  type MirrorCard,
+  type MirrorDrift,
   ROOT_REPOSITORY_TIMEOUT_MS,
   type RepositoriesModel,
   type RepositoriesModelInput,
   type RepositoryRead,
   errorMessage,
+  readLore,
   readRepositoryStateIn,
   repositoriesModel,
 } from '@ai-lore-companion/core';
@@ -39,6 +42,7 @@ import type {
 } from '../../shared/ipc.js';
 import { type SpaceContext, defineSpaceService } from './context.js';
 import type { SpaceLog } from './log.js';
+import { checkPayloadMirrors, uncheckedPayloadMirrors } from './mirror-drift.js';
 import type { RunningRoots } from './roots-service.js';
 import { spaceRoots } from './roots-service.js';
 
@@ -98,6 +102,27 @@ function workTreesOf(roots: readonly RootSummary[]): Map<string, string[]> {
   return groups;
 }
 
+/** The payload fields whose change makes a cached mirror result inapplicable. */
+function mirrorRootsKey(roots: readonly RootSummary[]): string {
+  const payloads = roots.filter(
+    (summary) => summary.root.kind === 'repository' || summary.root.kind === 'publish-area',
+  );
+  return JSON.stringify(
+    payloads.map((summary) => {
+      const { id, kind, name, path, tracking } = summary.root;
+      return [
+        id,
+        kind,
+        name,
+        path,
+        tracking.tracked
+          ? ['tracked', tracking.workTree, tracking.subPath]
+          : ['untracked', tracking.reason],
+      ];
+    }),
+  );
+}
+
 /** Build a repositories service. The timer starts now. */
 export function createSpaceRepositories(options: SpaceRepositoriesOptions): SpaceRepositories {
   const now = options.now ?? (() => new Date());
@@ -111,6 +136,11 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
   let queued: Promise<void> | null = null;
   let disposed = false;
   let attempted = false;
+  const cachedMirrors: Record<string, MirrorDrift> = {};
+  let nextMirrorCheck = 0;
+  let checkedMirrorRoots: string | null = null;
+  /** Changes while a generator runs make that run's result stale. */
+  let mirrorGeneration = 0;
   /** The `version` of the last state given; each state gets the next number. */
   let version = 0;
 
@@ -132,6 +162,7 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
       defaults,
       reads: Object.fromEntries(reads),
       github,
+      mirrors: cachedMirrors,
     };
   };
 
@@ -155,6 +186,20 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
     if (disposed || listeners.size === 0) return;
     const state = current();
     for (const listener of listeners) listener(state);
+  };
+
+  const invalidateMirrors = (list: SpaceRootsList | null): void => {
+    mirrorGeneration += 1;
+    nextMirrorCheck = 0;
+    if (list === null) return;
+    const replacement = uncheckedPayloadMirrors(
+      list.roots.map((summary) => summary.root),
+      now().toISOString(),
+    );
+    for (const id of Object.keys(cachedMirrors)) {
+      if (!(id in replacement)) delete cachedMirrors[id];
+    }
+    Object.assign(cachedMirrors, replacement);
   };
 
   const readWorkTree = async (workTree: string): Promise<RepositoryRead> => {
@@ -183,17 +228,63 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
           });
           return;
         }
+        if (disposed) return;
         problem = null;
         heldRoots = readOf(held);
         const list = options.list(held.value);
         const groups = workTreesOf(list.roots);
-        await Promise.allSettled(
+        const rootKey = mirrorRootsKey(list.roots);
+        const rootsChanged = rootKey !== checkedMirrorRoots;
+        if (rootsChanged) {
+          checkedMirrorRoots = rootKey;
+          invalidateMirrors(list);
+        }
+        const generation = mirrorGeneration;
+
+        const mirrorChecks =
+          rootsChanged || now().getTime() >= nextMirrorCheck
+            ? (async (): Promise<Record<string, MirrorDrift>> => {
+                nextMirrorCheck = now().getTime() + DEFAULT_REPOSITORY_REFRESH_MS * 2;
+                const roots = list.roots.map((summary) => summary.root);
+                const checkedAt = now().toISOString();
+                try {
+                  const loreRoot = list.roots.find((summary) => summary.root.kind === 'lore')?.root;
+                  if (loreRoot?.tracking.tracked) {
+                    const spaceRoot = loreRoot.tracking.workTree;
+                    const loreResult = await readLore(spaceRoot);
+                    if (loreResult.ok) {
+                      const mirrors: MirrorCard[] = loreResult.value.parts.mirrors.map(
+                        (e: { card: MirrorCard }) => e.card,
+                      );
+                      return checkPayloadMirrors({
+                        runner: options.runner,
+                        spaceRoot,
+                        roots,
+                        mirrors,
+                        checkedAt,
+                      });
+                    }
+                  }
+                } catch {
+                  // An unreadable Lore invalidates previous mirror results too.
+                }
+                return uncheckedPayloadMirrors(roots, checkedAt);
+              })()
+            : null;
+
+        const repositoryReads = Promise.allSettled(
           [...groups.entries()].map(async ([workTree, ids]) => {
             const read = await readWorkTree(workTree);
+            if (disposed) return;
             for (const id of ids) reads.set(id, read);
             emit();
           }),
         );
+        const [, mirrors] = await Promise.all([repositoryReads, mirrorChecks]);
+        if (!disposed && mirrors !== null && generation === mirrorGeneration) {
+          Object.assign(cachedMirrors, mirrors);
+          emit();
+        }
       } catch (caught) {
         problem = `The Space's repositories could not be read: ${errorMessage(caught)}.`;
         options.log?.warn('repositories-run-failed', { ...fields, message: errorMessage(caught) });
@@ -243,7 +334,11 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
     readOnce() {
       if (!attempted) void refresh();
     },
-    changed: emit,
+    changed() {
+      if (disposed) return;
+      invalidateMirrors(heldRoots === null ? null : options.list(heldRoots));
+      emit();
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

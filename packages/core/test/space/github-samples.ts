@@ -411,7 +411,12 @@ export const READ_PROJECT_PAGE_1 = {
             id: 'PVTI_1',
             isArchived: false,
             fieldValues: {
-              nodes: [{}, singleSelect('Stage', 'Plan'), singleSelect('Status', 'Todo')],
+              nodes: [
+                {},
+                singleSelect('Level', 'Focus'),
+                singleSelect('Stage', 'Plan'),
+                singleSelect('Status', 'Todo'),
+              ],
             },
             content: issueContent(1, {
               title: 'A focus',

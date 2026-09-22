@@ -4,7 +4,17 @@
  * `import type`. `shared/ipc.ts` already re-exports this file.
  */
 
-import type { DashboardModel, ProjectCacheFailure, ProjectSnapshot } from '@ai-lore-companion/core';
+import type {
+  DashboardModel,
+  DormantAggregate,
+  MovingPartition,
+  NextAction,
+  OpenPullRequest,
+  ProjectCacheFailure,
+  ProjectSnapshot,
+  PullRequestSummary,
+  SpaceStats,
+} from '@ai-lore-companion/core';
 
 /**
  * How current the shown snapshot is.
@@ -41,6 +51,15 @@ export type SpaceProjectState = {
    * gates at the time of the push; `null` when there is no snapshot.
    */
   model: DashboardModel | null;
+  pullRequests: OpenPullRequest[];
+  /** A failed PR read retains the last list without marking a good Project read stale. */
+  pullRequestsFailure: ProjectCacheFailure | null;
+  /** Counts and copy for the waiting PR panel, computed with the Project state. */
+  pullRequestSummary?: PullRequestSummary;
+  nextActions: NextAction[];
+  moving: MovingPartition;
+  dormant: DormantAggregate;
+  stats: SpaceStats;
 };
 
 /** Argument of every channel of the Project: nothing. The Space is the window's. */

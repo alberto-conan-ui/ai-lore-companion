@@ -13,9 +13,12 @@ import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
   DEFAULT_STAGES,
+  FOCUS_LEVEL,
   type GitHubError,
   type GitHubPort,
   type GitHubResult,
+  LEVEL_FIELD,
+  LEVEL_VALUES,
   PROJECT_SCOPE,
   SESSION_LABEL,
   STAGE_FIELD,
@@ -46,6 +49,11 @@ export type ContractSubject = {
     loseNextAnswer(error: GitHubError): void;
     /** Whether the host's API can create Project views. */
     setViewsSupported(on: boolean): void;
+    /** Add an open pull request to the fake. */
+    addOpenPullRequest(
+      repository: string,
+      pull: import('../../src/index.js').OpenPullRequest,
+    ): void;
   };
   cleanup(): void;
 };
@@ -189,12 +197,19 @@ export function gitHubPortContract(
         await port.ensureSingleSelectField({
           project,
           name: STAGE_FIELD,
-          options: ['Done', 'Spec', 'Review'],
+          // One option that exists and two that do not, named from the
+          // layout rather than spelled out, so renaming a stage cannot make
+          // this assert something about options nobody ships.
+          options: [
+            DEFAULT_STAGES[4] as string,
+            DEFAULT_STAGES[0] as string,
+            DEFAULT_STAGES[3] as string,
+          ],
         }),
       );
       assert.deepEqual(
         grown.options.map((option) => option.name),
-        [...three, 'Done', 'Review'],
+        [...three, DEFAULT_STAGES[4], DEFAULT_STAGES[3]],
       );
       assert.deepEqual(grown.options.slice(0, 3), first.options, 'existing options keep their ids');
       const snapshot = unwrap(await port.readProject({ project }));
@@ -495,6 +510,15 @@ export function gitHubPortContract(
           options: [...DEFAULT_STAGES],
         }),
       );
+      // The Project says which issues are focuses; nothing is derived from the
+      // Stage, the kind label or the sub-issues any more.
+      const level = unwrap(
+        await port.ensureSingleSelectField({
+          project,
+          name: LEVEL_FIELD,
+          options: [...LEVEL_VALUES],
+        }),
+      );
       const focus = unwrap(
         await port.createIssue({ repository, title: 'A focus', body: '', labels: ['feature'] }),
       );
@@ -514,8 +538,13 @@ export function gitHubPortContract(
       assert.equal(errorOf(await port.addSubIssue({ parent: alone, child: one })).kind, 'failed');
       const item = unwrap(await port.addIssueToProject({ project, issue: focus }));
       assert.equal(unwrap(await port.addIssueToProject({ project, issue: focus })), item);
-      unwrap(await port.addIssueToProject({ project, issue: one }));
-      unwrap(await port.addIssueToProject({ project, issue: alone }));
+      const oneItem = unwrap(await port.addIssueToProject({ project, issue: one }));
+      unwrap(await port.setSingleSelect({ project, item: oneItem, field: level, option: 'Item' }));
+      const aloneItem = unwrap(await port.addIssueToProject({ project, issue: alone }));
+      unwrap(
+        await port.setSingleSelect({ project, item: aloneItem, field: level, option: 'Item' }),
+      );
+      unwrap(await port.setSingleSelect({ project, item, field: level, option: FOCUS_LEVEL }));
       unwrap(await port.setSingleSelect({ project, item, field: stage, option: 'Build' }));
       unwrap(await port.setSingleSelect({ project, item, field: stage, option: 'Build' }));
       unwrap(await port.closeIssue({ issue: one }));
@@ -539,6 +568,8 @@ export function gitHubPortContract(
         ]),
         [[focus.number, 'A focus', 'Build', 'feature', 'open']],
       );
+      assert.ok(snapshot.focuses[0]?.updatedAt, 'FocusItem must have updatedAt');
+      assert.ok(snapshot.focuses[0]?.stageChangedAt, 'FocusItem must have stageChangedAt');
       assert.deepEqual(
         snapshot.focuses[0]?.items.map((entry) => [entry.issue.number, entry.state]),
         [
@@ -549,6 +580,11 @@ export function gitHubPortContract(
       assert.deepEqual(
         snapshot.standalone.map((entry) => entry.issue.number),
         [alone.number],
+      );
+      assert.ok(snapshot.standalone[0]?.updatedAt, 'PlanItem standalone must have updatedAt');
+      assert.ok(
+        snapshot.focuses[0]?.items[0]?.updatedAt,
+        'PlanItem inside focus must have updatedAt',
       );
       assert.deepEqual(snapshot.sessions, []);
     },
@@ -665,6 +701,59 @@ export function gitHubPortContract(
       assert.deepEqual([snapshot.focuses, snapshot.standalone], [[], []]);
     },
   );
+
+  run('openPullRequests returns the open pull requests', async (subject) => {
+    const { port, control } = subject;
+    const repository = await space(subject);
+    control.addOpenPullRequest(repository, {
+      repository,
+      number: 1,
+      title: 'Pull 1',
+      url: `https://github.com/${repository}/pull/1`,
+      headBranch: 'branch-1',
+      baseBranch: 'main',
+      draft: false,
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-02T00:00:00Z',
+      checks: 'failing',
+      review: 'none',
+      mergeable: 'unknown',
+    });
+    control.addOpenPullRequest(repository, {
+      repository,
+      number: 2,
+      title: 'Pull 2',
+      url: `https://github.com/${repository}/pull/2`,
+      headBranch: 'branch-2',
+      baseBranch: 'main',
+      draft: true,
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-03T00:00:00Z',
+      checks: 'passing',
+      review: 'approved',
+      mergeable: 'mergeable',
+    });
+    const pulls = unwrap(await port.openPullRequests({ repository, limit: 10 }));
+    assert.deepEqual(
+      pulls.map((p) => p.number),
+      [2, 1],
+    );
+    assert.deepEqual(pulls[0]?.review, 'approved');
+    assert.deepEqual(pulls[0]?.checks, 'passing');
+    assert.deepEqual(pulls[1]?.review, 'none');
+    assert.deepEqual(pulls[1]?.checks, 'failing');
+
+    control.setUnreachable(true);
+    const offline = errorOf(await port.openPullRequests({ repository, limit: 10 }));
+    assert.equal(offline.kind, 'unreachable');
+  });
+
+  run('Criterion 5: openPullRequests of an empty repository returns []', async (subject) => {
+    const { port } = subject;
+    const repository = await space(subject);
+    const pulls = unwrap(await port.openPullRequests({ repository, limit: 10 }));
+    assert.deepEqual(pulls, []);
+  });
 
   run(
     'a rate-limited answer says how long to wait, creates nothing, and the next try succeeds',

@@ -68,6 +68,22 @@ export {
 } from './owner.js';
 export { DESK_RECORD_SIZE_LIMIT, DESK_RECORD_VERSION } from './store.js';
 export { addSession, closeSession, getSession, listSessions, updateSession } from './sessions.js';
+export {
+  PENDING_WRITES_FILE,
+  type PendingWriteInput,
+  dropPendingWrite,
+  listPendingWrites,
+  pendingWritesOf,
+  queuePendingWrite,
+  recordPendingAttempt,
+} from './pending-writes.js';
+export {
+  STATUS_WRITES_FILE,
+  listStatusWrites,
+  rememberStatusWrite,
+  rememberStatusOverridden,
+  statusWriteOf,
+} from './status-writes.js';
 export { addClaims, listClaims, releaseClaim, releaseClaims, sameWriteTarget } from './claims.js';
 // Phase M4.2: the steps of a session's life, which apply a decision of `space/claims`.
 export {

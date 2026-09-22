@@ -24,4 +24,4 @@ Before it is agreed, a spec is a [draft](./draft.md) in `workbench/drafts/`. Onc
 
 ## What acts on it
 
-With the default set, the process specify takes an idea to an agreed spec, with the verb spec-draft for the draft and the verb spec-agree for publishing it. The verb plan-break-down draws the breakdown and the criteria from the agreed spec, and the verb work-report reports a changed criterion on the spec's unit of work. The core contract spec-before-breakdown applies to a unit of work that is being specified.
+With the default set, the process specify takes an idea to an agreed spec, with the verb spec-draft for the draft and the verb spec-agree for publishing it. The verb plan-break-down draws the breakdown and the criteria from the agreed spec, and the verb work-report reports a changed criterion on the spec's unit of work. The contract spec-before-breakdown, which ships as a default, applies to a unit of work that is being specified.

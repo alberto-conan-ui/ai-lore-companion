@@ -67,6 +67,7 @@ import { isSpaceBuild, spaceRoutingDecision } from './space/build-marker.js';
 import { type SpaceHost, createSpaceHost } from './space/host.js';
 import { createAppCommandRunner } from './space/live-github.js';
 import { createSpaceLog } from './space/log.js';
+import { createLoginShellRunner } from './space/login-shell-runner.js';
 import { isSpaceRoutingOn } from './space/routing.js';
 import type { SpaceWindowLike } from './space/windows.js';
 import { loadWindowBounds, saveWindowBounds } from './window-state.js';
@@ -1096,6 +1097,13 @@ const spaceLog = createSpaceLog({ logsDir: () => join(userDataDir, 'logs') });
 const appCommands = createAppCommandRunner(process.env);
 
 /**
+ * The same runner, carrying the Human Lead's own `PATH`. A Finder-launched app
+ * inherits a minimal `PATH` that holds no Homebrew prefix, so `gh` is not found
+ * without this (`space/login-shell-runner.ts`).
+ */
+const spaceRunner = createLoginShellRunner(appCommands.runner);
+
+/**
  * The Space host — everything AI-Lore 1.0 adds to main: routing by detection,
  * the 1.0 windows, one Space context per open Space. It gets its windows from
  * {@link createWindow}, so a 1.0 window has the same `webPreferences` (preload,
@@ -1105,8 +1113,8 @@ const appCommands = createAppCommandRunner(process.env);
 const spaceHost: SpaceHost = createSpaceHost({
   spaceRouting: SPACE_ROUTING,
   userDataDir: () => userDataDir,
-  runner: appCommands.runner,
-  git: createGitPort(appCommands.runner),
+  runner: spaceRunner,
+  git: createGitPort(spaceRunner),
   log: spaceLog,
   createWindow,
   pickFolder: async (window) => {
