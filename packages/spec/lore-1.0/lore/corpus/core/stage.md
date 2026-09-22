@@ -13,7 +13,7 @@ A stage says how far a [unit of work](./unit-of-work.md) has got, for example wh
 
 One thing about stages is fixed: moving a unit of work from one stage to the next is a [gate](./gate.md). It needs the Human Lead's explicit yes and is never a session's own decision.
 
-What the stages are called, and how many there are, is not fixed. The Lore of the Space says it. With the default Project layout the stages are Spec, Plan, Build, Review and Done, and each of the three default processes covers one of them: specify covers Spec, plan covers Plan, and work covers Build.
+What the stages are called, how many there are, and which processes cover them is not fixed. The Lore of the Space says it, in the entry for its own Project layout. This card names no stage, because a Space that renames or merges one would then have a core card stating something false about its own plan, with no way to correct it.
 
 ## Where it is kept
 

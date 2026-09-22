@@ -155,6 +155,40 @@ test('the upgrade moves the contract, keeps the Space its own, and the Lore pass
   assert.match(await loreIntegrity(root), /passes the check/, 'lore-integrity passes afterwards');
 });
 
+/**
+ * Criterion 4 of the Space's #116: a correction to a core card has to reach a
+ * Space that already exists, not only a new one.
+ *
+ * Two core cards stated things about the default plan layout that stopped
+ * being true — stage-gate called the stage "the Stage field of a focus", and
+ * stage.md listed five stage values and mapped a process to each. A Space that
+ * merged two of those stages could correct neither: core files are not edited
+ * in place and no Space file may take a core file's name.
+ */
+test('a correction to a core card reaches a Space that already exists', async () => {
+  const root = await aSpaceBeforeTheChange();
+  const card = join(root, 'lore', 'contracts', 'core', 'stage-gate.md');
+  const stale = 'With the default layout of the plan, that is the Stage field of a focus.';
+
+  // The Space carries the old sentence, as a Space created before the
+  // correction does.
+  const before = await readFile(card, 'utf8');
+  await writeFile(card, `${before}\n${stale}\n`);
+  assert.match(await readFile(card, 'utf8'), /Stage field of a focus/);
+
+  const upgraded = await upgradeLoreLayers(root, TEMPLATE);
+  assert.ok(upgraded.ok, 'the upgrade runs');
+
+  const after = await readFile(card, 'utf8');
+  assert.ok(!after.includes(stale), 'the stale sentence is gone');
+  assert.equal(
+    after,
+    await readFile(join(TEMPLATE, 'lore', 'contracts', 'core', 'stage-gate.md'), 'utf8'),
+    'the card is the template\'s, whole',
+  );
+  assert.match(await loreIntegrity(root), /passes the check/);
+});
+
 test('running it again changes nothing', async () => {
   const root = await aSpaceBeforeTheChange();
 

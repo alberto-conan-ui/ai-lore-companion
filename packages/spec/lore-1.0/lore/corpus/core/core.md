@@ -25,6 +25,16 @@ This is all of the core:
 
 No process is core, and `lore/processes/core/` is empty. No mirror is core, because a mirror describes one of the Space's own payloads. The core has no plan, because the plan is on the Space's GitHub Project and not in files.
 
+## What a core card may not say
+
+**A core card does not name anything a Space is entitled to replace.** Not the values of a field, not the name of a field, not the kind of issue something is recorded on, not which process covers what. Those belong to the default layer, where a Space that works differently writes its own file beside them.
+
+The reason is the shape of core itself. A core file cannot be edited in place, and no Space file may take its name — so the ordinary way of correcting a file is unavailable for it. A core card that names a replaceable detail is a sentence that goes stale in every Space that exercises its right to replace that detail, and stays stale until AI-Lore is upgraded, while every session reads it.
+
+Two cards were written this way and had to be corrected: stage-gate said the stage of a unit of work is "the Stage field of a focus", and this card's neighbour stage.md listed five stage values and mapped a process to each. A Space that merged two of those stages then had two core cards stating something false about its own plan, and no way to fix either.
+
+A core card says what is true in every Space, and points at the Space's own Lore for the rest.
+
 ## Where it is kept
 
 `ai_readme.md` is in the Space's folder. The other core files are in the folder `core/` of their part: `lore/corpus/core/`, `lore/verbs/core/`, `lore/contracts/core/` and `lore/processes/core/`.
