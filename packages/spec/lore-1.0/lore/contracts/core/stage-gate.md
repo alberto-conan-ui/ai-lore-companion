@@ -9,11 +9,19 @@ when: null
 
 # stage-gate
 
-This contract guards the pillar Planning. Its target is the plan: more exactly, whatever records the stage of a unit of work on the Space's plan on GitHub. With the default layout of the plan, that is the Stage field of a focus. This contract has only a rule. It has no check script, so nothing refuses a write that breaks it. A session treats it as advice that it can be asked to justify, and not as something that is enforced.
+This contract guards the pillar Planning. Its target is the plan: more exactly, whatever records the stage of a unit of work on the Space's plan on GitHub. What that is, and which unit of work carries it, is the Space's to say — this card does not name a field or a kind of issue, because a core card that describes a layout a Space may replace goes stale where no Space can correct it. This contract has only a rule. It has no check script, so nothing refuses a write that breaks it. A session treats it as advice that it can be asked to justify, and not as something that is enforced.
 
 ## The rule
 
 Moving a unit of work from one stage to the next is the Human Lead's explicit yes. It is never a session's own decision.
+
+### A stage move that records a fact
+
+A stage whose entry condition is a fact anyone can check — every piece of work closed, say — is entered by recording that fact, not by deciding anything. The Human Lead may give the yes for such a move **once, in the Space's Lore, for every unit of work**, instead of one at a time. A Space that does so names the move and says what the fact is.
+
+That is still this rule's explicit yes: given in advance, for a defined move, written where every session reads it. It is not a session deciding, because the session judges nothing beyond whether the fact holds.
+
+This does not reach a move that lets the next stage's work begin, whatever a Space calls it. The reason is under "Why it is core": the Human Lead must not learn of such a move after the work it authorises has started. A standing yes for a move like that would be the Human Lead agreeing in advance to be told afterwards.
 
 ## What a session does
 
