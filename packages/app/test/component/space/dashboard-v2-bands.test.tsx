@@ -144,7 +144,7 @@ describe('dashboard v2 Needs You and Moving bands', () => {
           ] as DashboardPanel[]
         }
         project={projectState({
-          moving: { inProgress, queued: [], dormant, done: [] },
+          moving: { inProgress, queued: [], untriaged: [], dormant, done: [] },
           dormant: { count: 2, paused: 0, oldestAgeMs: null, medianAgeMs: null },
         })}
         reportState={null}

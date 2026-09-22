@@ -33,7 +33,7 @@ function project(overrides: Partial<SpaceProjectState> = {}): SpaceProjectState 
       broken: false,
     },
     nextActions: [],
-    moving: { inProgress: [], queued: [], dormant: [], done: [] },
+    moving: { inProgress: [], queued: [], untriaged: [], dormant: [], done: [] },
     dormant: { count: 0, paused: 0, oldestAgeMs: null, medianAgeMs: null },
     stats: { focusesOpen: 2, itemsOpen: 4, openPullRequests: 0, liveSessions: 0 },
     ...overrides,
