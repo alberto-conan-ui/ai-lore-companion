@@ -14,8 +14,19 @@ import { closeSpaceApp, launchSpaceApp, withSpaceApp } from './space-fixture';
  */
 const STAGES = ['Backlog', 'Spec and Planning', 'Build', 'Review', 'Done'];
 
-/** One per grouping in `DEFAULT_VIEWS`, which the GitHub API cannot set. */
-const VIEW_SETTINGS_BY_HAND = 4;
+/**
+ * One per grouping in `DEFAULT_VIEWS`, which the GitHub API cannot set: "The
+ * plan" needs a column and a grouping, "Agents board" a column, and "Backlog"
+ * is a plain table that needs neither.
+ *
+ * This number went stale within the hour it was written. The view it counted
+ * was removed from the default layout the same day, the unit assertions were
+ * updated and this one was not, and `e2e` is not a required check — so a red
+ * `e2e` was merged into `main` without anything stopping it. That is the cost
+ * of spelling a number out here instead of deriving it, and the reason the
+ * comment now says which views contribute.
+ */
+const VIEW_SETTINGS_BY_HAND = 3;
 
 // Setup, end to end, with detection routing on (phase M3.9): from a launch with no Spaces
 // folder set, through Set up this computer, create a Space through the screens against
