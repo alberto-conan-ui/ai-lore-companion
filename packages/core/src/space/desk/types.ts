@@ -123,6 +123,44 @@ export type SessionPatch = {
   spend?: SessionSpend;
 };
 
+/**
+ * A write to GitHub that did not land, kept in `pending-writes.json` until it
+ * does.
+ *
+ * It states what the Project **should say**, not the call that failed to say
+ * it, so replaying it more than once is safe. The three shapes are everything
+ * the companion writes to the board: a session's issue, a comment, and a move
+ * between columns.
+ */
+export type PendingWrite = {
+  /**
+   * The caller's id for this intent. A second statement of the same intent —
+   * the same session's issue, say — replaces the first rather than queuing
+   * twice, because only the newest is worth replaying.
+   */
+  id: string;
+  /** The session the write belongs to, for reporting what of its work is outstanding. */
+  sessionId: string;
+  /** ISO 8601. */
+  queuedAt: string;
+  /** How often it has been tried, the attempt that queued it included. */
+  attempts: number;
+  /** Why the last attempt failed, as a sentence. */
+  lastError?: string;
+  /** ISO 8601, absent until it has been retried. */
+  lastTriedAt?: string;
+} & (
+  | {
+      /** The session's issue should say this and be in this column. Idempotent: found by its marker. */
+      kind: 'session-issue';
+      column: string;
+      /** `SessionIssueContent`, carried as recorded JSON so the desk file stays plain data. */
+      content: JsonObject;
+    }
+  | { kind: 'comment'; issue: IssueRef; body: string }
+  | { kind: 'move'; issue: IssueRef; column: string }
+);
+
 /** A write target held by a session. Kept in `claims.json`. */
 export type Claim = { sessionId: string; target: WriteTarget; claimedAt: string };
 

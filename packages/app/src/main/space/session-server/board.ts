@@ -26,12 +26,17 @@ import {
   type LocalFolder,
   type ProjectInfo,
   type Result,
+  type JsonObject,
   type SessionIssueContent,
   type SessionIssuePlace,
   type SessionRecord,
   type SpaceManifest,
   type WriteTarget,
   closeSessionIssue,
+  drainPendingWrites,
+  formatEntryComment,
+  listPendingWrites,
+  queuePendingWrite,
   formatSessionBackLink,
   describeGitHubFailure,
   developItemBranch,
@@ -47,8 +52,19 @@ import { spaceDesk } from '../desk-service.js';
 import { spaceGitHub } from '../github-service.js';
 import type { SpaceLog } from '../log.js';
 
-/** What the session reads about the Agents board in an answer. */
-export type BoardNote = { updated: true; issue: string } | { updated: false; message: string };
+/**
+ * What the session reads about the Agents board in an answer.
+ *
+ * `queued` says how many writes are waiting to reach GitHub. A write that did
+ * not land is no longer lost, but the session must not read a queued write as
+ * a landed one, so the note still says the board was not updated and names the
+ * number outstanding. That is what makes the queue visible: the session can
+ * tell the Human Lead what has not arrived, which the Lore's `session-close`
+ * requires it to do.
+ */
+export type BoardNote =
+  | { updated: true; issue: string; queued?: number }
+  | { updated: false; message: string; queued?: number };
 
 export type SessionBoard = {
   /**
@@ -145,6 +161,75 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
     throw new BoardError(describeGitHubFailure(error));
   };
 
+  /**
+   * GitHub did not take a write: queue the intent, then fail as before.
+   *
+   * The session is still told, because it must not read a queued write as a
+   * landed one — but the write is no longer gone. Until this, every board
+   * write was attempted once and lost on failure: on 2026-09-22 a grant
+   * answered "gh was not found on this machine, and nothing will retry it",
+   * and several sessions of this Space lost their handovers that way.
+   *
+   * Queuing must never be what breaks a session, so a desk that cannot be
+   * written is logged and the original GitHub failure is the one reported.
+   */
+  const queueThenFail = (
+    sessionId: string,
+    write: Parameters<typeof queuePendingWrite>[1],
+    error: GitHubError,
+  ): never => {
+    let waiting = 0;
+    try {
+      const desk = openDesk();
+      const queued = queuePendingWrite(desk, write);
+      if (!queued.ok) {
+        log.warn('board-write-not-queued', { session: sessionId, kind: queued.error.kind });
+      } else {
+        log.info('board-write-queued', { session: sessionId, id: write.id });
+      }
+      const pending = listPendingWrites(desk);
+      if (pending.ok) waiting = pending.value.length;
+    } catch (caught) {
+      log.warn('board-write-not-queued', {
+        session: sessionId,
+        reason: caught instanceof Error ? caught.message : String(caught),
+      });
+    }
+    throw new BoardError(
+      waiting === 0
+        ? describeGitHubFailure(error)
+        : `${describeGitHubFailure(error)}. It is queued and will be sent again; ${waiting === 1 ? '1 write is' : `${waiting} writes are`} waiting.`,
+    );
+  };
+
+  /**
+   * Replay what is queued, before doing something new.
+   *
+   * Every board operation is a moment GitHub is known to be reachable, which
+   * makes it the natural moment to try again — so a handover queued while the
+   * network was down arrives when the next session starts, with nothing to
+   * schedule and no daemon to keep alive.
+   */
+  const drain = async (): Promise<void> => {
+    try {
+      const desk = openDesk();
+      const pending = listPendingWrites(desk);
+      if (!pending.ok || pending.value.length === 0) return;
+      const report = await drainPendingWrites(await place(), desk);
+      if (report.ok) {
+        log.info('board-queue-drained', {
+          landed: report.value.landed,
+          waiting: report.value.waiting,
+        });
+      }
+    } catch (caught) {
+      // A drain is best effort: what it could not send is still queued.
+      log.info('board-queue-drain-failed', {
+        reason: caught instanceof Error ? caught.message : String(caught),
+      });
+    }
+  };
+
   const openDesk = (): Desk => {
     const desk = options.desk();
     if (!desk.ok)
@@ -231,18 +316,21 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
   const started: SessionBoard['started'] = (sessionId) =>
     serial(() =>
       run('board-session-started', sessionId, async () => {
+        await drain();
         const desk = openDesk();
         const record = getSession(desk, sessionId);
         if (!record.ok) throw new BoardError(record.error.message);
         if (record.value === null) throw new BoardError('the desk has no record of the session');
         const where = await place();
-        const put = await putSessionIssue(
-          where,
-          await contentOf(record.value, where, {}),
-          'Read only',
-          record.value.issue,
-        );
-        if (!put.ok) return gitHubFailed(put.error);
+        const content = await contentOf(record.value, where, {});
+        const put = await putSessionIssue(where, content, 'Read only', record.value.issue);
+        if (!put.ok) {
+          return queueThenFail(
+            sessionId,
+            { id: `session-issue:${sessionId}`, sessionId, kind: 'session-issue', column: 'Read only', content: content as unknown as JsonObject },
+            put.error,
+          );
+        }
         const recorded = updateSession(desk, sessionId, { issue: put.value.issue });
         if (!recorded.ok) {
           log.warn('board-issue-not-recorded', { session: sessionId, kind: recorded.error.kind });
@@ -392,7 +480,24 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
         const entry = await entryOf(sessionId);
         if (entry === null) log.info('board-no-journal-entry', { session: sessionId });
         const done = await closeSessionIssue(await place(), issue, entry, options.local ?? []);
-        if (!done.ok) gitHubFailed(done.error);
+        if (!done.ok) {
+          // The close is the write this contract exists for: a session that
+          // ends with GitHub unreachable must not lose its entry.
+          if (entry !== null && entry.trim() !== '') {
+            queuePendingWrite(openDesk(), {
+              id: `entry:${sessionId}`,
+              sessionId,
+              kind: 'comment',
+              issue,
+              body: formatEntryComment(entry, options.local ?? []),
+            });
+          }
+          return queueThenFail(
+            sessionId,
+            { id: `done:${sessionId}`, sessionId, kind: 'move', issue, column: 'Done' },
+            done.error,
+          );
+        }
         return issue;
       }),
     );

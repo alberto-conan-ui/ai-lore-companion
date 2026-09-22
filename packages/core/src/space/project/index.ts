@@ -76,3 +76,5 @@ export {
   sessionIssueMarker,
   sessionIssueTitle,
 } from './session-issue.js';
+
+export { type DrainReport, describePendingWrite, drainPendingWrites } from './pending.js';
