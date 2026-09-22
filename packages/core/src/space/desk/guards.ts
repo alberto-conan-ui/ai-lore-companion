@@ -9,6 +9,7 @@
 
 import type {
   PendingWrite,
+  StatusWrite,
   Claim,
   DeskOwner,
   FirstSeen,
@@ -150,6 +151,17 @@ export function isClaim(value: unknown): value is Claim {
     isText(value.sessionId) &&
     isWriteTarget(value.target) &&
     isTimestamp(value.claimedAt)
+  );
+}
+
+/** Whether `value` is a `StatusWrite`. */
+export function isStatusWrite(value: unknown): value is StatusWrite {
+  return (
+    isJsonObject(value) &&
+    isText(value.key) &&
+    isText(value.set) &&
+    isTimestamp(value.setAt) &&
+    isOptional(value.overriddenAt, isTimestamp)
   );
 }
 

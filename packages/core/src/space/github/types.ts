@@ -97,6 +97,26 @@ export type AgentsColumn = (typeof AGENTS_COLUMNS)[number];
 /** The built-in single-select field of a Project that holds an item's status. */
 export const STATUS_FIELD = 'Status';
 
+/**
+ * The values of {@link STATUS_FIELD}, in order. `Status` is GitHub's own field
+ * and a new Project arrives with `Todo`, `In Progress` and `Done`; `Paused` is
+ * the one this layout adds, so setup makes sure it exists.
+ *
+ * `Status` is the **activity** axis and answers one question: is a desk on
+ * this now. It used to carry two meanings at once with the lifecycle, and a
+ * focus nobody had touched for a day still read as busy.
+ *
+ * - `Todo` — no session has yet worked it. It never means anything else, so
+ *   nothing ever moves a root back to it.
+ * - `In Progress` — a desk is on it **now**.
+ * - `Paused` — started, unfinished, and no desk on it.
+ * - `Done` — finished. Only the Human Lead sets it: it is the Done call.
+ */
+export const STATUS_VALUES = ['Todo', 'In Progress', 'Paused', 'Done'] as const;
+
+/** One value of the Status field. */
+export type StatusValue = (typeof STATUS_VALUES)[number];
+
 /** The view of everything that belongs to a root, grouped by the root it belongs to. */
 const UNDER_PARENT_VIEW = 'Under a parent';
 

@@ -116,6 +116,7 @@ test('deskFile names each of the desk records', () => {
     'reviewed-marks.json',
     'session-closes.json',
     'sessions.json',
+    'status-writes.json',
     'unattended-tags.json',
   ]);
 });
