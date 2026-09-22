@@ -12,7 +12,12 @@ yarn-error.log*
 # Electron build artifacts
 out/
 dist/
-dist-test/
+# Any test output directory, not only the default one. The test scripts take
+# it from AI_LORE_CORE_TEST_OUT / AI_LORE_APP_TEST_OUT so that two suites can
+# run at once without each `rm -rf`-ing the other's — and with the old rule,
+# every value but the default left several thousand build artefacts untracked,
+# which `git add -A` then staged. It happened twice in one session.
+dist-test*
 # Test output folders chosen with AI_LORE_CORE_TEST_OUT and AI_LORE_APP_TEST_OUT
 .test-runs/
 

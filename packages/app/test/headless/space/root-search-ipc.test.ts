@@ -107,6 +107,24 @@ function must(result: SpaceRootSearchResult): RootSearchGroup {
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * How long to wait for a filesystem watcher's event.
+ *
+ * This was fifty attempts a hundred milliseconds apart — a five-second budget
+ * — and it was the flakiest thing in the suite. A watcher's event is not slow
+ * because anything is wrong; it is slow because the machine is busy, and the
+ * machine is busiest when two test suites run at once, which is exactly when
+ * these tests failed. Different tests failed on different runs, which is the
+ * signature of a budget rather than a bug.
+ *
+ * Thirty seconds is not a claim that it takes thirty seconds. It is a budget
+ * chosen so that a failure means the event never arrived, not that the
+ * machine was loaded. The tests still pass in well under a second when
+ * nothing else is running, because the loop returns the moment the check
+ * holds.
+ */
+const WATCHER_BUDGET_MS = 30_000;
+
 /** Search until `check` holds, for the watcher's events to arrive. */
 async function searchUntil(
   o: Opened,
@@ -114,12 +132,16 @@ async function searchUntil(
   check: (group: RootSearchGroup) => boolean,
 ): Promise<RootSearchGroup> {
   let last: RootSearchGroup | null = null;
-  for (let attempt = 0; attempt < 50; attempt += 1) {
+  const until = Date.now() + WATCHER_BUDGET_MS;
+  for (;;) {
     last = must(await search(o, arg));
     if (check(last)) return last;
+    if (Date.now() > until) break;
     await delay(100);
   }
-  assert.fail(`the condition did not hold; last names: ${JSON.stringify(last?.names.hits)}`);
+  assert.fail(
+    `the condition did not hold within ${WATCHER_BUDGET_MS}ms; last names: ${JSON.stringify(last?.names.hits)}`,
+  );
 }
 
 test('the channels are in the Files window fragment', () => {

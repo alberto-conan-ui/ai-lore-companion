@@ -120,7 +120,18 @@ function must<T>(result: SpaceRootsResult<T>): T {
   return result.value;
 }
 
-async function waitFor<T>(what: string, probe: () => T | undefined, ms = 8000): Promise<T> {
+/**
+ * How long to wait for a watcher's event. See the note in
+ * `root-search-ipc.test.ts`: the old budget failed when the machine was busy,
+ * not when anything was wrong.
+ */
+const WATCHER_BUDGET_MS = 30_000;
+
+async function waitFor<T>(
+  what: string,
+  probe: () => T | undefined,
+  ms = WATCHER_BUDGET_MS,
+): Promise<T> {
   const until = Date.now() + ms;
   for (;;) {
     const found = probe();
