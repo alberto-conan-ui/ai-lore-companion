@@ -195,6 +195,11 @@ export function createPtyService(opts: { cwd: string } & PtyServiceCallbacks): P
         if (!stopped) scheduleNext();
       });
     }, POLL_MS);
+    // A poll that nobody stopped must not be the only thing keeping the
+    // process alive. Without this, a test that threw before its cleanup left
+    // the timer rescheduling for ever: one wrong assertion in
+    // `pty-command.test.ts` ran a CI job for six hours instead of failing it.
+    pollTimer.unref?.();
   }
   scheduleNext();
 

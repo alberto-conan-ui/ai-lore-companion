@@ -12,6 +12,12 @@ jobs:
   # test rebuilds better-sqlite3 against node as needed).
   fast:
     runs-on: ubuntu-latest
+    # A required check with no timeout is a merge queue with no bottom. This
+    # job ran for six hours before a person cancelled it, because one stale
+    # assertion left a self-rescheduling timer alive and the test runner never
+    # exited. `fast` takes about four minutes; fifteen is generous and still
+    # fails in a tenth of the time it took to notice.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,6 +34,9 @@ jobs:
   # Electron + xvfb setup may need adjustment on its first run.
   e2e:
     runs-on: ubuntu-latest
+    # Heavier than `fast` — a full Electron build under a virtual display —
+    # but it has never taken more than about six minutes.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
