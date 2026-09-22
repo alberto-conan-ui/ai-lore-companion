@@ -46,7 +46,7 @@ import type { DashboardReportService } from '../dashboard-report.js';
 import { spaceDesk } from '../desk-service.js';
 import { spaceProjectRefresh } from '../project-refresh.js';
 import { spaceRepositories } from '../repositories.js';
-import { boardWithin, sessionBoard } from '../session-server/board.js';
+import { type BoardNote, boardWithin, sessionBoard } from '../session-server/board.js';
 import { BOARD_UPDATE_WAIT_MS } from '../session-server/constants.js';
 import { sessionCloseCommits, sessionServer } from '../session-server/index.js';
 import { loreTemplateDir } from '../template-dir.js';
@@ -473,6 +473,8 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
         'The transient PM refresh session ended before it reported dashboard data.',
       );
     }
+    /** What the Agents board answered for the handover, and `null` when the session has no issue. */
+    let handover: BoardNote | null = null;
     const refusals = await readNotedRefusals(entry.paths, MAX_LOGGED_REFUSALS);
     for (const refusal of refusals) {
       context.log.info('write-guard-refused', {
@@ -501,8 +503,11 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
           kind: ended.error.kind,
         });
       }
-      // The session's issue, when it has one, takes the handover and moves to Done. The board logs a failure.
-      await boardWithin(board.closed(sessionId), BOARD_UPDATE_WAIT_MS);
+      // The session's issue, when it has one, takes the handover and moves to Done.
+      // The note says whether it landed: a handover that did not reach GitHub is the
+      // session's whole record of itself, so the reason is carried to `session-ended`
+      // below rather than left in the board's own log line (the Space's issue #58).
+      handover = await boardWithin(board.closed(sessionId), BOARD_UPDATE_WAIT_MS);
     } else {
       context.log.warn('session-end-not-recorded', {
         space: context.key,
@@ -513,7 +518,15 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
     await removeSessionFiles(context.desk.sessions, sessionId);
     live.delete(sessionId);
     if (entry.purpose === 'pm' && pmSessionId === sessionId) pmSessionId = null;
-    context.log.info('session-ended', { space: context.key, session: sessionId });
+    context.log.info('session-ended', {
+      space: context.key,
+      session: sessionId,
+      ...(handover === null
+        ? {}
+        : handover.updated
+          ? { handover: handover.issue }
+          : { handoverFailed: handover.message }),
+    });
   }
 
   function ended(sessionId: string): Promise<void> {
