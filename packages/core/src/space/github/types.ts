@@ -117,12 +117,6 @@ export const STATUS_VALUES = ['Todo', 'In Progress', 'Paused', 'Done'] as const;
 /** One value of the Status field. */
 export type StatusValue = (typeof STATUS_VALUES)[number];
 
-/** The view of everything that belongs to a root, grouped by the root it belongs to. */
-const UNDER_PARENT_VIEW = 'Under a parent';
-
-/** The Project's built-in field naming an issue's parent, which the table groups by. */
-const PARENT_FIELD = 'Parent issue';
-
 /** The Stage value for work that is recorded and not yet on the plan. */
 const BACKLOG_STAGE = 'Backlog';
 
@@ -142,6 +136,12 @@ const BACKLOG_STAGE = 'Backlog';
  * A per-focus view is not here: one is created with each focus and removed
  * with it, so it belongs to the verb that opens a unit of work and not to
  * setup.
+ *
+ * A view of everything under a parent, grouped by its root, was in this set
+ * and is not any more. The Human Lead removed it from this Space's Project on
+ * 2026-09-22 as pointless: a focus's own view already shows its items, and a
+ * flat list of every child of every root answers no question anyone asks. A
+ * default that a Space deletes on sight is a default that should not ship.
  */
 export const DEFAULT_VIEWS: readonly ProjectViewSpec[] = [
   {
@@ -152,12 +152,6 @@ export const DEFAULT_VIEWS: readonly ProjectViewSpec[] = [
     filter: `is:open no:parent-issue -stage:Backlog -label:${SESSION_LABEL}`,
     columnField: STATUS_FIELD,
     groupField: LEVEL_FIELD,
-  },
-  {
-    name: UNDER_PARENT_VIEW,
-    layout: 'table',
-    filter: '-no:parent-issue',
-    groupField: PARENT_FIELD,
   },
   { name: 'Backlog', layout: 'table', filter: `is:open stage:${BACKLOG_STAGE}` },
   {
