@@ -56,6 +56,13 @@ export const MAX_PENDING_TICKETS_PER_SESSION = 4;
 /** The tickets kept for one session, answered ones included. */
 export const MAX_TICKETS_PER_SESSION = 32;
 
+/**
+ * The tickets of work one call of `tickets_touched` may name. "Ticket" here is
+ * an issue of the plan, not a dialog ticket — the two are different things
+ * that share a word, and MAX_TICKETS_PER_SESSION above counts the other one.
+ */
+export const MAX_WORK_TICKETS_PER_CALL = 32;
+
 /** The `await_answer` calls of one session that may wait at the same time; a further one answers pending at once. */
 export const MAX_WAITERS_PER_SESSION = 4;
 

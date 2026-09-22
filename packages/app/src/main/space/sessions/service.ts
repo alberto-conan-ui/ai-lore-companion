@@ -688,6 +688,19 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
         },
       };
     }
+    // The session's issue is created now, in Read only, and not when the
+    // session first writes. The Project is writable in Read only, so a reading
+    // session can restructure the whole plan and leave nothing on the board to
+    // say who did it — one created 38 issues and closed 37 that way, and its
+    // issue had to be written by hand afterwards. The board is not waited for:
+    // GitHub being slow or unreachable must not stop a session starting.
+    void boardWithin(board.started(sessionId), BOARD_UPDATE_WAIT_MS).catch((caught: unknown) => {
+      context.log.warn('board-session-started-failed', {
+        space: context.key,
+        session: sessionId,
+        reason: caught instanceof Error ? caught.message : String(caught),
+      });
+    });
     const undoRecord = () => {
       const undone = endSession(opened.value, sessionId);
       if (!undone.ok)

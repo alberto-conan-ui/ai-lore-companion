@@ -205,7 +205,7 @@ test('a session that writes has its issue on the board, with its targets, and en
   assert.equal(on[0]?.column, 'Writing');
   assert.deepEqual(on[0]?.targets, [APP]);
 
-  // The session closes: the journal entry's handover goes on the issue and the issue moves to Done.
+  // The session closes: the whole journal entry goes on the issue and the issue moves to Done.
   const journal = context.paths.journal;
   mkdirSync(journal, { recursive: true });
   const entry = join(journal, '2026-09-18-1200-board-s-board.md');
@@ -223,12 +223,124 @@ test('a session that writes has its issue on the board, with its targets, and en
   on = await rows();
   assert.equal(on[0]?.column, 'Done');
   const sessionIssue = fake.state().issues.find((i) => i.ref.number === on[0]?.issue.number);
-  // The handover section only, with the Space folder replaced; the issue stays open.
-  assert.equal(
-    sessionIssue?.comments.at(-1),
-    '## Handover\n\nDone: the item.\nNext: review <Space>/lore/a.md.\n',
+  // The whole entry, with the Space folder replaced; the issue stays open. It
+  // used to be the `## Handover` section alone, so what a session learned and
+  // what it corrected never left the desk. The handover now goes to the ticket
+  // of the work it concerns, which is the verb's job, so it is not repeated
+  // here under its own heading.
+  const comment = sessionIssue?.comments.at(-1) ?? '';
+  assert.match(comment, /^## The session's journal entry\n/);
+  assert.ok(comment.includes('# Board'), 'the whole entry, not only the handover');
+  assert.ok(comment.includes('Did it.'));
+  assert.ok(
+    comment.includes('Next: review <Space>/lore/a.md.'),
+    'no folder of this machine reaches GitHub',
   );
+  assert.ok(!comment.includes(space.root), 'no folder of this machine reaches GitHub');
   assert.equal(sessionIssue?.state, 'open');
+});
+
+/**
+ * A session in Read only can restructure the whole plan — one created 38
+ * issues and closed 37 that way, with nothing on the board to say who had done
+ * it, and its issue had to be written by hand afterwards. So the issue exists
+ * from the start, in Read only, before anything is written.
+ */
+test('a session that only reads is on the board from the moment it starts', async () => {
+  await connect(await start('s-reads'));
+  const board = context.service(sessionBoard);
+  const note = await boardWithin(board.started('s-reads'), 2000);
+  assert.equal(note?.updated, true, JSON.stringify(note));
+
+  const on = await rows();
+  assert.equal(on.length, 1);
+  assert.equal(on[0]?.column, 'Read only', 'it is on the board without ever having written');
+  assert.deepEqual(on[0]?.targets, [], 'it holds nothing');
+  const record = getSession(desk, 's-reads');
+  assert.ok(record.ok);
+  assert.equal(record.value?.issue?.number, on[0]?.issue.number);
+
+  const issue = fake.state().issues.find((i) => i.ref.number === on[0]?.issue.number);
+  assert.match(issue?.body ?? '', /Tickets this session touched:\n- none yet/);
+});
+
+test('the tickets a session touched are listed on its issue, and each gets one back-link', async () => {
+  const first = await fake.createIssue({
+    repository: SPACE_REPOSITORY,
+    title: 'One ticket',
+    body: '',
+    labels: [],
+  });
+  const second = await fake.createIssue({
+    repository: SPACE_REPOSITORY,
+    title: 'Another ticket',
+    body: '',
+    labels: [],
+  });
+  assert.ok(first.ok && second.ok);
+  await connect(await start('s-touch'));
+  const board = context.service(sessionBoard);
+  assert.equal((await boardWithin(board.started('s-touch'), 2000))?.updated, true);
+
+  assert.equal(
+    (await boardWithin(board.touched('s-touch', [first.value.number]), 2000))?.updated,
+    true,
+  );
+  // Said twice, with one new: the one already there is not commented on again.
+  assert.equal(
+    (await boardWithin(board.touched('s-touch', [first.value.number, second.value.number]), 2000))
+      ?.updated,
+    true,
+  );
+
+  const on = await rows();
+  const sessionIssue = fake.state().issues.find((i) => i.ref.number === on[0]?.issue.number);
+  const body = sessionIssue?.body ?? '';
+  assert.ok(body.includes(`/issues/${first.value.number}`), 'the first ticket is listed');
+  assert.ok(body.includes(`/issues/${second.value.number}`), 'the second ticket is listed');
+
+  const record = getSession(desk, 's-touch');
+  assert.ok(record.ok);
+  assert.deepEqual(
+    record.value?.tickets?.map((ticket) => ticket.number),
+    [first.value.number, second.value.number],
+    'the desk keeps them in the order they were first touched',
+  );
+
+  // One back-link per ticket, however often the ticket is named.
+  for (const number of [first.value.number, second.value.number]) {
+    const ticket = fake.state().issues.find((i) => i.ref.number === number);
+    const links = (ticket?.comments ?? []).filter((text) => text.startsWith('Worked on by'));
+    assert.equal(links.length, 1, `ticket ${number} has exactly one back-link`);
+    assert.ok(links[0]?.includes(`/issues/${on[0]?.issue.number}`), 'it names the session issue');
+  }
+});
+
+test('a session names the tickets it worked through the tool, and they reach its issue', async () => {
+  const ticket = await fake.createIssue({
+    repository: SPACE_REPOSITORY,
+    title: 'A ticket the session works',
+    body: '',
+    labels: [],
+  });
+  assert.ok(ticket.ok);
+  const client = await connect(await start('s-tool'));
+  const board = context.service(sessionBoard);
+  assert.equal((await boardWithin(board.started('s-tool'), 2000))?.updated, true);
+
+  // A session in Read only may say what it touched: this is the half of
+  // traceability that used to be missing entirely.
+  const named = await call(client, 'tickets_touched', { tickets: [ticket.value.number] });
+  assert.deepEqual(named.value, { tickets: [ticket.value.number] });
+
+  const record = getSession(desk, 's-tool');
+  assert.ok(record.ok);
+  assert.deepEqual(
+    record.value?.tickets?.map((entry) => entry.number),
+    [ticket.value.number],
+  );
+  const worked = fake.state().issues.find((i) => i.ref.number === ticket.value.number);
+  assert.equal((worked?.comments ?? []).filter((text) => text.startsWith('Worked on by')).length, 1);
 });
 
 test('a session with a profile names it in the issue body; the marker and the title are unchanged (M14.4)', async () => {

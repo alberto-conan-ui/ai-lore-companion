@@ -21,7 +21,9 @@ import {
   developItemBranch,
   findSpaceProject,
   formatHandoverComment,
+  formatSessionBackLink,
   formatSessionIssueBody,
+  issueRefFor,
   putSessionIssue,
   readHandover,
   sessionIssueMarker,
@@ -240,16 +242,60 @@ test('first Writing creates the issue; a second updates it; close leaves it in D
   assert.equal(rows[0]?.column, 'Writing');
   assert.deepEqual(rows[0]?.targets, [APP]);
 
-  const closed = await closeSessionIssue(
-    place,
-    first.value.issue,
-    'Done: the mirror.\nNext: the tests.',
-  );
+  // The whole entry goes to the session's issue, not its `## Handover`
+  // section: what the session learned and what it corrected are the parts a
+  // later session most needs, and they used never to leave the desk. The
+  // handover itself goes to the ticket of the work it concerns, which is the
+  // verb's job and not this one's, so it is not written here as well.
+  const entry =
+    '# What happened\n\nThe mirror.\n\n## Handover\n\nDone: the mirror.\nNext: the tests.';
+  const closed = await closeSessionIssue(place, first.value.issue, entry);
   assert.ok(closed.ok);
   rows = await sessionsOn(fake, place.project);
   assert.equal(rows[0]?.column, 'Done');
   const issue = fake.state().issues.find((i) => i.ref.number === first.value.issue.number);
-  assert.equal(issue?.comments.at(-1), '## Handover\n\nDone: the mirror.\nNext: the tests.\n');
+  const comment = issue?.comments.at(-1) ?? '';
+  assert.match(comment, /^## The session's journal entry\n/);
+  assert.ok(comment.includes('# What happened'), 'the whole entry, not only the handover');
+  assert.ok(comment.includes('Next: the tests.'));
+  assert.equal(
+    issue?.comments.filter((text) => text.startsWith('## Handover')).length,
+    0,
+    'the handover is not also written here',
+  );
+});
+
+test('a ticket gets one back-link naming the session that worked on it', () => {
+  const link = formatSessionBackLink({
+    issue: issueRefFor('owner/repo', 124),
+    engine: 'claude-code',
+    startedAt: '2026-09-22T16:18:00Z',
+  });
+  assert.equal(
+    link,
+    'Worked on by the claude-code session that started at 2026-09-22T16:18:00Z — https://github.com/owner/repo/issues/124\n',
+  );
+});
+
+test('the session issue lists every ticket it touched, and says so when there are none', () => {
+  const base = {
+    sessionId: 's-1',
+    engine: 'claude-code',
+    startedAt: '2026-09-22T16:18:00Z',
+    targets: [],
+    attended: true,
+    person: 'someone',
+    machine: 'a-desk',
+  } as const;
+  assert.match(formatSessionIssueBody(base), /Tickets this session touched:\n- none yet/);
+  const withTickets = formatSessionIssueBody({
+    ...base,
+    tickets: [issueRefFor('owner/repo', 63), issueRefFor('owner/repo', 119)],
+  });
+  assert.match(
+    withTickets,
+    /Tickets this session touched:\n- https:\/\/github\.com\/owner\/repo\/issues\/63\n- https:\/\/github\.com\/owner\/repo\/issues\/119/,
+  );
 });
 
 test('the Project is found by the Space name and number', async (t) => {
