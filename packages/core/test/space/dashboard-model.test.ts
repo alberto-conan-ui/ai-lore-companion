@@ -61,6 +61,7 @@ const STAGES = ['Spec', 'Plan', 'Build', 'Review', 'Done'];
 
 function snapshot(extra: Partial<ProjectSnapshot> = {}, stages = STAGES): ProjectSnapshot {
   return {
+    problems: [],
     fetchedAt: NOW,
     project: {
       owner: 'octo',

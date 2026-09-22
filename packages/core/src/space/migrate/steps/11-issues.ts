@@ -19,7 +19,10 @@
 import type { IssueRef } from '../../desk/types.js';
 import {
   DEFAULT_STAGES,
+  FOCUS_LEVEL,
   type FieldInfo,
+  LEVEL_FIELD,
+  LEVEL_VALUES,
   type LabelSpec,
   PAUSED_LABEL,
   type ProjectInfo,
@@ -200,6 +203,22 @@ async function createIssues(ctx: MigrationContext): Promise<Result<void, StepErr
     const github = ctx.deps.github;
     const repo = repository.value.fullName;
 
+    // Every issue the migration creates gets a Level, focus or item alike.
+    // Without it each one is reported as having no Level on the first refresh
+    // after the migration, and the migrated focus is read as an item.
+    const levelResult = await askGitHub(
+      writer,
+      () =>
+        github.ensureSingleSelectField({
+          project: project.value,
+          name: LEVEL_FIELD,
+          options: [...LEVEL_VALUES],
+        }),
+      { write: true },
+    );
+    if (!levelResult.ok) return levelResult;
+    const levelField = levelResult.value;
+
     let stageField: FieldInfo | null = null;
     if (wanted.some((issue) => issue.kind === 'focus')) {
       const field = await askGitHub(
@@ -284,6 +303,16 @@ async function createIssues(ctx: MigrationContext): Promise<Result<void, StepErr
         { write: true },
       );
       if (!item.ok) return item;
+      {
+        const field = levelField;
+        const option = issue.kind === 'focus' ? FOCUS_LEVEL : 'Item';
+        const levelled = await askGitHub(
+          writer,
+          () => github.setSingleSelect({ project: project.value, item: item.value, field, option }),
+          { write: true },
+        );
+        if (!levelled.ok) return levelled;
+      }
       if (issue.kind === 'focus' && issue.stage !== null && stageField !== null) {
         const field = stageField;
         const option = issue.stage;

@@ -51,6 +51,7 @@ const ISSUE = (number: number) => ({
 
 function snapshot(fetchedAt = NOW): ProjectSnapshot {
   return {
+    problems: [],
     fetchedAt,
     project: {
       owner: 'octo',

@@ -337,7 +337,7 @@ test('gitHubStepError adds the guidance sentence for each kind', () => {
 test('the default layout has the labels of the kinds and of a session, and three views', () => {
   assert.deepEqual(
     SETUP_LABELS.map((label) => label.name),
-    ['feature', 'document', 'investigation', 'session'],
+    ['feature', 'document', 'investigation', 'bug', 'maintenance', 'session'],
   );
   assert.ok(SETUP_LABELS.every((label) => /^[0-9a-f]{6}$/.test(label.color)));
   assert.deepEqual(

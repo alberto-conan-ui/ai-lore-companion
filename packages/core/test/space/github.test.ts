@@ -4,7 +4,7 @@ import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
   DEFAULT_STAGES,
-  FOCUS_KIND_LABELS,
+  FOCUS_LEVEL,
   type FieldInfo,
   GRAPHQL_ARGS,
   type GitHubPort,
@@ -12,6 +12,8 @@ import {
   ISSUE_BODY_MAX,
   ISSUE_TITLE_MAX,
   type IssueRef,
+  KIND_LABELS,
+  LEVEL_FIELD,
   PAUSED_LABEL,
   PROJECT_SCOPE,
   type ProjectInfo,
@@ -1214,12 +1216,15 @@ test('buildProjectSnapshot sorts focuses, items, standalone items and sessions',
     stageField: null,
     fetchedAt: '2026-09-18T12:00:00.000Z',
     issues: [
-      raw(1, { fieldValues: { [STAGE_FIELD]: 'Spec' } }),
-      raw(2, { labels: ['document'] }),
-      raw(3, { subIssues: [{ issue: raw(4).issue, title: 'Issue 4', state: 'open' }] }),
+      raw(1, { fieldValues: { [LEVEL_FIELD]: FOCUS_LEVEL, [STAGE_FIELD]: 'Spec' } }),
+      raw(2, { labels: ['document'], fieldValues: { [LEVEL_FIELD]: FOCUS_LEVEL } }),
+      raw(3, {
+        fieldValues: { [LEVEL_FIELD]: FOCUS_LEVEL },
+        subIssues: [{ issue: raw(4).issue, title: 'Issue 4', state: 'open' }],
+      }),
       raw(4, { parentNumber: 3, fieldValues: { [STATUS_FIELD]: 'Todo' } }),
-      raw(5, { parentNumber: 77 }),
-      raw(6, { labels: [PAUSED_LABEL] }),
+      raw(5, { parentNumber: 77, fieldValues: { [LEVEL_FIELD]: 'Item' } }),
+      raw(6, { labels: [PAUSED_LABEL], fieldValues: { [LEVEL_FIELD]: 'Item' } }),
       raw(7, { labels: [SESSION_LABEL], state: 'closed' }),
       raw(8, {
         labels: [SESSION_LABEL],
@@ -1258,6 +1263,58 @@ test('buildProjectSnapshot sorts focuses, items, standalone items and sessions',
       [8, 'Blocked', [], true],
     ],
   );
+  assert.deepEqual(snapshot.problems, [], 'every issue has a Level, so nothing is reported');
+});
+
+test('the Level field alone decides a focus: not the Stage, the kind or the sub-issues', () => {
+  const snapshot = buildProjectSnapshot({
+    project: PROJECT,
+    stageField: null,
+    fetchedAt: '2026-09-18T12:00:00.000Z',
+    issues: [
+      // No Stage, no kind label, no sub-issues: the three signals the category
+      // used to be derived from. It is a focus because the Project says so.
+      raw(1, { fieldValues: { [LEVEL_FIELD]: FOCUS_LEVEL } }),
+      // A kind label, which used to make an issue a focus by itself. `bug` was
+      // read correctly only because it was missing from the list that decided
+      // both questions; now the list decides neither.
+      raw(2, { labels: ['bug'], fieldValues: { [LEVEL_FIELD]: 'Item' } }),
+      // A Stage and sub-issues, and still an item, because the Project says so.
+      raw(3, {
+        fieldValues: { [LEVEL_FIELD]: 'Item', [STAGE_FIELD]: 'Build' },
+        subIssues: [{ issue: raw(9).issue, title: 'Issue 9', state: 'open' }],
+      }),
+    ],
+  });
+  assert.deepEqual(
+    snapshot.focuses.map((focus) => focus.issue.number),
+    [1],
+  );
+  assert.deepEqual(
+    snapshot.standalone.map((item) => item.issue.number),
+    [2, 3],
+  );
+  assert.equal(snapshot.problems.length, 0);
+});
+
+test('an issue with no Level is read as an item and reported', () => {
+  const snapshot = buildProjectSnapshot({
+    project: PROJECT,
+    stageField: null,
+    fetchedAt: '2026-09-18T12:00:00.000Z',
+    issues: [raw(1, { labels: ['feature'], fieldValues: { [STAGE_FIELD]: 'Build' } })],
+  });
+  assert.deepEqual(snapshot.focuses, [], 'nothing is guessed from the Stage or the kind');
+  assert.deepEqual(
+    snapshot.standalone.map((item) => item.issue.number),
+    [1],
+  );
+  assert.equal(snapshot.problems.length, 1);
+  assert.ok(
+    snapshot.problems[0]?.includes(`${REPOSITORY}#1`),
+    'the report names the issue it is about',
+  );
+  assert.ok(snapshot.problems[0]?.includes(LEVEL_FIELD), 'and the field that is missing');
 });
 
 test('the session block survives a round trip, also with --> in a name, and bad blocks give null', () => {
@@ -1294,10 +1351,10 @@ test('the spec link is written and read back', () => {
   assert.equal(parseSpecLink('Body'), null);
 });
 
-test('the default layout names five stages, four Agents columns and three kinds', () => {
+test('the default layout names five stages, four Agents columns and five kinds', () => {
   assert.deepEqual(DEFAULT_STAGES, ['Spec', 'Plan', 'Build', 'Review', 'Done']);
   assert.deepEqual(AGENTS_COLUMNS, ['Read only', 'Writing', 'Blocked', 'Done']);
-  assert.deepEqual(FOCUS_KIND_LABELS, ['feature', 'document', 'investigation']);
+  assert.deepEqual(KIND_LABELS, ['feature', 'document', 'investigation', 'bug', 'maintenance']);
 });
 
 // ---------- views ----------

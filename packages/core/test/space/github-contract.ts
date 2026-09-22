@@ -13,9 +13,12 @@ import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
   DEFAULT_STAGES,
+  FOCUS_LEVEL,
   type GitHubError,
   type GitHubPort,
   type GitHubResult,
+  LEVEL_FIELD,
+  LEVEL_VALUES,
   PROJECT_SCOPE,
   SESSION_LABEL,
   STAGE_FIELD,
@@ -495,6 +498,15 @@ export function gitHubPortContract(
           options: [...DEFAULT_STAGES],
         }),
       );
+      // The Project says which issues are focuses; nothing is derived from the
+      // Stage, the kind label or the sub-issues any more.
+      const level = unwrap(
+        await port.ensureSingleSelectField({
+          project,
+          name: LEVEL_FIELD,
+          options: [...LEVEL_VALUES],
+        }),
+      );
       const focus = unwrap(
         await port.createIssue({ repository, title: 'A focus', body: '', labels: ['feature'] }),
       );
@@ -514,8 +526,13 @@ export function gitHubPortContract(
       assert.equal(errorOf(await port.addSubIssue({ parent: alone, child: one })).kind, 'failed');
       const item = unwrap(await port.addIssueToProject({ project, issue: focus }));
       assert.equal(unwrap(await port.addIssueToProject({ project, issue: focus })), item);
-      unwrap(await port.addIssueToProject({ project, issue: one }));
-      unwrap(await port.addIssueToProject({ project, issue: alone }));
+      const oneItem = unwrap(await port.addIssueToProject({ project, issue: one }));
+      unwrap(await port.setSingleSelect({ project, item: oneItem, field: level, option: 'Item' }));
+      const aloneItem = unwrap(await port.addIssueToProject({ project, issue: alone }));
+      unwrap(
+        await port.setSingleSelect({ project, item: aloneItem, field: level, option: 'Item' }),
+      );
+      unwrap(await port.setSingleSelect({ project, item, field: level, option: FOCUS_LEVEL }));
       unwrap(await port.setSingleSelect({ project, item, field: stage, option: 'Build' }));
       unwrap(await port.setSingleSelect({ project, item, field: stage, option: 'Build' }));
       unwrap(await port.closeIssue({ issue: one }));
