@@ -14,8 +14,50 @@ export const SESSION_LABEL = 'session';
 /** The label of a paused focus carried over by migration. */
 export const PAUSED_LABEL = 'paused';
 
-/** The labels that say what kind a focus is (product document: a feature, a document, an investigation). */
-export const FOCUS_KIND_LABELS: readonly string[] = ['feature', 'document', 'investigation'];
+/**
+ * The labels that say what kind of work a root is. The kind belongs to the
+ * root and its children inherit it, so it is not repeated on every item.
+ *
+ * Only the `kind` of a focus is read from this list. **Whether an issue is a
+ * focus comes from {@link LEVEL_FIELD} and never from here.** The two
+ * questions were once decided by this one list, so a root labelled `bug` was
+ * read as an item only because `bug` happened not to be in it — and adding it
+ * would silently have turned every bug into a focus. The name no longer says
+ * `FOCUS_`, so there is nothing here to reach for when the focus test is next
+ * looked at.
+ */
+export const KIND_LABELS: readonly string[] = [
+  'feature',
+  'document',
+  'investigation',
+  'bug',
+  'maintenance',
+];
+
+/**
+ * The single-select field on the Project that records whether an issue is a
+ * focus or an item.
+ *
+ * The companion used to derive this: an issue was a focus when it had a Stage,
+ * **or** a kind label, **or** sub-issues. No GitHub filter can express a
+ * three-way disjunction over a field, a label set and a relation, so the
+ * Dashboard could show eight focuses while every GitHub view showed fifty-eight
+ * mixed cards. The two could not agree by construction. The Project records the
+ * category now, and the companion reads it.
+ */
+export const LEVEL_FIELD = 'Level';
+
+/**
+ * The value of {@link LEVEL_FIELD} that marks a focus. The field's other value
+ * is `Item`, and nothing names it: anything that is not exactly `Focus` is read
+ * as an item, an issue with no value at all included. Such an issue is also
+ * reported in {@link ProjectSnapshot.problems}, so a hole in the Project is
+ * visible rather than guessed at.
+ */
+export const FOCUS_LEVEL = 'Focus';
+
+/** The values of {@link LEVEL_FIELD}, in order: a root with children, and one without. */
+export const LEVEL_VALUES: readonly string[] = [FOCUS_LEVEL, 'Item'];
 
 /** The single-select field whose values are the Dashboard's columns. */
 export const STAGE_FIELD = 'Stage';
@@ -175,6 +217,13 @@ export type ProjectSnapshot = {
   focuses: FocusItem[];
   standalone: PlanItem[];
   sessions: SessionIssue[];
+  /**
+   * One sentence per issue on the Project that could not be read with
+   * confidence — today, an issue with no value for {@link LEVEL_FIELD}. Empty
+   * when the Project is complete. The Dashboard shows these rather than letting
+   * a missing field pass as a deliberate answer.
+   */
+  problems: string[];
 };
 
 /**

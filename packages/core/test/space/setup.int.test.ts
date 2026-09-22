@@ -250,9 +250,11 @@ test('createSpace ends with a pushed repository, a Project with five stages and 
   );
   const labels = state.repositories.find((entry) => entry.info.fullName === `${OWNER}/demo-space`);
   assert.deepEqual(labels?.labels.map((label) => label.name).sort(), [
+    'bug',
     'document',
     'feature',
     'investigation',
+    'maintenance',
     'session',
   ]);
   // What the API cannot set comes back as steps by hand.
@@ -876,7 +878,8 @@ test('create: an answer lost at each GitHub write is repaired by the second run,
     assert.deepEqual(b.fake.state().repositories, state.repositories, 'labels');
     const labels = state.repositories[0]?.labels.map((label) => label.name) ?? [];
     assert.equal(new Set(labels).size, labels.length);
-    assert.equal(labels.length, 4);
+    // Five kinds and the session label.
+    assert.equal(labels.length, 6);
   }
 });
 

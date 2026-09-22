@@ -94,6 +94,10 @@ function seedDashboardRun(busy = false): DashboardRun {
       "const project = must(await fake.createProject({ owner: o.owner, title: o.name }), 'project');",
       "const stage = must(await fake.ensureSingleSelectField({ project, name: 'Stage', options: o.stages }), 'Stage');",
       "const agentsField = must(await fake.ensureSingleSelectField({ project, name: core.AGENTS_FIELD, options: [...core.AGENTS_COLUMNS] }), 'Agents');",
+      // The Project says which issues are focuses; nothing is derived from the
+      // Stage, the kind label or the sub-issues any more. Without a Level every
+      // issue here reads as an item and the Dashboard renders no focuses.
+      "const level = must(await fake.ensureSingleSelectField({ project, name: core.LEVEL_FIELD, options: [...core.LEVEL_VALUES] }), 'Level');",
       'must(await fake.ensureLabels({ repository, labels: [',
       "  { name: core.SESSION_LABEL, color: 'ededed', description: 'A session' },",
       "  { name: 'feature', color: 'ededed', description: 'A feature' },",
@@ -108,11 +112,14 @@ function seedDashboardRun(busy = false): DashboardRun {
       'for (const child of [first, second]) must(await fake.addSubIssue({ parent: focus, child }), `sub-issue ${child.number}`);',
       'const placed = {};',
       'for (const one of [focus, first, second, standalone]) placed[one.number] = must(await fake.addIssueToProject({ project, issue: one }), `project item ${one.number}`);',
+      "must(await fake.setSingleSelect({ project, item: placed[focus.number], field: level, option: core.FOCUS_LEVEL }), 'Level of the focus');",
+      "must(await fake.setSingleSelect({ project, item: placed[standalone.number], field: level, option: 'Item' }), 'Level of the standalone item');",
       "must(await fake.setSingleSelect({ project, item: placed[focus.number], field: stage, option: 'Build' }), 'Stage of the focus');",
       "must(await fake.closeIssue({ issue: first }), 'close');",
       "const addFocus = async (title, stageName, labels = ['feature']) => {",
       "  const created = await issue(title, core.formatSpecLink('https://example.test/spec'), labels);",
       '  const projectItem = must(await fake.addIssueToProject({ project, issue: created }), `place ${title}`);',
+      '  must(await fake.setSingleSelect({ project, item: projectItem, field: level, option: core.FOCUS_LEVEL }), `level ${title}`);',
       '  if (stageName !== null) must(await fake.setSingleSelect({ project, item: projectItem, field: stage, option: stageName }), `stage ${title}`);',
       '  return created;',
       '};',

@@ -4,7 +4,10 @@ import { after, afterEach, before, beforeEach, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   DEFAULT_STAGES,
+  FOCUS_LEVEL,
   type GitHubPort,
+  LEVEL_FIELD,
+  LEVEL_VALUES,
   type OpenPullRequest,
   type ProjectInfo,
   deskFile,
@@ -102,6 +105,23 @@ beforeEach(async () => {
   assert.ok(focus.ok);
   const added = await fake.addIssueToProject({ project, issue: focus.value });
   assert.ok(added.ok);
+  // The Project says which issues are focuses; a Stage no longer implies one.
+  const level = await fake.ensureSingleSelectField({
+    project,
+    name: LEVEL_FIELD,
+    options: [...LEVEL_VALUES],
+  });
+  assert.ok(level.ok);
+  assert.ok(
+    (
+      await fake.setSingleSelect({
+        project,
+        item: added.value,
+        field: level.value,
+        option: FOCUS_LEVEL,
+      })
+    ).ok,
+  );
   const stage = await fake.ensureSingleSelectField({ project, name: 'Stage', options: [] });
   assert.ok(stage.ok);
   assert.ok(

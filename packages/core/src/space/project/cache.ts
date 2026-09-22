@@ -132,7 +132,10 @@ export function isProjectSnapshot(value: unknown): value is ProjectSnapshot {
     isListOf(stageField.options, isFieldOption) &&
     isListOf(value.focuses, isFocusItem) &&
     isListOf(value.standalone, isPlanItem) &&
-    isListOf(value.sessions, isSessionIssue)
+    isListOf(value.sessions, isSessionIssue) &&
+    // A snapshot cached before the Level field was read has no `problems`, so
+    // this rejects it and the cache is refreshed rather than read as complete.
+    isListOf(value.problems, isString)
   );
 }
 

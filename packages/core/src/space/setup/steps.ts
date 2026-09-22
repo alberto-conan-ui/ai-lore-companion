@@ -21,7 +21,9 @@ import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
   DEFAULT_STAGES,
-  FOCUS_KIND_LABELS,
+  KIND_LABELS,
+  LEVEL_FIELD,
+  LEVEL_VALUES,
   type LabelSpec,
   type ProjectInfo,
   type ProjectViewSpec,
@@ -67,10 +69,10 @@ export const ALWAYS_RUN_STEP_IDS: readonly string[] = ['machine-check', 'project
 
 /** The labels setup creates in the Space repository: the kinds of a focus, and the mark of a session issue. */
 export const SETUP_LABELS: readonly LabelSpec[] = [
-  ...FOCUS_KIND_LABELS.map((name) => ({
+  ...KIND_LABELS.map((name) => ({
     name,
     color: '1d76db',
-    description: `A focus of the kind ${name}`,
+    description: `Work of the kind ${name}`,
   })),
   {
     name: SESSION_LABEL,
@@ -523,8 +525,8 @@ export function projectStep(): Step<CreateSpaceContext> {
 }
 
 /**
- * The Project's layout: the Stage field, the Agents field, the labels, the
- * link to the repository and the three views. The port has no read for the
+ * The Project's layout: the Level field, the Stage field, the Agents field,
+ * the labels, the link to the repository and the three views. The port has no read for the
  * labels, the link or the views, so this step is never skipped; each of the
  * port's `ensure…` operations checks before it acts, and a second run creates
  * nothing twice. What the API cannot set is gathered in `ctx.byHand`.
@@ -534,6 +536,7 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
     id: 'project-layout',
     title: 'Set up the Project',
     describe: async (ctx) => [
+      { what: `Make sure the field ${LEVEL_FIELD} has the values ${LEVEL_VALUES.join(', ')}.` },
       { what: `Make sure the field ${STAGE_FIELD} has the values ${DEFAULT_STAGES.join(', ')}.` },
       { what: `Make sure the field ${AGENTS_FIELD} has the values ${AGENTS_COLUMNS.join(', ')}.` },
       {
@@ -558,6 +561,15 @@ export function projectLayoutStep(): Step<CreateSpaceContext> {
           `The Project "${ctx.name}" of ${ctx.owner} was not found on GitHub.`,
         );
       }
+      // The category is recorded and not derived, so that a GitHub filter can
+      // select exactly what the Dashboard computes. Without this field every
+      // issue reads as an item and the snapshot reports each one.
+      const level = await github.ensureSingleSelectField({
+        project,
+        name: LEVEL_FIELD,
+        options: [...LEVEL_VALUES],
+      });
+      if (!level.ok) return gitHubFail(level.error);
       const stage = await github.ensureSingleSelectField({
         project,
         name: STAGE_FIELD,

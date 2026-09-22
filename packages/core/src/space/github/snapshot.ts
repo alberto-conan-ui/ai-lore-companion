@@ -4,10 +4,15 @@
  *
  * The sorting rules (architecture document, section 3.6): an issue labelled
  * `session` is a session issue; an issue with a parent on the same Project is
- * listed under that focus and not by itself; of the rest, an issue is a focus
- * when it has a Stage, a kind label or sub-issues, and a standalone item
- * otherwise. The gh adapter and `FakeGitHub` both sort with
- * `buildProjectSnapshot`, so they cannot differ.
+ * listed under that focus and not by itself; of the rest, the Project's own
+ * `Level` field says whether an issue is a focus or an item.
+ *
+ * The category used to be derived here — a focus when the issue had a Stage,
+ * or a kind label, or sub-issues. No GitHub filter expresses that, so the
+ * Dashboard and GitHub could not show the same set. An issue with no `Level`
+ * is read as an item and named in `problems`, so a hole in the Project is
+ * visible rather than guessed at. The gh adapter and `FakeGitHub` both sort
+ * with `buildProjectSnapshot`, so they cannot differ.
  */
 
 import { isWriteTarget } from '../desk/guards.js';
@@ -16,9 +21,11 @@ import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
   type AgentsColumn,
-  FOCUS_KIND_LABELS,
+  FOCUS_LEVEL,
   type FieldInfo,
   type FocusItem,
+  KIND_LABELS,
+  LEVEL_FIELD,
   type PlanItem,
   type ProjectInfo,
   type ProjectSnapshot,
@@ -128,7 +135,7 @@ function focusItem(raw: RawProjectIssue, onProject: Map<string, RawProjectIssue>
     ...planItem(raw),
     stage: raw.fieldValues[STAGE_FIELD] ?? null,
     stageChangedAt: raw.fieldValuesAt[STAGE_FIELD] ?? null,
-    kind: raw.labels.find((label) => FOCUS_KIND_LABELS.includes(label)) ?? null,
+    kind: raw.labels.find((label) => KIND_LABELS.includes(label)) ?? null,
     items: raw.subIssues.map((sub) => {
       const own = onProject.get(issueKey(sub.issue.repository, sub.issue.number));
       if (own !== undefined) return planItem(own);
@@ -153,6 +160,7 @@ export function buildProjectSnapshot(arg: {
   const focuses: FocusItem[] = [];
   const standalone: PlanItem[] = [];
   const sessions: SessionIssue[] = [];
+  const problems: string[] = [];
   for (const raw of arg.issues) {
     if (raw.labels.includes(SESSION_LABEL)) {
       sessions.push(sessionIssue(raw));
@@ -161,11 +169,13 @@ export function buildProjectSnapshot(arg: {
     const underFocus =
       raw.parentNumber !== null && onProject.has(key(raw.issue.repository, raw.parentNumber));
     if (underFocus) continue;
-    const isFocus =
-      raw.fieldValues[STAGE_FIELD] !== undefined ||
-      raw.subIssues.length > 0 ||
-      raw.labels.some((label) => FOCUS_KIND_LABELS.includes(label));
-    if (isFocus) focuses.push(focusItem(raw, onProject));
+    const level = raw.fieldValues[LEVEL_FIELD];
+    if (level === undefined) {
+      problems.push(
+        `${key(raw.issue.repository, raw.issue.number)} has no value for the field ${LEVEL_FIELD}, so it is read as an item.`,
+      );
+    }
+    if (level === FOCUS_LEVEL) focuses.push(focusItem(raw, onProject));
     else standalone.push(planItem(raw));
   }
   const { owner, number, title, url } = arg.project;
@@ -176,5 +186,6 @@ export function buildProjectSnapshot(arg: {
     focuses,
     standalone,
     sessions,
+    problems,
   };
 }
