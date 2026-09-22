@@ -9,14 +9,18 @@ points_at:
 
 ## What it means
 
-The Stage field is a single-select field on a [focus](./focus.md), in the default [Project](./project.md) layout. It records the [stage](../core/stage.md) of the focus. It has five values, in this order: Spec, Plan, Build, Review and Done.
+The Stage field is a single-select field on every **root** of the plan — an issue with no parent on the Project — in the default [Project](./project.md) layout. It records the [stage](../core/stage.md) of that unit of work. A [focus](./focus.md) carries one, and so does a standalone [item](./item.md) that stands under no focus. It has five values, in this order: Backlog, Spec and Planning, Build, Review and Done.
 
-Each of the three default processes covers one value: specify covers Spec, plan covers Plan, and work covers Build. No process covers Review. At Review, the Human Lead reads the reports on the items of the focus against the agreed spec.
+`Backlog` is work that is recorded and not yet on the plan. The default plan view filters it out by name, so the value has to exist for that view to select anything.
+
+`Spec and Planning` is one value and not two. A unit of work is broken down while its spec is still being written — the pieces are posted as they are thought of — so a Space that kept them apart had to either hold planning off the plan until a spec was agreed, or move a unit of work to a stage that said its spec was finished when it was not.
+
+The processes specify and plan both run at `Spec and Planning`, and work covers Build. No process covers Review. At Review, the Human Lead reads the reports on the items of the unit of work against the agreed spec.
 
 The moves are made in this way:
 
-- From Spec to Plan: the process specify makes the move, after its gate.
-- From Plan to Build: the process plan makes the move, after its gate.
+- From Backlog to Spec and Planning: the Human Lead makes the move when the work is taken onto the plan.
+- From Spec and Planning to Build: the Human Lead makes the move. It is the moment a provisional breakdown stops being provisional, so a piece of work that no longer matches the agreed spec is corrected, closed or rewritten before the move.
 - From Build to Review, and from Review to Done: the Human Lead makes the move in GitHub.
 
 No move happens without the Human Lead's yes, which is the rule of the core contract stage-gate.
