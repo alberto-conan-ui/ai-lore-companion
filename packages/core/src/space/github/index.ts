@@ -75,6 +75,7 @@ export {
 } from './validate.js';
 export {
   type SessionBlock,
+  bodyGoals,
   buildProjectSnapshot,
   formatSessionBlock,
   formatSpecLink,

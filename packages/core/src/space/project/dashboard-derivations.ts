@@ -117,13 +117,24 @@ export function nextActionHeadline(action: ActionData): string {
       return `PR #${action.pull.number} CI has failed`;
     case 'review':
       return `Review #${action.focus.number}: ${action.title}`;
-    case 'ready-for-done':
+    case 'ready-for-done': {
       // The uncomputable case says what is missing rather than claiming the
-      // work is finished. Nobody can check a focus against criteria its ticket
-      // does not carry.
-      return action.criteriaOnTicket
-        ? `#${action.focus.number} is finished — your Done call: ${action.title}`
-        : `#${action.focus.number} has no criteria on its ticket, so done cannot be told: ${action.title}`;
+      // work is finished. Nobody can check a focus against something its
+      // ticket does not carry.
+      //
+      // Goals decide this, not acceptance criteria. Criteria belong to an item
+      // and name their evidence; Goals belong to the focus and say what it is
+      // for, and they are what the Human Lead checks at the gate. A focus with
+      // Goals is computable whether or not it also names criteria.
+      const count = action.goals.length;
+      if (count > 0) {
+        return `#${action.focus.number} is finished — your Done call against ${count === 1 ? 'its Goal' : `its ${count} Goals`}: ${action.title}`;
+      }
+      if (action.criteriaOnTicket) {
+        return `#${action.focus.number} is finished — your Done call: ${action.title}`;
+      }
+      return `#${action.focus.number} has no Goals on its ticket, so done cannot be told: ${action.title}`;
+    }
     case 'stale-session':
       return `Check the idle session #${action.issue.number}`;
     case 'draft':
@@ -249,9 +260,8 @@ export function dormantAggregate(focuses: readonly FocusCard[], now: string): Do
         : ((ages[middle - 1] as number) + (ages[middle] as number)) / 2;
   return {
     count: focuses.length,
-    paused: focuses.filter(
-      (focus) => focus.status === 'Paused' || focus.labels.includes('paused'),
-    ).length,
+    paused: focuses.filter((focus) => focus.status === 'Paused' || focus.labels.includes('paused'))
+      .length,
     oldestAgeMs: ages.at(-1) ?? null,
     medianAgeMs: median,
   };

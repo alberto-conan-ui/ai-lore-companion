@@ -95,6 +95,8 @@ export type FocusCard = {
   specUrl: string | null;
   /** Whether the issue's body names acceptance criteria. See `bodyNamesCriteria`. */
   criteriaOnTicket: boolean;
+  /** The Goals the focus carries, which are what the Human Lead checks at the gate. */
+  goals: string[];
   updatedAt: string | null;
   /** The focus's items, session issues left out. */
   items: ItemCard[];
@@ -169,6 +171,16 @@ export type NeedsYouEntry =
        * and unnoticed for two days.
        */
       criteriaOnTicket: boolean;
+      /**
+       * The Goals to check at the gate. Empty when the focus names none, and
+       * such a focus is reported as uncomputable rather than left out: silence
+       * reads as "not ready", which is how #1 sat finished and unnoticed for
+       * two days.
+       *
+       * Nothing here says a Goal is met. A Goal is checkable by reading, and
+       * whether it is met is the Human Lead's to say at the gate.
+       */
+      goals: string[];
     }
   | {
       kind: 'stale-session';
@@ -222,6 +234,7 @@ function focusCard(focus: FocusItem, gateNote: string | null): FocusCard {
     kind: focus.kind,
     specUrl: focus.specUrl,
     criteriaOnTicket: focus.criteriaOnTicket,
+    goals: focus.goals,
     updatedAt: focus.updatedAt,
     items,
     itemsDone: items.filter((item) => item.done).length,
@@ -335,6 +348,7 @@ export function dashboardModel(input: DashboardInput): DashboardModel {
           focus: card.issue,
           title: card.title,
           criteriaOnTicket: card.criteriaOnTicket,
+          goals: card.goals,
         }),
       ),
     ...board

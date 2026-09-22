@@ -42,6 +42,7 @@ const focus = (
   stage,
   stageChangedAt: stage === null ? null : NOW,
   kind: 'feature',
+  goals: [],
   items: [],
   specUrl: null,
   criteriaOnTicket: true,
@@ -413,12 +414,13 @@ test('focusCard and itemCard carry stageChangedAt and updatedAt, tolerating null
   const model = dashboardModel({
     snapshot: snapshot({
       focuses: [
-        focus(1, 'Build', { stageChangedAt: '2026-09-18T10:00:00.000Z', updatedAt: '2026-09-18T10:05:00.000Z' }),
+        focus(1, 'Build', {
+          stageChangedAt: '2026-09-18T10:00:00.000Z',
+          updatedAt: '2026-09-18T10:05:00.000Z',
+        }),
         focus(2, null, { stageChangedAt: null, updatedAt: '2026-09-18T10:05:00.000Z' }),
       ],
-      standalone: [
-        item(3, { updatedAt: '2026-09-18T10:05:00.000Z' }),
-      ],
+      standalone: [item(3, { updatedAt: '2026-09-18T10:05:00.000Z' })],
     }),
     sessions: [],
     gates: [],
@@ -441,7 +443,10 @@ test("Criterion 3: an item's issue changed after its Stage did, explicitly asser
   const model = dashboardModel({
     snapshot: snapshot({
       focuses: [
-        focus(1, 'Build', { stageChangedAt: '2026-09-18T10:00:00.000Z', updatedAt: '2026-09-18T10:05:00.000Z' }),
+        focus(1, 'Build', {
+          stageChangedAt: '2026-09-18T10:00:00.000Z',
+          updatedAt: '2026-09-18T10:05:00.000Z',
+        }),
       ],
     }),
     sessions: [],
