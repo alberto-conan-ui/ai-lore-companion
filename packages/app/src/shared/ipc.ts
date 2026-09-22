@@ -276,14 +276,14 @@ export type TerminalInputArg = { id: string; data: string };
 /**
  * Software flow-control tokens for PTY backpressure (Focus 4). The PTY is
  * spawned with node-pty's `handleFlowControl`, which intercepts these on the
- * input path — `PTY_FLOW_PAUSE` (XOFF) pauses reading from the child,
- * `PTY_FLOW_RESUME` (XON) resumes — rather than forwarding them. The renderer
+ * input path — `PTY_FLOW_PAUSE` pauses reading from the child,
+ * `PTY_FLOW_RESUME` resumes — rather than forwarding them. The renderer
  * sends them through the normal input channel when xterm's parse buffer crosses
  * the high/low-water mark, so a flood (`yes`, a big `cat`) cannot outrun the UI.
- * These are the conventional terminal flow-control codes (Ctrl+S / Ctrl+Q).
+ * Changed from XOFF/XON (Ctrl+S/Ctrl+Q) so the user can use Ctrl+S to save in editors.
  */
-export const PTY_FLOW_PAUSE = '\x13';
-export const PTY_FLOW_RESUME = '\x11';
+export const PTY_FLOW_PAUSE = '\x1e';
+export const PTY_FLOW_RESUME = '\x1f';
 
 /**
  * Renderer-safe mirror of core's `WORKSPACE_LAYOUT_SCHEMA_VERSION`. The renderer
