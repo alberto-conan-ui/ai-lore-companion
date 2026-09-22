@@ -549,7 +549,7 @@ test('views the host cannot create come back whole as steps by hand', async (t) 
     fake.state().projects[0]?.views.map((view) => view.name),
     ['View 1'],
   );
-  for (const name of ['The plan', 'Under a parent', 'Backlog', 'Agents board']) {
+  for (const name of ['The plan', 'Backlog', 'Agents board']) {
     assert.ok(
       result.value.byHand.some((step) => step.includes(`add a view named "${name}"`)),
       name,
@@ -561,10 +561,10 @@ test('report.viewSettings has one entry per grouping the API cannot set, each wi
   const { fake, deps, form } = bench(t);
   const result = await createSpace(form, deps);
   assert.ok(result.ok, result.ok ? '' : result.error.message);
-  // "The plan" needs both a column and a grouping; "Under a parent" a
-  // grouping; "Agents board" a column. "Backlog" is a plain table and needs
-  // nothing, so it contributes no setting.
-  assert.equal(result.value.viewSettings.length, 4);
+  // "The plan" needs both a column and a grouping and "Agents board" a
+  // column. "Backlog" is a plain table and needs nothing, so it contributes
+  // no setting.
+  assert.equal(result.value.viewSettings.length, 3);
   const project = fake.state().projects[0];
   assert.ok(project !== undefined);
   for (const setting of result.value.viewSettings) {
@@ -582,7 +582,7 @@ test('report.viewSettings has one entry per grouping the API cannot set, each wi
   );
   assert.ok(
     result.value.viewSettings.some(
-      (setting) => setting.view === 'Under a parent' && setting.setting.includes('"Group by"'),
+      (setting) => setting.view === 'The plan' && setting.setting.includes('"Group by"'),
     ),
   );
 });

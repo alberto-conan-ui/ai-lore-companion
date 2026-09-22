@@ -334,7 +334,7 @@ test('gitHubStepError adds the guidance sentence for each kind', () => {
   assert.match(gitHubStepError(gitHubRateLimited(null)).message, /in a few minutes/);
 });
 
-test('the default layout has the labels of the kinds and of a session, and four views', () => {
+test('the default layout has the labels of the kinds and of a session, and three views', () => {
   assert.deepEqual(
     SETUP_LABELS.map((label) => label.name),
     ['feature', 'document', 'investigation', 'bug', 'maintenance', 'session'],
@@ -347,18 +347,12 @@ test('the default layout has the labels of the kinds and of a session, and four 
     SETUP_VIEWS.map(
       (view) => `${view.name}:${view.layout}:${view.columnField ?? ''}:${view.groupField ?? ''}`,
     ),
-    [
-      'The plan:board:Status:Level',
-      'Under a parent:table::Parent issue',
-      'Backlog:table::',
-      'Agents board:board:Agents:',
-    ],
+    ['The plan:board:Status:Level', 'Backlog:table::', 'Agents board:board:Agents:'],
   );
   assert.deepEqual(
     SETUP_VIEWS.map((view) => view.filter ?? ''),
     [
       'is:open no:parent-issue -stage:Backlog -label:session',
-      '-no:parent-issue',
       'is:open stage:Backlog',
       'label:session',
     ],

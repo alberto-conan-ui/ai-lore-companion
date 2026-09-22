@@ -19,7 +19,7 @@ The default layout of the Project has these parts:
 - The kind of the work, for example a feature, a document or an investigation, is a label. It belongs on the root and is inherited by its children rather than repeated on every item.
 - A [dependency](./dependency.md) is GitHub's "blocked by" relation between two issues.
 - A session issue has the fields of the Agents board: the write targets with their branches, the mode, attended or unattended, the person and the desk.
-- There are four views from setup: the plan, which shows every root whatever its Level; everything under a parent, grouped by the root it belongs to; the backlog, which is what is not on the plan yet; and the Agents board, which shows the session issues by column. A focus also gets a view of its own, created with the focus and removed with it.
+- There are three views from setup: the plan, which shows every root whatever its Level; the backlog, which is what is not on the plan yet; and the Agents board, which shows the session issues by column. A focus also gets a view of its own, created with the focus and removed with it, and that is where a focus's items are read — so there is no view of everything under a parent.
 
 `Level` is a recorded field and not something the companion works out. It used to be derived — an issue was a focus when it had a Stage, **or** a kind label, **or** sub-issues — and no GitHub filter expresses a three-way disjunction over a field, a label set and a relation. The Dashboard and the Project could not show the same set by construction. A ticket typed into GitHub's own interface must be as visible to a session as one a session created, so the category is recorded where a filter can read it.
 
