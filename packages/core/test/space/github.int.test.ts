@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { type MergedPullRequest, createGhCliGitHub, gitHubFailed } from '../../src/index.js';
@@ -33,6 +33,7 @@ gitHubPortContract('FakeGitHub', () => {
       rateLimitNext: (count, seconds) => fake.rateLimitNext(count, seconds),
       loseNextAnswer: (error) => fake.loseNextAnswer(error),
       setViewsSupported: (on) => fake.setViewsSupported(on),
+      addOpenPullRequest: (repository, pull) => fake.addOpenPullRequest(repository, pull),
     },
     cleanup: () => fake.dispose(),
   };
@@ -47,7 +48,13 @@ gitHubPortContract('GhCliGitHub over a simulated gh', () => {
     port: createGhCliGitHub(gh),
     owner: 'fake-human',
     realCloneAddress: (fullName) => realCloneAddress(fake, fullName),
-    control: gh,
+    control: {
+      setUnreachable: (on) => gh.setUnreachable(on),
+      rateLimitNext: (count, seconds) => gh.rateLimitNext(count, seconds),
+      loseNextAnswer: (error) => gh.loseNextAnswer(error),
+      setViewsSupported: (on) => gh.setViewsSupported(on),
+      addOpenPullRequest: (repository, pull) => fake.addOpenPullRequest(repository, pull),
+    },
     cleanup: () => fake.dispose(),
   };
 });
@@ -166,6 +173,29 @@ test('FakeGitHub: the state file carries GitHub from one instance to the next', 
   assert.deepEqual(createFakeGitHub({ stateFile: copy }).state(), second.state());
   assert.throws(() =>
     createFakeGitHub({ stateFile: join(dir, 'repos', 'fake-human', 'my-space.git', 'HEAD') }),
+  );
+});
+
+test('FakeGitHub: a v1 state without open pull requests loads as empty', async (t) => {
+  const dir = useTempDir(t);
+  const stateFile = join(dir, 'github.json');
+  const first = createFakeGitHub({ stateFile, reposDir: join(dir, 'repos') });
+  const repository = await first.createRepository({
+    owner: 'fake-human',
+    name: 'my-space',
+    private: true,
+  });
+  assert.ok(repository.ok);
+
+  const legacy = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, unknown>;
+  delete legacy.openPullRequests;
+  writeFileSync(stateFile, `${JSON.stringify(legacy)}\n`);
+
+  const loaded = createFakeGitHub({ stateFile });
+  assert.deepEqual(loaded.state().openPullRequests, []);
+  assert.deepEqual(
+    await loaded.openPullRequests({ repository: 'fake-human/my-space', limit: 10 }),
+    { ok: true, value: [] },
   );
 });
 

@@ -38,6 +38,9 @@ export {
   STAGE_FIELD,
   STATUS_FIELD,
   type SessionIssue,
+  type OpenPullRequest,
+  type PullRequestChecks,
+  type PullRequestReview,
 } from './types.js';
 export {
   type GhApiResponse,

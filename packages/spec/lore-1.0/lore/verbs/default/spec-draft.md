@@ -43,7 +43,7 @@ It writes only the draft, in `workbench/drafts/`. The Workbench is always writab
 ## Contracts
 
 - write-guard, `lore/contracts/core/write-guard.md`. Its check allows every write under `workbench/` and refuses a write to the Lore or to a payload from a session in Read only.
-- spec-before-breakdown, `lore/contracts/core/spec-before-breakdown.md`. Its rule is that a unit of work that has a spec has no breakdown until the spec is agreed. A draft is not an agreed spec, so no breakdown is made from it.
+- spec-before-breakdown, `lore/contracts/default/spec-before-breakdown.md`. Its rule is that a unit of work that has a spec has no breakdown until the spec is agreed. A draft is not an agreed spec, so no breakdown is made from it.
 
 ## What it refuses
 

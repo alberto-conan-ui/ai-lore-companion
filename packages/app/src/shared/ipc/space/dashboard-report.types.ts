@@ -4,6 +4,8 @@
  * app state and is never written to a Space payload.
  */
 
+import type { HandoverParts } from '@ai-lore-companion/core';
+
 /** Limits shared by the app-side validator and the reporting tool. */
 export const DASHBOARD_REPORT_MAX_CHARS = 24 * 1024;
 export const DASHBOARD_REPORT_BASIS_MAX_CHARS = 1024;
@@ -11,68 +13,71 @@ export const DASHBOARD_COMPONENT_ID_MAX_CHARS = 64;
 export const DASHBOARD_TEXT_MAX_CHARS = 4096;
 export const DASHBOARD_LIST_MAX_ITEMS = 50;
 export const DASHBOARD_LIST_ITEM_MAX_CHARS = 512;
-export const DASHBOARD_MAX_SECTIONS = 12;
-export const DASHBOARD_MAX_COMPONENTS = 48;
-export const DASHBOARD_MAX_COLUMNS = 3;
+export const DASHBOARD_MAX_PANELS_PER_BAND = 8;
 export const DASHBOARD_DEFAULT_RECENT_DAYS = 14;
 export const DASHBOARD_DEFAULT_LIMIT = 10;
 
 export const DASHBOARD_PM_COMPONENT_TYPES = ['text', 'metric', 'list'] as const;
 export type DashboardPmComponentType = (typeof DASHBOARD_PM_COMPONENT_TYPES)[number];
 
-export const DASHBOARD_COMPANION_COMPONENT_TYPES = [
-  'plan',
-  'needs-you',
-  'agents',
-  'repositories',
-  'workbench-docs',
-  'handovers',
-  'activity',
-] as const;
-export type DashboardCompanionComponentType = (typeof DASHBOARD_COMPANION_COMPONENT_TYPES)[number];
+export const DASHBOARD_BAND_IDS = ['needs-you', 'moving', 'waiting'] as const;
+export type DashboardBandId = (typeof DASHBOARD_BAND_IDS)[number];
 
-export type DashboardComponentSource = 'pm' | 'companion';
+export const DASHBOARD_PANEL_KINDS = {
+  'needs-you': ['next-action', 'review-documents', 'publish-area'],
+  moving: ['in-progress', 'queued', 'dormant', 'done-line'],
+  waiting: ['pull-requests', 'live-sessions', 'agents-board', 'space-stats', 'handovers'],
+} as const satisfies Record<DashboardBandId, readonly string[]>;
+export type DashboardCompanionPanelKind =
+  (typeof DASHBOARD_PANEL_KINDS)[DashboardBandId][number];
 
-type DashboardComponentBase = {
+export type DashboardPanelOrder = 'newest' | 'oldest' | 'age' | 'stage' | 'state';
+
+/** One PM-written text value attached to a companion panel. */
+export type DashboardPanelPmLine = { id: string; instruction: string };
+
+export type DashboardCompanionPanel = {
   id: string;
-  title: string;
+  kind: DashboardCompanionPanelKind;
+  source: 'companion';
+  title?: string;
+  limit?: number;
+  recentDays?: number;
+  order?: DashboardPanelOrder;
+  pmLine?: DashboardPanelPmLine;
 };
 
-export type DashboardPmComponentDefinition = DashboardComponentBase & {
-  type: DashboardPmComponentType;
+export type DashboardPmPanel = {
+  id: string;
+  kind: DashboardPmComponentType;
   source: 'pm';
+  title: string;
   instruction?: string;
   limit?: number;
 };
 
-export type DashboardCompanionComponentDefinition = DashboardComponentBase & {
-  type: DashboardCompanionComponentType;
-  source: 'companion';
-  limit?: number;
-  recentDays?: number;
-};
+export type DashboardPanel = DashboardCompanionPanel | DashboardPmPanel;
 
-export type DashboardComponentDefinition =
-  | DashboardPmComponentDefinition
-  | DashboardCompanionComponentDefinition;
-
-export type DashboardSection = {
-  id: string;
-  title: string;
-  /** One to three ordered columns; each component id occurs once globally. */
-  columns: string[][];
+export type DashboardBand = {
+  id: DashboardBandId;
+  panels: DashboardPanel[];
 };
 
 export type DashboardDefinition = {
-  version: 1;
-  sections: DashboardSection[];
-  components: DashboardComponentDefinition[];
+  version: 2;
+  bands: DashboardBand[];
 };
 
 export type DashboardDefinitionSource = 'space' | 'installed-default' | 'packaged-default';
 
 export type DashboardDefinitionDiagnostic = {
-  kind: 'missing' | 'unreadable' | 'invalid-json' | 'invalid-definition' | 'unsafe-path';
+  kind:
+    | 'missing'
+    | 'unreadable'
+    | 'invalid-json'
+    | 'invalid-definition'
+    | 'unsupported-version'
+    | 'unsafe-path';
   message: string;
   path?: string;
 };
@@ -105,6 +110,7 @@ export type DashboardWorkbenchHandover = {
   title: string;
   sessionId: string | null;
   text: string | null;
+  parts: HandoverParts;
   timestamp: string;
   timestampKind: 'creation' | 'modification';
   modifiedAt: string;

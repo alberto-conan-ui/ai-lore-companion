@@ -3,7 +3,7 @@ type: corpus
 term: Specifying
 points_at:
   - lore/processes/default/specify.md
-  - lore/contracts/core/spec-before-breakdown.md
+  - lore/contracts/default/spec-before-breakdown.md
 ---
 
 # Specifying
@@ -20,4 +20,4 @@ A spec that is not yet agreed is a [draft](./draft.md) in the Workbench. An [agr
 
 ## What acts on it
 
-With the default set, the process specify takes an idea to an agreed spec that is published. It uses the verb spec-draft to write the draft and the verb spec-agree to publish it. The core contract spec-before-breakdown guards this pillar.
+With the default set, the process specify takes an idea to an agreed spec that is published. It uses the verb spec-draft to write the draft and the verb spec-agree to publish it. The contract spec-before-breakdown, which ships as a default, guards this pillar.

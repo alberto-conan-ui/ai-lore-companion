@@ -58,7 +58,7 @@ The tools belong to the local server that the companion runs for the session. In
 ## Contracts
 
 - write-guard, `lore/contracts/core/write-guard.md`. Before each write, its check refuses a write to a payload from a session in Read only, and a write outside the claimed targets from a session in Writing.
-- spec-before-breakdown, `lore/contracts/core/spec-before-breakdown.md`. Its rule is that a unit of work that has a spec has no breakdown until the spec is agreed. The published file and the link that this verb writes are what show that the spec is agreed.
+- spec-before-breakdown, `lore/contracts/default/spec-before-breakdown.md`. Its rule is that a unit of work that has a spec has no breakdown until the spec is agreed. The published file and the link that this verb writes are what show that the spec is agreed.
 - The mirror of the publish area. A payload is written as its mirror says.
 
 ## What it refuses

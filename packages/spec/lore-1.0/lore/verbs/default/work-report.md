@@ -48,7 +48,7 @@ This verb does not move the status of the piece of work, does not open a pull re
 ## Contracts
 
 - write-guard, `lore/contracts/core/write-guard.md`. The verb writes to GitHub and to the Workbench only, and the check allows both in either mode.
-- spec-before-breakdown, `lore/contracts/core/spec-before-breakdown.md`. Its rule says that the criteria of a piece of work are drawn from the agreed spec. That is why a changed criterion is reported on the spec's unit of work, and why it is not changed only on the piece of work.
+- spec-before-breakdown, `lore/contracts/default/spec-before-breakdown.md`. Its rule says that the criteria of a piece of work are drawn from the agreed spec. That is why a changed criterion is reported on the spec's unit of work, and why it is not changed only on the piece of work.
 
 ## What it refuses
 

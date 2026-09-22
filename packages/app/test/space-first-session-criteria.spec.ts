@@ -160,6 +160,11 @@ test.describe('the first-session criteria as end-to-end assertions (M12.4)', () 
       const page = launched.page;
 
       await expect(page.getByTestId('space-window')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('space-rail-dashboard')).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      await page.getByTestId('space-rail-sessions').click();
       await expect(page.getByTestId('space-rail-sessions')).toHaveAttribute('aria-current', 'page');
 
       // Opening now creates the PM tab automatically. The compact row's `+ AI`, same
@@ -188,6 +193,11 @@ test.describe('the first-session criteria as end-to-end assertions (M12.4)', () 
     test.setTimeout(60_000);
     await withSpaceApp('e2e-criterion-23', async ({ app, page }) => {
       await expect(page.getByTestId('space-window')).toBeVisible({ timeout: 15_000 });
+      await expect(page.getByTestId('space-rail-dashboard')).toHaveAttribute(
+        'aria-current',
+        'page',
+      );
+      await page.getByTestId('space-rail-sessions').click();
       const empty = page.getByTestId('space-sessions-empty');
       const start = empty.getByTestId('new-ai');
       await expect(start).toBeVisible();

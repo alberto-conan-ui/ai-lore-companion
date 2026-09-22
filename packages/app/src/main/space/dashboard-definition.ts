@@ -2,22 +2,27 @@ import { createHash } from 'node:crypto';
 import { type FileHandle, open, realpath, stat } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import type {
-  DashboardComponentDefinition,
+  DashboardBand,
+  DashboardBandId,
+  DashboardCompanionPanel,
+  DashboardCompanionPanelKind,
   DashboardDefinition,
   DashboardDefinitionDiagnostic,
-  DashboardPmComponentDefinition,
   DashboardPmComponentValue,
+  DashboardPmComponentType,
+  DashboardPanel,
   DashboardReportInput,
   ResolvedDashboardDefinition,
 } from '../../shared/ipc/space/dashboard-report.types.js';
 import {
+  DASHBOARD_BAND_IDS,
   DASHBOARD_COMPONENT_ID_MAX_CHARS,
   DASHBOARD_DEFAULT_LIMIT,
+  DASHBOARD_DEFAULT_RECENT_DAYS,
   DASHBOARD_LIST_ITEM_MAX_CHARS,
   DASHBOARD_LIST_MAX_ITEMS,
-  DASHBOARD_MAX_COLUMNS,
-  DASHBOARD_MAX_COMPONENTS,
-  DASHBOARD_MAX_SECTIONS,
+  DASHBOARD_MAX_PANELS_PER_BAND,
+  DASHBOARD_PANEL_KINDS,
   DASHBOARD_REPORT_BASIS_MAX_CHARS,
   DASHBOARD_REPORT_MAX_CHARS,
   DASHBOARD_TEXT_MAX_CHARS,
@@ -36,28 +41,8 @@ export type DashboardDefinitionReadResult =
 
 const FILE_NAME = 'dashboard.json';
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const COMPONENT_TYPES = new Set([
-  'plan',
-  'needs-you',
-  'agents',
-  'repositories',
-  'workbench-docs',
-  'handovers',
-  'activity',
-  'text',
-  'metric',
-  'list',
-]);
 const PM_TYPES = new Set(['text', 'metric', 'list']);
-const COMPANION_TYPES = new Set([
-  'plan',
-  'needs-you',
-  'agents',
-  'repositories',
-  'workbench-docs',
-  'handovers',
-  'activity',
-]);
+const BAND_IDS = new Set<string>(DASHBOARD_BAND_IDS);
 const DASHBOARD_DEFINITION_MAX_BYTES = 256 * 1024;
 
 const failure = (
@@ -110,9 +95,9 @@ function boundedInteger(
   label: string,
   minimum: number,
   maximum: number,
+  defaultValue: number,
 ): number | DashboardDefinitionDiagnostic {
-  if (value === undefined)
-    return minimum === 1 && maximum === DASHBOARD_DEFAULT_LIMIT ? DASHBOARD_DEFAULT_LIMIT : minimum;
+  if (value === undefined) return defaultValue;
   if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum || value > maximum)
     return failure(
       'invalid-definition',
@@ -121,167 +106,211 @@ function boundedInteger(
   return value;
 }
 
-function component(
+type CompanionOptions = {
+  limit?: number;
+  recentDays?: number;
+  orders?: readonly DashboardCompanionPanel['order'][];
+  pmLine?: true;
+};
+
+const COMPANION_OPTIONS: Record<DashboardCompanionPanelKind, CompanionOptions> = {
+  'next-action': { pmLine: true },
+  'review-documents': {
+    limit: DASHBOARD_DEFAULT_LIMIT,
+    recentDays: DASHBOARD_DEFAULT_RECENT_DAYS,
+    orders: ['newest', 'oldest'],
+  },
+  'publish-area': {},
+  'in-progress': { limit: DASHBOARD_DEFAULT_LIMIT, orders: ['age', 'stage'] },
+  queued: { limit: DASHBOARD_DEFAULT_LIMIT, orders: ['age', 'stage'] },
+  dormant: { pmLine: true },
+  'done-line': {},
+  'pull-requests': { limit: DASHBOARD_DEFAULT_LIMIT, orders: ['newest', 'oldest', 'state'] },
+  'live-sessions': { limit: DASHBOARD_DEFAULT_LIMIT, orders: ['newest', 'oldest'] },
+  'agents-board': { limit: DASHBOARD_DEFAULT_LIMIT, orders: ['newest', 'oldest'] },
+  'space-stats': {},
+  handovers: { limit: 5, orders: ['newest', 'oldest'] },
+};
+
+function companionBandOf(kind: string): DashboardBandId | null {
+  for (const band of DASHBOARD_BAND_IDS) {
+    if ((DASHBOARD_PANEL_KINDS[band] as readonly string[]).includes(kind)) return band;
+  }
+  return null;
+}
+
+function pmLine(
   value: unknown,
+  label: string,
+): { id: string; instruction: string } | DashboardDefinitionDiagnostic {
+  if (!isObject(value) || !keysAre(value, ['id', 'instruction']))
+    return failure('invalid-definition', `${label} has unsupported keys or is not an object.`);
+  const lineId = id(value.id, `${label}.id`);
+  const instruction = text(value.instruction, `${label}.instruction`, DASHBOARD_TEXT_MAX_CHARS);
+  if (typeof lineId !== 'string') return lineId;
+  if (typeof instruction !== 'string') return instruction;
+  return { id: lineId, instruction };
+}
+
+function panel(
+  value: unknown,
+  band: DashboardBandId,
   index: number,
-): DashboardComponentDefinition | DashboardDefinitionDiagnostic {
-  const label = `components[${index}]`;
+): DashboardPanel | DashboardDefinitionDiagnostic {
+  const label = `bands[${band}].panels[${index}]`;
   if (
     !isObject(value) ||
-    !keysAre(value, ['id', 'type', 'source', 'title', 'instruction', 'limit', 'recentDays'])
+    !keysAre(value, ['id', 'kind', 'source', 'title', 'instruction', 'limit', 'recentDays', 'order', 'pmLine'])
   )
     return failure('invalid-definition', `${label} has unsupported keys or is not an object.`);
-  const componentId = id(value.id, `${label}.id`);
-  const title = text(value.title, `${label}.title`, 200);
-  if (typeof componentId !== 'string') return componentId;
-  if (typeof title !== 'string') return title;
-  if (typeof value.type !== 'string' || !COMPONENT_TYPES.has(value.type))
-    return failure('invalid-definition', `${label}.type is unsupported.`);
-  const expectedSource = PM_TYPES.has(value.type) ? 'pm' : 'companion';
-  if (value.source !== expectedSource)
-    return failure(
-      'invalid-definition',
-      `${label}.source must be ${expectedSource} for ${value.type}.`,
-    );
-  const limit = boundedInteger(value.limit, `${label}.limit`, 1, DASHBOARD_LIST_MAX_ITEMS);
-  if (typeof limit !== 'number') return limit;
-  if (expectedSource === 'pm' && value.recentDays !== undefined)
-    return failure('invalid-definition', `${label}.recentDays applies only to workbench-docs.`);
-  if (expectedSource === 'companion' && value.instruction !== undefined)
-    return failure('invalid-definition', `${label}.instruction applies only to PM components.`);
-  if (
-    value.limit !== undefined &&
-    !['list', 'workbench-docs', 'handovers', 'activity'].includes(value.type)
-  )
-    return failure('invalid-definition', `${label}.limit applies only to bounded list components.`);
-  if (
-    expectedSource === 'companion' &&
-    value.type !== 'workbench-docs' &&
-    value.recentDays !== undefined
-  )
-    return failure('invalid-definition', `${label}.recentDays applies only to workbench-docs.`);
-  const recentDays =
-    expectedSource === 'companion' && value.type === 'workbench-docs'
-      ? boundedInteger(value.recentDays, `${label}.recentDays`, 1, 90)
-      : undefined;
-  if (recentDays !== undefined && typeof recentDays !== 'number') return recentDays;
-  if (value.instruction !== undefined) {
-    const instruction = text(value.instruction, `${label}.instruction`, DASHBOARD_TEXT_MAX_CHARS);
-    if (typeof instruction !== 'string') return instruction;
-  }
-  const base = { id: componentId, title, type: value.type, source: expectedSource } as const;
-  if (expectedSource === 'pm') {
+  const panelId = id(value.id, `${label}.id`);
+  if (typeof panelId !== 'string') return panelId;
+  if (typeof value.kind !== 'string') return failure('invalid-definition', `${label}.kind is unsupported.`);
+
+  if (PM_TYPES.has(value.kind)) {
+    if (value.source !== 'pm')
+      return failure('invalid-definition', `${label}.source must be pm for ${value.kind}.`);
+    const title = text(value.title, `${label}.title`, 200);
+    if (typeof title !== 'string') return title;
+    if (value.recentDays !== undefined || value.order !== undefined || value.pmLine !== undefined)
+      return failure('invalid-definition', `${label} has an option this PM panel does not support.`);
+    if (value.kind !== 'list' && value.limit !== undefined)
+      return failure('invalid-definition', `${label}.limit applies only to list panels.`);
+    const limit =
+      value.kind === 'list'
+        ? boundedInteger(value.limit, `${label}.limit`, 1, DASHBOARD_LIST_MAX_ITEMS, DASHBOARD_DEFAULT_LIMIT)
+        : undefined;
+    if (limit !== undefined && typeof limit !== 'number') return limit;
+    let instruction: string | undefined;
+    if (value.instruction !== undefined) {
+      const parsedInstruction = text(
+        value.instruction,
+        `${label}.instruction`,
+        DASHBOARD_TEXT_MAX_CHARS,
+      );
+      if (typeof parsedInstruction !== 'string') return parsedInstruction;
+      instruction = parsedInstruction;
+    }
     return {
-      ...base,
-      type: value.type as DashboardPmComponentDefinition['type'],
+      id: panelId,
+      kind: value.kind as DashboardPmComponentType,
       source: 'pm',
-      ...(value.instruction === undefined ? {} : { instruction: value.instruction as string }),
-      ...(value.limit === undefined ? {} : { limit }),
-    } as DashboardComponentDefinition;
+      title,
+      ...(instruction === undefined ? {} : { instruction }),
+      ...(limit === undefined ? {} : { limit }),
+    };
   }
+
+  const expectedBand = companionBandOf(value.kind);
+  if (expectedBand === null) return failure('invalid-definition', `${label}.kind is unsupported.`);
+  if (expectedBand !== band)
+    return failure('invalid-definition', `${label}.kind "${value.kind}" belongs in ${expectedBand}.`);
+  if (value.source !== 'companion')
+    return failure('invalid-definition', `${label}.source must be companion for ${value.kind}.`);
+  if (value.instruction !== undefined)
+    return failure('invalid-definition', `${label}.instruction applies only to PM panels.`);
+  let title: string | undefined;
+  if (value.title !== undefined) {
+    const parsedTitle = text(value.title, `${label}.title`, 200);
+    if (typeof parsedTitle !== 'string') return parsedTitle;
+    title = parsedTitle;
+  }
+  const kind = value.kind as DashboardCompanionPanelKind;
+  const options = COMPANION_OPTIONS[kind];
+  if (options.limit === undefined && value.limit !== undefined)
+    return failure('invalid-definition', `${label}.limit is not supported by ${kind}.`);
+  if (options.recentDays === undefined && value.recentDays !== undefined)
+    return failure('invalid-definition', `${label}.recentDays is not supported by ${kind}.`);
+  if (options.orders === undefined && value.order !== undefined)
+    return failure('invalid-definition', `${label}.order is not supported by ${kind}.`);
+  if (options.pmLine === undefined && value.pmLine !== undefined)
+    return failure('invalid-definition', `${label}.pmLine is not supported by ${kind}.`);
+  const limit =
+    options.limit === undefined
+      ? undefined
+      : boundedInteger(value.limit, `${label}.limit`, 1, DASHBOARD_LIST_MAX_ITEMS, options.limit);
+  if (limit !== undefined && typeof limit !== 'number') return limit;
+  const recentDays =
+    options.recentDays === undefined
+      ? undefined
+      : boundedInteger(value.recentDays, `${label}.recentDays`, 1, 90, options.recentDays);
+  if (recentDays !== undefined && typeof recentDays !== 'number') return recentDays;
+  let order: DashboardCompanionPanel['order'];
+  if (options.orders !== undefined) {
+    const defaultOrder = options.orders[0];
+    if (typeof value.order !== 'string' || !(options.orders as readonly string[]).includes(value.order)) {
+      if (value.order !== undefined)
+        return failure('invalid-definition', `${label}.order is not supported by ${kind}.`);
+      order = defaultOrder;
+    } else {
+      order = value.order as DashboardCompanionPanel['order'];
+    }
+  }
+  const line = value.pmLine === undefined ? undefined : pmLine(value.pmLine, `${label}.pmLine`);
+  if (line !== undefined && !('id' in line)) return line;
   return {
-    ...base,
-    type: value.type as Exclude<
-      DashboardComponentDefinition,
-      DashboardPmComponentDefinition
-    >['type'],
+    id: panelId,
+    kind,
     source: 'companion',
-    ...(value.limit === undefined ? {} : { limit }),
-    ...(value.recentDays === undefined ? {} : { recentDays }),
-  } as DashboardComponentDefinition;
+    ...(title === undefined ? {} : { title }),
+    ...(limit === undefined ? {} : { limit }),
+    ...(recentDays === undefined ? {} : { recentDays }),
+    ...(order === undefined ? {} : { order }),
+    ...(line === undefined ? {} : { pmLine: line }),
+  };
 }
 
 function definition(value: unknown): DashboardDefinition | DashboardDefinitionDiagnostic {
-  if (!isObject(value) || !keysAre(value, ['version', 'sections', 'components']))
+  if (!isObject(value))
+    return failure('invalid-definition', 'The dashboard definition must be an object with version and bands.');
+  if (value.version !== 2) {
+    const version = typeof value.version === 'number' ? String(value.version) : 'unknown';
     return failure(
-      'invalid-definition',
-      'The dashboard definition must be an object with version, sections and components.',
+      'unsupported-version',
+      `This dashboard definition is version ${version}. The Dashboard requires version 2, so a default definition is shown instead. Rewrite it with the verb dashboard-update, or remove it with dashboard-reset.`,
     );
-  if (value.version !== 1)
-    return failure('invalid-definition', 'The dashboard definition version must be 1.');
-  if (
-    !Array.isArray(value.sections) ||
-    value.sections.length === 0 ||
-    value.sections.length > DASHBOARD_MAX_SECTIONS
-  )
-    return failure(
-      'invalid-definition',
-      `sections must contain 1 to ${DASHBOARD_MAX_SECTIONS} sections.`,
-    );
-  if (
-    !Array.isArray(value.components) ||
-    value.components.length === 0 ||
-    value.components.length > DASHBOARD_MAX_COMPONENTS
-  )
-    return failure(
-      'invalid-definition',
-      `components must contain 1 to ${DASHBOARD_MAX_COMPONENTS} components.`,
-    );
-
-  const components: DashboardComponentDefinition[] = [];
-  const componentIds = new Set<string>();
-  for (let index = 0; index < value.components.length; index += 1) {
-    const parsed = component(value.components[index], index);
-    if (!('id' in parsed)) return parsed;
-    if (componentIds.has(parsed.id))
-      return failure('invalid-definition', `The component id "${parsed.id}" is duplicated.`);
-    componentIds.add(parsed.id);
-    components.push(parsed);
   }
-  const sections = [] as DashboardDefinition['sections'];
-  const placed = new Set<string>();
-  for (let index = 0; index < value.sections.length; index += 1) {
-    const raw = value.sections[index];
-    const label = `sections[${index}]`;
-    if (!isObject(raw) || !keysAre(raw, ['id', 'title', 'columns']))
+  if (!keysAre(value, ['version', 'bands']))
+    return failure('invalid-definition', 'The dashboard definition must be an object with version and bands.');
+  if (!Array.isArray(value.bands) || value.bands.length === 0 || value.bands.length > DASHBOARD_BAND_IDS.length)
+    return failure('invalid-definition', 'bands must contain 1 to 3 bands.');
+  const bands: DashboardBand[] = [];
+  const ids = new Set<string>();
+  const companionKinds = new Set<string>();
+  const bandIds = new Set<string>();
+  for (let index = 0; index < value.bands.length; index += 1) {
+    const raw = value.bands[index];
+    const label = `bands[${index}]`;
+    if (!isObject(raw) || !keysAre(raw, ['id', 'panels']))
       return failure('invalid-definition', `${label} has unsupported keys or is not an object.`);
-    const sectionId = id(raw.id, `${label}.id`);
-    const title = text(raw.title, `${label}.title`, 200);
-    if (typeof sectionId !== 'string') return sectionId;
-    if (typeof title !== 'string') return title;
-    if (
-      !Array.isArray(raw.columns) ||
-      raw.columns.length < 1 ||
-      raw.columns.length > DASHBOARD_MAX_COLUMNS
-    )
-      return failure(
-        'invalid-definition',
-        `${label}.columns must contain 1 to ${DASHBOARD_MAX_COLUMNS} columns.`,
-      );
-    const columns: string[][] = [];
-    for (let columnIndex = 0; columnIndex < raw.columns.length; columnIndex += 1) {
-      const rawColumn = raw.columns[columnIndex];
-      if (!Array.isArray(rawColumn) || rawColumn.length === 0)
-        return failure(
-          'invalid-definition',
-          `${label}.columns[${columnIndex}] must be a non-empty list.`,
-        );
-      const column: string[] = [];
-      for (const rawId of rawColumn) {
-        const componentId = id(rawId, `${label}.columns component id`);
-        if (typeof componentId !== 'string') return componentId;
-        if (!componentIds.has(componentId))
-          return failure(
-            'invalid-definition',
-            `The layout references unknown component "${componentId}".`,
-          );
-        if (placed.has(componentId))
-          return failure(
-            'invalid-definition',
-            `The component "${componentId}" appears more than once in the layout.`,
-          );
-        placed.add(componentId);
-        column.push(componentId);
+    if (typeof raw.id !== 'string' || !BAND_IDS.has(raw.id))
+      return failure('invalid-definition', `${label}.id is unsupported.`);
+    if (bandIds.has(raw.id)) return failure('invalid-definition', `The band id "${raw.id}" is duplicated.`);
+    bandIds.add(raw.id);
+    if (!Array.isArray(raw.panels) || raw.panels.length === 0 || raw.panels.length > DASHBOARD_MAX_PANELS_PER_BAND)
+      return failure('invalid-definition', `${label}.panels must contain 1 to ${DASHBOARD_MAX_PANELS_PER_BAND} panels.`);
+    const band = raw.id as DashboardBandId;
+    const panels: DashboardBand['panels'] = [];
+    for (let panelIndex = 0; panelIndex < raw.panels.length; panelIndex += 1) {
+      const parsed = panel(raw.panels[panelIndex], band, panelIndex);
+      if (!('id' in parsed)) return parsed;
+      if (ids.has(parsed.id)) return failure('invalid-definition', `The panel id "${parsed.id}" is duplicated.`);
+      ids.add(parsed.id);
+      if (parsed.source === 'companion') {
+        if (companionKinds.has(parsed.kind))
+          return failure('invalid-definition', `The companion panel kind "${parsed.kind}" is duplicated.`);
+        companionKinds.add(parsed.kind);
+        if (parsed.pmLine !== undefined) {
+          if (ids.has(parsed.pmLine.id))
+            return failure('invalid-definition', `The PM line id "${parsed.pmLine.id}" is duplicated.`);
+          ids.add(parsed.pmLine.id);
+        }
       }
-      columns.push(column);
+      panels.push(parsed);
     }
-    if (sections.some((section) => section.id === sectionId))
-      return failure('invalid-definition', `The section id "${sectionId}" is duplicated.`);
-    sections.push({ id: sectionId, title, columns });
+    bands.push({ id: band, panels });
   }
-  if (placed.size !== componentIds.size)
-    return failure('invalid-definition', 'Every component must appear exactly once in the layout.');
-  return { version: 1, sections, components };
+  return { version: 2, bands };
 }
 
 /** Stable JSON used for the definition hash shared with the PM. */
@@ -434,11 +463,24 @@ export async function readDashboardDefinition(
   };
 }
 
-function pmDefinitions(definitionValue: DashboardDefinition): DashboardPmComponentDefinition[] {
-  return definitionValue.components.filter(
-    (componentValue): componentValue is DashboardPmComponentDefinition =>
-      componentValue.source === 'pm',
-  );
+type DashboardPmDefinition = {
+  id: string;
+  type: DashboardPmComponentType;
+  limit?: number;
+};
+
+function pmDefinitions(definitionValue: DashboardDefinition): DashboardPmDefinition[] {
+  const values: DashboardPmDefinition[] = [];
+  for (const band of definitionValue.bands) {
+    for (const panel of band.panels) {
+      if (panel.source === 'pm') {
+        values.push({ id: panel.id, type: panel.kind, ...(panel.limit === undefined ? {} : { limit: panel.limit }) });
+      } else if (panel.pmLine !== undefined) {
+        values.push({ id: panel.pmLine.id, type: 'text' });
+      }
+    }
+  }
+  return values;
 }
 
 function validString(value: unknown, maximum: number, allowLineBreaks = false): value is string {

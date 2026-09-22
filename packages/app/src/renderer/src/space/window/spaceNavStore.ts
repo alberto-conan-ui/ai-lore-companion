@@ -61,7 +61,7 @@ let lastRequestId = 0;
  * M7.3, which builds the Dashboard, decides whether that changes.
  */
 export const useSpaceNavStore = create<SpaceNavState>((set) => ({
-  screen: 'sessions',
+  screen: 'dashboard',
   showScreen: (screen) => set({ screen }),
   sessionsRequest: null,
   sessionsWithTab: [],

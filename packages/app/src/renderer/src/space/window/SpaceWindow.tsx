@@ -47,8 +47,8 @@ export function SpaceWindow({ init }: Props): JSX.Element {
   const [searchOpen, setSearchOpen] = useState(false);
   const files = useWindowRequest();
 
-  // A Space just out of setup opens on the Dashboard (M9.10); otherwise the store's initial
-  // screen, Sessions, stays. Going Back and forth inside the window does not move again.
+  // A Space opens on the Dashboard. Setup also returns there if a previous screen was held;
+  // moving between screens afterwards does not reset the selection.
   // biome-ignore lint/correctness/useExhaustiveDependencies: runs once, on mount, like `init` itself.
   useEffect(() => {
     if (init.justCreated === true) showScreen('dashboard');

@@ -40,6 +40,9 @@ export function ModalSheet(props: Props): JSX.Element {
       <Dialog.Portal>
         <Dialog.Overlay
           style={{ ...overlayBaseStyle, ...props.backdropStyle }}
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) props.onClose();
+          }}
           {...(props.backdropTestId ? { 'data-testid': props.backdropTestId } : {})}
         />
         <Dialog.Content
