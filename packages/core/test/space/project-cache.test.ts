@@ -73,6 +73,7 @@ function snapshot(fetchedAt = NOW): ProjectSnapshot {
         kind: 'feature',
         items: [{ issue: ISSUE(2), title: 'An item', state: 'closed', status: 'Done', labels: [], updatedAt: NOW }],
         specUrl: null,
+      criteriaOnTicket: true,
       },
     ],
     standalone: [],

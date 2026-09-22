@@ -93,6 +93,8 @@ export type FocusCard = {
   stageChangedAt: string | null;
   kind: string | null;
   specUrl: string | null;
+  /** Whether the issue's body names acceptance criteria. See `bodyNamesCriteria`. */
+  criteriaOnTicket: boolean;
   updatedAt: string | null;
   /** The focus's items, session issues left out. */
   items: ItemCard[];
@@ -151,6 +153,24 @@ export type NeedsYouEntry =
     }
   | { kind: 'review'; focus: IssueRef; title: string }
   | {
+      /**
+       * Every item of this focus is closed, so it is waiting for the Human
+       * Lead's Done call. Only the prompt is automated: nothing here moves a
+       * Stage, which stays the Human Lead's explicit yes under stage-gate.
+       */
+      kind: 'ready-for-done';
+      focus: IssueRef;
+      title: string;
+      /**
+       * `false` when the focus's body names no acceptance criteria, so whether
+       * the work is *done* cannot be checked against its own ticket. Such a
+       * focus is reported as uncomputable rather than left out of the
+       * reckoning: silence reads as "not ready", which is how #1 sat finished
+       * and unnoticed for two days.
+       */
+      criteriaOnTicket: boolean;
+    }
+  | {
       kind: 'stale-session';
       issue: IssueRef;
       column: AgentsColumn;
@@ -201,6 +221,7 @@ function focusCard(focus: FocusItem, gateNote: string | null): FocusCard {
     stageChangedAt: focus.stageChangedAt,
     kind: focus.kind,
     specUrl: focus.specUrl,
+    criteriaOnTicket: focus.criteriaOnTicket,
     updatedAt: focus.updatedAt,
     items,
     itemsDone: items.filter((item) => item.done).length,
@@ -295,6 +316,27 @@ export function dashboardModel(input: DashboardInput): DashboardModel {
       .flatMap((column) => column.focuses)
       .filter((card) => card.state === 'open')
       .map((card): NeedsYouEntry => ({ kind: 'review', focus: card.issue, title: card.title })),
+    // Every item closed and the focus still open: the work is finished and the
+    // record has not moved. Nothing prompted this before — the only prompt in
+    // the Lore fires inside the `work` process, when a session happens to run
+    // it on the last item, so a focus finished by an earlier session carried
+    // nothing forward. A focus already at Review has its own entry above.
+    ...columns
+      .filter((column) => column.name !== REVIEW_STAGE)
+      .flatMap((column) => column.focuses)
+      .concat(unstaged)
+      .filter(
+        (card) =>
+          card.state === 'open' && card.itemsTotal > 0 && card.itemsDone === card.itemsTotal,
+      )
+      .map(
+        (card): NeedsYouEntry => ({
+          kind: 'ready-for-done',
+          focus: card.issue,
+          title: card.title,
+          criteriaOnTicket: card.criteriaOnTicket,
+        }),
+      ),
     ...board
       .filter((row) => row.stale)
       .sort((a, b) => (b.idleMs ?? 0) - (a.idleMs ?? 0))

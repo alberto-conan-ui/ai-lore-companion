@@ -4,7 +4,7 @@ import type { OpenPullRequest } from '../github/types.js';
 import type { DashboardModel, FocusCard, NeedsYouEntry } from './dashboard-model.js';
 
 type ActionData =
-  | Extract<NeedsYouEntry, { kind: 'gate' | 'review' | 'stale-session' }>
+  | Extract<NeedsYouEntry, { kind: 'gate' | 'review' | 'stale-session' | 'ready-for-done' }>
   | { kind: 'failing-pull-request'; pull: OpenPullRequest }
   | { kind: 'draft'; path: string; title: string };
 export type NextAction = ActionData & { headline: string };
@@ -117,6 +117,13 @@ export function nextActionHeadline(action: ActionData): string {
       return `PR #${action.pull.number} CI has failed`;
     case 'review':
       return `Review #${action.focus.number}: ${action.title}`;
+    case 'ready-for-done':
+      // The uncomputable case says what is missing rather than claiming the
+      // work is finished. Nobody can check a focus against criteria its ticket
+      // does not carry.
+      return action.criteriaOnTicket
+        ? `#${action.focus.number} is finished — your Done call: ${action.title}`
+        : `#${action.focus.number} has no criteria on its ticket, so done cannot be told: ${action.title}`;
     case 'stale-session':
       return `Check the idle session #${action.issue.number}`;
     case 'draft':
@@ -136,6 +143,17 @@ export function rankNextActions(input: {
   for (const action of input.needsYou) {
     if (action.kind === 'gate') entries.push({ action, priority: 0, at: time(action.askedAt) });
     else if (action.kind === 'review')
+      entries.push({
+        action,
+        priority: 2,
+        at: time(
+          input.focuses?.find((focus) => sameIssue(focus.issue, action.focus))?.stageChangedAt,
+        ),
+      });
+    // Beside a review: both say the work is done and the Human Lead has to
+    // look. Neither outranks a failing pull request, which is a thing going
+    // wrong rather than a thing waiting.
+    else if (action.kind === 'ready-for-done')
       entries.push({
         action,
         priority: 2,

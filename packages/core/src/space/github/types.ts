@@ -191,6 +191,12 @@ export type FocusItem = PlanItem & {
   items: PlanItem[];
   /** The address of the published spec, read from the issue's body, or `null`. */
   specUrl: string | null;
+  /**
+   * Whether the issue's body names acceptance criteria. A heuristic: it says
+   * that the work could be checked against its own ticket, not that it has
+   * been. Readiness cannot be computed without it.
+   */
+  criteriaOnTicket: boolean;
 };
 
 /** A session issue: one row of the Agents board. */
@@ -254,9 +260,16 @@ export type RawProjectIssue = {
 export type PullRequestChecks = 'passing' | 'failing' | 'pending' | 'none';
 export type PullRequestReview = 'approved' | 'changes-requested' | 'review-required' | 'none';
 export type OpenPullRequest = {
-  repository: string; number: number; title: string; url: string;
-  headBranch: string; baseBranch: string; draft: boolean;
-  createdAt: string; updatedAt: string;
-  checks: PullRequestChecks; review: PullRequestReview;
+  repository: string;
+  number: number;
+  title: string;
+  url: string;
+  headBranch: string;
+  baseBranch: string;
+  draft: boolean;
+  createdAt: string;
+  updatedAt: string;
+  checks: PullRequestChecks;
+  review: PullRequestReview;
   mergeable: 'mergeable' | 'conflicting' | 'unknown';
 };
