@@ -210,9 +210,26 @@ async function clientFromSessionFiles(files: SessionFilePaths): Promise<Client> 
   return client;
 }
 
+/**
+ * How long to wait for something the app does in the background — a session
+ * spawning, a refresh coalescing.
+ *
+ * This was a hundred attempts ten milliseconds apart: a **one-second** budget
+ * for starting a process. It held on an idle machine and failed on a busy
+ * one, which is why the failure only appeared when two suites ran at once.
+ *
+ * The budget is generous on purpose. A test that fails here should mean the
+ * thing never happened, not that the machine was loaded — and the loop
+ * returns the moment the predicate holds, so an idle run is as fast as it
+ * ever was.
+ */
+const BACKGROUND_BUDGET_MS = 30_000;
+
 async function waitFor(predicate: () => boolean, message: string): Promise<void> {
-  for (let attempt = 0; attempt < 100 && !predicate(); attempt += 1)
+  const until = Date.now() + BACKGROUND_BUDGET_MS;
+  while (!predicate() && Date.now() < until) {
     await new Promise((resolve) => setTimeout(resolve, 10));
+  }
   assert.equal(predicate(), true, message);
 }
 

@@ -14,7 +14,7 @@
     "typecheck": "vite-node scripts/typecheck.ts --",
     "typecheck:node": "tsc -b tsconfig.node.json",
     "clean": "rm -rf out",
-    "test": "npm run test:headless && npm run test:component",
+    "test": "npm run test:headless; h=$?; npm run test:component; c=$?; [ $h -eq 0 ] && [ $c -eq 0 ]",
     "test:headless": "OUT=\"${AI_LORE_APP_TEST_OUT:-dist-test}\" && rm -rf \"$OUT\" && tsc -p tsconfig.test.json --outDir \"$OUT\" && echo '{\"type\":\"module\"}' > \"$OUT/package.json\" && node --import ./test/headless/register-electron.mjs --test --enable-source-maps \"$OUT/test/headless/**/*.test.js\"",
     "test:component": "vitest run",
     "bench:search": "OUT=\"${AI_LORE_APP_TEST_OUT:-dist-test}\" && rm -rf \"$OUT\" && tsc -p tsconfig.test.json --outDir \"$OUT\" && echo '{\"type\":\"module\"}' > \"$OUT/package.json\" && node --import ./test/headless/register-electron.mjs --enable-source-maps \"$OUT/test/bench/search.bench.js\"",
@@ -76,7 +76,7 @@
   "build": {
     "appId": "com.ai-lore.cockpit",
     "productName": "AI-Lore",
-    "copyright": "Copyright © 2026 AI-Lore",
+    "copyright": "Copyright \u00a9 2026 AI-Lore",
     "electronVersion": "32.2.7",
     "directories": {
       "output": "dist"
@@ -87,12 +87,17 @@
         "node-pty": "^1.1.0"
       }
     },
-    "files": ["out/**/*", "package.json"],
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
     "extraResources": [
       {
         "from": "../spec/lore-1.0",
         "to": "lore-1.0",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "asar": false,
@@ -101,7 +106,10 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64", "x64"]
+          "arch": [
+            "arm64",
+            "x64"
+          ]
         }
       ],
       "icon": "build/icon.icns",
@@ -112,7 +120,9 @@
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icon.png",
