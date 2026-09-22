@@ -17,12 +17,11 @@
 
 import { isWriteTarget } from '../desk/guards.js';
 import type { WriteTarget } from '../desk/types.js';
-import { viewDrift } from './views.js';
 import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
-  DEFAULT_VIEWS,
   type AgentsColumn,
+  DEFAULT_VIEWS,
   FOCUS_LEVEL,
   type FieldInfo,
   type FocusItem,
@@ -30,14 +29,15 @@ import {
   LEVEL_FIELD,
   type PlanItem,
   type ProjectInfo,
-  type ProjectViewInfo,
   type ProjectSnapshot,
+  type ProjectViewInfo,
   type RawProjectIssue,
   SESSION_LABEL,
   STAGE_FIELD,
   STATUS_FIELD,
   type SessionIssue,
 } from './types.js';
+import { viewDrift } from './views.js';
 
 /** What a session issue's body records about the session, in its hidden block. */
 export type SessionBlock = {

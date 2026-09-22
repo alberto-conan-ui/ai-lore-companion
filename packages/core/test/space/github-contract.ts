@@ -50,7 +50,10 @@ export type ContractSubject = {
     /** Whether the host's API can create Project views. */
     setViewsSupported(on: boolean): void;
     /** Add an open pull request to the fake. */
-    addOpenPullRequest(repository: string, pull: import('../../src/index.js').OpenPullRequest): void;
+    addOpenPullRequest(
+      repository: string,
+      pull: import('../../src/index.js').OpenPullRequest,
+    ): void;
   };
   cleanup(): void;
 };
@@ -197,7 +200,11 @@ export function gitHubPortContract(
           // One option that exists and two that do not, named from the
           // layout rather than spelled out, so renaming a stage cannot make
           // this assert something about options nobody ships.
-          options: [DEFAULT_STAGES[4] as string, DEFAULT_STAGES[0] as string, DEFAULT_STAGES[3] as string],
+          options: [
+            DEFAULT_STAGES[4] as string,
+            DEFAULT_STAGES[0] as string,
+            DEFAULT_STAGES[3] as string,
+          ],
         }),
       );
       assert.deepEqual(
@@ -575,7 +582,10 @@ export function gitHubPortContract(
         [alone.number],
       );
       assert.ok(snapshot.standalone[0]?.updatedAt, 'PlanItem standalone must have updatedAt');
-      assert.ok(snapshot.focuses[0]?.items[0]?.updatedAt, 'PlanItem inside focus must have updatedAt');
+      assert.ok(
+        snapshot.focuses[0]?.items[0]?.updatedAt,
+        'PlanItem inside focus must have updatedAt',
+      );
       assert.deepEqual(snapshot.sessions, []);
     },
   );
@@ -726,7 +736,7 @@ export function gitHubPortContract(
     const pulls = unwrap(await port.openPullRequests({ repository, limit: 10 }));
     assert.deepEqual(
       pulls.map((p) => p.number),
-      [2, 1]
+      [2, 1],
     );
     assert.deepEqual(pulls[0]?.review, 'approved');
     assert.deepEqual(pulls[0]?.checks, 'passing');

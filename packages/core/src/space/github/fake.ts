@@ -89,7 +89,12 @@ export type FakeProject = {
   views: ProjectViewInfo[];
   /** The `fullName` of each linked repository. */
   linked: string[];
-  items: { id: string; issueId: string; values: Record<string, string>; valuesAt?: Record<string, string> }[];
+  items: {
+    id: string;
+    issueId: string;
+    values: Record<string, string>;
+    valuesAt?: Record<string, string>;
+  }[];
 };
 
 /** Everything the fake keeps. Plain data: this is what the state file holds. */
@@ -830,4 +835,3 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
   };
   return fake;
 }
-

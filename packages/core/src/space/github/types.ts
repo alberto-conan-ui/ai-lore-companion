@@ -133,7 +133,12 @@ export const DEFAULT_VIEWS: readonly ProjectViewSpec[] = [
     columnField: STATUS_FIELD,
     groupField: LEVEL_FIELD,
   },
-  { name: UNDER_PARENT_VIEW, layout: 'table', filter: '-no:parent-issue', groupField: PARENT_FIELD },
+  {
+    name: UNDER_PARENT_VIEW,
+    layout: 'table',
+    filter: '-no:parent-issue',
+    groupField: PARENT_FIELD,
+  },
   { name: 'Backlog', layout: 'table', filter: `is:open stage:${BACKLOG_STAGE}` },
   {
     name: 'Agents board',

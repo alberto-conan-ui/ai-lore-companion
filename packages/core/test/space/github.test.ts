@@ -1362,13 +1362,7 @@ test('the default layout names five stages, four Agents columns and five kinds',
   // spec is still being written, so the two were never separable. `Backlog`
   // holds what is recorded and not yet on the plan, and the plan view filters
   // on it by name.
-  assert.deepEqual(DEFAULT_STAGES, [
-    'Backlog',
-    'Spec and Planning',
-    'Build',
-    'Review',
-    'Done',
-  ]);
+  assert.deepEqual(DEFAULT_STAGES, ['Backlog', 'Spec and Planning', 'Build', 'Review', 'Done']);
   assert.deepEqual(AGENTS_COLUMNS, ['Read only', 'Writing', 'Blocked', 'Done']);
   assert.deepEqual(KIND_LABELS, ['feature', 'document', 'investigation', 'bug', 'maintenance']);
 });
@@ -1475,7 +1469,7 @@ test('viewDrift is silent when every view matches the default layout, and ignore
     {
       id: 'w',
       number: 2,
-      name: 'Focus #62 — a view of the Space\'s own',
+      name: "Focus #62 — a view of the Space's own",
       layout: 'board' as const,
       filter: 'parent-issue:owner/repo#62',
       columnField: null,

@@ -20,8 +20,8 @@ import type { GitHubError } from '../github/errors.js';
 import {
   AGENTS_COLUMNS,
   AGENTS_FIELD,
-  DEFAULT_VIEWS,
   DEFAULT_STAGES,
+  DEFAULT_VIEWS,
   KIND_LABELS,
   LEVEL_FIELD,
   LEVEL_VALUES,
