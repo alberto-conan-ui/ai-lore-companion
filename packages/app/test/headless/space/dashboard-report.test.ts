@@ -55,7 +55,8 @@ async function typedInput(
       )
       .map((component) => {
         if (component.type === 'text') return { id: component.id, type: 'text' as const, text };
-        if (component.type === 'metric') return { id: component.id, type: 'metric' as const, value: text };
+        if (component.type === 'metric')
+          return { id: component.id, type: 'metric' as const, value: text };
         return { id: component.id, type: 'list', items: [] };
       }),
     basis: 'headless test',

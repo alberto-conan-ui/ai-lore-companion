@@ -44,11 +44,11 @@ import {
   type FieldInfo,
   type MergedPullRequest,
   type OpenPullRequest,
-  type PullRequestChecks,
-  type PullRequestReview,
   type ProjectInfo,
   type ProjectViewInfo,
   type ProjectViewLayout,
+  type PullRequestChecks,
+  type PullRequestReview,
   type RawProjectIssue,
   type RepositoryInfo,
   STAGE_FIELD,
@@ -213,7 +213,10 @@ function parseView(node: unknown): ProjectViewInfo | null {
 }
 
 /** The name of the one field a view groups by on `key`, or null when it groups by none. */
-function groupingField(node: unknown, key: 'groupByFields' | 'verticalGroupByFields'): string | null {
+function groupingField(
+  node: unknown,
+  key: 'groupByFields' | 'verticalGroupByFields',
+): string | null {
   const first = list(node, key, 'nodes')[0];
   return first === undefined ? null : text(first, 'name');
 }
@@ -917,8 +920,16 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
         const draft = at(node, 'isDraft') === true;
         const createdAt = text(node, 'createdAt');
         const updatedAt = text(node, 'updatedAt');
-        
-        if (number === null || title === null || url === null || headBranch === null || baseBranch === null || createdAt === null || updatedAt === null) {
+
+        if (
+          number === null ||
+          title === null ||
+          url === null ||
+          headBranch === null ||
+          baseBranch === null ||
+          createdAt === null ||
+          updatedAt === null
+        ) {
           return [];
         }
 
@@ -931,7 +942,12 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
             if (typename === 'CheckRun') {
               const conclusion = text(check, 'conclusion');
               const status = text(check, 'status');
-              if (conclusion === 'FAILURE' || conclusion === 'TIMED_OUT' || conclusion === 'CANCELLED' || conclusion === 'ACTION_REQUIRED') {
+              if (
+                conclusion === 'FAILURE' ||
+                conclusion === 'TIMED_OUT' ||
+                conclusion === 'CANCELLED' ||
+                conclusion === 'ACTION_REQUIRED'
+              ) {
                 checks = 'failing';
                 break;
               }
@@ -958,13 +974,14 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
         };
         const reviewDecision = text(node, 'reviewDecision');
         const review = reviewDecision !== null ? (reviewMapping[reviewDecision] ?? 'none') : 'none';
-        
+
         const mergeableMapping: Record<string, OpenPullRequest['mergeable']> = {
           MERGEABLE: 'mergeable',
           CONFLICTING: 'conflicting',
         };
         const mergeableStr = text(node, 'mergeable');
-        const mergeable = mergeableStr !== null ? (mergeableMapping[mergeableStr] ?? 'unknown') : 'unknown';
+        const mergeable =
+          mergeableStr !== null ? (mergeableMapping[mergeableStr] ?? 'unknown') : 'unknown';
 
         const pr: OpenPullRequest = {
           repository: arg.repository,

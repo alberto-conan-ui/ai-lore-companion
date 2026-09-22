@@ -8,8 +8,6 @@
  */
 
 import type {
-  PendingWrite,
-  StatusWrite,
   Claim,
   DeskOwner,
   FirstSeen,
@@ -17,12 +15,14 @@ import type {
   IssueRef,
   JsonObject,
   JsonValue,
+  PendingWrite,
   ReviewedMark,
   SessionClose,
   SessionProfile,
   SessionPurpose,
   SessionRecord,
   SessionSpend,
+  StatusWrite,
   UnattendedTag,
   WriteTarget,
 } from './types.js';

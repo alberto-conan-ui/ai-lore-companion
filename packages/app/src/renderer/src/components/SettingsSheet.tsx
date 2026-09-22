@@ -1240,9 +1240,9 @@ function EnginesSection(): JSX.Element {
             value={draft.model ?? ''}
             onChange={(e) => {
               const model = e.target.value;
-              const next: EngineEntry = { ...draft };
-              if (model.trim().length > 0) next.model = model;
-              else delete next.model;
+              const { model: _dropped, ...rest } = draft;
+              const next: EngineEntry =
+                model.trim().length > 0 ? { ...rest, model } : (rest as EngineEntry);
               setDraft(next);
             }}
             data-testid="engine-draft-model"

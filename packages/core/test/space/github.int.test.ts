@@ -188,6 +188,8 @@ test('FakeGitHub: a v1 state without open pull requests loads as empty', async (
   assert.ok(repository.ok);
 
   const legacy = JSON.parse(readFileSync(stateFile, 'utf8')) as Record<string, unknown>;
+  // A state file written before this key existed does not carry it.
+  // biome-ignore lint/performance/noDelete: the file under test is one without the key
   delete legacy.openPullRequests;
   writeFileSync(stateFile, `${JSON.stringify(legacy)}\n`);
 

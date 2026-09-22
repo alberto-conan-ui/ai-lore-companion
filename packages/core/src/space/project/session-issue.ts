@@ -394,10 +394,10 @@ export function parseHandover(entry: string): HandoverParts {
     let done: string | null = null;
     let inProgress: string | null = null;
     let nextAction: string | null = null;
-    
+
     let currentPart: HandoverPart | null = null;
     let currentLines: string[] = [];
-    
+
     const savePart = () => {
       if (currentPart && currentLines.length > 0) {
         const joined = currentLines.join('\n').trim();
@@ -443,7 +443,7 @@ export function parseHandover(entry: string): HandoverParts {
     inProgress: null,
     nextAction: null,
     text: text ?? fallbackLines.join('\n'),
-    fallback: true
+    fallback: true,
   };
 }
 

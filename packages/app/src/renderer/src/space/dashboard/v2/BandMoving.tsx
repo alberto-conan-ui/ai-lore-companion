@@ -128,8 +128,8 @@ export function BandMoving({
             </div>
             {untriaged.length > 0 ? (
               <p className="dashboard-v2-clear" data-testid="dashboard-untriaged-note">
-                {untriaged.length} with no stage — nobody has said where these are yet.
-                Parked work is listed below them.
+                {untriaged.length} with no stage — nobody has said where these are yet. Parked work
+                is listed below them.
               </p>
             ) : null}
             {untriaged.map((focus) => (

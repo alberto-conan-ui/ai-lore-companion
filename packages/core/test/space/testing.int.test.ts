@@ -148,10 +148,7 @@ test('a temporary repository writes, removes and commits with a fixed date', asy
   repo.write('b.md', 'b');
   const first = await repo.commitAll('Add two', { date: '2026-02-03T04:05:06Z' });
   // `%cI` spells UTC as `Z` on newer git and as `+00:00` on older git.
-  assert.match(
-    await repo.git('log', '-1', '--format=%cI'),
-    /^2026-02-03T04:05:06(Z|\+00:00)$/,
-  );
+  assert.match(await repo.git('log', '-1', '--format=%cI'), /^2026-02-03T04:05:06(Z|\+00:00)$/);
   repo.remove('docs');
   const second = await repo.commitAll('Remove docs');
   assert.notEqual(first, second);
