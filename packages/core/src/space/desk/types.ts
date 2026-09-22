@@ -88,8 +88,20 @@ export type SessionRecord = {
   closedAt?: string;
   /** The item or focus the session is on, when it is on one. */
   item?: IssueRef;
-  /** The session's own issue, created when it first enters Writing. */
+  /**
+   * The session's own issue. Created when the session starts, in Read only,
+   * and not when it first writes: a session that only reads can restructure
+   * the whole plan, and one did — 38 issues created and 37 closed in Read
+   * only, with nothing on the board to say who had done it.
+   */
   issue?: IssueRef;
+  /**
+   * Every ticket the session has done substantive work on, in the order it
+   * first touched them. `item` is where the session was pointed; this is where
+   * it went. A session issue used to carry one `Item:` line, and a session
+   * that touched six tickets had nowhere to say so.
+   */
+  tickets?: IssueRef[];
   /** The options that changed the guard when the session started. Absent when none. */
   unguarded?: string[];
   /** The profile the session ran. Absent on a record written before M14. */
@@ -106,6 +118,8 @@ export type SessionPatch = {
   closedAt?: string;
   item?: IssueRef;
   issue?: IssueRef;
+  /** Replaces the list whole: the board holds the order and appends to it. */
+  tickets?: IssueRef[];
   spend?: SessionSpend;
 };
 

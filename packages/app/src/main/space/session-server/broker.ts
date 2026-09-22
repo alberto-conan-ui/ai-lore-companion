@@ -71,6 +71,7 @@ import {
   MAX_TEXT_LENGTH,
   MAX_TICKETS_PER_SESSION,
   MAX_WAITERS_PER_SESSION,
+  MAX_WORK_TICKETS_PER_CALL,
   PENDING_TICKET_TTL_MS,
   RATE_WINDOW_MS,
 } from './constants.js';
@@ -161,6 +162,8 @@ export type SessionPort = {
     options: { waitMs: number; signal?: AbortSignal },
   ): Promise<Result<AwaitedAnswer, BrokerFailure>>;
   leaveWriting(): Promise<Result<WritingLeftAnswer, BrokerFailure>>;
+  /** Name the tickets this session has done substantive work on. */
+  ticketsTouched(tickets: readonly number[]): Promise<Result<{ tickets: number[] }, BrokerFailure>>;
 };
 
 /** What leaving Writing answers. */
@@ -228,7 +231,7 @@ export type DialogBrokerOptions = {
    */
   closeCommits?: (desk: Desk, sessionId: string) => Promise<SessionCloseCommit[]>;
   /** The Agents board on GitHub (phase M4.7). Without it no board is updated. */
-  board?: Pick<SessionBoard, 'entered' | 'left'>;
+  board?: Pick<SessionBoard, 'entered' | 'left' | 'touched'>;
   /** How long an answer waits for the board. Default: `BOARD_UPDATE_WAIT_MS`. */
   boardWaitMs?: number;
   log: SpaceLog;
@@ -526,6 +529,34 @@ export function createDialogBroker(options: DialogBrokerOptions): DialogBroker {
   };
 
   const sessionPort = (sessionId: string): SessionPort => ({
+    async ticketsTouched(tickets) {
+      if (
+        !Array.isArray(tickets) ||
+        tickets.length === 0 ||
+        tickets.length > MAX_WORK_TICKETS_PER_CALL ||
+        !tickets.every((number) => Number.isSafeInteger(number) && number > 0)
+      ) {
+        return fail(
+          'invalid-request',
+          `Give \`tickets\` as a list of between 1 and ${MAX_WORK_TICKETS_PER_CALL} issue numbers.`,
+        );
+      }
+      if (closed) return CLOSED;
+      // The board is told, and the answer does not depend on GitHub: a ticket
+      // that could not be recorded must not stop the session working.
+      if (options.board !== undefined) {
+        await boardWithin(options.board.touched(sessionId, tickets), boardWaitMs).catch(
+          (caught: unknown) => {
+            log.warn('board-tickets-failed', {
+              session: sessionId,
+              reason: caught instanceof Error ? caught.message : String(caught),
+            });
+            return null;
+          },
+        );
+      }
+      return ok({ tickets: [...tickets] });
+    },
     requestWriting(input) {
       const targets = plainTargets(input.targets);
       if (

@@ -26,10 +26,13 @@ import {
   type LocalFolder,
   type ProjectInfo,
   type Result,
+  type SessionIssueContent,
   type SessionIssuePlace,
+  type SessionRecord,
   type SpaceManifest,
   type WriteTarget,
   closeSessionIssue,
+  formatSessionBackLink,
   describeGitHubFailure,
   developItemBranch,
   findSpaceProject,
@@ -37,7 +40,6 @@ import {
   issueRefFor,
   moveSessionIssue,
   putSessionIssue,
-  readHandover,
   updateSession,
 } from '@ai-lore-companion/core';
 import { type SpaceContext, defineSpaceService } from '../context.js';
@@ -49,6 +51,19 @@ import type { SpaceLog } from '../log.js';
 export type BoardNote = { updated: true; issue: string } | { updated: false; message: string };
 
 export type SessionBoard = {
+  /**
+   * The session started, in Read only. Its issue is created now, not when it
+   * first writes: the Project is writable in Read only, so a reading session
+   * can restructure the whole plan and leave no trace of itself — and one did.
+   */
+  started(sessionId: string): Promise<BoardNote | null>;
+  /**
+   * The session did substantive work on these tickets. The issue's list is
+   * updated, and a ticket named for the first time gets one back-link comment.
+   * Tickets it already carries are ignored, so a caller may say the same one
+   * twice without putting two comments on it.
+   */
+  touched(sessionId: string, tickets: readonly number[]): Promise<BoardNote | null>;
   /** The session entered Writing with `targets` (all it holds now), on `item` when it named one. */
   entered(
     sessionId: string,
@@ -188,6 +203,99 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
     return record.value?.issue;
   };
 
+  /**
+   * The issue's content from the desk's record. The three callers that write
+   * the issue all go through this, so a body written at start cannot lose the
+   * tickets a body written on entering Writing had put there.
+   */
+  const contentOf = async (
+    record: SessionRecord,
+    where: SessionIssuePlace,
+    extra: { targets?: readonly WriteTarget[]; item?: IssueRef },
+  ): Promise<SessionIssueContent> => {
+    const item = extra.item ?? record.item;
+    return {
+      sessionId: record.id,
+      engine: record.engine,
+      startedAt: record.startedAt,
+      targets: extra.targets ?? [],
+      ...(item !== undefined ? { item } : {}),
+      ...(record.tickets !== undefined ? { tickets: record.tickets } : {}),
+      attended: true,
+      person: await account(where.github),
+      machine,
+      ...(record.profile !== undefined ? { profile: record.profile } : {}),
+    };
+  };
+
+  const started: SessionBoard['started'] = (sessionId) =>
+    serial(() =>
+      run('board-session-started', sessionId, async () => {
+        const desk = openDesk();
+        const record = getSession(desk, sessionId);
+        if (!record.ok) throw new BoardError(record.error.message);
+        if (record.value === null) throw new BoardError('the desk has no record of the session');
+        const where = await place();
+        const put = await putSessionIssue(
+          where,
+          await contentOf(record.value, where, {}),
+          'Read only',
+          record.value.issue,
+        );
+        if (!put.ok) return gitHubFailed(put.error);
+        const recorded = updateSession(desk, sessionId, { issue: put.value.issue });
+        if (!recorded.ok) {
+          log.warn('board-issue-not-recorded', { session: sessionId, kind: recorded.error.kind });
+        }
+        return put.value.issue;
+      }),
+    );
+
+  const touched: SessionBoard['touched'] = (sessionId, tickets) =>
+    serial(() =>
+      run('board-session-touched', sessionId, async () => {
+        const desk = openDesk();
+        const record = getSession(desk, sessionId);
+        if (!record.ok) throw new BoardError(record.error.message);
+        if (record.value === null) return null;
+        const where = await place();
+        const had = record.value.tickets ?? [];
+        const known = new Set(had.map((ticket) => ticket.number));
+        const fresh = [...new Set(tickets)]
+          .filter((number) => !known.has(number))
+          .map((number) => issueRefFor(where.repository, number));
+        if (fresh.length === 0) return record.value.issue ?? null;
+        const all = [...had, ...fresh];
+        const recorded = updateSession(desk, sessionId, { tickets: all });
+        if (!recorded.ok) {
+          log.warn('board-tickets-not-recorded', { session: sessionId, kind: recorded.error.kind });
+        }
+        const issue = record.value.issue;
+        if (issue === undefined) return null;
+        const put = await putSessionIssue(
+          where,
+          await contentOf({ ...record.value, tickets: all }, where, {}),
+          record.value.mode === 'writing' ? 'Writing' : 'Read only',
+          issue,
+        );
+        if (!put.ok) return gitHubFailed(put.error);
+        // The back-link, once per ticket. A comment per edit would have put
+        // fifty comments on this Space's tickets in one afternoon.
+        for (const ticket of fresh) {
+          const commented = await where.github.comment({
+            issue: ticket,
+            body: formatSessionBackLink({
+              issue,
+              engine: record.value.engine,
+              startedAt: record.value.startedAt,
+            }),
+          });
+          if (!commented.ok) return gitHubFailed(commented.error);
+        }
+        return issue;
+      }),
+    );
+
   const entered: SessionBoard['entered'] = (sessionId, arg) =>
     serial(async () => {
       const note = await run('board-session-writing', sessionId, async () => {
@@ -200,17 +308,10 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
         if (record.value === null) throw new BoardError('the desk has no record of the session');
         const put = await putSessionIssue(
           where,
-          {
-            sessionId,
-            engine: record.value.engine,
-            startedAt: record.value.startedAt,
+          await contentOf(record.value, where, {
             targets: arg.targets,
             ...(item !== undefined ? { item } : {}),
-            attended: true,
-            person: await account(where.github),
-            machine,
-            ...(record.value.profile !== undefined ? { profile: record.value.profile } : {}),
-          },
+          }),
           'Writing',
           record.value?.issue,
         );
@@ -258,8 +359,13 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
       }),
     );
 
-  /** The handover of the session's journal entry: the file whose name ends with the session's id. */
-  const handoverOf = async (sessionId: string): Promise<string | null> => {
+  /**
+   * The session's whole journal entry: the file whose name ends with the
+   * session's id. The whole file, not its `## Handover` section — what the
+   * session learned and what it corrected are the parts a later session most
+   * needs, and they used never to leave the desk.
+   */
+  const entryOf = async (sessionId: string): Promise<string | null> => {
     let names: string[];
     try {
       names = await readdir(options.journalDir);
@@ -272,7 +378,7 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
       .at(-1);
     if (name === undefined) return null;
     try {
-      return readHandover(await readFile(join(options.journalDir, name), 'utf8'));
+      return await readFile(join(options.journalDir, name), 'utf8');
     } catch {
       return null;
     }
@@ -283,15 +389,15 @@ export function createSessionBoard(options: SessionBoardOptions): SessionBoard {
       run('board-session-done', sessionId, async () => {
         const issue = issueOf(openDesk(), sessionId);
         if (issue === undefined) return null;
-        const handover = await handoverOf(sessionId);
-        if (handover === null) log.info('board-no-handover', { session: sessionId });
-        const done = await closeSessionIssue(await place(), issue, handover, options.local ?? []);
+        const entry = await entryOf(sessionId);
+        if (entry === null) log.info('board-no-journal-entry', { session: sessionId });
+        const done = await closeSessionIssue(await place(), issue, entry, options.local ?? []);
         if (!done.ok) gitHubFailed(done.error);
         return issue;
       }),
     );
 
-  return { entered, left, closed };
+  return { started, entered, touched, left, closed };
 }
 
 /** The Agents board of a Space. `context.service(sessionBoard)` builds it on first use. */

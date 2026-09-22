@@ -60,6 +60,8 @@ export {
   type SessionIssuePlace,
   agentsField,
   closeSessionIssue,
+  formatEntryComment,
+  formatSessionBackLink,
   describeGitHubFailure,
   developItemBranch,
   findSpaceProject,

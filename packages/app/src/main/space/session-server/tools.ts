@@ -30,6 +30,7 @@ import {
   AWAIT_ANSWER_WAIT_MS,
   MAX_CALLS_PER_WINDOW,
   MAX_TARGETS_PER_REQUEST,
+  MAX_WORK_TICKETS_PER_CALL,
   MAX_TEXT_LENGTH,
   RATE_WINDOW_MS,
 } from './constants.js';
@@ -41,6 +42,7 @@ export const SESSION_TOOL_NAMES = [
   'request_gate',
   'await_answer',
   'leave_writing',
+  'tickets_touched',
 ] as const;
 
 export type SessionToolName = (typeof SESSION_TOOL_NAMES)[number];
@@ -123,6 +125,13 @@ const SHAPES = {
     ticket: z.string().min(1).max(128).describe('The ticket a request returned.'),
   },
   leave_writing: {},
+  tickets_touched: {
+    tickets: z
+      .array(z.number().int().positive())
+      .min(1)
+      .max(MAX_WORK_TICKETS_PER_CALL)
+      .describe('The numbers of the issues this session has done substantive work on.'),
+  },
 } satisfies Record<SessionToolName, z.ZodRawShape>;
 
 const DASHBOARD_REPORT_SHAPE = {
@@ -184,6 +193,8 @@ const DESCRIPTIONS: Record<SessionToolName, string> = {
     'Wait for the answer to a ticket. Returns the answer, or { "status": "pending" } when the Human Lead has not answered yet: call it again.',
   leave_writing:
     'Return the session to Read only. The companion releases every write target the session holds. Takes no arguments.',
+  tickets_touched:
+    "Name the tickets this session has done substantive work on. They are listed on the session's issue, and each gets one comment linking back to it, however often you name it. Call it as you go, not only at the end.",
 };
 
 const DASHBOARD_REPORT_DESCRIPTION =
@@ -256,6 +267,10 @@ export function createSessionTools(options: SessionToolsOptions): McpHostTool[] 
     leave_writing: async () => {
       const left = await port.leaveWriting();
       return left.ok ? answer(left.value) : refusal(left.error);
+    },
+    tickets_touched: async (args) => {
+      const named = await port.ticketsTouched((args.tickets ?? []) as number[]);
+      return named.ok ? answer(named.value) : refusal(named.error);
     },
     report_dashboard: (args) => {
       if (options.dashboardReport === undefined) {

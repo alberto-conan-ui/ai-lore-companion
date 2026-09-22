@@ -498,7 +498,11 @@ test("The session's issue exists on the Project with its targets and ends in Don
   on = await rows();
   assert.equal(on[0]?.column, 'Done');
   const issue = fake.state().issues.find((i) => i.ref.number === on[0]?.issue.number);
-  assert.equal(issue?.comments.at(-1), '## Handover\n\nDone: the item.\n');
+  // The whole entry, not only its handover section.
+  const comment = issue?.comments.at(-1) ?? '';
+  assert.match(comment, /^## The session's journal entry\n/);
+  assert.ok(comment.includes('# Gate'), 'the whole entry reaches GitHub');
+  assert.ok(comment.includes('Done: the item.'));
   const claims = listClaims(desk);
   assert.ok(claims.ok);
   assert.equal(claims.value.length, 0, 'the close released the claim');
