@@ -1,6 +1,22 @@
 /** The Project snapshot, its cache, the Dashboard model, and the sessions' issues on the Agents board. Phase M7.1 owns this file. */
 
 export {
+  type NextAction,
+  type DashboardDraft,
+  type MovingPartition,
+  type DormantAggregate,
+  type SpaceStats,
+  type PullRequestSummary,
+  focusAgeMs,
+  nextActionHeadline,
+  rankNextActions,
+  partitionMoving,
+  dormantAggregate,
+  spaceStats,
+  pullRequestSummary,
+} from './dashboard-derivations.js';
+
+export {
   PROJECT_CACHE_FILE,
   type ProjectCache,
   type ProjectCacheFailure,
@@ -34,6 +50,8 @@ export {
   type RepositoryRow,
   type RepositoryRowChanges,
   repositoriesModel,
+  mirrorDrift,
+  type MirrorDrift,
 } from './repositories-model.js';
 
 export {
@@ -49,6 +67,8 @@ export {
   formatSessionIssueBody,
   issueRefFor,
   moveSessionIssue,
+  parseHandover,
+  type HandoverParts,
   putSessionIssue,
   readHandover,
   sessionIssueMarker,

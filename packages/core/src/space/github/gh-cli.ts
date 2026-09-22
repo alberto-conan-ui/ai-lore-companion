@@ -43,6 +43,9 @@ import { buildProjectSnapshot } from './snapshot.js';
 import {
   type FieldInfo,
   type MergedPullRequest,
+  type OpenPullRequest,
+  type PullRequestChecks,
+  type PullRequestReview,
   type ProjectInfo,
   type ProjectViewInfo,
   type ProjectViewLayout,
@@ -214,10 +217,15 @@ function parseProjectItem(item: unknown): RawProjectIssue | null {
   const issue = parseIssueRef(content, '');
   if (issue === null) return null;
   const fieldValues: Record<string, string> = {};
+  const fieldValuesAt: Record<string, string> = {};
   for (const value of list(item, 'fieldValues', 'nodes')) {
     const field = text(value, 'field', 'name');
     const name = text(value, 'name');
-    if (field !== null && name !== null) fieldValues[field] = name;
+    if (field !== null && name !== null) {
+      fieldValues[field] = name;
+      const updatedAt = text(value, 'updatedAt');
+      if (updatedAt !== null) fieldValuesAt[field] = updatedAt;
+    }
   }
   const sameRepository =
     text(content, 'parent', 'repository', 'nameWithOwner') === issue.repository;
@@ -230,6 +238,7 @@ function parseProjectItem(item: unknown): RawProjectIssue | null {
     updatedAt: text(content, 'updatedAt') ?? '',
     parentNumber: sameRepository ? int(content, 'parent', 'number') : null,
     fieldValues,
+    fieldValuesAt,
     subIssues: list(content, 'subIssues', 'nodes').flatMap((sub) => {
       const ref = parseIssueRef(sub, issue.repository);
       if (ref === null) return [];
@@ -857,6 +866,105 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
       if (!Array.isArray(parsed)) return err(failed('gh pr list gave an answer that is not JSON'));
       const pulls = parsed.flatMap((node) => parseMergedPullRequest(node) ?? []);
       pulls.sort((a, b) => b.mergedAt.localeCompare(a.mergedAt));
+      return ok(pulls);
+    },
+
+    async openPullRequests(arg) {
+      const parts = splitRepositoryName(arg.repository);
+      if (!parts.ok) return parts;
+      const limit = Math.max(1, Math.floor(arg.limit));
+      const result = await run([
+        'pr',
+        'list',
+        '--repo',
+        arg.repository,
+        '--state',
+        'open',
+        '--limit',
+        String(limit),
+        '--json',
+        'number,title,url,headRefName,baseRefName,isDraft,createdAt,updatedAt,statusCheckRollup,reviewDecision,mergeable',
+      ]);
+      if (!runSucceeded(result)) return err(classifyGhFailure(result));
+      const parsed = parseJson(result.stdout);
+      if (!Array.isArray(parsed)) return err(failed('gh pr list gave an answer that is not JSON'));
+      const pulls = parsed.flatMap((node) => {
+        const number = int(node, 'number');
+        const title = text(node, 'title');
+        const url = text(node, 'url');
+        const headBranch = text(node, 'headRefName');
+        const baseBranch = text(node, 'baseRefName');
+        const draft = at(node, 'isDraft') === true;
+        const createdAt = text(node, 'createdAt');
+        const updatedAt = text(node, 'updatedAt');
+        
+        if (number === null || title === null || url === null || headBranch === null || baseBranch === null || createdAt === null || updatedAt === null) {
+          return [];
+        }
+
+        let checks: PullRequestChecks = 'none';
+        const rollup = list(node, 'statusCheckRollup');
+        if (rollup.length > 0) {
+          checks = 'passing';
+          for (const check of rollup) {
+            const typename = text(check, '__typename');
+            if (typename === 'CheckRun') {
+              const conclusion = text(check, 'conclusion');
+              const status = text(check, 'status');
+              if (conclusion === 'FAILURE' || conclusion === 'TIMED_OUT' || conclusion === 'CANCELLED' || conclusion === 'ACTION_REQUIRED') {
+                checks = 'failing';
+                break;
+              }
+              if (status !== 'COMPLETED') {
+                checks = 'pending';
+              }
+            } else if (typename === 'StatusContext') {
+              const state = text(check, 'state');
+              if (state === 'ERROR' || state === 'FAILURE') {
+                checks = 'failing';
+                break;
+              }
+              if (state === 'EXPECTED' || state === 'PENDING') {
+                checks = 'pending';
+              }
+            }
+          }
+        }
+
+        const reviewMapping: Record<string, OpenPullRequest['review']> = {
+          APPROVED: 'approved',
+          CHANGES_REQUESTED: 'changes-requested',
+          REVIEW_REQUIRED: 'review-required',
+        };
+        const reviewDecision = text(node, 'reviewDecision');
+        const review = reviewDecision !== null ? (reviewMapping[reviewDecision] ?? 'none') : 'none';
+        
+        const mergeableMapping: Record<string, OpenPullRequest['mergeable']> = {
+          MERGEABLE: 'mergeable',
+          CONFLICTING: 'conflicting',
+        };
+        const mergeableStr = text(node, 'mergeable');
+        const mergeable = mergeableStr !== null ? (mergeableMapping[mergeableStr] ?? 'unknown') : 'unknown';
+
+        const pr: OpenPullRequest = {
+          repository: arg.repository,
+          number,
+          title,
+          url,
+          headBranch,
+          baseBranch,
+          draft,
+          createdAt,
+          updatedAt,
+          checks,
+          review,
+          mergeable,
+        };
+        return [pr];
+      });
+
+      pulls.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
       return ok(pulls);
     },
   };

@@ -35,6 +35,7 @@ import type {
   ProjectSnapshot,
   ProjectViewSpec,
   RepositoryInfo,
+  OpenPullRequest,
 } from './types.js';
 
 /** The result of a `GitHubPort` operation. */
@@ -182,4 +183,6 @@ export type GitHubPort = {
     repository: string;
     limit: number;
   }): Promise<GitHubResult<MergedPullRequest[]>>;
+  /** The open pull requests of a repository, newest first, at most `limit`. */
+  openPullRequests(arg: { repository: string; limit: number }): Promise<GitHubResult<OpenPullRequest[]>>;
 };

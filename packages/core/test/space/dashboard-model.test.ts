@@ -29,6 +29,7 @@ const item = (number: number, extra: Partial<PlanItem> = {}): PlanItem => ({
   state: 'open',
   status: null,
   labels: [],
+  updatedAt: NOW,
   ...extra,
 });
 
@@ -39,6 +40,7 @@ const focus = (
 ): FocusItem => ({
   ...item(number),
   stage,
+  stageChangedAt: stage === null ? null : NOW,
   kind: 'feature',
   items: [],
   specUrl: null,
@@ -403,4 +405,48 @@ test('1,000 items are modelled quickly', () => {
   );
   assert.equal(model.board.length, 50);
   assert.ok(elapsed < 200, `took ${elapsed} ms`);
+});
+
+test('focusCard and itemCard carry stageChangedAt and updatedAt, tolerating nulls', () => {
+  const model = dashboardModel({
+    snapshot: snapshot({
+      focuses: [
+        focus(1, 'Build', { stageChangedAt: '2026-09-18T10:00:00.000Z', updatedAt: '2026-09-18T10:05:00.000Z' }),
+        focus(2, null, { stageChangedAt: null, updatedAt: '2026-09-18T10:05:00.000Z' }),
+      ],
+      standalone: [
+        item(3, { updatedAt: '2026-09-18T10:05:00.000Z' }),
+      ],
+    }),
+    sessions: [],
+    gates: [],
+    now: NOW,
+  });
+
+  const build = model.columns.find((c) => c.name === 'Build')?.focuses[0];
+  assert.equal(build?.stageChangedAt, '2026-09-18T10:00:00.000Z');
+  assert.equal(build?.updatedAt, '2026-09-18T10:05:00.000Z');
+
+  const unstaged = model.unstaged.find((f) => f.issue.number === 2);
+  assert.equal(unstaged?.stageChangedAt, null);
+  assert.equal(unstaged?.updatedAt, '2026-09-18T10:05:00.000Z');
+
+  const standalone = model.standalone.find((i) => i.issue.number === 3);
+  assert.equal(standalone?.updatedAt, '2026-09-18T10:05:00.000Z');
+});
+
+test("Criterion 3: an item's issue changed after its Stage did, explicitly asserting which one the age derives from", () => {
+  const model = dashboardModel({
+    snapshot: snapshot({
+      focuses: [
+        focus(1, 'Build', { stageChangedAt: '2026-09-18T10:00:00.000Z', updatedAt: '2026-09-18T10:05:00.000Z' }),
+      ],
+    }),
+    sessions: [],
+    gates: [],
+    now: NOW,
+  });
+  const build = model.columns.find((c) => c.name === 'Build')?.focuses[0];
+  assert.equal(build?.stageChangedAt, '2026-09-18T10:00:00.000Z');
+  assert.equal(build?.updatedAt, '2026-09-18T10:05:00.000Z');
 });

@@ -159,8 +159,15 @@ async function typedDashboardInput() {
   assert.ok(resolved);
   return {
     definitionHash: resolved.hash,
-    components: resolved.definition.components
-      .filter((component) => component.source === 'pm')
+    components: resolved.definition.bands
+      .flatMap((band) => band.panels)
+      .flatMap((panel) =>
+        panel.source === 'pm'
+          ? [{ id: panel.id, type: panel.kind }]
+          : panel.pmLine === undefined
+            ? []
+            : [{ id: panel.pmLine.id, type: 'text' as const }],
+      )
       .map((component) =>
         component.type === 'text'
           ? { id: component.id, type: 'text' as const, text: 'Current position' }
@@ -253,11 +260,22 @@ test('only a PM session can publish one bounded dashboard report without a claim
   const contextAnswer = await call(pm, DASHBOARD_CONTEXT_TOOL_NAME);
   const definition = contextAnswer.value.definition as {
     hash?: unknown;
-    definition?: { components?: Array<{ id: string; source: string; type: string }> };
+    definition?: {
+      bands?: Array<{
+        panels?: Array<{ id: string; kind: string; source: string; pmLine?: { id: string } }>;
+      }>;
+    };
   };
   assert.equal(typeof definition.hash, 'string');
-  const components = (definition.definition?.components ?? [])
-    .filter((component) => component.source === 'pm')
+  const components = (definition.definition?.bands ?? [])
+    .flatMap((band) => band.panels ?? [])
+    .flatMap((panel) =>
+      panel.source === 'pm'
+        ? [{ id: panel.id, type: panel.kind }]
+        : panel.pmLine === undefined
+          ? []
+          : [{ id: panel.pmLine.id, type: 'text' }],
+    )
     .map((component) =>
       component.type === 'text'
         ? { id: component.id, type: 'text' as const, text: 'The project is waiting for review.' }
@@ -378,6 +396,8 @@ test('an accepted transient report survives transient session cleanup', async ()
   const transient = await connect(
     await startRefresh('s-refresh-preserve', requested.request.requestId),
   );
+  const contextAnswer = await call(transient, DASHBOARD_CONTEXT_TOOL_NAME);
+  assert.equal(contextAnswer.isError, false, JSON.stringify(contextAnswer.value));
   const input = await typedDashboardInput();
   const published = await call(transient, DASHBOARD_REPORT_TOOL_NAME, input);
   assert.equal(published.isError, false, JSON.stringify(published.value));

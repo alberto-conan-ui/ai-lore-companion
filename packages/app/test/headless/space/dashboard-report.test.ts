@@ -44,11 +44,18 @@ async function typedInput(
   assert.ok(resolved);
   return {
     definitionHash: resolved.hash,
-    components: resolved.definition.components
-      .filter((component) => component.source === 'pm')
+    components: resolved.definition.bands
+      .flatMap((band) => band.panels)
+      .flatMap((panel) =>
+        panel.source === 'pm'
+          ? [{ id: panel.id, type: panel.kind }]
+          : panel.pmLine === undefined
+            ? []
+            : [{ id: panel.pmLine.id, type: 'text' as const }],
+      )
       .map((component) => {
-        if (component.type === 'text') return { id: component.id, type: 'text', text };
-        if (component.type === 'metric') return { id: component.id, type: 'metric', value: text };
+        if (component.type === 'text') return { id: component.id, type: 'text' as const, text };
+        if (component.type === 'metric') return { id: component.id, type: 'metric' as const, value: text };
         return { id: component.id, type: 'list', items: [] };
       }),
     basis: 'headless test',

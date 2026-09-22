@@ -30,6 +30,7 @@ export function StartSession({ justCreated }: Props): JSX.Element {
         </p>
       ) : null}
       <EngineStartControl
+        compact
         choice={choice}
         onStart={startAiSession}
         onPick={pick}

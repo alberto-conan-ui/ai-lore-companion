@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import {
   DEFAULT_STAGES,
   type GitHubPort,
+  type OpenPullRequest,
   type ProjectInfo,
   deskFile,
   recordProjectSnapshot,
@@ -331,4 +332,105 @@ test('a request from a window that shows no Space is refused', async () => {
   assert.equal(answer?.ok, false);
   assert.equal(answer?.ok === false ? answer.error.kind : '', 'not-a-space-window');
   assert.equal(reads(), 0);
+});
+
+test('one completed refresh pushes PRs and ranked actions together; PR failures retain the list and a good Project', async () => {
+  await openSpaces();
+  const repository = `${OWNER}/${NAME}`;
+  const pull: OpenPullRequest = {
+    repository,
+    number: 9,
+    title: 'Change',
+    url: `https://github.com/${repository}/pull/9`,
+    headBranch: 'change',
+    baseBranch: 'main',
+    draft: false,
+    createdAt: '2026-09-20T12:00:00Z',
+    updatedAt: '2026-09-21T12:00:00Z',
+    checks: 'failing',
+    review: 'none',
+    mergeable: 'unknown',
+  };
+  fake.addOpenPullRequest(repository, pull);
+  let rejectPulls = false;
+  const port: GitHubPort = {
+    ...fake,
+    openPullRequests: async (arg) =>
+      rejectPulls
+        ? { ok: false, error: { kind: 'unreachable', message: 'PRs offline' } }
+        : fake.openPullRequests(arg),
+  };
+  const options = {
+    github: async () => port,
+    manifest: () => ({ ...context.manifest, repositories: [{ name: 'app', github: repository }] }),
+    desk: () => context.service(spaceDesk).open(),
+    gates: () => [],
+    intervalMs: 0,
+  };
+  const service = createProjectRefresh(options);
+  const pushes: SpaceProjectState[] = [];
+  service.subscribe((state) => pushes.push(state));
+  try {
+    const fresh = await service.refresh();
+    assert.deepEqual(fresh.pullRequests, [pull]);
+    assert.equal(fresh.nextActions[0]?.headline, 'PR #9 CI has failed');
+    assert.equal(fresh.nextActions[1]?.kind, 'review');
+    assert.equal(fresh.stats.openPullRequests, 1);
+    assert.equal(pushes.at(-1)?.refreshing, false);
+    assert.deepEqual(pushes.at(-1)?.pullRequests, [pull]);
+    assert.equal(pushes.at(-1)?.nextActions[0]?.kind, 'failing-pull-request');
+    assert.equal(fake.calls.filter((call) => call.operation === 'openPullRequests').length, 1);
+    rejectPulls = true;
+    const degraded = await service.refresh();
+    assert.equal(degraded.state, 'fresh');
+    assert.equal(degraded.failure, null);
+    assert.equal(degraded.pullRequestsFailure?.kind, 'unreachable');
+    assert.deepEqual(degraded.pullRequests, [pull]);
+    const reopened = createProjectRefresh(options);
+    try {
+      assert.deepEqual(reopened.current().pullRequests, [pull]);
+      fake.setUnreachable(true);
+      const offline = await reopened.refresh();
+      assert.equal(offline.state, 'offline');
+      assert.deepEqual(offline.pullRequests, [pull]);
+      assert.equal(offline.nextActions[0]?.kind, 'failing-pull-request');
+    } finally {
+      reopened.dispose();
+    }
+  } finally {
+    service.dispose();
+  }
+});
+
+test('draft actions and gates remain available without a Project snapshot', async () => {
+  await openSpaces();
+  const service = createProjectRefresh({
+    github: async () => fake,
+    manifest: () => ({ ...context.manifest, github: { repository: '', project: 0 } }),
+    desk: () => context.service(spaceDesk).open(),
+    gates: () => [
+      {
+        ticket: 't',
+        sessionId: 's',
+        askedAt: '2026-09-21T12:00:00Z',
+        process: 'work',
+        step: 'claim',
+        question: 'Claim?',
+      },
+    ],
+    drafts: async () => [{ path: 'drafts/design.md', title: 'Design', at: '2026-09-20T12:00:00Z' }],
+    intervalMs: 0,
+  });
+  try {
+    const state = await service.refresh();
+    assert.deepEqual(
+      state.nextActions.map((action) => action.kind),
+      ['gate', 'draft'],
+    );
+    assert.deepEqual(state.moving, { inProgress: [], queued: [], dormant: [], done: [] });
+    assert.deepEqual(state.pullRequests, []);
+    assert.equal(state.stats.openPullRequests, 0);
+  } finally {
+    service.dispose();
+  }
 });

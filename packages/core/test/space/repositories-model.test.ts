@@ -32,6 +32,7 @@ function input(overrides: Partial<RepositoriesModelInput> = {}): RepositoriesMod
     defaults: {},
     reads: {},
     github: {},
+    mirrors: {},
     ...overrides,
   };
 }
@@ -77,12 +78,12 @@ test('the Workbench is never a row, and repository, Lore, publish-area order is 
 
   assert.deepEqual(
     model.rows.map((row) => row.rootId),
-    ['repo:alpha', 'lore', 'publish:handbook'],
+    ['repo:alpha', 'lore', 'publish:publish', 'publish:handbook'],
   );
   assert.ok(!model.rows.some((row) => row.kind === 'workbench'));
 });
 
-test('a publish area inside the Space is folded into the Lore row through alsoCovers', () => {
+test('a publish area inside the Space gets its own row and is not folded into the Lore row', () => {
   const roots: Root[] = [
     {
       id: 'lore',
@@ -102,10 +103,11 @@ test('a publish area inside the Space is folded into the Lore row through alsoCo
 
   const model = repositoriesModel(input({ roots }));
 
-  assert.equal(model.rows.length, 1);
+  assert.equal(model.rows.length, 2);
   assert.equal(model.rows[0]?.rootId, 'lore');
   assert.equal(model.rows[0]?.name, 'Lore');
-  assert.deepEqual(model.rows[0]?.alsoCovers, ['publish:publish']);
+  assert.deepEqual(model.rows[0]?.alsoCovers, []);
+  assert.equal(model.rows[1]?.rootId, 'publish:publish');
 });
 
 test('a root with no repository read is reading, with no head, operation or remote', () => {
@@ -293,4 +295,74 @@ test('a snapshot that failed to read leaves changes null but keeps the row ready
   assert.equal(model.rows[0]?.status, 'ready');
   assert.equal(model.rows[0]?.changes, null);
   assert.equal(model.rows[0]?.head?.kind, 'branch');
+});
+
+import { mirrorDrift } from '../../src/index.js';
+
+test('mirrorDrift reports not-checked when generated is null', () => {
+  const result = mirrorDrift({ path: 'p', stored: ['a'], generated: null, checkedAt: null });
+  assert.equal(result.state, 'not-checked');
+  assert.equal(result.added, 0);
+  assert.equal(result.removed, 0);
+});
+
+test('mirrorDrift reports matches when lists match', () => {
+  const result = mirrorDrift({
+    path: 'p',
+    stored: ['a', 'b'],
+    generated: ['a', 'b'],
+    checkedAt: 'time',
+  });
+  assert.equal(result.state, 'matches');
+  assert.equal(result.added, 0);
+  assert.equal(result.removed, 0);
+  assert.equal(result.checkedAt, 'time');
+});
+
+test('mirrorDrift reports differs with correct added and removed counts', () => {
+  const result = mirrorDrift({
+    path: 'p',
+    stored: ['a', 'b'],
+    generated: ['b', 'c', 'd'],
+    checkedAt: 'time',
+  });
+  assert.equal(result.state, 'differs');
+  assert.equal(result.added, 2);
+  assert.equal(result.removed, 1);
+});
+
+test('mirrorDrift treats reordered skeleton entries as a change', () => {
+  const result = mirrorDrift({
+    path: 'p',
+    stored: ['a', 'b'],
+    generated: ['b', 'a'],
+    checkedAt: null,
+  });
+  assert.equal(result.state, 'differs');
+  assert.equal(result.added, 1);
+  assert.equal(result.removed, 1);
+});
+
+test('mirrorDrift preserves duplicate entries when counting changes', () => {
+  const result = mirrorDrift({
+    path: 'p',
+    stored: ['a', 'a'],
+    generated: ['a'],
+    checkedAt: null,
+  });
+  assert.equal(result.state, 'differs');
+  assert.equal(result.added, 0);
+  assert.equal(result.removed, 1);
+});
+
+test('mirrorDrift considers two empty skeletons a match', () => {
+  assert.equal(
+    mirrorDrift({
+      path: 'p',
+      stored: [],
+      generated: [],
+      checkedAt: null,
+    }).state,
+    'matches',
+  );
 });

@@ -27,6 +27,7 @@ type DockApiLike = {
 test('a terminal tab moved to another group keeps its process in a Space window', async () => {
   await withSpaceApp('e2e-move-space', async ({ page, fixture }) => {
     await expect(page.getByTestId('space-window')).toBeVisible({ timeout: 15_000 });
+    await page.getByTestId('space-rail-sessions').click();
     await page.getByTestId('space-sessions-empty').getByTestId('new-shell').click();
     const dock = page.getByTestId('dock-workspace');
     await expect(dock.getByTestId('tab-shell')).toBeVisible({ timeout: 5_000 });

@@ -1203,6 +1203,7 @@ function raw(number: number, extra: Partial<RawProjectIssue> = {}): RawProjectIs
     updatedAt: '2026-09-18T10:00:00Z',
     parentNumber: null,
     fieldValues: {},
+    fieldValuesAt: {},
     subIssues: [],
     ...extra,
   };

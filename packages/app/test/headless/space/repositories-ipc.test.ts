@@ -126,9 +126,9 @@ test('a later state carries a row for the repository and one for the Lore, none 
   const model = ready.model;
   assert.ok(model);
   assert.deepEqual(
-    model.rows.map((row) => row.rootId).sort(),
-    ['lore', 'repo:app'],
-    'the Workbench and the publish area folded into the Lore are not their own row',
+    model.rows.map((row) => row.rootId),
+    ['repo:app', 'lore', 'publish:publish'],
+    'the Workbench is not its own row, but publish-area gets its own',
   );
   const app = model.rows.find((row) => row.rootId === 'repo:app');
   assert.equal(app?.status, 'ready');
@@ -141,7 +141,22 @@ test('a later state carries a row for the repository and one for the Lore, none 
   const lore = model.rows.find((row) => row.rootId === 'lore');
   assert.equal(lore?.status, 'ready');
   assert.equal(lore?.name, 'Lore');
-  assert.deepEqual(lore?.alsoCovers, ['publish:publish']);
+  assert.deepEqual(lore?.alsoCovers, []);
+
+  const publish = model.rows.find((row) => row.rootId === 'publish:publish');
+  assert.equal(publish?.status, 'ready');
+});
+
+test('the publish row settles with a current mirror result', async () => {
+  const o = await open();
+  const state = await waitForState(o, (candidate) => {
+    const publish = candidate.model?.rows.find((row) => row.rootId === 'publish:publish');
+    return (
+      publish !== undefined && publish.mirror !== null && publish.mirror.state !== 'not-checked'
+    );
+  });
+  const publish = state.model?.rows.find((row) => row.rootId === 'publish:publish');
+  assert.equal(publish?.mirror?.state, 'matches');
 });
 
 test('one failing read fails only its own row: the others keep working', async () => {

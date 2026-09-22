@@ -110,6 +110,11 @@ vi.mock('../../../src/renderer/src/components/SearchDialog.js', () => ({
 
 import { SpaceSurface } from '../../../src/renderer/src/space/SpaceSurface.js';
 import { useSpaceNavStore } from '../../../src/renderer/src/space/window/spaceNavStore.js';
+import { projectState } from './dashboard-fixtures.js';
+
+test('a newly opened Space starts on the Dashboard', () => {
+  expect(useSpaceNavStore.getInitialState().screen).toBe('dashboard');
+});
 import type {
   SpaceEngineChoice,
   SpaceSessionEnginesResult,
@@ -188,15 +193,7 @@ const cockpit = {
   // The Dashboard of phase M7.3, mounted hidden: no Project has been read yet.
   spaceProjectState: vi.fn(async () => ({
     ok: true,
-    value: {
-      version: 1,
-      snapshot: null,
-      fetchedAt: null,
-      state: 'stale',
-      failure: null,
-      refreshing: false,
-      model: null,
-    },
+    value: projectState({ snapshot: null, fetchedAt: null, state: 'stale', model: null }),
   })),
   spaceProjectFocus: vi.fn(async () => ({ ok: true, value: null })),
   spaceProjectRefresh: vi.fn(),
@@ -278,9 +275,7 @@ test('the window opens on Sessions; Dashboard shows the Dashboard and keeps Sess
   fireEvent.click(screen.getByTestId('space-rail-dashboard'));
   expect(shown('space-screen-dashboard')).toBe(true);
   expect(shown('space-screen-sessions')).toBe(false);
-  expect((await screen.findByTestId('dashboard-no-model')).textContent).toContain(
-    'No Project has been read from GitHub for this Space yet',
-  );
+  expect(await screen.findByTestId('dashboard-v2')).toBeTruthy();
   // The tab is still there, only hidden: its terminal keeps its process.
   expect(screen.getAllByTestId('dock-tab')).toHaveLength(1);
 

@@ -8,6 +8,68 @@
  * clock, no file system. The same input gives the same rows.
  */
 
+export type MirrorDrift = {
+  path: string;
+  state: 'matches' | 'differs' | 'not-checked' | 'no-mirror';
+  added: number;
+  removed: number;
+  checkedAt: string | null;
+};
+
+export function mirrorDrift(arg: {
+  path: string;
+  stored: readonly string[];
+  generated: readonly string[] | null;
+  checkedAt: string | null;
+}): MirrorDrift {
+  if (arg.generated === null) {
+    return { path: arg.path, state: 'not-checked', added: 0, removed: 0, checkedAt: arg.checkedAt };
+  }
+  // Skeleton order is significant. Count insertions and removals around their
+  // longest common subsequence, preserving duplicates and reordered entries.
+  const lcs = (a: readonly string[], b: readonly string[]): number => {
+    // Most refreshes leave the skeleton unchanged, or change only a small
+    // region. Exclude the shared ends before allocating the comparison rows.
+    let start = 0;
+    while (start < a.length && start < b.length && a[start] === b[start]) start++;
+    let aEnd = a.length;
+    let bEnd = b.length;
+    while (aEnd > start && bEnd > start && a[aEnd - 1] === b[bEnd - 1]) {
+      aEnd--;
+      bEnd--;
+    }
+    const sharedEnds = start + a.length - aEnd;
+    const left = a.slice(start, aEnd);
+    const right = b.slice(start, bEnd);
+    if (left.length === 0 || right.length === 0) return sharedEnds;
+    const prev = new Int32Array(right.length + 1);
+    const curr = new Int32Array(right.length + 1);
+    for (let i = 0; i < left.length; i++) {
+      for (let j = 0; j < right.length; j++) {
+        if (left[i] === right[j]) {
+          curr[j + 1] = (prev[j] as number) + 1;
+        } else {
+          curr[j + 1] = Math.max(curr[j] as number, prev[j + 1] as number);
+        }
+      }
+      prev.set(curr);
+    }
+    return sharedEnds + (curr[right.length] as number);
+  };
+
+  const common = lcs(arg.stored, arg.generated);
+  const added = arg.generated.length - common;
+  const removed = arg.stored.length - common;
+
+  return {
+    path: arg.path,
+    state: added === 0 && removed === 0 ? 'matches' : 'differs',
+    added,
+    removed,
+    checkedAt: arg.checkedAt,
+  };
+}
+
 import type { DefaultBaseline } from '../baseline/types.js';
 import type {
   Root,
@@ -39,6 +101,8 @@ export type RepositoriesModelInput = {
   reads: Readonly<Record<string, RepositoryRead>>;
   /** `owner/name` per repository root, from the manifest. */
   github: Readonly<Record<string, string>>;
+  /** The mirror drift per root id, if applicable. */
+  mirrors: Readonly<Record<string, MirrorDrift>>;
 };
 
 /** What a row says about the changes of its root. */
@@ -95,6 +159,7 @@ export type RepositoryRow = {
   remote: RootRemoteComparison | null;
   /** `null` until the tracker has read the root, and for an untracked root. */
   changes: RepositoryRowChanges | null;
+  mirror: MirrorDrift | null;
 };
 
 /** The Repositories section's model. */
@@ -178,6 +243,7 @@ function trackedRow(
     operation,
     remote,
     changes,
+    mirror: input.mirrors[owner.id] ?? null,
   };
 }
 
@@ -197,6 +263,7 @@ function untrackedRow(root: Root, input: RepositoriesModelInput): RepositoryRow 
     operation: null,
     remote: null,
     changes: null,
+    mirror: input.mirrors[root.id] ?? null,
   };
 }
 
@@ -216,6 +283,7 @@ export function repositoriesModel(input: RepositoriesModelInput): RepositoriesMo
   const groupOrder: string[] = [];
   const groupMembers = new Map<string, Root[]>();
   for (const root of trackedRoots) {
+    if (root.kind === 'publish-area') continue;
     const workTree = root.tracking.workTree;
     const members = groupMembers.get(workTree);
     if (members === undefined) {
@@ -242,8 +310,13 @@ export function repositoriesModel(input: RepositoriesModelInput): RepositoriesMo
 
   // Rule 4: every remaining untracked repository or Lore root becomes its own row.
   for (const root of kept) {
+    if (root.kind === 'publish-area' && isTracked(root)) {
+      sources.push({ rankRoot: root, build: () => trackedRow(root, [], input) });
+      continue;
+    }
     if (root.tracking.tracked) continue;
-    if (root.kind !== 'repository' && root.kind !== 'lore') continue;
+    if (root.kind !== 'repository' && root.kind !== 'lore' && root.kind !== 'publish-area')
+      continue;
     sources.push({ rankRoot: root, build: () => untrackedRow(root, input) });
   }
 
