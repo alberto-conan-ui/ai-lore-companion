@@ -22,6 +22,7 @@ import {
   SESSION_LABEL,
   STAGE_FIELD,
   STATUS_FIELD,
+  bodyGoals,
   bodyHasMarker,
   buildProjectSnapshot,
   classifyGhFailure,
@@ -1745,4 +1746,59 @@ test('recorded and documented failures of gh are sorted by kind, and an unknown 
     message: 'something nobody has seen',
   });
   assert.deepEqual(classifyGhFailure(run('', 7)), { kind: 'failed', message: 'gh exited 7' });
+});
+
+// ---------- the Goals a focus carries ----------
+
+test('the Goals of a focus are read from its ticket, and nothing claims they are met', () => {
+  // The shape every focus of this Space uses: a heading, a sentence of prose,
+  // a numbered list, then a rule and whatever follows.
+  const body = [
+    '# A focus',
+    '',
+    '## Goals',
+    '',
+    'What this focus must deliver. The Human Lead checks these at the gate.',
+    '',
+    '1. Open GitHub and you see the same picture as the Dashboard.',
+    '2. Every piece of work has a ticket.',
+    '3. Lose the laptop and you lose no draft either.',
+    '',
+    '---',
+    '',
+    '## The goal',
+    '',
+    '1. This is not a Goal; it is under another heading.',
+  ].join('\n');
+  assert.deepEqual(bodyGoals(body), [
+    'Open GitHub and you see the same picture as the Dashboard.',
+    'Every piece of work has a ticket.',
+    'Lose the laptop and you lose no draft either.',
+  ]);
+});
+
+test('a focus with no Goals heading has none, which is what makes it uncomputable', () => {
+  assert.deepEqual(bodyGoals('# A focus\n\n## Acceptance\n\n- A criterion.\n'), []);
+  assert.deepEqual(bodyGoals(''), []);
+  // "Goals" must be the whole heading: a heading that merely begins with it is
+  // about something else.
+  assert.deepEqual(bodyGoals('## Goals and scope\n\n- Not a Goal.\n'), []);
+});
+
+test('Goals stop at the next heading of the same level or higher, and bullets count as well as numbers', () => {
+  const body = [
+    '### Goals',
+    '',
+    '- One.',
+    '* Two.',
+    '+ Three.',
+    '',
+    '### Something else',
+    '',
+    '- Four.',
+  ].join('\n');
+  assert.deepEqual(bodyGoals(body), ['One.', 'Two.', 'Three.']);
+  // A deeper heading inside the section does not end it.
+  const nested = ['## Goals', '', '1. One.', '', '#### A note', '', '2. Two.'].join('\n');
+  assert.deepEqual(bodyGoals(nested), ['One.', 'Two.']);
 });

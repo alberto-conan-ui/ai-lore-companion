@@ -114,6 +114,48 @@ export function bodyNamesCriteria(body: string): boolean {
   return CRITERIA_HEADING.test(body);
 }
 
+/** A markdown heading whose text is "Goals" — "## Goals", "### Goals". */
+const GOALS_HEADING = /^\s{0,3}(#{1,6})\s+goals\s*$/im;
+
+/** A numbered or bulleted line, which is how a Goal is written. */
+const GOAL_LINE = /^\s{0,3}(?:[-*+]|\d{1,3}[.)])\s+(\S.*)$/;
+
+/**
+ * The Goals a focus carries: a short list, in plain English, of what it must
+ * deliver.
+ *
+ * Goals are not acceptance criteria. Criteria belong to an item and name their
+ * evidence; Goals belong to the focus and say what it is for. They are what
+ * the Human Lead checks at the gate, so the Done call is computed from these
+ * and not from the criteria heading.
+ *
+ * A Goal is checkable **by reading**, so nothing here says a Goal is met — it
+ * cannot be told by running something, and pretending otherwise would put a
+ * machine's opinion where the Human Lead's belongs. What this gives is the
+ * list to check, and the ability to say when there is none.
+ *
+ * The lines are taken from under the heading, up to the next heading of the
+ * same level or higher. Prose under the heading is skipped: only list items
+ * are Goals, which is how every focus of this Space writes them.
+ */
+export function bodyGoals(body: string): string[] {
+  const match = GOALS_HEADING.exec(body);
+  if (match === null) return [];
+  const level = (match[1] ?? '#').length;
+  const lines = body.slice(match.index + match[0].length).split('\n');
+  const goals: string[] = [];
+  for (const line of lines) {
+    const heading = /^\s{0,3}(#{1,6})\s/.exec(line);
+    if (heading !== null && (heading[1]?.length ?? 7) <= level) break;
+    // A horizontal rule ends the section too: this Space's focuses put one
+    // between the Goals and what follows.
+    if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line)) break;
+    const item = GOAL_LINE.exec(line);
+    if (item !== null) goals.push((item[1] ?? '').trim());
+  }
+  return goals;
+}
+
 function isAgentsColumn(value: string | undefined): value is AgentsColumn {
   return AGENTS_COLUMNS.some((column) => column === value);
 }
@@ -177,6 +219,7 @@ function focusItem(raw: RawProjectIssue, onProject: Map<string, RawProjectIssue>
     }),
     specUrl: parseSpecLink(raw.body),
     criteriaOnTicket: bodyNamesCriteria(raw.body),
+    goals: bodyGoals(raw.body),
   };
 }
 

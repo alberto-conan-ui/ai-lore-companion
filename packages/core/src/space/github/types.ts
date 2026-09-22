@@ -308,6 +308,12 @@ export type FocusItem = PlanItem & {
    * been. Readiness cannot be computed without it.
    */
   criteriaOnTicket: boolean;
+  /**
+   * The Goals the focus carries: what it must deliver, in plain English, as
+   * the Human Lead checks them at the gate. Empty when the ticket names none,
+   * and a focus with none is reported as uncomputable rather than skipped.
+   */
+  goals: string[];
 };
 
 /** A session issue: one row of the Agents board. */

@@ -33,6 +33,7 @@ function focus(number: number, overrides: Partial<FocusCard> = {}): FocusCard {
     kind: null,
     specUrl: null,
     criteriaOnTicket: true,
+    goals: [],
     updatedAt: now,
     items: [],
     itemsDone: 0,
@@ -219,21 +220,36 @@ test('the Done-call prompt is ranked beside a review, and says when it cannot be
     focus: issue(1),
     title: 'Finished focus',
     criteriaOnTicket: true,
+    goals: ['Lose the laptop and you lose no plan.'],
   };
   const uncomputable: NeedsYouEntry = {
     kind: 'ready-for-done',
     focus: issue(2),
     title: 'No criteria here',
     criteriaOnTicket: false,
+    goals: [],
   };
 
+  // The Goals are what the Human Lead checks at the gate, so the prompt names
+  // how many there are to check.
   assert.equal(
     nextActionHeadline(ready),
-    '#1 is finished — your Done call: Finished focus',
+    '#1 is finished — your Done call against its Goal: Finished focus',
   );
   assert.equal(
+    nextActionHeadline({ ...ready, goals: ['One.', 'Two.', 'Three.'] }),
+    '#1 is finished — your Done call against its 3 Goals: Finished focus',
+  );
+  // No Goals and no criteria: uncomputable, and it says which is missing.
+  assert.equal(
     nextActionHeadline(uncomputable),
-    '#2 has no criteria on its ticket, so done cannot be told: No criteria here',
+    '#2 has no Goals on its ticket, so done cannot be told: No criteria here',
+  );
+  // A focus written before Goals existed still has criteria, and is still
+  // computable: this does not make older tickets unreadable.
+  assert.equal(
+    nextActionHeadline({ ...uncomputable, criteriaOnTicket: true }),
+    '#2 is finished — your Done call: No criteria here',
   );
 
   // It reaches the band at all: the Needs you band renders `nextActions`, so an
