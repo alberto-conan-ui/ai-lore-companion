@@ -37,6 +37,7 @@ export const DESK_FILES = {
   firstSeen: 'first-seen.json',
   projectCache: 'project-cache.json',
   migration: 'migration.json',
+  pendingWrites: 'pending-writes.json',
 } as const;
 
 /** The name of one of the desk's records. */

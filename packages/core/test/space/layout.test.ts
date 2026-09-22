@@ -111,6 +111,7 @@ test('deskFile names each of the desk records', () => {
     'first-seen.json',
     'gate-answers.json',
     'migration.json',
+    'pending-writes.json',
     'project-cache.json',
     'reviewed-marks.json',
     'session-closes.json',
