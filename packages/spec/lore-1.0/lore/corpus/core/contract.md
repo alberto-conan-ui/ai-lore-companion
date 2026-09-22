@@ -20,7 +20,7 @@ A contract may have only a rule, and then its card says so. A session treats a c
 
 ## Where it is kept
 
-The contracts are the folder `lore/contracts/`. The five core contracts are in `lore/contracts/core/`: write-guard, lore-integrity, journal-append-forward, spec-before-breakdown and stage-gate. The Space's own contracts are beside that folder. A check script is kept in the Lore, in the same folder as the card of its contract, so that every clone of the Space repository has the same checks.
+The contracts are the folder `lore/contracts/`. The four core contracts are in `lore/contracts/core/`: write-guard, lore-integrity, journal-append-forward and stage-gate. The contracts that ship as defaults are in `lore/contracts/default/`, and a Space replaces one by writing a file of the same name beside that folder. The Space's own contracts are beside both folders. A check script is kept in the Lore, in the same folder as the card of its contract, so that every clone of the Space repository has the same checks.
 
 A contract is a [card](./card.md) whose frontmatter has its target, its check script if it has one, and whether the check runs before or after a write.
 

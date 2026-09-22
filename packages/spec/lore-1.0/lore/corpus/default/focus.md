@@ -24,4 +24,4 @@ A focus is an issue of the Space repository, shown on the Project. The view of t
 
 ## What acts on it
 
-The process specify creates the focus at the Stage value Spec, or takes the focus that the Human Lead points at. The verb spec-agree links the published spec from the focus in a comment on its issue. The verb plan-break-down creates the items of the focus. The verb work-report writes a comment on the focus when a criterion of one of its items has changed. The core contract spec-before-breakdown applies to a focus that is being specified, and the core contract stage-gate applies to its Stage field.
+The process specify creates the focus at the Stage value Spec, or takes the focus that the Human Lead points at. The verb spec-agree links the published spec from the focus in a comment on its issue. The verb plan-break-down creates the items of the focus. The verb work-report writes a comment on the focus when a criterion of one of its items has changed. The contract spec-before-breakdown, which ships as a default, applies to a focus that is being specified, and the core contract stage-gate applies to its Stage field.

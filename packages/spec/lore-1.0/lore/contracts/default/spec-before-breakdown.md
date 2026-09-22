@@ -31,12 +31,18 @@ Before a session writes a breakdown for a unit of work, it reads the unit of wor
 
 The product document of AI-Lore 1.0 describes a check for this contract: before a sub-issue is created under a focus, a script confirms that the focus links a published, agreed spec, and the script reads the Lore for how the plan is laid out. The first build of AI-Lore 1.0 does not include that script, by the Human Lead's decision on the scope of the first build. Until the script exists, `check` and `when` are `null`, and the rule is kept by the session and by the verbs and processes that name this contract.
 
-## Why it is core
+## Why it is a default and not core
 
 A breakdown that is not made from the agreed spec can differ from what the Human Lead agreed, and the work is then checked against criteria that the spec does not contain. The spec is written to prevent that.
+
+That is a good way to work, and it is the way AI-Lore ships. It is not a safety rule. A Space that decides to plan as it thinks, writing its breakdown to the plan while the spec is still settling, is making a different choice about how it works, not breaking anything that must hold. So this contract is a default: a Space replaces it by writing a file of the same name beside the `default/` folder, as it replaces any other default.
+
+The core contracts are the ones no Space may replace, because a Space that replaced them could lose work or overwrite another session's: write-guard, lore-integrity and journal-append-forward. This contract is not one of them.
 
 ## Choices recorded here
 
 The product document fixes the rule, what it covers and the check that it describes. The session that wrote this card on 2026-09-18 made one choice, which is open to the Human Lead's review.
 
 - The sentence that says when a spec is agreed puts together what the product document says in several places: the Human Lead declares the draft agreed, the agreed spec is published to a publish area, and the unit of work links it.
+
+A later session moved this card from `core/` to `default/` on 2026-09-22, and wrote the section above. Contracts was the only part of the Lore with no `default/` folder, so when this card was written there was nowhere else for it to go, and a way of working ended up in the layer reserved for the rules that keep a Space safe. Nothing in the engine had to change: `lore-integrity.py` protects any folder named `core` or `default` in any part, and the Lore's reader already read both layers for every part.
