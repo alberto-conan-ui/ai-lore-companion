@@ -183,6 +183,23 @@ export type NeedsYouEntry =
       goals: string[];
     }
   | {
+      /**
+       * Something about the Project itself that the companion can see and
+       * cannot fix: a view whose filter or grouping does not match the default
+       * layout, or an issue with no `Level`.
+       *
+       * These were computed into `ProjectSnapshot.problems` and rendered
+       * nowhere. A diagnostic whose only audience cannot see it is the failure
+       * this Space's focus on the plan exists to cure — setup said its piece
+       * once, to a place nobody looked at again.
+       *
+       * Every one of them is the Human Lead's to fix, which is why they belong
+       * in "Needs you" and not in a log.
+       */
+      kind: 'project-problem';
+      message: string;
+    }
+  | {
       kind: 'stale-session';
       issue: IssueRef;
       column: AgentsColumn;
@@ -312,6 +329,9 @@ export function dashboardModel(input: DashboardInput): DashboardModel {
   });
 
   const needsYou: NeedsYouEntry[] = [
+    // What the Project says about itself that is wrong. Computed on every read
+    // since the view check landed, and until now rendered nowhere.
+    ...snapshot.problems.map((message): NeedsYouEntry => ({ kind: 'project-problem', message })),
     ...gates.map(
       (gate): NeedsYouEntry => ({
         kind: 'gate',
