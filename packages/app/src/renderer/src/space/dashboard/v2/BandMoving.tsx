@@ -28,7 +28,17 @@ export function BandMoving({
   onOpenFocus,
 }: BandMovingProps): JSX.Element {
   const [backlogOpen, setBacklogOpen] = useState(false);
-  const moving = project?.moving ?? { inProgress: [], queued: [], dormant: [], done: [] };
+  const moving = project?.moving ?? {
+    inProgress: [],
+    queued: [],
+    untriaged: [],
+    dormant: [],
+    done: [],
+  };
+  // A payload from an older cache has no `untriaged`. Read it defensively: a
+  // band that throws takes the whole Dashboard with it, and a missing bucket
+  // should degrade to "nothing to show" rather than a blank page.
+  const untriaged = moving.untriaged ?? [];
   const dormant = project?.dormant ?? {
     count: moving.dormant.length,
     paused: moving.dormant.filter((focus) => focus.labels.includes('paused')).length,
@@ -41,6 +51,7 @@ export function BandMoving({
         <h2>WHAT IS MOVING</h2>
         <span className="dashboard-v2-clear">
           {moving.inProgress.length} IN PROGRESS · {moving.queued.length} QUEUED
+          {untriaged.length > 0 ? ` · ${untriaged.length} UNTRIAGED` : ''}
         </span>
       </div>
       <div className="dashboard-v2-moving-content">
@@ -106,7 +117,7 @@ export function BandMoving({
         >
           <div className="dashboard-v2-theme dashboard-v2-backlog">
             <div className="dashboard-v2-backlog-heading">
-              <h3>DORMANT FOCUSES</h3>
+              <h3>UNTRIAGED AND PARKED</h3>
               <button
                 type="button"
                 className="dashboard-v2-secondary"
@@ -115,6 +126,26 @@ export function BandMoving({
                 Close
               </button>
             </div>
+            {untriaged.length > 0 ? (
+              <p className="dashboard-v2-clear" data-testid="dashboard-untriaged-note">
+                {untriaged.length} with no stage — nobody has said where these are yet.
+                Parked work is listed below them.
+              </p>
+            ) : null}
+            {untriaged.map((focus) => (
+              <button
+                type="button"
+                className="dashboard-v2-draft-row"
+                key={focus.issue.url}
+                data-testid="dashboard-untriaged-row"
+                onClick={() => {
+                  setBacklogOpen(false);
+                  onOpenFocus(focus);
+                }}
+              >
+                #{focus.issue.number} {focus.title}
+              </button>
+            ))}
             {moving.dormant.map((focus) => (
               <button
                 type="button"

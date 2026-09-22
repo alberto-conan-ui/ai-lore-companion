@@ -29,7 +29,7 @@ export function projectState(over: Partial<SpaceProjectState> = {}): SpaceProjec
       broken: false,
     },
     nextActions: [],
-    moving: { inProgress: [], queued: [], dormant: [], done: [] },
+    moving: { inProgress: [], queued: [], untriaged: [], dormant: [], done: [] },
     dormant: { count: 0, paused: 0, oldestAgeMs: null, medianAgeMs: null },
     stats: { focusesOpen: 0, itemsOpen: 0, openPullRequests: 0, liveSessions: 0 },
     ...over,
