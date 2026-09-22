@@ -2,7 +2,7 @@ import type { Dirent, Stats } from 'node:fs';
 import { type FileHandle, lstat, open, readdir, realpath, stat } from 'node:fs/promises';
 import { basename, extname, isAbsolute, join, relative } from 'node:path';
 import type { SessionRecord } from '@ai-lore-companion/core';
-import { readHandover, parseHandover } from '@ai-lore-companion/core';
+import { parseHandover, readHandover } from '@ai-lore-companion/core';
 import type {
   DashboardActivitySession,
   DashboardDefinitionDiagnostic,

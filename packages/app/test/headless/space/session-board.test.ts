@@ -340,7 +340,10 @@ test('a session names the tickets it worked through the tool, and they reach its
     [ticket.value.number],
   );
   const worked = fake.state().issues.find((i) => i.ref.number === ticket.value.number);
-  assert.equal((worked?.comments ?? []).filter((text) => text.startsWith('Worked on by')).length, 1);
+  assert.equal(
+    (worked?.comments ?? []).filter((text) => text.startsWith('Worked on by')).length,
+    1,
+  );
 });
 
 test('a root a session works goes to In Progress, and to Paused when it releases', async () => {

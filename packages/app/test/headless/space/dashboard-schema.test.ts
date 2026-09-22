@@ -8,7 +8,10 @@ import {
   readDashboardDefinition,
   validateDashboardReport,
 } from '../../../src/main/space/dashboard-definition.js';
-import type { DashboardDefinition, DashboardReportInput } from '../../../src/shared/ipc/space/dashboard-report.types.js';
+import type {
+  DashboardDefinition,
+  DashboardReportInput,
+} from '../../../src/shared/ipc/space/dashboard-report.types.js';
 import { LORE_TEMPLATE_DIR } from './space-harness.js';
 
 const definition: DashboardDefinition = {
@@ -81,20 +84,24 @@ async function spaceWith(): Promise<{ root: string; cleanup: () => Promise<void>
 test('the packaged v2 definition validates and carries the three fixed bands', async () => {
   const space = await spaceWith();
   try {
-    const resolved = await readDashboardDefinition({ spaceRoot: space.root, templateDir: LORE_TEMPLATE_DIR });
+    const resolved = await readDashboardDefinition({
+      spaceRoot: space.root,
+      templateDir: LORE_TEMPLATE_DIR,
+    });
     assert.ok(resolved.ok);
     if (!resolved.ok) return;
     assert.equal(resolved.value.source, 'packaged-default');
-    assert.deepEqual(resolved.value.definition.bands.map((band) => band.id), [
-      'needs-you',
-      'moving',
-      'waiting',
-    ]);
+    assert.deepEqual(
+      resolved.value.definition.bands.map((band) => band.id),
+      ['needs-you', 'moving', 'waiting'],
+    );
     const panels = resolved.value.definition.bands.flatMap((band) => band.panels);
     assert.ok(panels.some((panel) => panel.kind === 'agents-board'));
     assert.ok(panels.some((panel) => panel.kind === 'live-sessions'));
     assert.deepEqual(
-      panels.flatMap((panel) => (panel.source === 'companion' && panel.pmLine ? [panel.pmLine.id] : [])),
+      panels.flatMap((panel) =>
+        panel.source === 'companion' && panel.pmLine ? [panel.pmLine.id] : [],
+      ),
       ['next-action-note', 'dormant-note'],
     );
   } finally {
@@ -112,7 +119,10 @@ test('a v1 override falls through each tier with an unsupported-version diagnost
       join(space.root, 'lore/corpus/default/dashboard.json'),
       JSON.stringify(definition),
     );
-    const installed = await readDashboardDefinition({ spaceRoot: space.root, templateDir: LORE_TEMPLATE_DIR });
+    const installed = await readDashboardDefinition({
+      spaceRoot: space.root,
+      templateDir: LORE_TEMPLATE_DIR,
+    });
     assert.ok(installed.ok);
     if (!installed.ok) return;
     assert.equal(installed.value.source, 'installed-default');
@@ -124,7 +134,10 @@ test('a v1 override falls through each tier with an unsupported-version diagnost
     );
 
     await writeFile(join(space.root, 'lore/corpus/default/dashboard.json'), JSON.stringify(v1));
-    const packaged = await readDashboardDefinition({ spaceRoot: space.root, templateDir: LORE_TEMPLATE_DIR });
+    const packaged = await readDashboardDefinition({
+      spaceRoot: space.root,
+      templateDir: LORE_TEMPLATE_DIR,
+    });
     assert.ok(packaged.ok);
     if (!packaged.ok) return;
     assert.equal(packaged.value.source, 'packaged-default');
@@ -139,39 +152,148 @@ test('the validator resolves panel defaults and rejects structural and option mi
   const space = await spaceWith();
   try {
     await writeFile(join(space.root, 'lore/corpus/dashboard.json'), JSON.stringify(definition));
-    const resolved = await readDashboardDefinition({ spaceRoot: space.root, templateDir: LORE_TEMPLATE_DIR });
+    const resolved = await readDashboardDefinition({
+      spaceRoot: space.root,
+      templateDir: LORE_TEMPLATE_DIR,
+    });
     assert.ok(resolved.ok);
     if (!resolved.ok) return;
     const panels = resolved.value.definition.bands.flatMap((band) => band.panels);
-    assert.deepEqual(panels.find((panel) => panel.id === 'live'), {
-      id: 'live',
-      kind: 'live-sessions',
-      source: 'companion',
-      limit: 10,
-      order: 'newest',
-    });
-    assert.deepEqual(panels.find((panel) => panel.id === 'handover'), {
-      id: 'handover',
-      kind: 'handovers',
-      source: 'companion',
-      limit: 5,
-      order: 'newest',
-    });
+    assert.deepEqual(
+      panels.find((panel) => panel.id === 'live'),
+      {
+        id: 'live',
+        kind: 'live-sessions',
+        source: 'companion',
+        limit: 10,
+        order: 'newest',
+      },
+    );
+    assert.deepEqual(
+      panels.find((panel) => panel.id === 'handover'),
+      {
+        id: 'handover',
+        kind: 'handovers',
+        source: 'companion',
+        limit: 5,
+        order: 'newest',
+      },
+    );
     const checked = async (value: unknown): Promise<string | undefined> => {
       await writeFile(join(space.root, 'lore/corpus/dashboard.json'), JSON.stringify(value));
-      const read = await readDashboardDefinition({ spaceRoot: space.root, templateDir: LORE_TEMPLATE_DIR });
+      const read = await readDashboardDefinition({
+        spaceRoot: space.root,
+        templateDir: LORE_TEMPLATE_DIR,
+      });
       if (!read.ok) throw new Error(read.error.message);
       return read.value.diagnostic?.message;
     };
     for (const [name, invalid] of [
-      ['unknown kind', { ...definition, bands: [{ id: 'needs-you', panels: [{ id: 'x', kind: 'unknown', source: 'companion' }] }] }],
-      ['wrong band', { ...definition, bands: [{ id: 'moving', panels: [{ id: 'x', kind: 'publish-area', source: 'companion' }] }] }],
-      ['duplicate kind', { ...definition, bands: [{ id: 'waiting', panels: [{ id: 'x', kind: 'live-sessions', source: 'companion' }, { id: 'y', kind: 'live-sessions', source: 'companion' }] }] }],
-      ['duplicate id', { ...definition, bands: [{ id: 'needs-you', panels: [{ id: 'x', kind: 'next-action', source: 'companion', pmLine: { id: 'x', instruction: 'x' } }] }] }],
-      ['bad pm line', { ...definition, bands: [{ id: 'waiting', panels: [{ id: 'x', kind: 'space-stats', source: 'companion', pmLine: { id: 'note', instruction: 'x' } }] }] }],
-      ['bad limit', { ...definition, bands: [{ id: 'waiting', panels: [{ id: 'x', kind: 'handovers', source: 'companion', limit: 51 }] }] }],
-      ['bad recent days', { ...definition, bands: [{ id: 'needs-you', panels: [{ id: 'x', kind: 'review-documents', source: 'companion', recentDays: 0 }] }] }],
-      ['bad order', { ...definition, bands: [{ id: 'waiting', panels: [{ id: 'x', kind: 'handovers', source: 'companion', order: 'age' }] }] }],
+      [
+        'unknown kind',
+        {
+          ...definition,
+          bands: [{ id: 'needs-you', panels: [{ id: 'x', kind: 'unknown', source: 'companion' }] }],
+        },
+      ],
+      [
+        'wrong band',
+        {
+          ...definition,
+          bands: [
+            { id: 'moving', panels: [{ id: 'x', kind: 'publish-area', source: 'companion' }] },
+          ],
+        },
+      ],
+      [
+        'duplicate kind',
+        {
+          ...definition,
+          bands: [
+            {
+              id: 'waiting',
+              panels: [
+                { id: 'x', kind: 'live-sessions', source: 'companion' },
+                { id: 'y', kind: 'live-sessions', source: 'companion' },
+              ],
+            },
+          ],
+        },
+      ],
+      [
+        'duplicate id',
+        {
+          ...definition,
+          bands: [
+            {
+              id: 'needs-you',
+              panels: [
+                {
+                  id: 'x',
+                  kind: 'next-action',
+                  source: 'companion',
+                  pmLine: { id: 'x', instruction: 'x' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      [
+        'bad pm line',
+        {
+          ...definition,
+          bands: [
+            {
+              id: 'waiting',
+              panels: [
+                {
+                  id: 'x',
+                  kind: 'space-stats',
+                  source: 'companion',
+                  pmLine: { id: 'note', instruction: 'x' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      [
+        'bad limit',
+        {
+          ...definition,
+          bands: [
+            {
+              id: 'waiting',
+              panels: [{ id: 'x', kind: 'handovers', source: 'companion', limit: 51 }],
+            },
+          ],
+        },
+      ],
+      [
+        'bad recent days',
+        {
+          ...definition,
+          bands: [
+            {
+              id: 'needs-you',
+              panels: [{ id: 'x', kind: 'review-documents', source: 'companion', recentDays: 0 }],
+            },
+          ],
+        },
+      ],
+      [
+        'bad order',
+        {
+          ...definition,
+          bands: [
+            {
+              id: 'waiting',
+              panels: [{ id: 'x', kind: 'handovers', source: 'companion', order: 'age' }],
+            },
+          ],
+        },
+      ],
     ] as const) {
       assert.ok(await checked(invalid), name);
     }
@@ -183,8 +305,14 @@ test('the validator resolves panel defaults and rejects structural and option mi
 test('hashing stays canonical and typed PM values remain validated', async () => {
   const space = await spaceWith();
   try {
-    await writeFile(join(space.root, 'lore/corpus/dashboard.json'), JSON.stringify(reportDefinition));
-    const resolved = await readDashboardDefinition({ spaceRoot: space.root, templateDir: LORE_TEMPLATE_DIR });
+    await writeFile(
+      join(space.root, 'lore/corpus/dashboard.json'),
+      JSON.stringify(reportDefinition),
+    );
+    const resolved = await readDashboardDefinition({
+      spaceRoot: space.root,
+      templateDir: LORE_TEMPLATE_DIR,
+    });
     assert.ok(resolved.ok);
     if (!resolved.ok) return;
     assert.equal(resolved.value.hash, dashboardDefinitionHash(resolved.value.definition));

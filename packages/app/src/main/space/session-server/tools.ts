@@ -30,8 +30,8 @@ import {
   AWAIT_ANSWER_WAIT_MS,
   MAX_CALLS_PER_WINDOW,
   MAX_TARGETS_PER_REQUEST,
-  MAX_WORK_TICKETS_PER_CALL,
   MAX_TEXT_LENGTH,
+  MAX_WORK_TICKETS_PER_CALL,
   RATE_WINDOW_MS,
 } from './constants.js';
 import { createRateLimit } from './rate-limit.js';

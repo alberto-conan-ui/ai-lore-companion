@@ -28,8 +28,7 @@ export const DASHBOARD_PANEL_KINDS = {
   moving: ['in-progress', 'queued', 'dormant', 'done-line'],
   waiting: ['pull-requests', 'live-sessions', 'agents-board', 'space-stats', 'handovers'],
 } as const satisfies Record<DashboardBandId, readonly string[]>;
-export type DashboardCompanionPanelKind =
-  (typeof DASHBOARD_PANEL_KINDS)[DashboardBandId][number];
+export type DashboardCompanionPanelKind = (typeof DASHBOARD_PANEL_KINDS)[DashboardBandId][number];
 
 export type DashboardPanelOrder = 'newest' | 'oldest' | 'age' | 'stage' | 'state';
 

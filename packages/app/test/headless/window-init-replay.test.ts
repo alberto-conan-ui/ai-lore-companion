@@ -1,7 +1,7 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { RecentProject, WindowInitPayload } from '../../src/shared/ipc.js';
+import test from 'node:test';
 import { createWindowInitReplay } from '../../src/preload/window-init-replay.js';
+import type { RecentProject, WindowInitPayload } from '../../src/shared/ipc.js';
 
 const welcome = (recents: RecentProject[]): WindowInitPayload => ({ mode: 'welcome', recents });
 const cockpit: WindowInitPayload = { mode: 'cockpit' };

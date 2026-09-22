@@ -8,9 +8,9 @@ import type {
   DashboardCompanionPanelKind,
   DashboardDefinition,
   DashboardDefinitionDiagnostic,
-  DashboardPmComponentValue,
-  DashboardPmComponentType,
   DashboardPanel,
+  DashboardPmComponentType,
+  DashboardPmComponentValue,
   DashboardReportInput,
   ResolvedDashboardDefinition,
 } from '../../shared/ipc/space/dashboard-report.types.js';
@@ -160,12 +160,23 @@ function panel(
   const label = `bands[${band}].panels[${index}]`;
   if (
     !isObject(value) ||
-    !keysAre(value, ['id', 'kind', 'source', 'title', 'instruction', 'limit', 'recentDays', 'order', 'pmLine'])
+    !keysAre(value, [
+      'id',
+      'kind',
+      'source',
+      'title',
+      'instruction',
+      'limit',
+      'recentDays',
+      'order',
+      'pmLine',
+    ])
   )
     return failure('invalid-definition', `${label} has unsupported keys or is not an object.`);
   const panelId = id(value.id, `${label}.id`);
   if (typeof panelId !== 'string') return panelId;
-  if (typeof value.kind !== 'string') return failure('invalid-definition', `${label}.kind is unsupported.`);
+  if (typeof value.kind !== 'string')
+    return failure('invalid-definition', `${label}.kind is unsupported.`);
 
   if (PM_TYPES.has(value.kind)) {
     if (value.source !== 'pm')
@@ -173,12 +184,21 @@ function panel(
     const title = text(value.title, `${label}.title`, 200);
     if (typeof title !== 'string') return title;
     if (value.recentDays !== undefined || value.order !== undefined || value.pmLine !== undefined)
-      return failure('invalid-definition', `${label} has an option this PM panel does not support.`);
+      return failure(
+        'invalid-definition',
+        `${label} has an option this PM panel does not support.`,
+      );
     if (value.kind !== 'list' && value.limit !== undefined)
       return failure('invalid-definition', `${label}.limit applies only to list panels.`);
     const limit =
       value.kind === 'list'
-        ? boundedInteger(value.limit, `${label}.limit`, 1, DASHBOARD_LIST_MAX_ITEMS, DASHBOARD_DEFAULT_LIMIT)
+        ? boundedInteger(
+            value.limit,
+            `${label}.limit`,
+            1,
+            DASHBOARD_LIST_MAX_ITEMS,
+            DASHBOARD_DEFAULT_LIMIT,
+          )
         : undefined;
     if (limit !== undefined && typeof limit !== 'number') return limit;
     let instruction: string | undefined;
@@ -204,7 +224,10 @@ function panel(
   const expectedBand = companionBandOf(value.kind);
   if (expectedBand === null) return failure('invalid-definition', `${label}.kind is unsupported.`);
   if (expectedBand !== band)
-    return failure('invalid-definition', `${label}.kind "${value.kind}" belongs in ${expectedBand}.`);
+    return failure(
+      'invalid-definition',
+      `${label}.kind "${value.kind}" belongs in ${expectedBand}.`,
+    );
   if (value.source !== 'companion')
     return failure('invalid-definition', `${label}.source must be companion for ${value.kind}.`);
   if (value.instruction !== undefined)
@@ -238,7 +261,10 @@ function panel(
   let order: DashboardCompanionPanel['order'];
   if (options.orders !== undefined) {
     const defaultOrder = options.orders[0];
-    if (typeof value.order !== 'string' || !(options.orders as readonly string[]).includes(value.order)) {
+    if (
+      typeof value.order !== 'string' ||
+      !(options.orders as readonly string[]).includes(value.order)
+    ) {
       if (value.order !== undefined)
         return failure('invalid-definition', `${label}.order is not supported by ${kind}.`);
       order = defaultOrder;
@@ -262,7 +288,10 @@ function panel(
 
 function definition(value: unknown): DashboardDefinition | DashboardDefinitionDiagnostic {
   if (!isObject(value))
-    return failure('invalid-definition', 'The dashboard definition must be an object with version and bands.');
+    return failure(
+      'invalid-definition',
+      'The dashboard definition must be an object with version and bands.',
+    );
   if (value.version !== 2) {
     const version = typeof value.version === 'number' ? String(value.version) : 'unknown';
     return failure(
@@ -271,8 +300,15 @@ function definition(value: unknown): DashboardDefinition | DashboardDefinitionDi
     );
   }
   if (!keysAre(value, ['version', 'bands']))
-    return failure('invalid-definition', 'The dashboard definition must be an object with version and bands.');
-  if (!Array.isArray(value.bands) || value.bands.length === 0 || value.bands.length > DASHBOARD_BAND_IDS.length)
+    return failure(
+      'invalid-definition',
+      'The dashboard definition must be an object with version and bands.',
+    );
+  if (
+    !Array.isArray(value.bands) ||
+    value.bands.length === 0 ||
+    value.bands.length > DASHBOARD_BAND_IDS.length
+  )
     return failure('invalid-definition', 'bands must contain 1 to 3 bands.');
   const bands: DashboardBand[] = [];
   const ids = new Set<string>();
@@ -285,24 +321,39 @@ function definition(value: unknown): DashboardDefinition | DashboardDefinitionDi
       return failure('invalid-definition', `${label} has unsupported keys or is not an object.`);
     if (typeof raw.id !== 'string' || !BAND_IDS.has(raw.id))
       return failure('invalid-definition', `${label}.id is unsupported.`);
-    if (bandIds.has(raw.id)) return failure('invalid-definition', `The band id "${raw.id}" is duplicated.`);
+    if (bandIds.has(raw.id))
+      return failure('invalid-definition', `The band id "${raw.id}" is duplicated.`);
     bandIds.add(raw.id);
-    if (!Array.isArray(raw.panels) || raw.panels.length === 0 || raw.panels.length > DASHBOARD_MAX_PANELS_PER_BAND)
-      return failure('invalid-definition', `${label}.panels must contain 1 to ${DASHBOARD_MAX_PANELS_PER_BAND} panels.`);
+    if (
+      !Array.isArray(raw.panels) ||
+      raw.panels.length === 0 ||
+      raw.panels.length > DASHBOARD_MAX_PANELS_PER_BAND
+    )
+      return failure(
+        'invalid-definition',
+        `${label}.panels must contain 1 to ${DASHBOARD_MAX_PANELS_PER_BAND} panels.`,
+      );
     const band = raw.id as DashboardBandId;
     const panels: DashboardBand['panels'] = [];
     for (let panelIndex = 0; panelIndex < raw.panels.length; panelIndex += 1) {
       const parsed = panel(raw.panels[panelIndex], band, panelIndex);
       if (!('id' in parsed)) return parsed;
-      if (ids.has(parsed.id)) return failure('invalid-definition', `The panel id "${parsed.id}" is duplicated.`);
+      if (ids.has(parsed.id))
+        return failure('invalid-definition', `The panel id "${parsed.id}" is duplicated.`);
       ids.add(parsed.id);
       if (parsed.source === 'companion') {
         if (companionKinds.has(parsed.kind))
-          return failure('invalid-definition', `The companion panel kind "${parsed.kind}" is duplicated.`);
+          return failure(
+            'invalid-definition',
+            `The companion panel kind "${parsed.kind}" is duplicated.`,
+          );
         companionKinds.add(parsed.kind);
         if (parsed.pmLine !== undefined) {
           if (ids.has(parsed.pmLine.id))
-            return failure('invalid-definition', `The PM line id "${parsed.pmLine.id}" is duplicated.`);
+            return failure(
+              'invalid-definition',
+              `The PM line id "${parsed.pmLine.id}" is duplicated.`,
+            );
           ids.add(parsed.pmLine.id);
         }
       }
@@ -474,7 +525,11 @@ function pmDefinitions(definitionValue: DashboardDefinition): DashboardPmDefinit
   for (const band of definitionValue.bands) {
     for (const panel of band.panels) {
       if (panel.source === 'pm') {
-        values.push({ id: panel.id, type: panel.kind, ...(panel.limit === undefined ? {} : { limit: panel.limit }) });
+        values.push({
+          id: panel.id,
+          type: panel.kind,
+          ...(panel.limit === undefined ? {} : { limit: panel.limit }),
+        });
       } else if (panel.pmLine !== undefined) {
         values.push({ id: panel.pmLine.id, type: 'text' });
       }

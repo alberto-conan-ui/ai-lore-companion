@@ -4,28 +4,81 @@
     {
       "id": "needs-you",
       "panels": [
-        { "id": "next-action", "kind": "next-action", "source": "companion", "pmLine": { "id": "next-action-note", "instruction": "One line of context for the next action: what is at stake, or why it is next. No provenance, no session identifiers." } },
-        { "id": "review-documents", "kind": "review-documents", "source": "companion", "limit": 10, "recentDays": 14, "order": "newest" },
+        {
+          "id": "next-action",
+          "kind": "next-action",
+          "source": "companion",
+          "pmLine": {
+            "id": "next-action-note",
+            "instruction": "One line of context for the next action: what is at stake, or why it is next. No provenance, no session identifiers."
+          }
+        },
+        {
+          "id": "review-documents",
+          "kind": "review-documents",
+          "source": "companion",
+          "limit": 10,
+          "recentDays": 14,
+          "order": "newest"
+        },
         { "id": "publish-area", "kind": "publish-area", "source": "companion" }
       ]
     },
     {
       "id": "moving",
       "panels": [
-        { "id": "in-progress", "kind": "in-progress", "source": "companion", "limit": 10, "order": "age" },
+        {
+          "id": "in-progress",
+          "kind": "in-progress",
+          "source": "companion",
+          "limit": 10,
+          "order": "age"
+        },
         { "id": "queued", "kind": "queued", "source": "companion", "limit": 10, "order": "age" },
-        { "id": "dormant", "kind": "dormant", "source": "companion", "pmLine": { "id": "dormant-note", "instruction": "Characterise the dormant group in one line: what it is and how long it has been idle. Say only what the sources support." } },
+        {
+          "id": "dormant",
+          "kind": "dormant",
+          "source": "companion",
+          "pmLine": {
+            "id": "dormant-note",
+            "instruction": "Characterise the dormant group in one line: what it is and how long it has been idle. Say only what the sources support."
+          }
+        },
         { "id": "done-line", "kind": "done-line", "source": "companion" }
       ]
     },
     {
       "id": "waiting",
       "panels": [
-        { "id": "pull-requests", "kind": "pull-requests", "source": "companion", "limit": 10, "order": "state" },
-        { "id": "live-sessions", "kind": "live-sessions", "source": "companion", "limit": 10, "order": "newest" },
-        { "id": "agents-board", "kind": "agents-board", "source": "companion", "limit": 10, "order": "newest" },
+        {
+          "id": "pull-requests",
+          "kind": "pull-requests",
+          "source": "companion",
+          "limit": 10,
+          "order": "state"
+        },
+        {
+          "id": "live-sessions",
+          "kind": "live-sessions",
+          "source": "companion",
+          "limit": 10,
+          "order": "newest"
+        },
+        {
+          "id": "agents-board",
+          "kind": "agents-board",
+          "source": "companion",
+          "limit": 10,
+          "order": "newest"
+        },
         { "id": "space-stats", "kind": "space-stats", "source": "companion" },
-        { "id": "handovers", "kind": "handovers", "source": "companion", "limit": 5, "order": "newest" }
+        {
+          "id": "handovers",
+          "kind": "handovers",
+          "source": "companion",
+          "limit": 5,
+          "order": "newest"
+        }
       ]
     }
   ]

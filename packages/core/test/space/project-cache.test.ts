@@ -261,9 +261,17 @@ test('an older cache without updatedAt and stageChangedAt still loads', (t) => {
   const paths = tempPaths(t);
   const desk = open(paths);
   const old = snapshot();
-  delete (old.focuses[0] as any).updatedAt;
-  delete (old.focuses[0] as any).stageChangedAt;
-  delete (old.focuses[0]!.items[0] as any).updatedAt;
+  // A cache written before these keys existed does not carry them. Setting
+  // them to undefined would not be the same record: the subject of this test
+  // is a key that is absent, not one that is present and empty.
+  const focus = old.focuses[0] as unknown as Record<string, unknown>;
+  const item = old.focuses[0]?.items[0] as unknown as Record<string, unknown>;
+  // biome-ignore lint/performance/noDelete: the record under test is one without these keys
+  delete focus.updatedAt;
+  // biome-ignore lint/performance/noDelete: the record under test is one without these keys
+  delete focus.stageChangedAt;
+  // biome-ignore lint/performance/noDelete: the record under test is one without these keys
+  delete item.updatedAt;
   const fileContent = { version: 1, records: [{ snapshot: old, failure: null }] };
   writeFileSync(deskFile(paths, 'projectCache'), JSON.stringify(fileContent));
   const read = must(readProjectCache(desk));

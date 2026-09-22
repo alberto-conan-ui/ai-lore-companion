@@ -1,5 +1,5 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import { parseHandover } from '../../src/space/project/session-issue.js';
 
 test('parses handover with all three parts', () => {
