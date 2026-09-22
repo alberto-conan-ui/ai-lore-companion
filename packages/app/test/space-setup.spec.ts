@@ -6,6 +6,17 @@ import { expect, test } from '@playwright/test';
 import type { ElectronApplication, Page } from 'playwright';
 import { closeSpaceApp, launchSpaceApp, withSpaceApp } from './space-fixture';
 
+/**
+ * The default layout, spelled out rather than imported: this spec runs against
+ * the built application, and asserting it with the same constant the build
+ * used would make the assertion agree with itself. Whenever these change,
+ * `DEFAULT_STAGES` and `DEFAULT_VIEWS` in core change with them.
+ */
+const STAGES = ['Backlog', 'Spec and Planning', 'Build', 'Review', 'Done'];
+
+/** One per grouping in `DEFAULT_VIEWS`, which the GitHub API cannot set. */
+const VIEW_SETTINGS_BY_HAND = 4;
+
 // Setup, end to end, with detection routing on (phase M3.9): from a launch with no Spaces
 // folder set, through Set up this computer, create a Space through the screens against
 // core's FakeGitHub, and open it on the Dashboard; open a plain repository and get the
@@ -200,16 +211,21 @@ test.describe('setup of a Space', () => {
         }
       }
 
-      // The result: the Space is ready, with the three GitHub view settings by hand.
+      // The result: the Space is ready, with one GitHub view setting by hand per
+      // grouping the API cannot set: "The plan" needs a column and a grouping,
+      // "Under a parent" a grouping, "Agents board" a column. "Backlog" is a
+      // plain table and needs none.
       const finished = page.getByTestId('setup-finished');
       await expect(finished).toBeVisible({ timeout: 90_000 });
       await expect(finished).toContainText('The Space e2e-created is ready.');
       const byHand = page.getByTestId('setup-by-hand');
       await expect(byHand).toBeVisible();
-      await expect(byHand.getByRole('button', { name: 'Open this view' })).toHaveCount(3);
+      await expect(byHand.getByRole('button', { name: 'Open this view' })).toHaveCount(
+        VIEW_SETTINGS_BY_HAND,
+      );
 
       // What the fake holds: the repository, pushed to its bare remote, and the Project
-      // with its Stage field of five stages, linked to the repository.
+      // with its Stage field of the five default stages, linked to the repository.
       const state = JSON.parse(readFileSync(stateFile, 'utf8')) as FakeState;
       const repository = state.repositories.find(
         (entry) => entry.info.fullName === 'fake-human/e2e-created',
@@ -218,13 +234,7 @@ test.describe('setup of a Space', () => {
       const project = state.projects.find((entry) => entry.info.title === 'e2e-created');
       expect(project?.linked).toContain('fake-human/e2e-created');
       const stage = project?.fields.find((field) => field.name === 'Stage');
-      expect(stage?.options.map((option) => option.name)).toEqual([
-        'Spec',
-        'Plan',
-        'Build',
-        'Review',
-        'Done',
-      ]);
+      expect(stage?.options.map((option) => option.name)).toEqual(STAGES);
       const pushed = execFileSync(
         'git',
         ['--git-dir', repository?.info.cloneUrl ?? '', 'rev-list', '--count', '--all'],
