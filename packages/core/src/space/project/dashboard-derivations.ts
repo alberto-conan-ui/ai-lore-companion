@@ -138,10 +138,15 @@ export function nextActionHeadline(action: ActionData): string {
       }
       return `#${action.focus.number} has no Goals on its ticket, so done cannot be told: ${action.title}`;
     }
-    case 'project-problem':
-      // The message already says what is wrong and what to do about it; it is
-      // written where it is computed, beside the thing that noticed.
-      return action.message;
+    case 'project-problem': {
+      // Each message says what is wrong and what to do about it, written where
+      // it is computed, beside the thing that noticed. The headline is the
+      // first of them, with a count when there are more, so one line says both
+      // what to do and how much there is.
+      const [first = 'The Project has a problem'] = action.messages;
+      const rest = action.messages.length - 1;
+      return rest > 0 ? `${first} (and ${rest} more about the Project)` : first;
+    }
     case 'stale-session':
       return `Check the idle session #${action.issue.number}`;
     case 'draft':

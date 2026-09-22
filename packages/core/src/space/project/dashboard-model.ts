@@ -197,7 +197,8 @@ export type NeedsYouEntry =
        * in "Needs you" and not in a log.
        */
       kind: 'project-problem';
-      message: string;
+      /** Every problem the read found, in the order the snapshot reports them. */
+      messages: string[];
     }
   | {
       kind: 'stale-session';
@@ -329,9 +330,6 @@ export function dashboardModel(input: DashboardInput): DashboardModel {
   });
 
   const needsYou: NeedsYouEntry[] = [
-    // What the Project says about itself that is wrong. Computed on every read
-    // since the view check landed, and until now rendered nowhere.
-    ...snapshot.problems.map((message): NeedsYouEntry => ({ kind: 'project-problem', message })),
     ...gates.map(
       (gate): NeedsYouEntry => ({
         kind: 'gate',
@@ -383,6 +381,14 @@ export function dashboardModel(input: DashboardInput): DashboardModel {
           sessionId: row.local?.sessionId ?? null,
         }),
       ),
+    // Last, and as **one** entry however many there are. A Space whose issues
+    // have no `Level` yet produces one problem per issue, and forty entries in
+    // the band the Human Lead reads first would bury everything else in it —
+    // the failure #97 avoided when it put one back-link on a ticket rather
+    // than one per edit.
+    ...(snapshot.problems.length === 0
+      ? []
+      : [{ kind: 'project-problem', messages: [...snapshot.problems] } as NeedsYouEntry]),
   ];
 
   return { columns, unstaged, standalone, board, needsYou };
