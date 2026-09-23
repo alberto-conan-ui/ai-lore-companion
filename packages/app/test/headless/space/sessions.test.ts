@@ -1103,6 +1103,93 @@ test('the IPC starts a guarded session in the Space window and ends it', async (
   }
 });
 
+// ai-lore#144: a Space with an AGENTS.md has its Lore as standard files, and a
+// Claude Code session of it starts without the write hooks, the plugin or
+// isolated settings. Removing the file restores the guarded start.
+
+test('ai-lore#144: a Claude Code session of a Space with an AGENTS.md starts with no write hooks and no Read only', async () => {
+  const mcp: McpHost = createMcpHost();
+  await mcp.listen();
+  configureSessionServer({ host: async () => mcp });
+  const engines: EngineEntry[] = [
+    { id: 'claude-code', name: 'Claude Code', binary: '/opt/nowhere/claude' },
+  ];
+  const h = spaceHarnessFor(
+    createSpaceSessionsRegister(() => ({
+      engines: () => engines,
+      loginPath: async () => null,
+      runner: () => execFileRunner,
+      newId: () => `s-std-${Math.random().toString(16).slice(2, 8)}`,
+      probeEngine: async (engine) => fineEngineCheck(engine),
+    })),
+  );
+  const agentsMd = join(space.root, 'AGENTS.md');
+  try {
+    await h.space.host.openFolder(undefined, space.root);
+    const spaceWindow = h.space.created[0];
+    assert.ok(spaceWindow);
+    const context = h.space.host.contextFor({ sender: { id: spaceWindow.webContents.id } });
+    assert.ok(context);
+    const spawned: { engine?: PtySpawnEngine; opts?: PtySpawnOpts }[] = [];
+    context.ptyService = {
+      spawn: (engine, opts) => {
+        spawned.push({ engine, opts });
+        return `pty-${spawned.length}`;
+      },
+      write: () => {},
+      resize: () => {},
+      kill: (id) => {
+        spawned[Number(id.slice(4)) - 1]?.opts?.onExit?.(0);
+      },
+      killAll: () => {},
+      hasRunningTask: () => false,
+    } as PtyService;
+    const lore = await readLore(space.root);
+    assert.ok(lore.ok);
+    assert.ok((await installClaudeCode(lore.value, context.desk.install)).ok);
+
+    writeFileSync(agentsMd, '# The Space\n');
+    const standard = (await h.invoke('spaceSessionStart', spaceWindow, {
+      engineId: 'claude-code',
+      params: [],
+    })) as { ok: boolean; value: { sessionId: string } };
+    assert.equal(standard.ok, true, JSON.stringify(standard));
+    const args = spawned[0]?.engine?.args ?? [];
+    assert.ok(!args.includes('--setting-sources'), 'the Space and user settings apply');
+    assert.ok(!args.includes('--plugin-dir'), 'no lore plugin');
+    const appended = args[args.indexOf('--append-system-prompt') + 1] ?? '';
+    assert.match(appended, /Read .*\/AGENTS\.md first and follow it/);
+    assert.doesNotMatch(appended, /The session starts in Read only/);
+    const files = sessionFilePaths(context.desk.sessions, standard.value.sessionId);
+    const settings = readSettings(files);
+    assert.equal(settings.hooks.PreToolUse, undefined);
+    assert.equal(settings.hooks.PostToolUse, undefined);
+    assert.ok(settings.permissions.allow.includes('Write'));
+    await h.invoke('spaceSessionEnd', spaceWindow, { sessionId: standard.value.sessionId });
+
+    rmSync(agentsMd);
+    const guarded = (await h.invoke('spaceSessionStart', spaceWindow, {
+      engineId: 'claude-code',
+      params: [],
+    })) as { ok: boolean; value: { sessionId: string } };
+    assert.equal(guarded.ok, true, JSON.stringify(guarded));
+    const guardedArgs = spawned[1]?.engine?.args ?? [];
+    assert.ok(guardedArgs.includes('--setting-sources'));
+    assert.ok(guardedArgs.includes('--plugin-dir'));
+    const guardedSettings = readSettings(
+      sessionFilePaths(context.desk.sessions, guarded.value.sessionId),
+    );
+    assert.ok(guardedSettings.hooks.PreToolUse?.length);
+    await h.invoke('spaceSessionEnd', spaceWindow, { sessionId: guarded.value.sessionId });
+    await h.space.host.windowClosed(spaceWindow.id);
+  } finally {
+    rmSync(agentsMd, { force: true });
+    configureSessionServer(null);
+    await mcp.close();
+    h.cleanup();
+  }
+});
+
 // Phase M14.3: a session starts from a profile, and the record it writes
 // names the profile and the parameters that were ticked.
 

@@ -46,6 +46,11 @@ export type SessionLaunchInput = {
   /** The argument list of the ticked parameters, in the order of the engine's parameters. */
   paramArgv: readonly string[];
   /**
+   * The Space's Lore is standard files (`standard-lore.ts`) and this adapter supports it:
+   * the session gets no write hooks and no Read only. Never set for a PM session.
+   */
+  standardLore?: boolean;
+  /**
    * A user turn the interactive CLI owns from launch. The CLI must keep this
    * queued behind any of its own trust, authentication or startup UI; the
    * companion never types it into the PTY.
@@ -82,6 +87,11 @@ export type EngineAdapter = {
   skillInvocation(name: string): string;
   /** `invoked`: the verbs are skills or commands the session can run. `listed`: the instructions list them with their card paths (3.3). */
   verbsAre: 'invoked' | 'listed';
+  /**
+   * Set when this adapter launches a session of a Space with standard-file Lore
+   * (`standard-lore.ts`) without the 1.0 modes. Absent: such a session is guarded as in 1.0.
+   */
+  supportsStandardLore?: true;
   launch(input: SessionLaunchInput): SessionLaunch;
   /** What the engine reported this session spent. An adapter without one reports `{ source: 'none' }`. */
   readSpend?(input: ReadSpendInput): Promise<SessionSpend>;

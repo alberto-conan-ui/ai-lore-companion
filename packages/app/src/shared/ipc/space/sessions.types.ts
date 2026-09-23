@@ -22,7 +22,12 @@ export type SpaceLoreLine = {
 };
 
 /** The Lore readiness report of one engine option. `lines` is always three, in the order lore, session-tools, guard. */
-export type SpaceEngineLore = { lines: SpaceLoreLine[]; asClaudeCode: boolean };
+export type SpaceEngineLore = {
+  lines: SpaceLoreLine[];
+  asClaudeCode: boolean;
+  /** The session starts without Read only: the Space has an AGENTS.md and the engine supports it (ai-lore#144). */
+  standardLore?: boolean;
+};
 
 /**
  * Argument of `spaceSessionStart` (M10.3): the engine id, and the ticked

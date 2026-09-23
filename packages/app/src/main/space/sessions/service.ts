@@ -78,6 +78,7 @@ import {
   findPython3,
   verifyInstall,
 } from './preflight.js';
+import { hasStandardLore } from './standard-lore.js';
 
 /** A started session, as the window receives it. */
 export type StartedSession = {
@@ -110,6 +111,8 @@ export type SessionReadiness =
         install: VerifiedInstall;
         /** The count of `readInstalledSkills`, for the Lore readiness report (M10.5). */
         skillCount: number;
+        /** The Space has an `AGENTS.md` (`standard-lore.ts`, ai-lore#144). */
+        standardLore?: boolean;
       };
     }
   | { ok: false; error: SessionStartFailure };
@@ -461,6 +464,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
         python: python.value,
         install: install.value,
         skillCount: skills.length,
+        standardLore: await hasStandardLore(context.root),
       },
     };
   }
@@ -726,10 +730,16 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
     const paths = sessionFilePaths(context.desk.sessions, sessionId);
     const repositories = context.manifest.repositories.map((repository) => repository.name);
     const skills = await readInstalledSkills(context.desk.install, context.root);
+    // A PM session stays guarded whatever the Space's Lore is: its role is Read only by design.
+    const standardLore =
+      ready.value.standardLore === true &&
+      adapter.supportsStandardLore === true &&
+      !isPmPurpose(purpose);
     const instructions = sessionInstructions({
       spaceRoot: context.root,
       skills,
       adapter,
+      ...(standardLore ? { standardLore } : {}),
       ...(isPmPurpose(purpose) ? { purpose, pmCorpusPaths: pmCorpus?.value ?? [] } : {}),
     });
     let launch: ReturnType<typeof adapter.launch>;
@@ -746,6 +756,7 @@ function createSpaceSessions(context: SpaceContext, use: SpaceSessionParts): Hel
         repositories,
         instructions,
         paramArgv: engineArgs,
+        ...(standardLore ? { standardLore } : {}),
         ...(isPmPurpose(purpose) ? { initialPrompt: PM_INITIAL_PROMPT } : {}),
       });
     } catch (caught) {

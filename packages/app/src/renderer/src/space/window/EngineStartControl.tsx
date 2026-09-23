@@ -145,9 +145,13 @@ export function EngineStartControl({
       ? AI_READINESS_CHECKING
       : choice.refusal !== null
         ? choice.refusal.message
-        : compact
-          ? 'Starts in Read only. Writing needs your confirmation.'
-          : `Starts ${engineName(choice, engineId ?? '')} in this Space's folder, in Read only. Writing needs your confirmation.`;
+        : chosenOption?.lore?.standardLore === true
+          ? compact
+            ? 'Starts without Read only: this Space has an AGENTS.md.'
+            : `Starts ${engineName(choice, engineId ?? '')} in this Space's folder, without Read only: this Space has an AGENTS.md, so work is kept safe by branches and pull requests.`
+          : compact
+            ? 'Starts in Read only. Writing needs your confirmation.'
+            : `Starts ${engineName(choice, engineId ?? '')} in this Space's folder, in Read only. Writing needs your confirmation.`;
 
   const runFix = (fix: SpaceEngineFix): void => {
     setMenuOpen(false);
