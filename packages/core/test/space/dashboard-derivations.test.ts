@@ -347,7 +347,7 @@ test('Space counts exclude done focuses and closed sessions and deduplicate shar
 
 // ---------- what the Project says about itself that is wrong ----------
 
-test("a Project problem reaches Needs you, because nothing else will ever raise it", () => {
+test('a Project problem reaches Needs you, because nothing else will ever raise it', () => {
   const message =
     'The view "Agents board" of the Project has the filter (none), and the default layout gives it label:session.';
   const problem: NeedsYouEntry = { kind: 'project-problem', messages: [message] };

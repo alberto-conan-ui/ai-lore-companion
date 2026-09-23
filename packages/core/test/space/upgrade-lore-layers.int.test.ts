@@ -184,7 +184,7 @@ test('a correction to a core card reaches a Space that already exists', async ()
   assert.equal(
     after,
     await readFile(join(TEMPLATE, 'lore', 'contracts', 'core', 'stage-gate.md'), 'utf8'),
-    'the card is the template\'s, whole',
+    "the card is the template's, whole",
   );
   assert.match(await loreIntegrity(root), /passes the check/);
 });

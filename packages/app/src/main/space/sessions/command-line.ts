@@ -82,7 +82,13 @@ export type EngineArgvParts = {
   engineArgs: readonly string[];
   settingsFile: string;
   mcpFile: string;
-  pluginDir: string;
+  /** The `lore` plugin of the install; null for a standard-Lore session, which reads the Space's own skills. */
+  pluginDir: string | null;
+  /**
+   * False for a standard-Lore session (`standard-lore.ts`): `--setting-sources ''` is left out,
+   * so the Space's committed settings and the Human Lead's own apply. Absent means true.
+   */
+  isolateSettings?: boolean;
   /** The full names of the session server's tools (`mcp__<server>__<tool>`). */
   tools: readonly string[];
   /** The session instructions of section 3.3 (M10.5, the Human Lead's answer 8). */
@@ -111,14 +117,13 @@ export const SETTING_SOURCES_ARGS: readonly string[] = ['--setting-sources', '']
 export function engineArgv(parts: EngineArgvParts): string[] {
   return [
     ...parts.engineArgs,
-    ...SETTING_SOURCES_ARGS,
+    ...(parts.isolateSettings === false ? [] : SETTING_SOURCES_ARGS),
     '--settings',
     parts.settingsFile,
     '--mcp-config',
     parts.mcpFile,
     '--strict-mcp-config',
-    '--plugin-dir',
-    parts.pluginDir,
+    ...(parts.pluginDir !== null ? ['--plugin-dir', parts.pluginDir] : []),
     '--append-system-prompt',
     parts.appendSystemPrompt,
     // `--allowedTools` is variadic and must remain last. Claude's positional

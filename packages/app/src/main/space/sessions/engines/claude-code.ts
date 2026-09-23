@@ -10,10 +10,41 @@ import { CLAUDE_CODE_OPTIONS } from '../engine-options.js';
 import {
   buildSessionMcpConfig,
   buildSessionSettings,
+  buildStandardSessionSettings,
   readSessionSpend,
   sessionToolNames,
 } from '../files.js';
 import type { EngineAdapter, SessionLaunch, SessionLaunchInput } from './types.js';
+
+/**
+ * A session of a Space with standard-file Lore (`standard-lore.ts`, ai-lore#144):
+ * no write hooks, no `lore` plugin, and the Space's and the Human Lead's own
+ * settings apply. The session server, its tools and the spend hook stay.
+ */
+function launchStandard(input: SessionLaunchInput): SessionLaunch {
+  const settings = buildStandardSessionSettings(
+    { sessionId: input.sessionId, python: input.python, connection: input.connection },
+    input.paths,
+  );
+  const mcp = buildSessionMcpConfig(input.connection);
+  return {
+    args: engineArgv({
+      engineArgs: [...input.paramArgv],
+      settingsFile: input.paths.settings,
+      mcpFile: input.paths.mcp,
+      pluginDir: null,
+      isolateSettings: false,
+      tools: sessionToolNames(input.connection),
+      appendSystemPrompt: input.instructions,
+      ...(input.initialPrompt !== undefined ? { initialPrompt: input.initialPrompt } : {}),
+    }),
+    env: {},
+    files: [
+      { path: SESSION_FILES.settings, content: `${JSON.stringify(settings, null, 2)}\n` },
+      { path: SESSION_FILES.mcp, content: `${JSON.stringify(mcp, null, 2)}\n` },
+    ],
+  };
+}
 
 // Confirmed by a real run (M10.9 item 3, m10-engine-findings.md, "Claude
 // Code, phase M10.9"): the PreToolUse hook's `deny` still blocks a write with
@@ -60,7 +91,9 @@ export const claudeCodeAdapter: EngineAdapter = {
   // process. `readSessionSpend` gives `{ source: 'none' }` for anything but a
   // well-formed `spend.json`, and never throws.
   readSpend: (input) => readSessionSpend(input.paths),
+  supportsStandardLore: true,
   launch(input: SessionLaunchInput): SessionLaunch {
+    if (input.standardLore === true) return launchStandard(input);
     const settings = buildSessionSettings(
       {
         sessionId: input.sessionId,

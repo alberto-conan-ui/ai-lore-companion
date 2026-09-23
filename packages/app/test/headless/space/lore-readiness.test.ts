@@ -100,6 +100,28 @@ test('engine-not-installed, engine-not-signed-in and engine-not-found change no 
   }
 });
 
+test('standard-file Lore: Claude Code says no write-guard and no Read only, and marks standardLore', () => {
+  const standard: SessionReadiness = {
+    ok: true,
+    value: { ...(READY.ok ? READY.value : ({} as never)), skillCount: 0, standardLore: true },
+  };
+  const lore = loreReadiness(claudeCodeAdapter, standard, 0);
+  assert.equal(lore.standardLore, true);
+  assert.equal(lore.asClaudeCode, true);
+  assert.match(lore.lines[2]?.text ?? '', /No write-guard and no Read only/);
+  assert.match(lore.lines[0]?.text ?? '', /AGENTS\.md/);
+});
+
+test('standard-file Lore: an adapter without support keeps its guarded report', () => {
+  const standard: SessionReadiness = {
+    ok: true,
+    value: { ...(READY.ok ? READY.value : ({} as never)), standardLore: true },
+  };
+  const lore = loreReadiness(codexAdapter, standard, 5);
+  assert.equal(lore.standardLore, undefined);
+  assert.deepEqual(lore.lines[2], codexAdapter.capability.guard);
+});
+
 test('Codex gives asClaudeCode: false, its own static capability', () => {
   const lore = loreReadiness(codexAdapter, READY, READY.value.skillCount);
   assert.equal(lore.asClaudeCode, false);

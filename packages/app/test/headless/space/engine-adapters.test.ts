@@ -6,7 +6,15 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -37,10 +45,12 @@ import { readInstalledSkills } from '../../../src/main/space/sessions/engines/sk
 import {
   buildSessionMcpConfig,
   buildSessionSettings,
+  buildStandardSessionSettings,
   sessionFilePaths,
   writeSessionFiles,
 } from '../../../src/main/space/sessions/files.js';
 import { verifyInstall } from '../../../src/main/space/sessions/preflight.js';
+import { hasStandardLore } from '../../../src/main/space/sessions/standard-lore.js';
 import { LORE_TEMPLATE_DIR } from './space-harness.js';
 
 const CONNECTION: SessionConnection = {
@@ -238,4 +248,102 @@ test('the Claude Code launch gives the parameters first, --append-system-prompt 
   );
   assert.deepEqual(JSON.parse(settingsFile?.content ?? '{}'), expectedSettings);
   assert.deepEqual(JSON.parse(mcpFile?.content ?? '{}'), buildSessionMcpConfig(CONNECTION));
+  // A guarded session keeps its settings isolated and loads the Lore's plugin.
+  assert.ok(launch.args.includes('--setting-sources'));
+  assert.equal(launch.args[launch.args.indexOf('--plugin-dir') + 1], verified.value.pluginDir);
+});
+
+test('only the Claude Code adapter supports a Space with standard-file Lore (ai-lore#144)', () => {
+  assert.equal(claudeCodeAdapter.supportsStandardLore, true);
+  for (const adapter of [codexAdapter, antigravityAdapter, opencodeAdapter]) {
+    assert.equal(adapter.supportsStandardLore, undefined, adapter.catalogId);
+  }
+});
+
+test('sessionInstructions for standard-file Lore: AGENTS.md first, no Read only, no claim tools, no /lore: verbs', () => {
+  const text = sessionInstructions({
+    spaceRoot: '/space',
+    skills: [],
+    adapter: claudeCodeAdapter,
+    standardLore: true,
+  });
+  assert.match(text, /Read \/space\/AGENTS\.md first/);
+  assert.match(text, /There is no Read only and no Writing/);
+  assert.match(text, /do not call request_writing or leave_writing/);
+  assert.doesNotMatch(text, /ai_readme\.md/);
+  assert.doesNotMatch(text, /\/lore:/);
+  assert.doesNotMatch(text, /The session starts in Read only/);
+});
+
+test('the Claude Code launch for standard-file Lore has no write hooks, no plugin, no isolated settings, and allows the file-writing tools', async () => {
+  const verified = await verifyInstall(paths.install);
+  assert.ok(verified.ok, verified.ok ? '' : verified.error.message);
+  const sessionId = 's-standard';
+  const filePaths = sessionFilePaths(paths.sessions, sessionId);
+  const instructions = sessionInstructions({
+    spaceRoot: space.root,
+    skills: [],
+    adapter: claudeCodeAdapter,
+    standardLore: true,
+  });
+  const launch = claudeCodeAdapter.launch({
+    sessionId,
+    spaceRoot: space.root,
+    deskDir: paths.desk,
+    paths: filePaths,
+    python: '/usr/bin/python3',
+    install: verified.value,
+    skills: [],
+    connection: CONNECTION,
+    repositories: [],
+    instructions,
+    paramArgv: ['--model', 'opus'],
+    standardLore: true,
+  });
+
+  assert.deepEqual(launch.args.slice(0, 2), ['--model', 'opus']);
+  assert.ok(!launch.args.includes('--setting-sources'), 'the Space and user settings apply');
+  assert.ok(!launch.args.includes('--plugin-dir'), 'no lore plugin');
+  assert.equal(launch.args[launch.args.indexOf('--settings') + 1], filePaths.settings);
+  assert.equal(launch.args[launch.args.indexOf('--append-system-prompt') + 1], instructions);
+  assert.ok(launch.args.includes('--allowedTools'));
+
+  const settingsFile = launch.files.find((file) => file.path === 'settings.json');
+  assert.ok(settingsFile);
+  const settings = JSON.parse(settingsFile?.content ?? '{}');
+  assert.deepEqual(
+    settings,
+    buildStandardSessionSettings(
+      { sessionId, python: '/usr/bin/python3', connection: CONNECTION },
+      filePaths,
+    ),
+  );
+  assert.deepEqual(Object.keys(settings.hooks), ['Stop']);
+  assert.ok(
+    !('defaultMode' in settings.permissions),
+    'the Space and user settings choose the mode',
+  );
+  assert.ok(!('deny' in settings.permissions));
+  for (const tool of ['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'mcp__ailore__request_gate']) {
+    assert.ok(settings.permissions.allow.includes(tool), tool);
+  }
+  assert.ok(launch.files.some((file) => file.path === 'mcp.json'));
+});
+
+test('hasStandardLore: true only for an AGENTS.md that is a regular file', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'standard-lore-'));
+  try {
+    assert.equal(await hasStandardLore(root), false);
+    mkdirSync(join(root, 'AGENTS.md'));
+    assert.equal(await hasStandardLore(root), false, 'a folder');
+    rmSync(join(root, 'AGENTS.md'), { recursive: true });
+    writeFileSync(join(root, 'elsewhere.md'), '# x\n');
+    symlinkSync(join(root, 'elsewhere.md'), join(root, 'AGENTS.md'));
+    assert.equal(await hasStandardLore(root), false, 'a link');
+    rmSync(join(root, 'AGENTS.md'));
+    writeFileSync(join(root, 'AGENTS.md'), '# Space\n');
+    assert.equal(await hasStandardLore(root), true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

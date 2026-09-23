@@ -73,6 +73,20 @@ export function loreReadiness(
         // else: the option's own reason already says it; no line changes.
         break;
     }
+  } else if (readiness.value.standardLore === true && adapter.supportsStandardLore === true) {
+    // ai-lore#144: the Space's Lore is standard files, so the plugin's verbs and the
+    // write-guard are not given to the session; the install's skill count says nothing.
+    lines[0] = {
+      aspect: 'lore',
+      state: 'yes',
+      text: "Reads the Space's AGENTS.md and its skills.",
+    };
+    lines[2] = {
+      aspect: 'guard',
+      state: 'yes',
+      text: "No write-guard and no Read only: this Space has an AGENTS.md. Branches, pull requests and the engine's settings keep the work safe.",
+    };
+    return { lines, asClaudeCode: allYes(lines), standardLore: true };
   } else if (skillCount === 0) {
     lines[0] = {
       aspect: 'lore',

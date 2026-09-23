@@ -186,6 +186,52 @@ export function buildSessionSettings(
   };
 }
 
+/** The tools that write a file, which a guarded session leaves to the before-write adapter. */
+const FILE_WRITING_TOOLS = ['Write', 'Edit', 'MultiEdit', 'NotebookEdit'] as const;
+
+/**
+ * The content of `settings.json` for a session of a Space with standard-file
+ * Lore (`standard-lore.ts`, ai-lore#144). It has no `PreToolUse` and no
+ * `PostToolUse` hook, so no check runs on a write, and it allows the
+ * file-writing tools, so a write does not ask. It sets no `defaultMode` and no
+ * deny rule: the engine is started without `--setting-sources ''`
+ * (`engineArgv`), so the Space's committed `.claude/settings.json` and the
+ * Human Lead's own settings decide the rest. The `Stop` hook that reports what
+ * the session spent is kept.
+ */
+export function buildStandardSessionSettings(
+  input: Pick<SessionFilesInput, 'sessionId' | 'python' | 'connection'>,
+  paths: SessionFilePaths,
+): {
+  permissions: { allow: string[] };
+  hooks: { Stop: StopHookEntry[] };
+  env: Record<string, string>;
+} {
+  const spendCommand = shellCommandLine([
+    input.python,
+    paths.spendHook,
+    '--out',
+    paths.spend,
+    '--adapter-seconds',
+    String(SPEND_HOOK_TIMEOUTS.adapterSeconds),
+  ]);
+  return {
+    permissions: {
+      allow: ['Read', 'Grep', 'Glob', ...FILE_WRITING_TOOLS, ...sessionToolNames(input.connection)],
+    },
+    hooks: {
+      Stop: [
+        {
+          hooks: [
+            { type: 'command', command: spendCommand, timeout: SPEND_HOOK_TIMEOUTS.hookSeconds },
+          ],
+        },
+      ],
+    },
+    env: { [SESSION_ID_ENV]: input.sessionId },
+  };
+}
+
 /** The content of `mcp.json`, as an object. It holds the session's token. */
 export function buildSessionMcpConfig(connection: SessionConnection): {
   mcpServers: Record<string, { type: 'http'; url: string; headers: Record<string, string> }>;

@@ -15,8 +15,20 @@ export function sessionInstructions(input: {
   purpose?: 'pm' | 'dashboard-refresh';
   /** Resolved PM and Dashboard corpus cards, falling back to the shipped defaults for older Spaces. */
   pmCorpusPaths?: readonly string[];
+  /** The Space's Lore is standard files (`standard-lore.ts`): no modes, no claims, no plugin skills. */
+  standardLore?: boolean;
 }): string {
-  const { spaceRoot, skills, adapter, purpose, pmCorpusPaths = [] } = input;
+  const { spaceRoot, skills, adapter, purpose, pmCorpusPaths = [], standardLore = false } = input;
+  if (standardLore) {
+    // The skills come from the Space's own files (`.agents/skills`, and the engine's link to
+    // them), which the engine reads by itself, so they are not listed here.
+    return `${[
+      `This session was started by the AI-Lore companion in a Space whose folder is ${spaceRoot}. The Space has an AGENTS.md: its Lore is standard files, and the modes of AI-Lore 1.0 do not apply.`,
+      `Read ${spaceRoot}/AGENTS.md first and follow it.`,
+      "There is no Read only and no Writing, and nothing is claimed: do not call request_writing or leave_writing. Work on a branch for each piece of work and open a pull request. The engine's settings, git and GitHub keep the work safe.",
+      'The companion\'s tools for this session come from the MCP server "ailore": request_gate and await_answer ask the Human Lead a question and wait for the answer; get_dashboard_context and request_dashboard_update serve the dashboard.',
+    ].join('\n')}\n`;
+  }
   const lines = [
     `This session was started by the AI-Lore companion in an AI-Lore 1.0 Space, whose folder is ${spaceRoot}.`,
     `Read ${spaceRoot}/ai_readme.md first and follow it. Then run the verb session-orient.`,
