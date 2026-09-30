@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { Dashboard } from '../../../src/renderer/src/space/dashboard/Dashboard.js';
 import type { DashboardDefinitionState } from '../../../src/renderer/src/space/dashboard/useDashboardDefinition.js';
+import type { PlansStateView } from '../../../src/renderer/src/space/dashboard/usePlansState.js';
 import type { ProjectStateView } from '../../../src/renderer/src/space/dashboard/useProjectState.js';
 import type { RepositoriesStateView } from '../../../src/renderer/src/space/dashboard/useRepositoriesState.js';
 import { projectState, reportState, repositoriesState } from './dashboard-fixtures.js';
@@ -9,6 +10,7 @@ import { projectState, reportState, repositoriesState } from './dashboard-fixtur
 let project: ProjectStateView;
 let reports: DashboardDefinitionState;
 let repositories: RepositoriesStateView;
+let plans: PlansStateView;
 vi.mock('../../../src/renderer/src/space/dashboard/useProjectState.js', () => ({
   useProjectState: () => project,
 }));
@@ -17,6 +19,9 @@ vi.mock('../../../src/renderer/src/space/dashboard/useDashboardDefinition.js', (
 }));
 vi.mock('../../../src/renderer/src/space/dashboard/useRepositoriesState.js', () => ({
   useRepositoriesState: () => repositories,
+}));
+vi.mock('../../../src/renderer/src/space/dashboard/usePlansState.js', () => ({
+  usePlansState: () => plans,
 }));
 vi.mock('../../../src/renderer/src/space/dashboard/StartSession.js', () => ({
   StartSession: ({ justCreated }: { justCreated: boolean }) => (
@@ -32,6 +37,17 @@ beforeEach(() => {
     requested: false,
     refresh: vi.fn(),
   };
+  plans = {
+    plans: null,
+    problem: null,
+    requested: false,
+    active: true,
+    opening: null,
+    openProblem: null,
+    refresh: vi.fn(),
+    open: vi.fn(),
+    bandRef: vi.fn(),
+  };
 });
 afterEach(cleanup);
 
@@ -45,12 +61,46 @@ test('the empty Space renders the new bands and can start a session before initi
   expect(screen.queryByText('No data is available yet.')).toBeNull();
 });
 
-test('Refresh updates factual Project, repository and PM sources together', () => {
+test('Refresh updates factual Project, repository, plans and PM sources together', () => {
   render(<Dashboard />);
   fireEvent.click(screen.getByTestId('dashboard-refresh'));
   expect(project.refresh).toHaveBeenCalledOnce();
   expect(repositories.refresh).toHaveBeenCalledOnce();
+  expect(plans.refresh).toHaveBeenCalledOnce();
   expect(reports.refresh).toHaveBeenCalledOnce();
+});
+
+test('a plans read the Refresh asked for disables another request', () => {
+  plans.requested = true;
+  render(<Dashboard />);
+  expect((screen.getByTestId('dashboard-refresh') as HTMLButtonElement).disabled).toBe(true);
+});
+
+test('the Plans band is in the Space dashboard, between the first band and the rows, and is not drawn for a Space without the tool', () => {
+  const { unmount } = render(<Dashboard />);
+  expect(screen.getByTestId('dashboard-v2-plans')).toBeTruthy();
+  expect(
+    screen.getByTestId('dashboard-v2-plans').nextElementSibling?.getAttribute('data-testid'),
+  ).toBe('dashboard-v2-row2');
+  unmount();
+  plans.plans = {
+    version: 1,
+    reading: false,
+    outcome: 'unavailable',
+    units: null,
+    readAt: null,
+    lastReadAt: null,
+    head: '',
+    text: '',
+    missing: [],
+    note: '',
+  };
+  render(<Dashboard />);
+  expect(screen.queryByTestId('dashboard-v2-plans')).toBeNull();
+  // nothing of it is left in the layout: the rows follow the first band directly, as before the band existed
+  expect(
+    screen.getByTestId('dashboard-v2-row2').previousElementSibling?.getAttribute('data-testid'),
+  ).toBe('dashboard-v2-band1');
 });
 
 test('a pending refresh disables another request and exposes source failures', () => {

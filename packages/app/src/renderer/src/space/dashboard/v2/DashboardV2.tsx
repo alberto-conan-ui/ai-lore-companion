@@ -7,6 +7,7 @@ const AGE_TICK_MS = 30 * 1000;
 export type DashboardV2Slots = {
   header?: ReactNode;
   band1?: ReactNode;
+  plans?: ReactNode;
   moving?: ReactNode;
   waiting?: ReactNode;
   handovers?: ReactNode;
@@ -57,6 +58,7 @@ export function DashboardV2Shell({
           </>
         )}
       </section>
+      {slots.plans ?? null}
       <div className="dashboard-v2-row2" data-testid="dashboard-v2-row2">
         {slots.moving ?? <DashboardV2Panel title="WHAT IS MOVING" />}
         {slots.waiting ?? <DashboardV2Panel title="WHAT IS WAITING" />}

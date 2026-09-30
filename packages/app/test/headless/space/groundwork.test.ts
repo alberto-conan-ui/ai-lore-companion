@@ -18,6 +18,7 @@ import { SPACE_DIALOGS_CONTRACT } from '../../../src/shared/ipc/space/dialogs.co
 import { SPACE_FILES_CONTRACT } from '../../../src/shared/ipc/space/files.contract.js';
 import { SPACE_MACHINE_CONTRACT } from '../../../src/shared/ipc/space/machine.contract.js';
 import { SPACE_MIGRATION_CONTRACT } from '../../../src/shared/ipc/space/migration.contract.js';
+import { SPACE_PLANS_CONTRACT } from '../../../src/shared/ipc/space/plans.contract.js';
 import { SPACE_PROJECT_CONTRACT } from '../../../src/shared/ipc/space/project.contract.js';
 import { SPACE_REPOSITORIES_CONTRACT } from '../../../src/shared/ipc/space/repositories.contract.js';
 import { SPACE_ROOTS_CONTRACT } from '../../../src/shared/ipc/space/roots.contract.js';
@@ -43,6 +44,7 @@ const FRAGMENTS: Record<string, Record<string, Desc>> = {
   migration: SPACE_MIGRATION_CONTRACT,
   project: SPACE_PROJECT_CONTRACT,
   repositories: SPACE_REPOSITORIES_CONTRACT,
+  plans: SPACE_PLANS_CONTRACT,
 };
 
 test('every entry of every 1.0 fragment is in CONTRACT and follows the naming rules', () => {

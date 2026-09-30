@@ -5,8 +5,10 @@ import type {
   SpaceProjectState,
   SpaceRepositoriesState,
 } from '../../../../../shared/ipc.js';
+import type { PlansStateView } from '../usePlansState.js';
 import { BandMoving } from './BandMoving.js';
 import { BandNeedsYou } from './BandNeedsYou.js';
+import { BandPlans } from './BandPlans.js';
 import { DashboardV2Shell } from './DashboardV2.js';
 import { Handovers } from './Handovers.js';
 import { WaitingBand } from './WaitingBand.js';
@@ -19,6 +21,8 @@ export type DashboardContentProps = {
   header: ReactNode;
   onOpenFocus: (focus: FocusCard) => void;
   onOpenBoard?: () => void;
+  /** The Space's plans; without it the Plans band is not drawn. */
+  plans?: PlansStateView;
 };
 
 /** The validated definition selects panels; each band renders only its closed vocabulary. */
@@ -30,6 +34,7 @@ export function DashboardContent({
   header,
   onOpenFocus,
   onOpenBoard,
+  plans,
 }: DashboardContentProps): JSX.Element {
   const bands = reportState?.definition?.definition.bands ?? [];
   const panels = (id: 'needs-you' | 'moving' | 'waiting') =>
@@ -49,6 +54,7 @@ export function DashboardContent({
             onOpenFocus={onOpenFocus}
           />
         ),
+        plans: plans === undefined ? undefined : <BandPlans view={plans} now={now} />,
         moving: (
           <BandMoving
             panels={panels('moving')}

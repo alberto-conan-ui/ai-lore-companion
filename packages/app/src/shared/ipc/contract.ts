@@ -84,6 +84,7 @@ import { SPACE_DIALOGS_CONTRACT } from './space/dialogs.contract.js';
 import { SPACE_FILES_CONTRACT } from './space/files.contract.js';
 import { SPACE_MACHINE_CONTRACT } from './space/machine.contract.js';
 import { SPACE_MIGRATION_CONTRACT } from './space/migration.contract.js';
+import { SPACE_PLANS_CONTRACT } from './space/plans.contract.js';
 import { SPACE_PROJECT_CONTRACT } from './space/project.contract.js';
 import { SPACE_REPOSITORIES_CONTRACT } from './space/repositories.contract.js';
 import { SPACE_ROOTS_CONTRACT } from './space/roots.contract.js';
@@ -321,6 +322,7 @@ export const CONTRACT = {
   ...SPACE_MIGRATION_CONTRACT,
   ...SPACE_PROJECT_CONTRACT,
   ...SPACE_REPOSITORIES_CONTRACT,
+  ...SPACE_PLANS_CONTRACT,
 } as const;
 
 type Contract = typeof CONTRACT;

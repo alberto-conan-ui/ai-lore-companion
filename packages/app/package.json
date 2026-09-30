@@ -11,6 +11,7 @@
     "prebuild": "electron-rebuild -f -o node-pty",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "dev:plans-band": "vite --config dev/plans-band/vite.config.ts",
     "typecheck": "vite-node scripts/typecheck.ts --",
     "typecheck:node": "tsc -b tsconfig.node.json",
     "clean": "rm -rf out",

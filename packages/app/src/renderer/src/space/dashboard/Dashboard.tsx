@@ -5,6 +5,7 @@ import { StartSession } from './StartSession.js';
 import { stateSentence } from './dashboardText.js';
 import { relativeTime } from './format.js';
 import { useDashboardDefinition } from './useDashboardDefinition.js';
+import { usePlansState } from './usePlansState.js';
 import { useProjectState } from './useProjectState.js';
 import { useRepositoriesState } from './useRepositoriesState.js';
 import { DashboardContent } from './v2/DashboardContent.js';
@@ -13,6 +14,7 @@ import { DashboardContent } from './v2/DashboardContent.js';
 export function Dashboard({ justCreated = false }: { justCreated?: boolean } = {}): JSX.Element {
   const project = useProjectState();
   const repositories = useRepositoriesState();
+  const plans = usePlansState();
   const dashboard = useDashboardDefinition();
   const [now, setNow] = useState(Date.now());
   const [focusUrl, setFocusUrl] = useState<string | null>(null);
@@ -32,11 +34,13 @@ export function Dashboard({ justCreated = false }: { justCreated?: boolean } = {
     project.requested ||
     project.project?.refreshing === true ||
     repositories.requested ||
+    plans.requested ||
     dashboard.refreshing;
   const refresh = (): void => {
     project.refresh();
     repositories.refresh();
     dashboard.refresh();
+    plans.refresh();
   };
   const problem = project.problem ?? repositories.problem ?? dashboard.problem;
   const diagnostic = state?.definition?.diagnostic;
@@ -154,6 +158,7 @@ export function Dashboard({ justCreated = false }: { justCreated?: boolean } = {
         now={now}
         header={header}
         onOpenFocus={(focus) => setFocusUrl(focus.issue.url)}
+        plans={plans}
         onOpenBoard={
           boardUrl
             ? () => {
