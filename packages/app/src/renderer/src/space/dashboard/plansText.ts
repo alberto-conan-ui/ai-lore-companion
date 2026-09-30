@@ -1,5 +1,4 @@
 import type { SpacePlansState, SpacePlansUnit } from '../../../../shared/ipc.js';
-import type { StageShape } from './v2/statusVocabulary.js';
 
 /** The words of the Plans band, in one place so the band and its tests say the same things. */
 
@@ -25,28 +24,13 @@ export function updatedText(unit: SpacePlansUnit, now: number): string {
   return unit.updatedExact ? `updated ${ago}` : `updated ${ago} or later`;
 }
 
-/** The mark of a Stage: a solid square for Build and Review, a diamond for the planning Stages, a circle for the rest. */
-export function stageShape(stage: string | null): StageShape {
-  if (stage === 'Build' || stage === 'Review') return 'build';
-  if (
-    stage === 'Draft' ||
-    stage === 'Analysed' ||
-    stage === 'Settled' ||
-    stage === 'Locked' ||
-    stage === 'Spec and Planning'
-  ) {
-    return 'spec';
-  }
-  return 'queued';
-}
-
 export function kindLabel(kind: SpacePlansUnit['kind']): string {
   return kind === 'sub-epic' ? 'SUB-EPIC' : kind.toUpperCase();
 }
 
 /** The clear line at the right of the band's heading. */
-export function headingState(state: SpacePlansState | null, now: number): string {
-  if (state === null || state.outcome === null) return 'READING';
+export function headingState(state: SpacePlansState | null, now: number, active = true): string {
+  if (state === null || state.outcome === null) return active ? 'READING' : 'NOT READ YET';
   const reading = state.reading ? ' · READING' : '';
   switch (state.outcome) {
     case 'complete': {

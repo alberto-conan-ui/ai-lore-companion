@@ -135,8 +135,16 @@ test('a list: each unit is a row with its kind, Stage, number, title and when it
   expect(rows[2]?.textContent).toContain('updated 1m ago');
   expect(rows[3]?.textContent).toContain('updated 3m ago');
   expect(rows[3]?.textContent).toContain('Locked');
-  expect((rows[2] as HTMLElement).style.marginLeft).toBe('36px');
-  expect((rows[0] as HTMLElement).style.marginLeft).toBe('0px');
+  const pad = (r?: HTMLElement): string =>
+    (r?.querySelector('.dashboard-v2-plan-title') as HTMLElement).style.paddingLeft;
+  expect(pad(rows[2])).toBe('44px');
+  expect(pad(rows[0])).toBe('0px');
+  expect(rows[0]?.querySelector('.dashboard-v2-plan-level')?.getAttribute('data-kind')).toBe(
+    'epic',
+  );
+  expect(rows[2]?.querySelector('.dashboard-v2-plan-stage')?.getAttribute('data-stage')).toBe(
+    'Review',
+  );
   expect(screen.getByTestId('plans-footer').textContent).toContain(
     'Each row opens its dashboard. Changes show within a minute.',
   );
@@ -160,7 +168,7 @@ test('a time that was not read is said as not read, and one read from only half 
 
 test('a unit with no Stage says so; it is not shown as a Stage or hidden', () => {
   render(<BandPlans view={view(state({ units: [row(1, { stage: null })] }))} now={NOW} />);
-  expect(screen.getByTestId('plans-row').textContent).toContain('NO STAGE');
+  expect(screen.getByTestId('plans-row').textContent).toContain('No Stage');
 });
 
 test('an empty complete read says there is nothing on the Project, and is not the state of an unread list', () => {
@@ -177,6 +185,20 @@ test('before the first answer it says it is reading, and draws no list and no em
   expect(screen.getByTestId('plans-state').textContent).toContain('READING');
   expect(screen.queryByTestId('plans-empty')).toBeNull();
   expect(screen.queryByTestId('plans-row')).toBeNull();
+});
+
+test('a window in the background from the start says it has not read yet, not that it is reading', () => {
+  render(<BandPlans view={view(null, { active: false })} now={NOW} />);
+  expect(screen.getByTestId('plans-reading').textContent).toContain('have not been read yet');
+  expect(screen.getByTestId('plans-reading').textContent).toContain('in the background');
+  expect(screen.getByTestId('plans-reading').getAttribute('aria-busy')).toBe('false');
+  expect(screen.getByTestId('plans-state').textContent).toContain('NOT READ YET');
+  expect(screen.getByTestId('plans-state').textContent).not.toContain('READING');
+});
+
+test('the footer is a plain sentence, in sentence case', () => {
+  render(<BandPlans view={view(state())} now={NOW} />);
+  expect(screen.getByTestId('plans-footer').className).toBe('dashboard-v2-muted');
 });
 
 test('an incomplete read is said as incomplete, names what was not read, and still lists what was', () => {

@@ -1,17 +1,9 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import type { SpacePlansState, SpacePlansUnit } from '../../../../../shared/ipc.js';
-import {
-  PLANS_FOOTER,
-  headingState,
-  kindLabel,
-  lastReadText,
-  stageShape,
-  updatedText,
-} from '../plansText.js';
+import { PLANS_FOOTER, headingState, kindLabel, lastReadText, updatedText } from '../plansText.js';
 import type { PlansStateView } from '../usePlansState.js';
 import { OverflowFooter, capItems } from './overflow.js';
-import { StageMark } from './statusVocabulary.js';
 
 /** The rows shown before "show all": the band sits among others on one page. */
 export const PLANS_ROWS_SHOWN = 12;
@@ -44,7 +36,7 @@ export function BandPlans({ view, now }: BandPlansProps): JSX.Element | null {
       <div className="dashboard-v2-band-heading">
         <h2>PLANS</h2>
         <span className="dashboard-v2-clear" data-testid="plans-state">
-          {view.problem === null ? headingState(state, now) : 'NOT READ'}
+          {view.problem === null ? headingState(state, now, view.active) : 'NOT READ'}
           {view.active ? '' : ' · PAUSED'}
         </span>
       </div>
@@ -80,7 +72,7 @@ export function BandPlans({ view, now }: BandPlansProps): JSX.Element | null {
             {view.openProblem}
           </p>
         )}
-        <p className="dashboard-v2-micro" data-testid="plans-footer">
+        <p className="dashboard-v2-muted" data-testid="plans-footer">
           {PLANS_FOOTER}
           {state?.note ? ` ${state.note}` : ''}
           {view.active ? '' : ' Not refreshing while this window is in the background.'}
@@ -105,8 +97,10 @@ function PlansNotice({
   }
   if (state === null || state.outcome === null) {
     return (
-      <p className="dashboard-v2-empty" data-testid="plans-reading" aria-busy="true">
-        Reading the plans…
+      <p className="dashboard-v2-empty" data-testid="plans-reading" aria-busy={view.active}>
+        {view.active
+          ? 'Reading the plans…'
+          : 'The plans have not been read yet, because this window is in the background or this band is out of view. They are read as soon as it is shown.'}
       </p>
     );
   }
@@ -158,26 +152,32 @@ function PlanRow({
   return (
     <button
       type="button"
-      className="dashboard-v2-moving-row"
+      className="dashboard-v2-moving-row dashboard-v2-plan-row"
       data-testid="plans-row"
       data-number={String(unit.number)}
-      style={{
-        marginLeft: `${String(unit.depth * 18)}px`,
-        width: `calc(100% - ${String(unit.depth * 18)}px)`,
-      }}
       disabled={busy}
       aria-busy={opening}
       title={unit.onGitHub ? 'Opens its dashboard from GitHub' : 'Opens its JSON dashboard'}
       onClick={onOpen}
     >
-      <span className="dashboard-v2-moving-row-top">
-        <span className="dashboard-v2-micro">{kindLabel(unit.kind)}</span>
-        <StageMark shape={stageShape(unit.stage)} word={unit.stage ?? 'NO STAGE'} />
-        <time>{opening ? 'opening…' : updatedText(unit, now)}</time>
+      <span
+        className="dashboard-v2-plan-title"
+        style={{ paddingLeft: `${String(unit.depth * 22)}px` }}
+        data-depth={String(unit.depth)}
+      >
+        <span className="dashboard-v2-plan-level" data-kind={unit.kind}>
+          {kindLabel(unit.kind)}
+        </span>
+        <span className="dashboard-v2-plan-name">
+          <span className="dashboard-v2-issue">#{unit.number}</span> {unit.title}
+        </span>
       </span>
-      <span>
-        <span className="dashboard-v2-issue">#{unit.number}</span> {unit.title}
+      <span className="dashboard-v2-plan-stage" data-stage={unit.stage ?? ''}>
+        {unit.stage ?? 'No Stage'}
       </span>
+      <time className="dashboard-v2-plan-updated">
+        {opening ? 'opening…' : updatedText(unit, now)}
+      </time>
     </button>
   );
 }

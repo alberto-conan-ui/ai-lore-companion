@@ -680,3 +680,99 @@
   cursor: progress;
   opacity: 0.6;
 }
+
+/* The Plans band's row, one line as in the design: the level pill and title, the Stage pill, when it was updated. */
+.dashboard-v2-plan-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 120px;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+}
+
+.dashboard-v2-plan-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dashboard-v2-plan-name {
+  overflow: hidden;
+  color: var(--d-text);
+  font-size: var(--d-size-body);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-v2-plan-updated {
+  color: var(--d-text-3);
+  font-family: var(--d-mono);
+  font-size: var(--d-size-micro);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dashboard-v2-plan-level,
+.dashboard-v2-plan-stage {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid transparent;
+  font-family: var(--d-mono);
+  font-size: var(--d-size-micro);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dashboard-v2-plan-level {
+  border-radius: 5px;
+  color: #07090b;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: #a5b4fc;
+}
+.dashboard-v2-plan-level[data-kind="sub-epic"] {
+  background: #d6a2f5;
+}
+.dashboard-v2-plan-level[data-kind="focus"] {
+  background: #67d4ea;
+}
+
+.dashboard-v2-plan-stage {
+  justify-self: start;
+  border-radius: 999px;
+  border-color: #33404d;
+  background: #26303b;
+  color: var(--d-text-2);
+}
+.dashboard-v2-plan-stage[data-stage="Build"] {
+  border-color: #f5b54a;
+  background: #3d2c10;
+  color: #f5b54a;
+}
+.dashboard-v2-plan-stage[data-stage="Review"] {
+  border-color: #6fb2f0;
+  background: #17304a;
+  color: #6fb2f0;
+}
+.dashboard-v2-plan-stage[data-stage="Settled"] {
+  border-color: #a5b4fc;
+  background: #23264a;
+  color: #a5b4fc;
+}
+.dashboard-v2-plan-stage[data-stage="Analysed"] {
+  border-color: #d6a2f5;
+  background: #381d4a;
+  color: #d6a2f5;
+}
+.dashboard-v2-plan-stage[data-stage="Locked"] {
+  border-color: #e6ebf0;
+  background: #e6ebf0;
+  color: #1b232c;
+}
+.dashboard-v2-plan-stage[data-stage="Done"] {
+  border-color: #5ccb7f;
+  background: #173a24;
+  color: #5ccb7f;
+}
