@@ -244,7 +244,10 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
   };
 
   const listeners = new Set<(state: SpacePlansState) => void>();
-  let held: Omit<SpacePlansState, 'version' | 'reading'> = { ...EMPTY };
+  // a Space with no plans tool is known to have none before any read, so its dashboard never draws a band for it, not even briefly
+  let held: Omit<SpacePlansState, 'version' | 'reading'> = toolExists()
+    ? { ...EMPTY }
+    : { ...EMPTY, outcome: 'unavailable' };
   /** The units of the list held: a row is opened only if it is on it. Its dashboard is looked up at the click. */
   let listed = new Set<number>();
   let version = 0;

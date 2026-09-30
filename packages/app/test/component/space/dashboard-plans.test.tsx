@@ -289,6 +289,7 @@ test('a Space that has no plans tool has no Plans band', () => {
     <BandPlans view={view(state({ outcome: 'unavailable', units: null }))} now={NOW} />,
   );
   expect(container.textContent).toBe('');
+  expect(container.firstChild).toBeNull();
 });
 
 test('a window hidden says the band is paused and is not refreshing', () => {

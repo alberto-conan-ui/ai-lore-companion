@@ -724,3 +724,9 @@ test('J2: a child that did not answer in time is stopped, and one that exited do
   await plans.open(346);
   assert.equal(fake.spawned.length, 2, 'the dead child was replaced by a new one');
 });
+
+test('a Space with no plans tool is known to have none before any read', () => {
+  const { plans, calls } = service([{ stdout: tool('complete') }], { toolExists: () => false });
+  assert.equal(plans.current().outcome, 'unavailable');
+  assert.equal(calls.length, 0);
+});

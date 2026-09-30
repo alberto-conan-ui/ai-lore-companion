@@ -27,7 +27,7 @@ export function BandPlans({ view, now }: BandPlansProps): JSX.Element | null {
   const shown = rows === null ? null : capItems(rows, all ? rows.length : PLANS_ROWS_SHOWN);
   return (
     <section
-      className="dashboard-v2-band-moving dashboard-v2-band-plans"
+      className="dashboard-v2-panel dashboard-v2-band-moving dashboard-v2-band-plans dashboard-v2-plans-row"
       data-testid="dashboard-v2-plans"
       data-outcome={state?.outcome ?? (view.problem === null ? 'reading' : 'problem')}
       aria-label="Plans"

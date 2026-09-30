@@ -80,7 +80,7 @@ test('the Plans band is in the Space dashboard, between the first band and the r
   const { unmount } = render(<Dashboard />);
   expect(screen.getByTestId('dashboard-v2-plans')).toBeTruthy();
   expect(
-    screen.getByTestId('dashboard-v2-plans-row').nextElementSibling?.getAttribute('data-testid'),
+    screen.getByTestId('dashboard-v2-plans').nextElementSibling?.getAttribute('data-testid'),
   ).toBe('dashboard-v2-row2');
   unmount();
   plans.plans = {
@@ -97,6 +97,10 @@ test('the Plans band is in the Space dashboard, between the first band and the r
   };
   render(<Dashboard />);
   expect(screen.queryByTestId('dashboard-v2-plans')).toBeNull();
+  // nothing of it is left in the layout: the rows follow the first band directly, as before the band existed
+  expect(
+    screen.getByTestId('dashboard-v2-row2').previousElementSibling?.getAttribute('data-testid'),
+  ).toBe('dashboard-v2-band1');
 });
 
 test('a pending refresh disables another request and exposes source failures', () => {
