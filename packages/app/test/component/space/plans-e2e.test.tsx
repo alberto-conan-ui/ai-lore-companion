@@ -14,12 +14,14 @@ import { BandPlans } from '../../../src/renderer/src/space/dashboard/v2/BandPlan
 // fake GitHub and a fake clock) in a real child process; the real hook (`usePlansState`) and band schedule it under fake timers;
 // the tool starts 0.3 to 0.7 s after each tick; a row is opened through the real `open()` (the path looked up at the click); and
 // the page it opens (`/gh/<n>`) is the real `ghlive.js` refreshing itself against the real `serve_live`, on the same cache folder.
-// It needs the Space's tools (AI_LORE_SPACE, default: the Space this repository sits in) and python3; without them it is skipped.
+// It needs the Space's tools (AI_LORE_SPACE, default: the Space this repository sits in) and python3; without them it is skipped, unless AI_LORE_SPACE is set, which makes it a guard that fails.
 
 const SPACE = process.env.AI_LORE_SPACE ?? resolve(process.cwd(), '../../../..');
 const TESTS = join(SPACE, 'tools/plan/tests');
 const HAVE =
   existsSync(join(TESTS, 'e2e398_tool.py')) && existsSync(join(SPACE, 'tools/plan/ghlive.js'));
+// Asked for by name (AI_LORE_SPACE set, as CI does), the test is a guard: a Space without the tools fails it, it is not skipped.
+const EXPLICIT = process.env.AI_LORE_SPACE !== undefined;
 const FOCUS = 346;
 const T0 = 1_800_000_000_000;
 const DELAY_S = 2;
@@ -304,9 +306,13 @@ async function scenario(changeAt: number, seed: number): Promise<Outcome> {
   }
 }
 
-test.skipIf(!HAVE)(
+test.skipIf(!HAVE && !EXPLICIT)(
   'H2: a change at any moment shows in the list (real service, real tool, real hook timer, jittered start-up) and on the page the row opens, each within 60 s plus its own read',
   async () => {
+    expect(
+      HAVE,
+      `AI_LORE_SPACE=${SPACE} has no tools/plan/tests/e2e398_tool.py or tools/plan/ghlive.js`,
+    ).toBe(true);
     const worst = { list: 0, page: 0, listBound: 0, pageBound: 0 };
     let runs = 0;
     const only = process.env.E2E_ONLY?.split(',').map(Number);

@@ -67,3 +67,47 @@ jobs:
           path: packages/app/test-results
           retention-days: 7
           if-no-files-found: ignore
+
+  # The Plans band's end-to-end guard (ai-lore#398): the real service, the real plans.py over a fake host, the real hook timer
+  # and the real dashboard script. The tool lives in the ai-lore repository, which is PRIVATE, so the default token of this
+  # repository cannot read it: the job needs a read-only token for it in the secret AI_LORE_READ_TOKEN. Without the secret the
+  # job says so in a warning and does not run the test (a fork's pull request has no secrets either); with it the test runs
+  # with AI_LORE_SPACE set, which makes it FAIL rather than skip when the tools are absent.
+  plans-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AI_LORE_READ_TOKEN: ${{ secrets.AI_LORE_READ_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Is the ai-lore repository readable here?
+        id: lore
+        run: |
+          if [ -z "$AI_LORE_READ_TOKEN" ]; then
+            echo "::warning title=plans-e2e not run::the secret AI_LORE_READ_TOKEN is not set (or this is a fork), and alberto-conan-ui/ai-lore is private, so the Plans band's end-to-end test could not be run"
+            echo "have=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.lore.outputs.have == 'true'
+        with:
+          repository: alberto-conan-ui/ai-lore
+          ref: main
+          token: ${{ secrets.AI_LORE_READ_TOKEN }}
+          path: ai-lore
+      - uses: actions/setup-node@v4
+        if: steps.lore.outputs.have == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - if: steps.lore.outputs.have == 'true'
+        run: npm ci --ignore-scripts
+      - if: steps.lore.outputs.have == 'true'
+        run: npm run build -w @ai-lore-companion/core
+      - name: plans-e2e (AI_LORE_SPACE is set, so a Space without the tools fails it)
+        if: steps.lore.outputs.have == 'true'
+        working-directory: packages/app
+        env:
+          AI_LORE_SPACE: ${{ github.workspace }}/ai-lore
+        run: npx vitest run test/component/space/plans-e2e.test.tsx

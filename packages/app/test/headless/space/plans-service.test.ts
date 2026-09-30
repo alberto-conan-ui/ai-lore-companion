@@ -300,6 +300,8 @@ function fakeServer(up: boolean, answersAfterSpawn = true, demoServer = false): 
   const clock = { t: 0 };
   const spawned: Fake['spawned'] = [];
   const child = Object.assign(new EventEmitter(), {
+    stdout: new EventEmitter(),
+    stdin: { end: () => undefined },
     killed: false,
     exitCode: null as number | null,
     kill() {
@@ -323,6 +325,8 @@ function fakeServer(up: boolean, answersAfterSpawn = true, demoServer = false): 
       now: () => clock.t,
       sleep: async (ms) => {
         clock.t += ms;
+        const last = spawned[spawned.length - 1];
+        if (last?.args.includes('0') && clock.t >= 500) child.stdout.emit('data', 'PORT 51234\n');
         if (spawned.length > 0 && answersAfterSpawn && clock.t >= 1000) listening.up = true;
       },
       spawn: (bin, args, cwd) => {
@@ -376,7 +380,9 @@ test('when nothing answers, the server is started in the Space folder as a child
     url: 'http://127.0.0.1:8765/gh/346',
     startedServer: true,
   });
-  assert.deepEqual(fake.spawned, [{ bin: 'python3', args: [EDIT_TOOL], cwd: ROOT }]);
+  assert.deepEqual(fake.spawned, [
+    { bin: 'python3', args: [EDIT_TOOL, '--port', '8765', '--parent-pipe'], cwd: ROOT },
+  ]);
   assert.equal(fake.child.killed, false);
   // a second row does not start a second server
   assert.deepEqual(await plans.open(131), {
@@ -465,7 +471,7 @@ test('the demo switch starts the server on the fake GitHub as well', async () =>
   });
   await plans.refresh();
   await plans.open(346);
-  assert.deepEqual(fake.spawned[0]?.args, [EDIT_TOOL, '--demo']);
+  assert.deepEqual(fake.spawned[0]?.args, [EDIT_TOOL, '--port', '8765', '--parent-pipe', '--demo']);
 });
 
 // ---- the review of #398: whose server, where a row opens, what a list says ----
@@ -483,24 +489,23 @@ test("H5: another Space's edit.py on port 8765 is not taken for ours: our own st
   const { plans } = service(listed(), {
     ...fake.options,
     fetch: foreign,
-    freePort: async () => 51234,
   });
   await plans.refresh();
   const answer = await plans.open(346);
   assert.deepEqual(answer, { ok: true, url: 'http://127.0.0.1:51234/gh/346', startedServer: true });
   assert.deepEqual(fake.spawned, [
-    { bin: 'python3', args: [EDIT_TOOL, '--port', '51234'], cwd: ROOT },
+    { bin: 'python3', args: [EDIT_TOOL, '--port', '0', '--parent-pipe'], cwd: ROOT },
   ]);
 });
 
 test("H5: a demo edit.py is not this Space's server, and a real one is not a demo's", async () => {
   const demoOnPort = fakeServer(true, true, true);
-  const real = service(listed(), { ...demoOnPort.options, freePort: async () => 51235 });
+  const real = service(listed(), { ...demoOnPort.options });
   await real.plans.refresh();
   await real.plans.open(346);
   assert.deepEqual(
     demoOnPort.spawned[0]?.args,
-    [EDIT_TOOL, '--port', '51235'],
+    [EDIT_TOOL, '--port', '0', '--parent-pipe'],
     'a demo page is never shown as this plan',
   );
   const realOnPort = fakeServer(true, true, false);
@@ -508,11 +513,16 @@ test("H5: a demo edit.py is not this Space's server, and a real one is not a dem
     ...realOnPort.options,
     env: { COCKPIT_PLANS_DEMO: '1' },
     liveGitHub: false,
-    freePort: async () => 51236,
   });
   await demo.plans.refresh();
   await demo.plans.open(346);
-  assert.deepEqual(realOnPort.spawned[0]?.args, [EDIT_TOOL, '--port', '51236', '--demo']);
+  assert.deepEqual(realOnPort.spawned[0]?.args, [
+    EDIT_TOOL,
+    '--port',
+    '0',
+    '--parent-pipe',
+    '--demo',
+  ]);
 });
 
 test('H5: an edit.py that does not say whose it is (an old one) is not proven, so it is not opened on', async () => {
@@ -521,7 +531,7 @@ test('H5: an edit.py that does not say whose it is (an old one) is not proven, s
     ok: true,
     json: async () => ({ ok: true }),
   })) as unknown as typeof fetch;
-  const { plans } = service(listed(), { ...fake.options, fetch: old, freePort: async () => 51237 });
+  const { plans } = service(listed(), { ...fake.options, fetch: old });
   await plans.refresh();
   await plans.open(346);
   assert.equal(fake.spawned.length, 1);
@@ -629,4 +639,88 @@ test('identity is repository plus number: the same number in two repositories is
   assert.equal(twice.ok, false);
   const noRepo = parsePlans(tool('complete', { units: [{ ...unit(133), repo: undefined }] }));
   assert.equal(noRepo.ok, false);
+});
+
+test('J2 (R2): two rows opened at once start ONE server, and dispose stops every child that was started', async () => {
+  const spawnedChildren: (EventEmitter & {
+    killed: boolean;
+    exitCode: number | null;
+    kill: () => boolean;
+    stdin: { ended: boolean; end: () => void };
+  })[] = [];
+  let up = false;
+  let t = 0;
+  const plans = createSpacePlans({
+    runner: {
+      run: async (_bin, args) =>
+        args[1] === '--dashboard'
+          ? {
+              code: 0,
+              stdout: JSON.stringify({
+                ok: true,
+                number: 346,
+                dashboard: '/gh/346',
+                on_github: true,
+              }),
+              stderr: '',
+            }
+          : { code: 0, stdout: tool('complete'), stderr: '' },
+    },
+    root: ROOT,
+    realRoot: ROOT,
+    liveGitHub: true,
+    env: {},
+    toolExists: () => true,
+    fetch: (async () => {
+      if (!up) throw new Error('fetch failed ECONNREFUSED');
+      return { ok: true, json: async () => ({ ok: true, root: ROOT, demo: false }) };
+    }) as unknown as typeof fetch,
+    now: () => t,
+    sleep: async (ms) => {
+      t += ms;
+      await new Promise((done) => setImmediate(done));
+      if (t >= 1000) up = true;
+    },
+    spawn: () => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stdin: {
+          ended: false,
+          end() {
+            this.ended = true;
+          },
+        },
+        killed: false,
+        exitCode: null as number | null,
+        kill() {
+          this.killed = true;
+          return true;
+        },
+      });
+      spawnedChildren.push(child);
+      return child as never;
+    },
+  });
+  await plans.refresh();
+  const [a, b] = await Promise.all([plans.open(346), plans.open(346)]);
+  assert.equal(a.ok && b.ok, true);
+  assert.equal(spawnedChildren.length, 1, 'two edit.py started for one Space');
+  plans.dispose();
+  assert.ok(
+    spawnedChildren.every((child) => child.killed && child.stdin.ended),
+    'a child is left running after dispose',
+  );
+});
+
+test('J2: a child that did not answer in time is stopped, and one that exited does not hide the next start', async () => {
+  const fake = fakeServer(false, false);
+  const { plans } = service(listed(), fake.options);
+  await plans.refresh();
+  const first = await plans.open(346);
+  assert.equal(first.ok, false);
+  assert.equal(fake.child.killed, true);
+  fake.child.killed = false;
+  fake.clock.t = 0;
+  await plans.open(346);
+  assert.equal(fake.spawned.length, 2, 'the dead child was replaced by a new one');
 });

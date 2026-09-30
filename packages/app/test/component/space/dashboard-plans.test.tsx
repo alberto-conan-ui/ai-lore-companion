@@ -20,6 +20,9 @@ import type {
 
 const NOW = Date.UTC(2026, 8, 30, 12, 0, 0);
 
+const NOTE =
+  'except a unit that enters Epic or Focus any way other than being created among the newest 20 issues (its Level changed, an older issue added to the Project, or more than 20 new issues at once), which can take a minute or more (measured once at about 80 seconds) to show';
+
 const row = (number: number, extra: Partial<SpacePlansUnit> = {}): SpacePlansUnit => ({
   number,
   title: `Unit ${String(number)}`,
@@ -71,7 +74,7 @@ const state = (extra: Partial<SpacePlansState> = {}): SpacePlansState => ({
   head: '',
   text: '',
   missing: [],
-  note: 'except a unit whose Level was just changed to or from Epic or Focus, which can take about 80 seconds to show',
+  note: NOTE,
   leftOut: [],
   demo: false,
   ...extra,
@@ -149,9 +152,10 @@ test('a list: each unit is a row with its kind, Stage, number, title and when it
     'Review',
   );
   expect(screen.getByTestId('plans-footer').textContent).toContain(
-    'Each row opens its dashboard. Changes show within a minute, except a unit whose Level was just changed to or from Epic or Focus, which can take about 80 seconds to show.',
+    `Each row opens its dashboard. Changes show within a minute, ${NOTE}.`,
   );
   expect(screen.getByTestId('plans-footer').textContent).not.toContain('brand-new');
+  expect(screen.getByTestId('plans-footer').textContent).not.toContain('or from');
   expect(screen.queryByTestId('plans-problem')).toBeNull();
 });
 

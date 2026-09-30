@@ -26,7 +26,6 @@
 
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { join } from 'node:path';
 import type { CommandRunner } from '@ai-lore-companion/core';
 import { z } from 'zod';
@@ -183,8 +182,6 @@ export type SpacePlansOptions = {
   fetch?: typeof fetch;
   /** Replaces `child_process.spawn` for the dashboards' server. */
   spawn?: (bin: string, args: readonly string[], cwd: string) => ChildProcess;
-  /** Replaces the choice of a free port for a server of our own. */
-  freePort?: () => Promise<number>;
   /** The Space folder with links resolved, to tell whose server answers. Default: `realpathSync(root)`. */
   realRoot?: string;
   /** Replaces the wait between two looks at a server that is starting. */
@@ -220,19 +217,6 @@ const EMPTY: Omit<SpacePlansState, 'version' | 'reading'> = {
   demo: false,
 };
 
-const defaultFreePort = (): Promise<number> =>
-  new Promise((done, fail) => {
-    const probe = createServer();
-    probe.once('error', fail);
-    probe.listen(0, '127.0.0.1', () => {
-      const address = probe.address();
-      probe.close(() => {
-        if (address !== null && typeof address === 'object') done(address.port);
-        else fail(new Error('no free port'));
-      });
-    });
-  });
-
 const defaultSleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
 export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
@@ -244,11 +228,12 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
   const toolExists = options.toolExists ?? (() => existsSync(join(options.root, PLANS_TOOL)));
   const spawnServer =
     options.spawn ??
-    ((bin, args, cwd): ChildProcess => nodeSpawn(bin, [...args], { cwd, stdio: 'ignore' }));
+    ((bin, args, cwd): ChildProcess =>
+      // stdin is a pipe we hold open: edit.py (--parent-pipe) exits when it closes, so a companion that dies leaves none behind
+      nodeSpawn(bin, [...args], { cwd, stdio: ['pipe', 'pipe', 'ignore'] }));
   const demo = env.COCKPIT_PLANS_DEMO === '1';
   const simulated = DEMO_STATES.find((state) => state === env.COCKPIT_PLANS_SIMULATE);
   const liveGitHub = options.liveGitHub ?? liveGitHubAllowed(env);
-  const freePort = options.freePort ?? defaultFreePort;
   const realRoot = (): string => {
     if (options.realRoot !== undefined) return options.realRoot;
     try {
@@ -264,9 +249,6 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
   let listed = new Set<number>();
   let version = 0;
   let running: Promise<SpacePlansState> | null = null;
-  let server: ChildProcess | null = null;
-  let childOrigin = DASHBOARD_ORIGIN;
-  const gone: { why: string | null } = { why: null };
   let disposed = false;
 
   const current = (): SpacePlansState => {
@@ -420,78 +402,102 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
     }
   };
 
+  /** A server this service started: its child, why it is gone (if it is), and where it listens once that is known. */
+  type Own = { child: ChildProcess; gone: { why: string | null }; origin: string | null };
+  const children = new Set<Own>();
   let serverOrigin: string | null = null;
+  /** The start in flight: every `open()` that arrives while one runs shares it, so one Space has one server of its own. */
+  let starting: Promise<{ origin: string; started: boolean; problem: string | null }> | null = null;
 
-  /** Make sure this Space's own dashboards' server answers, and where. Never takes another Space's or a demo for it. */
-  const ensureServer = async (): Promise<{
+  const stop = (own: Own): void => {
+    children.delete(own);
+    try {
+      own.child.stdin?.end(); // the pipe edit.py watches (--parent-pipe): closing it stops it, even if kill() cannot
+    } catch {
+      // already closed
+    }
+    own.child.kill();
+  };
+
+  /** Start `edit.py`: on the default port when nothing holds it, else on port 0, which edit.py binds itself and reports. */
+  const startServer = (onPort0: boolean): Own => {
+    const args = [
+      EDIT_TOOL,
+      '--port',
+      onPort0 ? '0' : String(DASHBOARD_PORT),
+      '--parent-pipe',
+      ...(demo ? ['--demo'] : []),
+    ];
+    const child = spawnServer('python3', args, options.root);
+    const own: Own = {
+      child,
+      gone: { why: null },
+      origin: onPort0 ? null : DASHBOARD_ORIGIN,
+    };
+    children.add(own);
+    child.once('error', (error) => {
+      own.gone.why = `python3 could not start ${EDIT_TOOL}: ${error.message}`;
+    });
+    child.once('exit', (code) => {
+      own.gone.why = `${EDIT_TOOL} stopped (exit ${String(code)}) before it answered.${
+        onPort0 ? '' : ` Is something else using port ${String(DASHBOARD_PORT)}?`
+      }`;
+      children.delete(own);
+    });
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      const said = /PORT (\d+)/.exec(String(chunk));
+      if (said?.[1] !== undefined) own.origin = `http://127.0.0.1:${said[1]}`;
+    });
+    return own;
+  };
+
+  const doEnsureServer = async (): Promise<{
     origin: string;
     started: boolean;
     problem: string | null;
   }> => {
-    const fallback = serverOrigin ?? DASHBOARD_ORIGIN;
     if (serverOrigin !== null && (await probe(serverOrigin)) === 'ours') {
       return { origin: serverOrigin, started: false, problem: null };
     }
     serverOrigin = null;
-    let origin = DASHBOARD_ORIGIN;
-    if (server === null || server.exitCode !== null || server.killed) {
+    let own = [...children].find((candidate) => candidate.gone.why === null) ?? null;
+    if (own === null) {
       const first = await probe(DASHBOARD_ORIGIN);
       if (first === 'ours') {
         serverOrigin = DASHBOARD_ORIGIN;
         return { origin: DASHBOARD_ORIGIN, started: false, problem: null };
       }
-      let port = DASHBOARD_PORT;
-      if (first === 'other') {
-        // something that is not this Space's server holds the port: start our own on a free one
-        try {
-          port = await freePort();
-        } catch (caught) {
-          return {
-            origin: fallback,
-            started: false,
-            problem: `No free port for ${EDIT_TOOL}: ${String(caught)}`,
-          };
-        }
-      }
-      origin = `http://127.0.0.1:${String(port)}`;
-      childOrigin = origin;
-      const args = [
-        EDIT_TOOL,
-        ...(port === DASHBOARD_PORT ? [] : ['--port', String(port)]),
-        ...(demo ? ['--demo'] : []),
-      ];
-      const child = spawnServer('python3', args, options.root);
-      server = child;
-      gone.why = null;
-      child.once('error', (error) => {
-        gone.why = `python3 could not start ${EDIT_TOOL}: ${error.message}`;
-      });
-      child.once('exit', (code) => {
-        gone.why = `${EDIT_TOOL} stopped (exit ${String(code)}) before it answered. Is something else using port ${String(port)}?`;
-        if (server === child) server = null;
-      });
-    } else {
-      origin = childOrigin;
+      own = startServer(first === 'other'); // something else holds the port: ours binds a free one itself
     }
     const deadline = now() + SERVER_START_WAIT_MS;
     while (now() < deadline) {
       await sleep(SERVER_POLL_MS);
-      if (gone.why !== null) return { origin, started: true, problem: gone.why };
-      if ((await probe(origin)) === 'ours') {
-        serverOrigin = origin;
-        return { origin, started: true, problem: null };
+      if (own.gone.why !== null)
+        return { origin: own.origin ?? DASHBOARD_ORIGIN, started: true, problem: own.gone.why };
+      if (own.origin !== null && (await probe(own.origin)) === 'ours') {
+        serverOrigin = own.origin;
+        return { origin: own.origin, started: true, problem: null };
       }
     }
     // it did not answer in time: a server this service started is stopped, not left half-started
-    if (server !== null) {
-      server.kill();
-      server = null;
-    }
+    stop(own);
     return {
-      origin,
+      origin: own.origin ?? DASHBOARD_ORIGIN,
       started: true,
       problem: `${EDIT_TOOL} did not answer within ${String(SERVER_START_WAIT_MS / 1000)} seconds.`,
     };
+  };
+
+  /** Make sure this Space's own dashboards' server answers, and where. Never takes another Space's or a demo for it. */
+  const ensureServer = (): Promise<{
+    origin: string;
+    started: boolean;
+    problem: string | null;
+  }> => {
+    starting ??= doEnsureServer().finally(() => {
+      starting = null;
+    });
+    return starting;
   };
 
   /** Where a row opens, looked up NOW from the Space's `specs/` (an epic that moved since the list was read opens `/gh/<n>`). */
@@ -556,10 +562,7 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
     dispose() {
       disposed = true;
       listeners.clear();
-      if (server !== null) {
-        server.kill();
-        server = null;
-      }
+      for (const own of [...children]) stop(own);
     },
   };
 }
