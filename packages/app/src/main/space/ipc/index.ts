@@ -5,6 +5,7 @@ import { registerSpaceDialogs } from './dialogs.js';
 import { registerSpaceFiles } from './files.js';
 import { registerSpaceMachine } from './machine.js';
 import { registerSpaceMigration } from './migration.js';
+import { registerSpacePlans } from './plans.js';
 import { registerSpaceProject } from './project.js';
 import { registerSpaceRepositories } from './repositories.js';
 import { registerSpaceRoots } from './roots.js';
@@ -30,4 +31,5 @@ export const SPACE_MODULES: readonly RegisterModule[] = [
   registerSpaceMigration,
   registerSpaceProject,
   registerSpaceRepositories,
+  registerSpacePlans,
 ];

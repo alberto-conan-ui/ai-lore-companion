@@ -161,6 +161,19 @@ const space: SpaceSummary = {
 
 let focusGlobalSearch: (() => void) | null = null;
 
+const noPlans = {
+  version: 1,
+  reading: false,
+  outcome: 'unavailable' as const,
+  units: null,
+  readAt: null,
+  lastReadAt: null,
+  head: '',
+  text: '',
+  missing: [],
+  note: '',
+};
+
 const cockpit = {
   spaceNavigate: vi.fn<(arg: unknown) => Promise<SpaceWindowResult>>(),
   enginesList: vi.fn(async () => []),
@@ -214,6 +227,11 @@ const cockpit = {
     value: { version: 1, reading: false, model: null, readAt: null, problem: null },
   })),
   onSpaceRepositoriesState: vi.fn(() => () => {}),
+  // The Dashboard also mounts the Plans band. This fixture's Space has no plans tool: the band is not drawn.
+  spacePlansState: vi.fn(async () => ({ ok: true, value: noPlans })),
+  spacePlansRefresh: vi.fn(async () => ({ ok: true, value: noPlans })),
+  spacePlansOpen: vi.fn(),
+  onSpacePlansState: vi.fn(() => () => {}),
   // Dashboard mounts the PM report; this window fixture keeps it empty.
   spaceDashboardReport: vi.fn(async () => ({
     ok: true,
