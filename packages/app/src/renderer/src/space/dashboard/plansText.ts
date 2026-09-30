@@ -2,7 +2,13 @@ import type { SpacePlansState, SpacePlansUnit } from '../../../../shared/ipc.js'
 
 /** The words of the Plans band, in one place so the band and its tests say the same things. */
 
-export const PLANS_FOOTER = 'Each row opens its dashboard. Changes show within a minute.';
+export const PLANS_FOOTER = 'Each row opens its dashboard. Changes show within a minute';
+
+/** The footer: the promise, qualified by what the tool says can take longer (its `note`), as one sentence. */
+export function footerText(state: SpacePlansState | null): string {
+  const note = state?.note ?? '';
+  return `${PLANS_FOOTER}${note === '' ? '.' : `, ${note}.`}`;
+}
 
 /** `Ns ago`, `Nm ago`, `Nh ago`, `Nd ago`; `just now` for a time not yet reached (clocks differ by a little). */
 export function agoText(ms: number, now: number): string {
@@ -39,8 +45,11 @@ export function headingState(state: SpacePlansState | null, now: number, active 
         state.readAt === null ? '' : ` · READ ${agoText(state.readAt, now).toUpperCase()}`;
       return `${String(count)} ${count === 1 ? 'PLAN' : 'PLANS'}${read}${reading}`;
     }
-    case 'incomplete':
-      return `INCOMPLETE${reading}`;
+    case 'incomplete': {
+      const read =
+        state.readAt === null ? '' : ` · READ ${agoText(state.readAt, now).toUpperCase()}`;
+      return `INCOMPLETE${read}${reading}`;
+    }
     case 'refused':
       return `REFUSED${reading}`;
     case 'unreachable':

@@ -25,7 +25,8 @@
  */
 
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
 import type { CommandRunner } from '@ai-lore-companion/core';
 import { z } from 'zod';
@@ -45,6 +46,8 @@ export const EDIT_TOOL = 'tools/plan/edit.py';
 export const PLANS_TIMEOUT_MS = 120_000;
 export const DASHBOARD_PORT = 8765;
 export const DASHBOARD_ORIGIN = `http://127.0.0.1:${DASHBOARD_PORT}`;
+/** The longest `plans.py --dashboard` may run: it reads no GitHub, only `specs/`. */
+export const DASHBOARD_LOOKUP_TIMEOUT_MS = 20_000;
 /** One look at `/api/ping`. */
 export const PING_TIMEOUT_MS = 2_000;
 /** The longest the service waits for a server it started to answer. */
@@ -54,6 +57,7 @@ const SERVER_POLL_MS = 250;
 const DEMO_STATES = ['incomplete', 'refused', 'unreachable', 'empty'] as const;
 
 const unitSchema = z.object({
+  repo: z.string().min(1),
   number: z.number().int().positive(),
   title: z.string(),
   level: z.enum(['Epic', 'Focus']),
@@ -79,7 +83,21 @@ const toolSchema = z.object({
   head: z.string(),
   text: z.string(),
   note: z.string(),
+  left_out: z.array(z.string()).default([]),
+  demo: z.boolean().default(false),
 });
+
+const dashboardSchema = z.object({
+  ok: z.literal(true),
+  number: z.number().int().positive(),
+  dashboard: z
+    .string()
+    .regex(/^\/[A-Za-z0-9._\-/]*$/)
+    .refine((path) => !path.startsWith('//') && !path.split('/').includes('..')),
+  on_github: z.boolean(),
+});
+
+const pingSchema = z.object({ ok: z.literal(true), root: z.string(), demo: z.boolean() });
 
 /** What the tool answered, validated; or why it cannot be used. */
 export type ParsedPlans =
@@ -92,6 +110,8 @@ export type ParsedPlans =
       text: string;
       missing: readonly string[];
       note: string;
+      leftOut: readonly string[];
+      demo: boolean;
     }
   | { ok: false; message: string };
 
@@ -109,20 +129,24 @@ export function parsePlans(stdout: string): ParsedPlans {
   }
   const tool = parsed.data;
   const lists = tool.state === 'complete' || tool.state === 'incomplete';
-  if (lists && (tool.read_at === null || !Number.isFinite(tool.read_at))) {
+  // a complete list says when it was read; an incomplete one may not (our own limit ended it before it had read anything)
+  if (tool.state === 'complete' && (tool.read_at === null || !Number.isFinite(tool.read_at))) {
     return { ok: false, message: 'The plans tool gave a list with no time for when it was read.' };
   }
-  const seen = new Set<number>();
+  // identity is repository plus number
+  const seen = new Set<string>();
   for (const unit of tool.units) {
-    if (seen.has(unit.number)) {
+    const key = `${unit.repo}#${String(unit.number)}`;
+    if (seen.has(key)) {
       return { ok: false, message: 'The plans tool listed one unit twice.' };
     }
-    seen.add(unit.number);
+    seen.add(key);
   }
   return {
     ok: true,
     outcome: tool.state,
-    readAt: lists && tool.read_at !== null ? tool.read_at * 1000 : null,
+    readAt:
+      lists && tool.read_at !== null && Number.isFinite(tool.read_at) ? tool.read_at * 1000 : null,
     // a list that was not read lists nothing, whatever the tool put in it
     units: lists
       ? tool.units.map((unit) => ({
@@ -141,6 +165,8 @@ export function parsePlans(stdout: string): ParsedPlans {
     text: tool.text,
     missing: tool.missing.map((entry) => `${entry.what}: ${entry.why}`),
     note: tool.note,
+    leftOut: tool.left_out,
+    demo: tool.demo,
   };
 }
 
@@ -157,6 +183,10 @@ export type SpacePlansOptions = {
   fetch?: typeof fetch;
   /** Replaces `child_process.spawn` for the dashboards' server. */
   spawn?: (bin: string, args: readonly string[], cwd: string) => ChildProcess;
+  /** Replaces the choice of a free port for a server of our own. */
+  freePort?: () => Promise<number>;
+  /** The Space folder with links resolved, to tell whose server answers. Default: `realpathSync(root)`. */
+  realRoot?: string;
   /** Replaces the wait between two looks at a server that is starting. */
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -186,7 +216,22 @@ const EMPTY: Omit<SpacePlansState, 'version' | 'reading'> = {
   text: '',
   missing: [],
   note: '',
+  leftOut: [],
+  demo: false,
 };
+
+const defaultFreePort = (): Promise<number> =>
+  new Promise((done, fail) => {
+    const probe = createServer();
+    probe.once('error', fail);
+    probe.listen(0, '127.0.0.1', () => {
+      const address = probe.address();
+      probe.close(() => {
+        if (address !== null && typeof address === 'object') done(address.port);
+        else fail(new Error('no free port'));
+      });
+    });
+  });
 
 const defaultSleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 
@@ -203,14 +248,25 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
   const demo = env.COCKPIT_PLANS_DEMO === '1';
   const simulated = DEMO_STATES.find((state) => state === env.COCKPIT_PLANS_SIMULATE);
   const liveGitHub = options.liveGitHub ?? liveGitHubAllowed(env);
+  const freePort = options.freePort ?? defaultFreePort;
+  const realRoot = (): string => {
+    if (options.realRoot !== undefined) return options.realRoot;
+    try {
+      return realpathSync(options.root);
+    } catch {
+      return options.root;
+    }
+  };
 
   const listeners = new Set<(state: SpacePlansState) => void>();
   let held: Omit<SpacePlansState, 'version' | 'reading'> = { ...EMPTY };
-  /** The dashboards' paths of the rows held: what `open` looks up. Never taken from the renderer. */
-  let dashboards = new Map<number, string>();
+  /** The units of the list held: a row is opened only if it is on it. Its dashboard is looked up at the click. */
+  let listed = new Set<number>();
   let version = 0;
   let running: Promise<SpacePlansState> | null = null;
   let server: ChildProcess | null = null;
+  let childOrigin = DASHBOARD_ORIGIN;
+  const gone: { why: string | null } = { why: null };
   let disposed = false;
 
   const current = (): SpacePlansState => {
@@ -225,13 +281,14 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
 
   const fail = (head: string, text: string): void => {
     // nothing is held as a list; only the time of the last read that answered stays, to be said beside this
-    dashboards = new Map();
+    listed = new Set();
     held = {
       ...EMPTY,
       outcome: 'failed',
       lastReadAt: held.lastReadAt,
       head,
       text,
+      demo,
     };
   };
 
@@ -244,7 +301,7 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
     if (lists) {
       // a read that started earlier than the one held never replaces it
       if (held.readAt !== null && parsed.readAt !== null && parsed.readAt < held.readAt) return;
-      dashboards = new Map(parsed.units.map((unit) => [unit.number, unit.dashboard]));
+      listed = new Set(parsed.units.map((unit) => unit.number));
       held = {
         outcome: parsed.outcome,
         units: parsed.units.map((unit) => ({
@@ -258,15 +315,17 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
           onGitHub: unit.onGitHub,
         })),
         readAt: parsed.readAt,
-        lastReadAt: parsed.readAt,
+        lastReadAt: parsed.readAt ?? held.lastReadAt,
         head: parsed.outcome === 'complete' ? '' : parsed.head,
         text: parsed.outcome === 'complete' ? '' : parsed.text,
         missing: parsed.outcome === 'complete' ? [] : parsed.missing,
         note: parsed.note,
+        leftOut: parsed.leftOut,
+        demo: demo || parsed.demo,
       };
       return;
     }
-    dashboards = new Map();
+    listed = new Set();
     held = {
       ...EMPTY,
       outcome: parsed.outcome,
@@ -274,12 +333,13 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
       head: parsed.head,
       text: parsed.text,
       note: parsed.note,
+      demo: demo || parsed.demo,
     };
   };
 
   const readOnce = async (): Promise<void> => {
     if (!toolExists()) {
-      dashboards = new Map();
+      listed = new Set();
       held = { ...EMPTY, outcome: 'unavailable' };
       return;
     }
@@ -340,40 +400,87 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
     return run;
   };
 
-  const ping = async (): Promise<boolean> => {
+  /**
+   * One look at a server's `/api/ping`: `ours` only when it answers that it is a live `edit.py` of THIS Space (its folder,
+   * with links resolved, is the Space's) serving what this service serves (a demo for a demo, never a demo for a real
+   * Space); `none` when nothing is listening; `other` for anything else that holds the port.
+   */
+  const probe = async (origin: string): Promise<'ours' | 'other' | 'none'> => {
     try {
-      const response = await fetchFn(`${DASHBOARD_ORIGIN}/api/ping`, {
+      const response = await fetchFn(`${origin}/api/ping`, {
         signal: AbortSignal.timeout(PING_TIMEOUT_MS),
       });
-      if (!response.ok) return false;
-      const body: unknown = await response.json();
-      return typeof body === 'object' && body !== null && (body as { ok?: unknown }).ok === true;
-    } catch {
-      return false;
+      if (!response.ok) return 'other';
+      const body = pingSchema.safeParse(await response.json());
+      if (!body.success) return 'other';
+      return body.data.root === realRoot() && body.data.demo === demo ? 'ours' : 'other';
+    } catch (caught) {
+      const text = `${String(caught)} ${String((caught as { cause?: unknown })?.cause ?? '')}`;
+      return /ECONNREFUSED/.test(text) ? 'none' : 'other';
     }
   };
 
-  /** Make sure the dashboards' server answers. `null` when it does; else why it does not. */
-  const ensureServer = async (): Promise<{ started: boolean; problem: string | null }> => {
-    if (await ping()) return { started: false, problem: null };
-    const gone: { why: string | null } = { why: null };
+  let serverOrigin: string | null = null;
+
+  /** Make sure this Space's own dashboards' server answers, and where. Never takes another Space's or a demo for it. */
+  const ensureServer = async (): Promise<{
+    origin: string;
+    started: boolean;
+    problem: string | null;
+  }> => {
+    const fallback = serverOrigin ?? DASHBOARD_ORIGIN;
+    if (serverOrigin !== null && (await probe(serverOrigin)) === 'ours') {
+      return { origin: serverOrigin, started: false, problem: null };
+    }
+    serverOrigin = null;
+    let origin = DASHBOARD_ORIGIN;
     if (server === null || server.exitCode !== null || server.killed) {
-      const args = [EDIT_TOOL, ...(demo ? ['--demo'] : [])];
+      const first = await probe(DASHBOARD_ORIGIN);
+      if (first === 'ours') {
+        serverOrigin = DASHBOARD_ORIGIN;
+        return { origin: DASHBOARD_ORIGIN, started: false, problem: null };
+      }
+      let port = DASHBOARD_PORT;
+      if (first === 'other') {
+        // something that is not this Space's server holds the port: start our own on a free one
+        try {
+          port = await freePort();
+        } catch (caught) {
+          return {
+            origin: fallback,
+            started: false,
+            problem: `No free port for ${EDIT_TOOL}: ${String(caught)}`,
+          };
+        }
+      }
+      origin = `http://127.0.0.1:${String(port)}`;
+      childOrigin = origin;
+      const args = [
+        EDIT_TOOL,
+        ...(port === DASHBOARD_PORT ? [] : ['--port', String(port)]),
+        ...(demo ? ['--demo'] : []),
+      ];
       const child = spawnServer('python3', args, options.root);
       server = child;
+      gone.why = null;
       child.once('error', (error) => {
         gone.why = `python3 could not start ${EDIT_TOOL}: ${error.message}`;
       });
       child.once('exit', (code) => {
-        gone.why = `${EDIT_TOOL} stopped (exit ${String(code)}) before it answered. Is something else using port ${String(DASHBOARD_PORT)}?`;
+        gone.why = `${EDIT_TOOL} stopped (exit ${String(code)}) before it answered. Is something else using port ${String(port)}?`;
         if (server === child) server = null;
       });
+    } else {
+      origin = childOrigin;
     }
     const deadline = now() + SERVER_START_WAIT_MS;
     while (now() < deadline) {
       await sleep(SERVER_POLL_MS);
-      if (gone.why !== null) return { started: true, problem: gone.why };
-      if (await ping()) return { started: true, problem: null };
+      if (gone.why !== null) return { origin, started: true, problem: gone.why };
+      if ((await probe(origin)) === 'ours') {
+        serverOrigin = origin;
+        return { origin, started: true, problem: null };
+      }
     }
     // it did not answer in time: a server this service started is stopped, not left half-started
     if (server !== null) {
@@ -381,14 +488,38 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
       server = null;
     }
     return {
+      origin,
       started: true,
       problem: `${EDIT_TOOL} did not answer within ${String(SERVER_START_WAIT_MS / 1000)} seconds.`,
     };
   };
 
+  /** Where a row opens, looked up NOW from the Space's `specs/` (an epic that moved since the list was read opens `/gh/<n>`). */
+  const lookUp = async (number: number): Promise<{ path: string } | { problem: string }> => {
+    const result = await options.runner.run(
+      'python3',
+      [PLANS_TOOL, '--dashboard', String(number)],
+      {
+        cwd: options.root,
+        timeoutMs: DASHBOARD_LOOKUP_TIMEOUT_MS,
+      },
+    );
+    if (result.failure !== undefined || result.code !== 0) {
+      return {
+        problem: `Where #${String(number)} opens could not be looked up: ${result.stderr.trim() || 'the tool did not run'}`,
+      };
+    }
+    try {
+      const parsed = dashboardSchema.safeParse(JSON.parse(result.stdout.trim()));
+      if (parsed.success && parsed.data.number === number) return { path: parsed.data.dashboard };
+    } catch {
+      // fall through: an answer that cannot be read is not a place to open
+    }
+    return { problem: `Where #${String(number)} opens could not be read from the tool's answer.` };
+  };
+
   const open = async (number: number): Promise<SpacePlansOpenResult> => {
-    const path = dashboards.get(number);
-    if (path === undefined) {
+    if (!listed.has(number)) {
       return {
         ok: false,
         error: {
@@ -396,6 +527,10 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
           message: `#${String(number)} is not on the list that was last read, so its dashboard was not opened.`,
         },
       };
+    }
+    const found = await lookUp(number);
+    if ('problem' in found) {
+      return { ok: false, error: { kind: 'not-listed', message: found.problem } };
     }
     const served = await ensureServer();
     if (served.problem !== null) {
@@ -407,7 +542,7 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
         },
       };
     }
-    return { ok: true, url: `${DASHBOARD_ORIGIN}${path}`, startedServer: served.started };
+    return { ok: true, url: `${served.origin}${found.path}`, startedServer: served.started };
   };
 
   return {

@@ -218,6 +218,18 @@ test('focus: a window of the Space gaining focus refreshes', async () => {
   await until(() => reads() === 1);
 });
 
+test('focus: a second focus within five minutes of the last full read reads nothing; Refresh still does', async () => {
+  await openSpaces();
+  harness.invoke('spaceProjectFocus', window, {});
+  await until(() => reads() === 1);
+  harness.invoke('spaceProjectFocus', window, {});
+  harness.invoke('spaceProjectFocus', window, {});
+  await delay(60);
+  assert.equal(reads(), 1, 'focus does not read the whole Project again inside five minutes');
+  await refresh();
+  assert.equal(reads(), 2, 'an explicit Refresh is not held back');
+});
+
 test('timer: the Project is read again at the interval', async () => {
   configureProjectRefresh({ intervalMs: 30 });
   await openSpaces();

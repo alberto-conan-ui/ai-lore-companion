@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import {
   PLANS_REFRESH_MS,
   type PlansStateView,
+  nextPlansDelay,
   usePlansState,
 } from '../../../src/renderer/src/space/dashboard/usePlansState.js';
 import { BandPlans } from '../../../src/renderer/src/space/dashboard/v2/BandPlans.js';
@@ -70,7 +71,9 @@ const state = (extra: Partial<SpacePlansState> = {}): SpacePlansState => ({
   head: '',
   text: '',
   missing: [],
-  note: 'A brand-new epic can take longer.',
+  note: 'except a unit whose Level was just changed to or from Epic or Focus, which can take about 80 seconds to show',
+  leftOut: [],
+  demo: false,
   ...extra,
 });
 
@@ -146,11 +149,9 @@ test('a list: each unit is a row with its kind, Stage, number, title and when it
     'Review',
   );
   expect(screen.getByTestId('plans-footer').textContent).toContain(
-    'Each row opens its dashboard. Changes show within a minute.',
+    'Each row opens its dashboard. Changes show within a minute, except a unit whose Level was just changed to or from Epic or Focus, which can take about 80 seconds to show.',
   );
-  expect(screen.getByTestId('plans-footer').textContent).toContain(
-    'A brand-new epic can take longer.',
-  );
+  expect(screen.getByTestId('plans-footer').textContent).not.toContain('brand-new');
   expect(screen.queryByTestId('plans-problem')).toBeNull();
 });
 
@@ -187,10 +188,10 @@ test('before the first answer it says it is reading, and draws no list and no em
   expect(screen.queryByTestId('plans-row')).toBeNull();
 });
 
-test('a window in the background from the start says it has not read yet, not that it is reading', () => {
+test('a window hidden from the start says it has not read yet, not that it is reading', () => {
   render(<BandPlans view={view(null, { active: false })} now={NOW} />);
   expect(screen.getByTestId('plans-reading').textContent).toContain('have not been read yet');
-  expect(screen.getByTestId('plans-reading').textContent).toContain('in the background');
+  expect(screen.getByTestId('plans-reading').textContent).toContain('hidden');
   expect(screen.getByTestId('plans-reading').getAttribute('aria-busy')).toBe('false');
   expect(screen.getByTestId('plans-state').textContent).toContain('NOT READ YET');
   expect(screen.getByTestId('plans-state').textContent).not.toContain('READING');
@@ -286,11 +287,11 @@ test('a Space that has no plans tool has no Plans band', () => {
   expect(container.textContent).toBe('');
 });
 
-test('a window in the background says the band is paused and is not refreshing', () => {
+test('a window hidden says the band is paused and is not refreshing', () => {
   render(<BandPlans view={view(state(), { active: false })} now={NOW} />);
   expect(screen.getByTestId('plans-state').textContent).toContain('PAUSED');
   expect(screen.getByTestId('plans-footer').textContent).toContain(
-    'Not refreshing while this window is in the background',
+    'Not refreshing while this window is hidden',
   );
 });
 
@@ -300,6 +301,56 @@ test('a long list shows twelve rows and opens the rest on "show all"', () => {
   expect(screen.getAllByTestId('plans-row')).toHaveLength(12);
   fireEvent.click(screen.getByRole('button', { name: '+3 more plans · show all' }));
   expect(screen.getAllByTestId('plans-row')).toHaveLength(15);
+});
+
+test('H3: an incomplete read with no rows never also says the Project has no epics or focuses', () => {
+  render(
+    <BandPlans
+      view={view(
+        state({
+          outcome: 'incomplete',
+          units: [],
+          head: 'Incomplete read',
+          text: 'part was not read',
+          missing: [
+            'the Level field: the Project has no Level field with the options Epic and Focus',
+          ],
+        }),
+      )}
+      now={NOW}
+    />,
+  );
+  expect(screen.queryByTestId('plans-empty')).toBeNull();
+  expect(screen.getByTestId('plans-problem').textContent).toContain('Level field');
+});
+
+test('H3: what the tool left out is said under the list', () => {
+  render(
+    <BandPlans
+      view={view(state({ leftOut: ['2 issues with no Level were left out.'] }))}
+      now={NOW}
+    />,
+  );
+  expect(screen.getByTestId('plans-left-out').textContent).toBe(
+    '2 issues with no Level were left out.',
+  );
+});
+
+test('H5: demo data says it is demo data, in the heading', () => {
+  render(<BandPlans view={view(state({ demo: true }))} now={NOW} />);
+  expect(screen.getByTestId('plans-state').textContent).toContain('DEMO DATA');
+});
+
+test('H9: an incomplete heading also shows the age of its read', () => {
+  render(
+    <BandPlans
+      view={view(
+        state({ outcome: 'incomplete', head: 'Incomplete read', text: 't', readAt: NOW - 65_000 }),
+      )}
+      now={NOW}
+    />,
+  );
+  expect(screen.getByTestId('plans-state').textContent).toContain('INCOMPLETE · READ 1M AGO');
 });
 
 // ---- opening a row ----
@@ -344,6 +395,7 @@ type Cockpit = {
 
 let cockpit: Cockpit;
 let push: (s: SpacePlansState) => void;
+let readVersion = 1;
 let focused = true;
 let visibility = 'visible';
 
@@ -355,6 +407,7 @@ function Harness(): JSX.Element {
 }
 
 beforeEach(() => {
+  readVersion = 1;
   focused = true;
   visibility = 'visible';
   vi.spyOn(document, 'hasFocus').mockImplementation(() => focused);
@@ -363,7 +416,7 @@ beforeEach(() => {
     spacePlansState: vi.fn(async () =>
       ok(state({ outcome: null, units: null, readAt: null, lastReadAt: null })),
     ),
-    spacePlansRefresh: vi.fn(async () => ok(state({ version: 2 }))),
+    spacePlansRefresh: vi.fn(async () => ok(state({ version: ++readVersion, readAt: Date.now() }))),
     spacePlansOpen: vi.fn(
       async (): Promise<SpacePlansOpenResult> => ({
         ok: true,
@@ -399,16 +452,16 @@ test('the band reads at once when it is shown, then every 30 seconds while it ca
   expect(cockpit.spacePlansRefresh).toHaveBeenCalledTimes(3);
 });
 
-test('nothing is read while the window is in the background or hidden, and a read follows when it comes back', async () => {
+test('nothing is read while the window is hidden, and a read follows when it is shown', async () => {
   vi.useFakeTimers();
-  focused = false;
+  visibility = 'hidden';
   render(<Harness />);
   await settle(PLANS_REFRESH_MS * 3);
   expect(cockpit.spacePlansRefresh).not.toHaveBeenCalled();
   expect(screen.getByTestId('plans-state').textContent).toContain('PAUSED');
-  focused = true;
+  visibility = 'visible';
   act(() => {
-    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
   });
   await settle();
   expect(cockpit.spacePlansRefresh).toHaveBeenCalledTimes(1);
@@ -421,21 +474,34 @@ test('nothing is read while the window is in the background or hidden, and a rea
   expect(cockpit.spacePlansRefresh).toHaveBeenCalledTimes(1);
 });
 
-test('coming to the front inside 30 seconds of the last read does not read again', async () => {
+test('H7: a window that is visible but has not the focus keeps refreshing (visible means visible)', async () => {
+  vi.useFakeTimers();
+  focused = false;
+  render(<Harness />);
+  await settle(PLANS_REFRESH_MS * 4);
+  expect(cockpit.spacePlansRefresh.mock.calls.length).toBeGreaterThanOrEqual(4);
+  expect(screen.getByTestId('plans-state').textContent).not.toContain('PAUSED');
+});
+
+test('showing the window inside 30 seconds of the newest read does not read again; after 30 seconds it does', async () => {
   vi.useFakeTimers();
   render(<Harness />);
   await settle();
   act(() => {
-    window.dispatchEvent(new Event('focus'));
+    document.dispatchEvent(new Event('visibilitychange'));
   });
   await settle(10_000);
   expect(cockpit.spacePlansRefresh).toHaveBeenCalledTimes(1);
-  await settle(20_000);
-  act(() => {
-    window.dispatchEvent(new Event('focus'));
-  });
-  await settle();
-  expect(cockpit.spacePlansRefresh.mock.calls.length).toBeGreaterThanOrEqual(2);
+});
+
+test('H2: the next ask is when the newest read is 30 s old, not 30 s after the last ask', () => {
+  expect(nextPlansDelay(1000, null, null)).toBe(0);
+  expect(nextPlansDelay(10_000, 10_000, null)).toBe(30_000);
+  // asked at 10_000, the tool's read started at 10_400 (its start-up): the next ask is when THAT read is 30 s old
+  expect(nextPlansDelay(10_500, 10_000, 10_400)).toBe(29_900);
+  expect(nextPlansDelay(40_400, 10_000, 10_400)).toBe(0);
+  // never sooner than the minimum gap after the last ask
+  expect(nextPlansDelay(50_000, 49_000, 10_000)).toBe(4_000);
 });
 
 test('a band that is out of view is not read; it is read when it comes into view', async () => {

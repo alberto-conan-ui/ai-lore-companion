@@ -28,6 +28,7 @@ const answer = JSON.stringify({
   read_at: 1_790_000_100,
   units: [
     {
+      repo: 'alberto-conan-ui/ai-lore',
       number: 346,
       title: 'Live dashboards',
       level: 'Focus',
@@ -72,7 +73,16 @@ async function open(): Promise<{ h: SpaceHarness; window: FakeSpaceWindow }> {
   runs = 0;
   configureSpacePlans({
     runner: {
-      run: async () => {
+      run: async (_bin, args) => {
+        if (args[1] === '--dashboard') {
+          const dashboard = JSON.stringify({
+            ok: true,
+            number: 346,
+            dashboard: '/gh/346',
+            on_github: true,
+          });
+          return { code: 0, stdout: dashboard, stderr: '' };
+        }
         runs += 1;
         return { code: 0, stdout: answer, stderr: '' };
       },
@@ -80,9 +90,10 @@ async function open(): Promise<{ h: SpaceHarness; window: FakeSpaceWindow }> {
     liveGitHub: true,
     env: {},
     toolExists: () => true,
+    realRoot: space.root,
     fetch: (async () => ({
       ok: true,
-      json: async () => ({ ok: true }),
+      json: async () => ({ ok: true, root: space.root, demo: false }),
     })) as unknown as typeof fetch,
   });
   const h = spaceHarnessFor(registerSpacePlans);

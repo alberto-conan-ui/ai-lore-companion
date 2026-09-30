@@ -1,7 +1,7 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import type { SpacePlansState, SpacePlansUnit } from '../../../../../shared/ipc.js';
-import { PLANS_FOOTER, headingState, kindLabel, lastReadText, updatedText } from '../plansText.js';
+import { footerText, headingState, kindLabel, lastReadText, updatedText } from '../plansText.js';
 import type { PlansStateView } from '../usePlansState.js';
 import { OverflowFooter, capItems } from './overflow.js';
 
@@ -36,6 +36,7 @@ export function BandPlans({ view, now }: BandPlansProps): JSX.Element | null {
       <div className="dashboard-v2-band-heading">
         <h2>PLANS</h2>
         <span className="dashboard-v2-clear" data-testid="plans-state">
+          {state?.demo ? 'DEMO DATA, FAKE GITHUB · ' : ''}
           {view.problem === null ? headingState(state, now, view.active) : 'NOT READ'}
           {view.active ? '' : ' · PAUSED'}
         </span>
@@ -44,7 +45,7 @@ export function BandPlans({ view, now }: BandPlansProps): JSX.Element | null {
         <PlansNotice view={view} state={state} now={now} />
         {shown === null ? null : (
           <div className="dashboard-v2-moving-group">
-            {shown.visible.length === 0 ? (
+            {shown.visible.length === 0 && state?.outcome === 'complete' ? (
               <p className="dashboard-v2-empty" data-testid="plans-empty">
                 No epics or focuses are on the Project yet.
               </p>
@@ -72,10 +73,14 @@ export function BandPlans({ view, now }: BandPlansProps): JSX.Element | null {
             {view.openProblem}
           </p>
         )}
+        {(state?.leftOut ?? []).map((line) => (
+          <p className="dashboard-v2-muted" key={line} data-testid="plans-left-out">
+            {line}
+          </p>
+        ))}
         <p className="dashboard-v2-muted" data-testid="plans-footer">
-          {PLANS_FOOTER}
-          {state?.note ? ` ${state.note}` : ''}
-          {view.active ? '' : ' Not refreshing while this window is in the background.'}
+          {footerText(state)}
+          {view.active ? '' : ' Not refreshing while this window is hidden.'}
         </p>
       </div>
     </section>
@@ -100,7 +105,7 @@ function PlansNotice({
       <p className="dashboard-v2-empty" data-testid="plans-reading" aria-busy={view.active}>
         {view.active
           ? 'Reading the plans…'
-          : 'The plans have not been read yet, because this window is in the background or this band is out of view. They are read as soon as it is shown.'}
+          : 'The plans have not been read yet, because this window is hidden or this band is out of view. They are read as soon as it is shown.'}
       </p>
     );
   }

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SpacePlansState } from '../../../../shared/ipc.js';
 
-/** How often the band asks for the plans again while it can be seen. The tool's own cache is 30 seconds too. */
+/** How old the newest read may be before the band asks again. The tool's own cache is strict at 30 seconds too. */
 export const PLANS_REFRESH_MS = 30_000;
+/** No ask is made sooner than this after the last one (a clock that is early, a read that came back from the cache). */
+export const PLANS_MIN_GAP_MS = 5_000;
 
 /** What the Plans band knows of the Space's plans, and its actions. */
 export type PlansStateView = {
@@ -12,7 +14,7 @@ export type PlansStateView = {
   problem: string | null;
   /** Whether a Refresh asked from this window has not answered yet. */
   requested: boolean;
-  /** Whether the band is being read on its timer now: it is in view and the window is in front. */
+  /** Whether the band is being read on its timer now: it is in view and the window is visible. */
   active: boolean;
   /** The row whose dashboard is being opened, or `null`. */
   opening: number | null;
@@ -24,21 +26,40 @@ export type PlansStateView = {
   bandRef: (element: Element | null) => void;
 };
 
-const windowInFront = (): boolean => document.visibilityState !== 'hidden' && document.hasFocus();
+/** Visible means visible: a window beside another, with no focus, still shows its band and is kept current. */
+const windowVisible = (): boolean => document.visibilityState !== 'hidden';
+
+/**
+ * When to ask next: the scheme of the live dashboards (ai-lore#397). The band promises a minute from the START of the
+ * read it shows, so it asks when the newest read it knows of is 30 s old, not 30 s after its last ask: a timer of its own
+ * would drift against the tool's cache, which is strict at 30 s from the start of a read, and a tick that came a little
+ * early would be answered from that cache and show the same read for 30 s more. Without a read to go by (a read that
+ * failed, or none yet) it asks 30 s after the last ask. `now` and the times are milliseconds.
+ */
+export function nextPlansDelay(
+  now: number,
+  lastStart: number | null,
+  newestReadStart: number | null,
+): number {
+  if (lastStart === null) return 0;
+  const byAsk = lastStart + PLANS_REFRESH_MS - now;
+  if (newestReadStart === null) return byAsk;
+  return Math.max(newestReadStart + PLANS_REFRESH_MS - now, lastStart + PLANS_MIN_GAP_MS - now);
+}
 
 /**
  * The Space's plans as main pushes them. Modelled on `useRepositoriesState.ts`, with one difference: main starts no
- * read of its own, so this hook asks, every `PLANS_REFRESH_MS`, and only while the band is in view and the window is
- * in front (an interval that finds it is not does nothing), when the window comes to the front after 30 seconds or
- * more, and when Refresh is pressed. A state replaces the shown one only when its `version` is not lower. An answer
- * main could not give is shown as that, with no list: a list from before is never put back in its place.
+ * read of its own, so this hook asks, on the schedule of `nextPlansDelay`, only while the band is in view and the window
+ * is visible; when the window becomes visible and the newest read is 30 seconds old or more; and when Refresh is pressed.
+ * A state replaces the shown one only when its `version` is not lower. An answer main could not give is shown as that,
+ * with no list: a list from before is never put back in its place.
  */
 export function usePlansState(): PlansStateView {
   const [plans, setPlans] = useState<SpacePlansState | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [requested, setRequested] = useState(false);
   const [inView, setInView] = useState(true);
-  const [front, setFront] = useState(windowInFront);
+  const [visible, setVisible] = useState(windowVisible);
   const [opening, setOpening] = useState<number | null>(null);
   const [openProblem, setOpenProblem] = useState<string | null>(null);
   const lastStart = useRef<number | null>(null);
@@ -47,7 +68,8 @@ export function usePlansState(): PlansStateView {
   const observer = useRef<IntersectionObserver | null>(null);
   const inViewRef = useRef(inView);
   inViewRef.current = inView;
-  const active = inView && front;
+  const timer = useRef<number | null>(null);
+  const active = inView && visible;
 
   const isUnavailable = useCallback((): boolean => latest.current?.outcome === 'unavailable', []);
 
@@ -58,6 +80,32 @@ export function usePlansState(): PlansStateView {
     }
     setProblem(null);
   }, []);
+
+  const canRead = useCallback(
+    (): boolean => inViewRef.current && windowVisible() && !isUnavailable(),
+    [isUnavailable],
+  );
+
+  // `read` and `schedule` call each other: `schedule` sets a timer that calls `read`, `read` ends by scheduling.
+  const readRef = useRef<() => Promise<void>>(async () => undefined);
+
+  const schedule = useCallback((): void => {
+    if (timer.current !== null) window.clearTimeout(timer.current);
+    timer.current = null;
+    if (!canRead()) return;
+    const current = latest.current;
+    // the newest read the state stands on: a list says when its read started; a failed read has none
+    const readStart =
+      current?.units !== null && current?.units !== undefined ? current.readAt : null;
+    const delay = nextPlansDelay(Date.now(), lastStart.current, readStart);
+    timer.current = window.setTimeout(
+      () => {
+        timer.current = null;
+        if (canRead()) void readRef.current();
+      },
+      Math.max(0, delay),
+    );
+  }, [canRead]);
 
   const read = useCallback((): Promise<void> => {
     lastStart.current = Date.now();
@@ -77,8 +125,10 @@ export function usePlansState(): PlansStateView {
         setProblem(
           `Plans could not be asked for: ${caught instanceof Error ? caught.message : String(caught)}`,
         );
-      });
-  }, [take]);
+      })
+      .then(schedule);
+  }, [take, schedule]);
+  readRef.current = read;
 
   useEffect(() => {
     let live = true;
@@ -94,36 +144,45 @@ export function usePlansState(): PlansStateView {
     };
   }, [take]);
 
+  // The window's visibility changes: read at once if the newest read is 30 seconds old or more, else wait for its time.
   useEffect(() => {
-    const due = (): boolean =>
-      lastStart.current === null || Date.now() - lastStart.current >= PLANS_REFRESH_MS;
     const wake = (): void => {
-      const now = windowInFront();
-      setFront(now);
-      if (now && inViewRef.current && !isUnavailable() && due()) void read();
+      setVisible(windowVisible());
+      if (!canRead()) {
+        if (timer.current !== null) window.clearTimeout(timer.current);
+        timer.current = null;
+        return;
+      }
+      const current = latest.current;
+      const readStart =
+        current?.units !== null && current?.units !== undefined ? current.readAt : null;
+      if (nextPlansDelay(Date.now(), lastStart.current, readStart) <= 0) void read();
+      else schedule();
     };
-    const timer = window.setInterval(() => {
-      const now = windowInFront();
-      setFront(now);
-      if (now && inViewRef.current && !isUnavailable()) void read();
-    }, PLANS_REFRESH_MS);
-    window.addEventListener('focus', wake);
-    window.addEventListener('blur', wake);
     document.addEventListener('visibilitychange', wake);
+    window.addEventListener('focus', wake);
     wake();
     return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('focus', wake);
-      window.removeEventListener('blur', wake);
       document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('focus', wake);
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = null;
     };
-  }, [read, isUnavailable]);
+  }, [read, schedule, canRead]);
 
-  // the band came into view: read at once if the last read is 30 seconds old or more
+  // the band came into or went out of view
   useEffect(() => {
-    const old = lastStart.current === null || Date.now() - lastStart.current >= PLANS_REFRESH_MS;
-    if (inView && windowInFront() && !isUnavailable() && old) void read();
-  }, [inView, read, isUnavailable]);
+    if (!inView) {
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = null;
+      return;
+    }
+    const current = latest.current;
+    const readStart =
+      current?.units !== null && current?.units !== undefined ? current.readAt : null;
+    if (canRead() && nextPlansDelay(Date.now(), lastStart.current, readStart) <= 0) void read();
+    else schedule();
+  }, [inView, read, schedule, canRead]);
 
   const refresh = useCallback((): void => {
     setRequested(true);

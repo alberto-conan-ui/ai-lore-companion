@@ -60,6 +60,13 @@ import { sessionServer } from './session-server/index.js';
 /** The refresh interval: five minutes (a proposal of the architecture document; a setting). */
 export const DEFAULT_PROJECT_REFRESH_MS = 5 * 60 * 1000;
 
+/**
+ * A window gaining focus reads the whole Project again only when the last full read started this long ago or more: the
+ * paged Project read is what tripped the rate limit, and focus comes and goes many times a minute. The timer and an explicit
+ * Refresh are not held back.
+ */
+export const FOCUS_READ_MIN_MS = 5 * 60 * 1000;
+
 /** What a refresh service is built from. */
 export type ProjectRefreshOptions = {
   github: () => Promise<GitHubPort>;
@@ -108,6 +115,8 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
   let queued: Promise<void> | null = null;
   let disposed = false;
   let attempted = false;
+  /** When the last full read started, in milliseconds; `null` when none has. */
+  let lastRunAt: number | null = null;
   let drafts: DashboardDraft[] = [];
   /** The `version` of the last state given; each state gets the next number. */
   let version = 0;
@@ -311,6 +320,7 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
 
   const run = (): Promise<void> => {
     attempted = true;
+    lastRunAt = now().getTime();
     const started = (async () => {
       try {
         await read();
@@ -358,6 +368,7 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
     current,
     refresh,
     windowFocused() {
+      if (lastRunAt !== null && now().getTime() - lastRunAt < FOCUS_READ_MIN_MS) return;
       void refresh();
     },
     readOnce() {

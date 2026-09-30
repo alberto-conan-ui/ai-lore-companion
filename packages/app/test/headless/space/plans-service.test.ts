@@ -18,6 +18,7 @@ const ROOT = '/space';
 
 type Unit = Record<string, unknown>;
 const unit = (number: number, extra: Unit = {}): Unit => ({
+  repo: 'alberto-conan-ui/ai-lore',
   number,
   title: `Unit ${String(number)}`,
   level: 'Focus',
@@ -53,6 +54,8 @@ const tool = (state: string, extra: Unit = {}): string =>
     ...extra,
   });
 
+const movedNow = new Set<number>();
+
 type Scripted = { stdout?: string; result?: Partial<RunResult> };
 
 function scriptedRunner(answers: Scripted[]): {
@@ -65,6 +68,17 @@ function scriptedRunner(answers: Scripted[]): {
     runner: {
       run: async (bin, args, opts) => {
         calls.push({ bin, args, cwd: opts?.cwd, timeoutMs: opts?.timeoutMs });
+        if (args[1] === '--dashboard') {
+          // where a row opens, looked up at the click: epics in `movedNow` open /gh/<n>, the others as the list said
+          const n = Number(args[2]);
+          const dashboard =
+            n === 131 && !movedNow.has(131) ? '/epic-factory/dashboard.html' : `/gh/${String(n)}`;
+          return {
+            code: 0,
+            stdout: JSON.stringify({ ok: true, number: n, dashboard, on_github: true }),
+            stderr: '',
+          };
+        }
         const next = answers.shift() ?? answers[0];
         assert.ok(next, 'the runner was asked more times than the test scripted');
         return { code: 0, stdout: next.stdout ?? '', stderr: '', ...next.result };
@@ -81,6 +95,7 @@ function service(answers: Scripted[], more: Partial<Parameters<typeof createSpac
     liveGitHub: true,
     env: {},
     toolExists: () => true,
+    realRoot: ROOT,
     ...more,
   });
   return { plans, ...run };
@@ -280,7 +295,7 @@ type Fake = {
   options: Partial<Parameters<typeof createSpacePlans>[0]>;
 };
 
-function fakeServer(up: boolean, answersAfterSpawn = true): Fake {
+function fakeServer(up: boolean, answersAfterSpawn = true, demoServer = false): Fake {
   const listening = { up };
   const clock = { t: 0 };
   const spawned: Fake['spawned'] = [];
@@ -295,7 +310,7 @@ function fakeServer(up: boolean, answersAfterSpawn = true): Fake {
   const fetchFn = (async (url: string | URL | Request) => {
     assert.equal(String(url), 'http://127.0.0.1:8765/api/ping');
     if (!listening.up) throw new Error('connect ECONNREFUSED');
-    return { ok: true, json: async () => ({ ok: true }) };
+    return { ok: true, json: async () => ({ ok: true, root: ROOT, demo: demoServer }) };
   }) as unknown as typeof fetch;
   return {
     fetch: fetchFn,
@@ -451,4 +466,167 @@ test('the demo switch starts the server on the fake GitHub as well', async () =>
   await plans.refresh();
   await plans.open(346);
   assert.deepEqual(fake.spawned[0]?.args, [EDIT_TOOL, '--demo']);
+});
+
+// ---- the review of #398: whose server, where a row opens, what a list says ----
+
+test("H5: another Space's edit.py on port 8765 is not taken for ours: our own starts on a free port and is used", async () => {
+  const fake = fakeServer(true);
+  const foreign = (async (url: string | URL | Request) => {
+    const origin = String(url).replace('/api/ping', '');
+    if (origin === 'http://127.0.0.1:8765') {
+      return { ok: true, json: async () => ({ ok: true, root: '/spaceA', demo: false }) };
+    }
+    if (fake.spawned.length === 0 || fake.clock.t < 1000) throw new Error('connect ECONNREFUSED');
+    return { ok: true, json: async () => ({ ok: true, root: ROOT, demo: false }) };
+  }) as unknown as typeof fetch;
+  const { plans } = service(listed(), {
+    ...fake.options,
+    fetch: foreign,
+    freePort: async () => 51234,
+  });
+  await plans.refresh();
+  const answer = await plans.open(346);
+  assert.deepEqual(answer, { ok: true, url: 'http://127.0.0.1:51234/gh/346', startedServer: true });
+  assert.deepEqual(fake.spawned, [
+    { bin: 'python3', args: [EDIT_TOOL, '--port', '51234'], cwd: ROOT },
+  ]);
+});
+
+test("H5: a demo edit.py is not this Space's server, and a real one is not a demo's", async () => {
+  const demoOnPort = fakeServer(true, true, true);
+  const real = service(listed(), { ...demoOnPort.options, freePort: async () => 51235 });
+  await real.plans.refresh();
+  await real.plans.open(346);
+  assert.deepEqual(
+    demoOnPort.spawned[0]?.args,
+    [EDIT_TOOL, '--port', '51235'],
+    'a demo page is never shown as this plan',
+  );
+  const realOnPort = fakeServer(true, true, false);
+  const demo = service(listed(), {
+    ...realOnPort.options,
+    env: { COCKPIT_PLANS_DEMO: '1' },
+    liveGitHub: false,
+    freePort: async () => 51236,
+  });
+  await demo.plans.refresh();
+  await demo.plans.open(346);
+  assert.deepEqual(realOnPort.spawned[0]?.args, [EDIT_TOOL, '--port', '51236', '--demo']);
+});
+
+test('H5: an edit.py that does not say whose it is (an old one) is not proven, so it is not opened on', async () => {
+  const fake = fakeServer(true);
+  const old = (async () => ({
+    ok: true,
+    json: async () => ({ ok: true }),
+  })) as unknown as typeof fetch;
+  const { plans } = service(listed(), { ...fake.options, fetch: old, freePort: async () => 51237 });
+  await plans.refresh();
+  await plans.open(346);
+  assert.equal(fake.spawned.length, 1);
+});
+
+test('H6: where a row opens is looked up when it is clicked: an epic that moved since the list was read opens /gh/<n>', async () => {
+  const fake = fakeServer(true);
+  const { plans, calls } = service(listed(), fake.options);
+  await plans.refresh();
+  movedNow.add(131);
+  try {
+    assert.deepEqual(await plans.open(131), {
+      ok: true,
+      url: 'http://127.0.0.1:8765/gh/131',
+      startedServer: false,
+    });
+  } finally {
+    movedNow.delete(131);
+  }
+  assert.deepEqual(calls[1], {
+    bin: 'python3',
+    args: [PLANS_TOOL, '--dashboard', '131'],
+    cwd: ROOT,
+    timeoutMs: 20_000,
+  });
+});
+
+test('H6: a lookup that fails or cannot be read opens nothing', async () => {
+  const fake = fakeServer(true);
+  for (const answer of [
+    { code: 1, stdout: '', stderr: 'boom' },
+    { code: 0, stdout: 'not json', stderr: '' },
+    {
+      code: 0,
+      stdout: JSON.stringify({ ok: true, number: 999, dashboard: '/gh/999', on_github: true }),
+      stderr: '',
+    },
+    {
+      code: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        number: 346,
+        dashboard: '//evil.example/x',
+        on_github: true,
+      }),
+      stderr: '',
+    },
+  ]) {
+    const runner: CommandRunner = {
+      run: async (_bin, args) =>
+        args[1] === '--dashboard' ? answer : { code: 0, stdout: tool('complete'), stderr: '' },
+    };
+    const plans = createSpacePlans({
+      runner,
+      root: ROOT,
+      liveGitHub: true,
+      env: {},
+      toolExists: () => true,
+      realRoot: ROOT,
+      ...fake.options,
+    });
+    await plans.refresh();
+    const opened = await plans.open(346);
+    assert.equal(opened.ok, false, JSON.stringify(answer));
+  }
+  assert.equal(fake.spawned.length, 0);
+});
+
+test('H3/H4: an incomplete read with our own limit has no read time and no rows, and says so; it is not failed', async () => {
+  const { plans } = service([
+    {
+      stdout: tool('incomplete', {
+        read_at: null,
+        units: [],
+        head: 'Read took too long',
+        text: 'the read took longer than 90 s, so it was stopped; it was not refused',
+        missing: [{ unit: null, what: 'the list of units', why: 'nothing was read' }],
+      }),
+    },
+  ]);
+  const state = await plans.refresh();
+  assert.equal(state.outcome, 'incomplete');
+  assert.deepEqual(state.units, []);
+  assert.equal(state.readAt, null);
+  assert.equal(state.head, 'Read took too long');
+});
+
+test('H3: what the tool left out is carried to the band, and a demo list is marked as demo', async () => {
+  const { plans } = service([
+    {
+      stdout: tool('complete', { left_out: ['2 issues with no Level were left out.'], demo: true }),
+    },
+  ]);
+  const state = await plans.refresh();
+  assert.deepEqual(state.leftOut, ['2 issues with no Level were left out.']);
+  assert.equal(state.demo, true);
+});
+
+test('identity is repository plus number: the same number in two repositories is two units, one twice is refused', () => {
+  const two = parsePlans(
+    tool('complete', { units: [unit(133), unit(133, { repo: 'alberto-conan-ui/other' })] }),
+  );
+  assert.ok(two.ok);
+  const twice = parsePlans(tool('complete', { units: [unit(133), unit(133)] }));
+  assert.equal(twice.ok, false);
+  const noRepo = parsePlans(tool('complete', { units: [{ ...unit(133), repo: undefined }] }));
+  assert.equal(noRepo.ok, false);
 });

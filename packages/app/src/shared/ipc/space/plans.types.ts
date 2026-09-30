@@ -54,8 +54,12 @@ export type SpacePlansState = {
   text: string;
   /** What an incomplete read did not read, one line each. */
   missing: readonly string[];
-  /** The tool's line about how quickly a brand-new epic appears. */
+  /** The tool's qualification of "changes show within a minute". */
   note: string;
+  /** What the tool left out of a list that is otherwise whole (other repositories' issues, issues with no Level), one line each. */
+  leftOut: readonly string[];
+  /** Whether this is demo data from the fake GitHub: the band says so, and never offers it as this Space's plans. */
+  demo: boolean;
 };
 
 export type SpacePlansArg = Record<string, never>;
