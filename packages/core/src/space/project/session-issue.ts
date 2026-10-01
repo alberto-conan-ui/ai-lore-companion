@@ -146,9 +146,10 @@ export function formatSessionIssueBody(content: SessionIssueContent): string {
 export async function findSpaceProject(
   github: GitHubPort,
   space: { repository: string; name: string; project: number },
+  signal?: AbortSignal,
 ): Promise<GitHubResult<ProjectInfo>> {
   const owner = space.repository.split('/')[0] ?? '';
-  const found = await github.findProject({ owner, title: space.name });
+  const found = await github.findProject({ owner, title: space.name, signal });
   if (!found.ok) return found;
   const project = found.value;
   if (project === null || (space.project > 0 && project.number !== space.project)) {

@@ -323,6 +323,7 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
   };
 
   const readOnce = async (): Promise<void> => {
+    if (disposed) return;
     if (!toolExists()) {
       listed = new Set();
       held = { ...EMPTY, outcome: 'unavailable' };
@@ -341,6 +342,7 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
       cwd: options.root,
       timeoutMs: PLANS_TIMEOUT_MS,
     });
+    if (disposed) return; // the Space closed while the tool ran: its answer is not kept
     if (result.failure === 'timeout') {
       fail(
         'Plans could not be read',
@@ -366,6 +368,11 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
     if (running !== null) return running;
     // started on a later tick, so `running` is set when the first state is pushed and says it is reading
     const run = Promise.resolve().then(async (): Promise<SpacePlansState> => {
+      // Rule N1: the owner is checked where the work starts, not where it was queued: disposed since, nothing runs
+      if (disposed) {
+        running = null;
+        return current();
+      }
       emit();
       try {
         await readOnce();

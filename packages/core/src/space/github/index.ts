@@ -60,6 +60,7 @@ export {
   retryAfterSeconds,
   unreachable as gitHubUnreachable,
 } from './errors.js';
+export { CLOSED_MESSAGE } from './port.js';
 export type { GitHubPort, GitHubResult } from './port.js';
 export { bodyHasMarker, formatIssueMarker, isIssueMarker } from './marker.js';
 export {

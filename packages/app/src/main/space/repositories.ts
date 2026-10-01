@@ -215,7 +215,9 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
     }
   };
 
+  // Rule N1: the owner is checked where work STARTS: every step after an await re-checks `disposed` before it calls a port.
   const run = (): Promise<void> => {
+    if (disposed) return Promise.resolve();
     attempted = true;
     const started = (async () => {
       try {
@@ -252,6 +254,7 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
                   if (loreRoot?.tracking.tracked) {
                     const spaceRoot = loreRoot.tracking.workTree;
                     const loreResult = await readLore(spaceRoot);
+                    if (disposed) return uncheckedPayloadMirrors(roots, checkedAt);
                     if (loreResult.ok) {
                       const mirrors: MirrorCard[] = loreResult.value.parts.mirrors.map(
                         (e: { card: MirrorCard }) => e.card,
