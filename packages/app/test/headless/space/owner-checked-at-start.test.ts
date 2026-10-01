@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CommandRunner, GitHubPort } from '@ai-lore-companion/core';
-import { createFakeGitHub } from '@ai-lore-companion/core/testing';
+import { createFakeGitHub, makeSpaceFixture } from '@ai-lore-companion/core/testing';
 import { createSpacePlans } from '../../../src/main/space/plans.js';
 import { createProjectRefresh } from '../../../src/main/space/project-refresh.js';
 import { createSpaceRepositories } from '../../../src/main/space/repositories.js';
+import { spaceRoots } from '../../../src/main/space/roots-service.js';
+import { LORE_TEMPLATE_DIR } from './space-harness.js';
 
 // Rule N1 (review of slice 5a, findings 2 and 3): the owner is checked where work STARTS, not where it was queued. A service
 // that is disposed while a step is queued or pending makes no port call and spawns nothing afterwards.
@@ -257,4 +259,110 @@ test("P1: the Project refresh hands the port its owner's signal, and aborts it a
   assert.equal(signals[0]?.aborted, true, 'the page loop in the port would go on');
   release();
   await pending;
+});
+
+// ---- companion#40: the compound helpers carry the owner too ----
+
+test('N1 in the helpers (probe roots-after-close): closed while the first roots command is out, no command starts after', async () => {
+  const space = await makeSpaceFixture({
+    templateDir: LORE_TEMPLATE_DIR,
+    name: 'roots-after-close',
+  });
+  try {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((done) => {
+      release = done;
+    });
+    let closed = false;
+    const calls: { afterClose: boolean; bin: string }[] = [];
+    const service = spaceRoots.create({
+      root: space.root,
+      key: 'roots-after-close',
+      runner: {
+        run: async (bin: string) => {
+          calls.push({ afterClose: closed, bin });
+          if (calls.length === 1) await gate;
+          return { code: 1, stdout: '', stderr: 'probe: not a git repository' };
+        },
+      },
+      log: { info() {}, warn() {} },
+      service() {
+        throw new Error('No desk or tracker should be started');
+      },
+    } as never);
+    const pending = service.running();
+    for (let i = 0; i < 1000 && calls.length === 0; i++)
+      await new Promise((done) => setTimeout(done, 1));
+    assert.ok(calls.length > 0, 'the first read was not reached');
+    closed = true;
+    const closing = service.close();
+    release();
+    await pending;
+    await closing;
+    assert.deepEqual(
+      calls.filter((call) => call.afterClose),
+      [],
+      'a command started after close',
+    );
+  } finally {
+    space.cleanup();
+  }
+});
+
+test('N1 in the helpers (probe repositories-after-dispose): disposed while the first command of a compound read is out, none after', async () => {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  let disposed = false;
+  const calls: { afterDispose: boolean; bin: string }[] = [];
+  const root = {
+    id: 'repo:probe',
+    name: 'probe',
+    kind: 'repository',
+    path: process.cwd(),
+    tracking: { tracked: true, workTree: process.cwd(), subPath: '' },
+  };
+  const list = {
+    roots: [
+      {
+        root,
+        baseline: 'HEAD',
+        defaultBaseline: null,
+        baselineNotice: null,
+        snapshot: { rootId: root.id, baseline: 'HEAD', status: 'unread' },
+        github: null,
+      },
+    ],
+    deskWritable: false,
+    deskNotice: null,
+  };
+  const service = createSpaceRepositories({
+    intervalMs: 0,
+    roots: async () => ({ ok: true, value: {} }) as never,
+    list: () => list as never,
+    runner: {
+      run: async (bin) => {
+        calls.push({ afterDispose: disposed, bin });
+        if (calls.length === 1) {
+          await gate;
+          return { code: 0, stdout: '/fake/git\n', stderr: '' };
+        }
+        return { code: 1, stdout: '', stderr: '' };
+      },
+    },
+  });
+  const pending = service.refresh();
+  for (let i = 0; i < 100 && calls.length === 0; i++)
+    await new Promise((done) => setImmediate(done));
+  assert.ok(calls.length > 0, 'the first read was not reached');
+  disposed = true;
+  service.dispose();
+  release();
+  await pending;
+  assert.deepEqual(
+    calls.filter((call) => call.afterDispose),
+    [],
+    'a command started after dispose',
+  );
 });

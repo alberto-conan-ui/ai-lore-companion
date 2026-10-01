@@ -3,8 +3,10 @@ import { test } from 'node:test';
 import {
   CLOSED_MESSAGE,
   type GitHubPort,
+  OWNER_CLOSED_MESSAGE,
   createGhCliGitHub,
   formatIssueMarker,
+  ownedRunner,
 } from '../../src/index.js';
 import * as Q from '../../src/space/github/queries.js';
 import { createFakeGitHub } from '../../src/space/testing/index.js';
@@ -131,4 +133,93 @@ test('findProject: aborted before it starts makes no call; the fake keeps the sa
     signal: owner.signal,
   });
   assert.equal(viaFake.ok, false);
+});
+
+// Rule N2: cancellation is checked after an await as well as before. An answer that arrives after the owner closed is "not
+// read", never `ok`: for a final page (readProject, markers that are absent) and for an early match (findProject, a marker found).
+test('N2: an answer that arrives after the abort is "not read" for all four multi-page methods, final page and early match', async () => {
+  const { fake, project, repository } = await world();
+  const marked = await fake.createIssue({
+    repository,
+    title: 'marked',
+    body: `x\n${formatIssueMarker('space', 'present')}`,
+    labels: [],
+  });
+  assert.ok(marked.ok);
+  const cases: [
+    string,
+    (
+      port: GitHubPort,
+      signal: AbortSignal,
+    ) => Promise<{ ok: boolean; error?: { message: string } }>,
+  ][] = [
+    ['readProject (final page)', (port, signal) => port.readProject({ project, signal })],
+    [
+      'findProject (early match)',
+      (port, signal) => port.findProject({ owner: 'fake-human', title: 'space', signal }),
+    ],
+    [
+      'findIssuesByMarkers (final page)',
+      (port, signal) =>
+        port.findIssuesByMarkers({
+          repository,
+          markers: [formatIssueMarker('space', 'absent')],
+          signal,
+        }),
+    ],
+    [
+      'findIssuesByMarkers (early match)',
+      (port, signal) =>
+        port.findIssuesByMarkers({
+          repository,
+          markers: [formatIssueMarker('space', 'present')],
+          signal,
+        }),
+    ],
+    [
+      'findAllIssuesByMarkers (final page)',
+      (port, signal) =>
+        port.findAllIssuesByMarkers({
+          repository,
+          markers: [formatIssueMarker('space', 'absent')],
+          signal,
+        }),
+    ],
+  ];
+  for (const [name, call] of cases) {
+    const owner = new AbortController();
+    const gh = createSimulatedGh(fake);
+    const port = createGhCliGitHub({
+      run: async (...args: Parameters<typeof gh.run>) => {
+        const answer = await gh.run(...args);
+        owner.abort(); // the owner closes while this answer is on its way back
+        return answer;
+      },
+    }) as GitHubPort;
+    const answered = await call(port, owner.signal);
+    assert.equal(answered.ok, false, `${name}: an answer after the abort was taken as ok`);
+    assert.equal(answered.error?.message, CLOSED_MESSAGE, name);
+  }
+});
+
+test('ownedRunner: starts no command once aborted, and refuses an answer that arrives after the abort', async () => {
+  const owner = new AbortController();
+  const ran: string[] = [];
+  const runner = ownedRunner(
+    {
+      run: async (bin) => {
+        ran.push(bin);
+        if (bin === 'second') owner.abort();
+        return { code: 0, stdout: 'ok', stderr: '' };
+      },
+    },
+    owner.signal,
+  );
+  assert.equal((await runner.run('first', [])).code, 0);
+  const second = await runner.run('second', []); // aborted while it ran: its answer is refused
+  assert.equal(second.failure, 'refused');
+  assert.equal(second.stderr, OWNER_CLOSED_MESSAGE);
+  const third = await runner.run('third', []);
+  assert.equal(third.failure, 'refused');
+  assert.deepEqual(ran, ['first', 'second'], 'a command was started after the abort');
 });

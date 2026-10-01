@@ -303,8 +303,11 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
     opts: { missingIsNull?: boolean; absentIsNull?: boolean; signal?: AbortSignal } = {},
   ): Promise<GitHubResult<unknown>> {
     // the owner closed: no call is started, and what was being read is "not read", never complete or empty
-    if (opts.signal?.aborted === true) return err(failed(CLOSED_MESSAGE));
+    const cancelled = (): boolean => opts.signal?.aborted === true;
+    if (cancelled()) return err(failed(CLOSED_MESSAGE));
     const result = await run(GRAPHQL_ARGS, JSON.stringify({ query, variables }));
+    // Rule N2: the owner may have closed while the call was out: that answer is "not read", never taken as `ok`
+    if (cancelled()) return err(failed(CLOSED_MESSAGE));
     const response = parseGhApiResponse(result.stdout);
     const errors = graphQlErrors(response.body);
     if (opts.absentIsNull === true && result.failure === undefined && isSchemaAbsence(errors)) {
