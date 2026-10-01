@@ -6,6 +6,8 @@ import { MINUTE_MS, REFRESH_LATE_MS } from './plansText.js';
 export const PLANS_REFRESH_MS = 30_000;
 /** No ask is made sooner than this after the last one (a clock that is early, a read that came back from the cache). */
 export const PLANS_MIN_GAP_MS = 5_000;
+/** How often the band's ages are redrawn while it is shown and the window is visible. */
+export const AGE_TICK_MS = 1_000;
 
 /** What the Plans band knows of the Space's plans, and its actions. */
 export type PlansStateView = {
@@ -285,6 +287,18 @@ export function usePlansState(): PlansStateView {
       promiseTimer.current = null;
     };
   });
+
+  // The ages the band says ("READ 5S AGO", "updated 12s ago") are counted from the hook's own clock, and that clock ticks every
+  // second while a list is shown, the band is in view and the window is visible: an age is never said more than about a second
+  // younger than it is. The ticker is a timer like any other: it stops when the band is hidden or unmounted (the rule of K1).
+  const showsAges = plans !== null && plans.units !== null;
+  useEffect(() => {
+    if (!showsAges || !active || !mounted.current) return;
+    const ticker = window.setInterval(() => {
+      if (mounted.current) setTick((n) => n + 1);
+    }, AGE_TICK_MS);
+    return () => window.clearInterval(ticker);
+  }, [showsAges, active]);
 
   return {
     plans,

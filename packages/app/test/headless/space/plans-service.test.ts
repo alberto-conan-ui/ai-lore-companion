@@ -750,3 +750,86 @@ test('K1: the service reads only when asked: with no subscriber and no request i
     mock.timers.reset();
   }
 });
+
+test('L1: an open() in flight when the service is disposed starts no server (or stops it at once) and opens nothing', async () => {
+  const children: { killed: boolean }[] = [];
+  let releasePing: (() => void) | null = null;
+  let pings = 0;
+  let t = 0;
+  const plans = createSpacePlans({
+    runner: {
+      run: async (_bin, args) =>
+        args[1] === '--dashboard'
+          ? {
+              code: 0,
+              stdout: JSON.stringify({
+                ok: true,
+                number: 346,
+                dashboard: '/gh/346',
+                on_github: true,
+              }),
+              stderr: '',
+            }
+          : { code: 0, stdout: tool('complete'), stderr: '' },
+    },
+    root: ROOT,
+    realRoot: ROOT,
+    liveGitHub: true,
+    env: {},
+    toolExists: () => true,
+    fetch: (async () => {
+      if (pings++ === 0) {
+        await new Promise<void>((done) => {
+          releasePing = done;
+        });
+      }
+      if (children.length === 0) throw new Error('fetch failed ECONNREFUSED');
+      return { ok: true, json: async () => ({ ok: true, root: ROOT, demo: false }) };
+    }) as unknown as typeof fetch,
+    now: () => t,
+    sleep: async (ms) => {
+      t += ms;
+    },
+    spawn: () => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: null,
+        stdin: null,
+        killed: false,
+        exitCode: null as number | null,
+        kill() {
+          this.killed = true;
+          return true;
+        },
+      });
+      children.push(child);
+      return child as never;
+    },
+  });
+  await plans.refresh();
+  const opening = plans.open(346);
+  for (let i = 0; i < 20 && releasePing === null; i++)
+    await new Promise((done) => setImmediate(done));
+  plans.dispose(); // the last window of the Space closed
+  (releasePing as unknown as () => void)();
+  const answer = await opening;
+  assert.equal(children.length, 0, 'children started after dispose');
+  assert.equal(answer.ok, false, 'a browser would be opened for a closed Space');
+  assert.equal((await plans.open(346)).ok, false);
+  assert.equal(children.length, 0);
+});
+
+test('L1: a child that was started and then the service is disposed while it starts is stopped at once', async () => {
+  const fake = fakeServer(false, false);
+  const { plans } = service(listed(), {
+    ...fake.options,
+    sleep: async (ms) => {
+      fake.clock.t += ms;
+      plans.dispose(); // the Space closes while the server is starting
+    },
+  });
+  await plans.refresh();
+  const answer = await plans.open(346);
+  assert.equal(answer.ok, false);
+  assert.equal(fake.spawned.length, 1);
+  assert.equal(fake.child.killed, true);
+});

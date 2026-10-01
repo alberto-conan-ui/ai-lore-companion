@@ -714,6 +714,10 @@ function later(): { promise: Promise<unknown>; resolve: (x: unknown) => void } {
   return { promise, resolve };
 }
 
+const hiddenNow = (): void => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+};
+
 const visibleNow = (): void => {
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
 };
@@ -791,4 +795,43 @@ test('K2: a refresh left unanswered withdraws the minute promise on a timer, bef
   expect(promised()).toBe(false);
   expect(screen.getByTestId('plans-minute').textContent).toMatch(/The minute is not promised/);
   expect(screen.getByTestId('plans-minute').textContent).toContain('a refresh is still running');
+});
+
+test("L2: the ages in the heading and the rows follow the hook's own clock every second, and the ticker stops when hidden or unmounted", async () => {
+  vi.useFakeTimers({ now: T0 });
+  visibleNow();
+  const { refresh } = realCockpit();
+  refresh.mockResolvedValueOnce(
+    ok(state({ readAt: Date.now() - 5_000, units: [row(1, { updated: Date.now() - 12_000 })] })),
+  );
+  refresh.mockImplementation(() => new Promise(() => undefined));
+  const mounted = render(<Real />);
+  await act(async () => {});
+  expect(screen.getByTestId('plans-state').textContent).toContain('READ 5S AGO');
+  expect(screen.getByTestId('plans-row').textContent).toContain('updated 12s ago');
+  for (const [ms, heading, updated] of [
+    [1000, 'READ 6S AGO', 'updated 13s ago'],
+    [1000, 'READ 7S AGO', 'updated 14s ago'],
+    [8000, 'READ 15S AGO', 'updated 22s ago'],
+  ] as const) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+    expect(screen.getByTestId('plans-state').textContent).toContain(heading);
+    expect(screen.getByTestId('plans-row').textContent).toContain(updated);
+  }
+  // hidden: the ticker is gone
+  hiddenNow();
+  act(() => {
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  const during = vi.getTimerCount();
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10_000);
+  });
+  expect(vi.getTimerCount()).toBeLessThanOrEqual(during);
+  expect(screen.getByTestId('plans-state').textContent).toContain('PAUSED');
+  expect(screen.getByTestId('plans-state').textContent).toContain('READ 15S AGO'); // not redrawn while hidden
+  mounted.unmount();
+  expect(vi.getTimerCount()).toBe(0);
 });

@@ -454,18 +454,27 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
     return own;
   };
 
+  const closed = {
+    origin: DASHBOARD_ORIGIN,
+    started: false,
+    problem: 'The Space was closed.',
+  };
+
   const doEnsureServer = async (): Promise<{
     origin: string;
     started: boolean;
     problem: string | null;
   }> => {
+    if (disposed) return closed;
     if (serverOrigin !== null && (await probe(serverOrigin)) === 'ours') {
-      return { origin: serverOrigin, started: false, problem: null };
+      return disposed ? closed : { origin: serverOrigin, started: false, problem: null };
     }
+    if (disposed) return closed;
     serverOrigin = null;
     let own = [...children].find((candidate) => candidate.gone.why === null) ?? null;
     if (own === null) {
       const first = await probe(DASHBOARD_ORIGIN);
+      if (disposed) return closed; // the Space closed while the ping was out: nothing is started for it
       if (first === 'ours') {
         serverOrigin = DASHBOARD_ORIGIN;
         return { origin: DASHBOARD_ORIGIN, started: false, problem: null };
@@ -475,9 +484,17 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
     const deadline = now() + SERVER_START_WAIT_MS;
     while (now() < deadline) {
       await sleep(SERVER_POLL_MS);
+      if (disposed) {
+        stop(own); // dispose ran while this server was being started: it is stopped at once
+        return closed;
+      }
       if (own.gone.why !== null)
         return { origin: own.origin ?? DASHBOARD_ORIGIN, started: true, problem: own.gone.why };
       if (own.origin !== null && (await probe(own.origin)) === 'ours') {
+        if (disposed) {
+          stop(own);
+          return closed;
+        }
         serverOrigin = own.origin;
         return { origin: own.origin, started: true, problem: null };
       }
@@ -527,7 +544,16 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
     return { problem: `Where #${String(number)} opens could not be read from the tool's answer.` };
   };
 
+  const closedOpen: SpacePlansOpenResult = {
+    ok: false,
+    error: {
+      kind: 'not-opened',
+      message: 'The Space was closed, so its dashboard was not opened.',
+    },
+  };
+
   const open = async (number: number): Promise<SpacePlansOpenResult> => {
+    if (disposed) return closedOpen;
     if (!listed.has(number)) {
       return {
         ok: false,
@@ -538,10 +564,12 @@ export function createSpacePlans(options: SpacePlansOptions): SpacePlans {
       };
     }
     const found = await lookUp(number);
+    if (disposed) return closedOpen;
     if ('problem' in found) {
       return { ok: false, error: { kind: 'not-listed', message: found.problem } };
     }
     const served = await ensureServer();
+    if (disposed) return closedOpen; // the Space closed while this was waiting: the browser is not opened for it
     if (served.problem !== null) {
       return {
         ok: false,
