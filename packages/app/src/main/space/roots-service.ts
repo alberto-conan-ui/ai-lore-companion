@@ -408,6 +408,7 @@ function createSpaceRoots(context: SpaceContext): SpaceRoots {
       if (current !== null) return { ok: true as const, value: current };
       const resolved = await resolve();
       if (!resolved.ok) return resolved;
+      if (closed) return failure<RunningRoots>('roots-unavailable', CLOSED); // Rule N1: before a tracker is started
       const started = await start(resolved.value);
       current = started;
       return { ok: true as const, value: started };
@@ -468,6 +469,7 @@ function createSpaceRoots(context: SpaceContext): SpaceRoots {
         if (closed) return failure<RunningRoots>('roots-unavailable', CLOSED);
         const resolved = await resolve();
         if (!resolved.ok) return resolved;
+        if (closed) return failure<RunningRoots>('roots-unavailable', CLOSED);
         if (current !== null && current.signature === resolved.value.signature) {
           await current.tracker.refreshNow(rootId);
           return { ok: true as const, value: current };
@@ -475,6 +477,7 @@ function createSpaceRoots(context: SpaceContext): SpaceRoots {
         const before = current;
         current = null;
         if (before !== null) await stop(before);
+        if (closed) return failure<RunningRoots>('roots-unavailable', CLOSED);
         const started = await start(resolved.value);
         current = started;
         if (before !== null) {

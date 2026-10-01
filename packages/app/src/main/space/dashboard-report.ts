@@ -210,6 +210,7 @@ export function createDashboardReportService(
             diagnostic: currentDefinition.diagnostic,
           });
     await loadDefinition();
+    if (disposed) return state(); // Rule N1: the owner is checked where work starts
     const hadContext = context !== null;
     const definitionIdentity =
       currentDefinition === null
@@ -249,6 +250,7 @@ export function createDashboardReportService(
       })),
       now,
     });
+    if (disposed) return state();
     const nextFingerprint = sourceFingerprint(workbench);
     const contextChanged = contextFingerprint !== nextFingerprint;
     if (hadContext && (contextChanged || definitionChanged)) sourceGeneration += 1;

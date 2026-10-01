@@ -241,6 +241,8 @@ export const spaceUi = defineSpaceService<SpaceUi>({
       }
     };
 
+    let closedStore = false;
+
     const flush = (): void => {
       for (const concern of [...pending.keys()]) write(concern);
     };
@@ -267,7 +269,7 @@ export const spaceUi = defineSpaceService<SpaceUi>({
         return { state: parsed.data as JsonObject, notice: null };
       },
       save(concern, state) {
-        if (newer.has(concern) || !owns()) return 'not-writable';
+        if (closedStore || newer.has(concern) || !owns()) return 'not-writable'; // nothing is scheduled after dispose
         pending.set(concern, state);
         const timer = timers.get(concern);
         if (timer) clearTimeout(timer);
@@ -277,7 +279,10 @@ export const spaceUi = defineSpaceService<SpaceUi>({
         return 'scheduled';
       },
       flush,
-      dispose: flush,
+      dispose() {
+        flush();
+        closedStore = true;
+      },
     };
   },
   dispose: (service) => (service as Held).dispose(),

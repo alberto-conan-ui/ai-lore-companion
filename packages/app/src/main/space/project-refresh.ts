@@ -232,13 +232,17 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
     options.log?.info('project-refresh-failed', { ...fields, kind: error.kind });
   };
 
+  // Rule N1: the owner is checked where work STARTS. Every step of this chain that follows an await re-checks `disposed`
+  // immediately before it calls a port, so a refresh disposed while a step was pending makes no further call.
   const read = async (): Promise<void> => {
+    if (disposed) return;
     if (options.drafts !== undefined) {
       try {
         drafts = await options.drafts();
       } catch {
         /* Retain the last readable drafts. */
       }
+      if (disposed) return;
     }
     const manifest = options.manifest();
     const repository = manifest.github.repository;
@@ -250,12 +254,14 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
       return;
     }
     const github = await options.github();
+    if (disposed) return;
     if (project === null) {
       const found = await findSpaceProject(github, {
         repository,
         name: manifest.name,
         project: manifest.github.project,
       });
+      if (disposed) return;
       if (!found.ok) {
         failed(
           found.error,
@@ -267,7 +273,9 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
       }
       project = found.value;
     }
+    if (disposed) return;
     const snapshot = await github.readProject({ project });
+    if (disposed) return;
     if (!snapshot.ok) {
       if (snapshot.error.kind === 'not-found') {
         const gone = project;
@@ -290,8 +298,10 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
     const pullRequests: OpenPullRequest[] = [];
     let pullRequestsFailure: ProjectCacheFailure | null = null;
     for (const repository of repositories) {
+      if (disposed) return;
       try {
         const read = await github.openPullRequests({ repository, limit: 100 });
+        if (disposed) return;
         if (read.ok) pullRequests.push(...read.value);
         else {
           pullRequests.push(...previous.filter((pull) => pull.repository === repository));
@@ -319,6 +329,7 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
   };
 
   const run = (): Promise<void> => {
+    if (disposed) return Promise.resolve();
     attempted = true;
     lastRunAt = now().getTime();
     const started = (async () => {
