@@ -295,9 +295,10 @@ test('a Space that has no plans tool has no Plans band', () => {
 test('a window hidden says the band is paused and is not refreshing', () => {
   render(<BandPlans view={view(state(), { active: false })} now={NOW} />);
   expect(screen.getByTestId('plans-state').textContent).toContain('PAUSED');
-  expect(screen.getByTestId('plans-footer').textContent).toContain(
-    'Not refreshing while this window is hidden',
+  expect(screen.getByTestId('plans-minute').textContent).toContain(
+    'Not refreshing while this window is hidden, so the minute is not promised',
   );
+  expect(screen.getByTestId('plans-footer').textContent).not.toContain('within a minute');
 });
 
 test('a long list shows twelve rows and opens the rest on "show all"', () => {
@@ -617,4 +618,177 @@ test('the hook unsubscribes from pushes when the band goes away', async () => {
   expect(off).toHaveBeenCalledOnce();
   await settle(PLANS_REFRESH_MS * 2);
   expect(cockpit.spacePlansRefresh).toHaveBeenCalledTimes(1);
+});
+
+// ---- K2: the minute promise follows the read ----
+
+const promised = (): boolean =>
+  screen.getByTestId('dashboard-v2-plans').getAttribute('data-minute') === 'promised';
+
+test('K2: the promise is made while the shown read is under a minute old and a refresh is not late', () => {
+  const { rerender } = render(<BandPlans view={view(state({ readAt: NOW - 59_000 }))} now={NOW} />);
+  expect(promised()).toBe(true);
+  expect(screen.getByTestId('plans-footer').textContent).toContain('Changes show within a minute');
+  expect(screen.queryByTestId('plans-minute')).toBeNull();
+  // a refresh is due and pending, but not late: still promised
+  rerender(
+    <BandPlans
+      view={view(state({ readAt: NOW - 40_000 }), { pendingSince: NOW - 10_000 })}
+      now={NOW}
+    />,
+  );
+  expect(promised()).toBe(true);
+});
+
+for (const outcome of ['complete', 'incomplete'] as const) {
+  test(`K2: a ${outcome} list withdraws the promise once its read is a minute old, and says why`, () => {
+    render(
+      <BandPlans
+        view={view(state({ outcome, readAt: NOW - 61_000, head: 'h', text: 't' }))}
+        now={NOW}
+      />,
+    );
+    expect(promised()).toBe(false);
+    expect(screen.getByTestId('plans-minute').textContent).toBe(
+      'The minute is not promised: the list shown is from a read that started 61 seconds ago.',
+    );
+    expect(screen.getByTestId('plans-footer').textContent).not.toContain('within a minute');
+  });
+
+  test(`K2: a ${outcome} list withdraws the promise while a refresh has been pending more than 30 s`, () => {
+    render(
+      <BandPlans
+        view={view(state({ outcome, readAt: NOW - 45_000, head: 'h', text: 't' }), {
+          pendingSince: NOW - 31_000,
+        })}
+        now={NOW}
+      />,
+    );
+    expect(promised()).toBe(false);
+    expect(screen.getByTestId('plans-minute').textContent).toBe(
+      'The minute is not promised: the list shown is from a read that started 45 seconds ago; a refresh is still running.',
+    );
+  });
+}
+
+test('K2: with no list shown (reading, refused) nothing is promised and nothing is said about it', () => {
+  const { rerender } = render(<BandPlans view={view(null)} now={NOW} />);
+  expect(promised()).toBe(false);
+  expect(screen.queryByTestId('plans-minute')).toBeNull();
+  expect(screen.getByTestId('plans-footer').textContent).toBe('Each row opens its dashboard.');
+  rerender(<BandPlans view={view(down('refused'))} now={NOW} />);
+  expect(promised()).toBe(false);
+  expect(screen.getByTestId('plans-footer').textContent).toBe('Each row opens its dashboard.');
+});
+
+// ---- the real hook with fake timers (the independent review's probes of slice 5a) ----
+
+const T0 = 1_800_000_000_000;
+
+function Real() {
+  const v = usePlansState();
+  return <BandPlans view={v} now={Date.now()} />;
+}
+
+function realCockpit(over: Record<string, unknown> = {}) {
+  const push: { fn: (x: unknown) => void } = { fn: () => undefined };
+  const refresh = vi.fn();
+  (window as unknown as { cockpit: unknown }).cockpit = {
+    onSpacePlansState: (fn: (x: unknown) => void) => {
+      push.fn = fn;
+      return () => undefined;
+    },
+    spacePlansState: async () => ({ ok: true, value: { ...state(), outcome: null, units: null } }),
+    spacePlansRefresh: refresh,
+    spacePlansOpen: vi.fn(),
+    ...over,
+  };
+  return { refresh, push };
+}
+
+function later(): { promise: Promise<unknown>; resolve: (x: unknown) => void } {
+  let resolve: (x: unknown) => void = () => undefined;
+  const promise = new Promise<unknown>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+const visibleNow = (): void => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+};
+
+test('K1: a read that finishes after the band unmounted starts no polling, and nothing is read in 5 minutes', async () => {
+  vi.useFakeTimers({ now: T0 });
+  visibleNow();
+  const pending = later();
+  const { refresh } = realCockpit();
+  refresh
+    .mockImplementationOnce(() => pending.promise)
+    .mockImplementation(async () => ok(state({ version: 10, readAt: Date.now() })));
+  const mounted = render(<Real />);
+  await act(async () => {});
+  expect(refresh).toHaveBeenCalledTimes(1);
+  mounted.unmount();
+  await act(async () => pending.resolve(ok(state({ version: 2, readAt: Date.now() }))));
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+  });
+  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+test('K1: after unmount no timer is left, and a late push, subscription answer and open set nothing', async () => {
+  vi.useFakeTimers({ now: T0 });
+  visibleNow();
+  const answerState = later();
+  const answerOpen = later();
+  const { refresh, push } = realCockpit({
+    spacePlansState: () => answerState.promise,
+    spacePlansOpen: () => answerOpen.promise,
+  });
+  refresh.mockImplementation(async () => ok(state({ readAt: Date.now() })));
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const mounted = render(<Real />);
+  await act(async () => {});
+  act(() => {
+    (screen.getAllByTestId('plans-row')[0] as HTMLElement).click();
+  });
+  mounted.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+  await act(async () => {
+    push.fn(state({ version: 99 }));
+    answerState.resolve(ok(state({ version: 98 })));
+    answerOpen.resolve({ ok: false, error: { kind: 'not-listed', message: 'late' } });
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+  });
+  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(vi.getTimerCount()).toBe(0);
+  expect(errors).not.toHaveBeenCalled();
+});
+
+test('K2: a refresh left unanswered withdraws the minute promise on a timer, before any timeout', async () => {
+  vi.useFakeTimers({ now: T0 });
+  visibleNow();
+  const { refresh } = realCockpit({
+    spacePlansState: async () => ok(state({ readAt: Date.now() })),
+  });
+  refresh
+    .mockResolvedValueOnce(ok(state({ readAt: Date.now() })))
+    .mockImplementation(() => new Promise(() => undefined));
+  render(<Real />);
+  await act(async () => {});
+  expect(promised()).toBe(true);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(45_000); // the refresh asked at 30 s has been pending 15 s
+  });
+  expect(promised()).toBe(true);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(20_000); // pending 35 s, and the read is 65 s old
+  });
+  expect(promised()).toBe(false);
+  expect(screen.getByTestId('plans-minute').textContent).toMatch(/The minute is not promised/);
+  expect(screen.getByTestId('plans-minute').textContent).toContain('a refresh is still running');
 });

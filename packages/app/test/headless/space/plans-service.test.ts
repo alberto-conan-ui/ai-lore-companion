@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import type { CommandRunner, RunResult } from '@ai-lore-companion/core';
 import {
   EDIT_TOOL,
@@ -729,4 +729,24 @@ test('a Space with no plans tool is known to have none before any read', () => {
   const { plans, calls } = service([{ stdout: tool('complete') }], { toolExists: () => false });
   assert.equal(plans.current().outcome, 'unavailable');
   assert.equal(calls.length, 0);
+});
+
+test('K1: the service reads only when asked: with no subscriber and no request it never reads on its own, and after dispose it reads nothing', async () => {
+  mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  try {
+    const { plans, calls } = service([{ stdout: tool('complete') }]);
+    await plans.refresh();
+    assert.equal(calls.length, 1);
+    const unsubscribe = plans.subscribe(() => undefined);
+    unsubscribe(); // nobody is listening any more
+    mock.timers.tick(5 * 60_000);
+    await new Promise((done) => setImmediate(done));
+    assert.equal(calls.length, 1, 'a read on its own schedule');
+    plans.dispose();
+    await plans.refresh();
+    mock.timers.tick(5 * 60_000);
+    assert.equal(calls.length, 1, 'a read after dispose');
+  } finally {
+    mock.timers.reset();
+  }
 });
