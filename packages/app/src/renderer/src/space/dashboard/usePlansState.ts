@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SpacePlansState } from '../../../../shared/ipc.js';
+import { MINUTE_MS, REFRESH_LATE_MS } from './plansText.js';
 
 /** How old the newest read may be before the band asks again. The tool's own cache is strict at 30 seconds too. */
 export const PLANS_REFRESH_MS = 30_000;
 /** No ask is made sooner than this after the last one (a clock that is early, a read that came back from the cache). */
 export const PLANS_MIN_GAP_MS = 5_000;
+/** How often the band's ages are redrawn while it is shown and the window is visible. */
+export const AGE_TICK_MS = 1_000;
 
 /** What the Plans band knows of the Space's plans, and its actions. */
 export type PlansStateView = {
@@ -12,6 +15,10 @@ export type PlansStateView = {
   plans: SpacePlansState | null;
   /** Why main could not be asked, or `null`. When it is set there is no list: nothing is shown from before. */
   problem: string | null;
+  /** The time now, as of this render (the band's ages and its promise are counted from it, not from a page-level tick). */
+  now: number;
+  /** When the refresh that is still running was asked for, or `null` when none is. */
+  pendingSince: number | null;
   /** Whether a Refresh asked from this window has not answered yet. */
   requested: boolean;
   /** Whether the band is being read on its timer now: it is in view and the window is visible. */
@@ -61,8 +68,13 @@ export function usePlansState(): PlansStateView {
   const [inView, setInView] = useState(true);
   const [visible, setVisible] = useState(windowVisible);
   const [opening, setOpening] = useState<number | null>(null);
+  const [pendingSince, setPendingSince] = useState<number | null>(null);
+  const [, setTick] = useState(0);
   const [openProblem, setOpenProblem] = useState<string | null>(null);
   const lastStart = useRef<number | null>(null);
+  // Nothing outlives its owner: once the hook is unmounted no read is sent, no timer is set, no state is set, whatever completes
+  const mounted = useRef(false);
+  const promiseTimer = useRef<number | null>(null);
   // the state last taken, kept here as well so the timer never reads a render's stale copy
   const latest = useRef<SpacePlansState | null>(null);
   const observer = useRef<IntersectionObserver | null>(null);
@@ -74,6 +86,7 @@ export function usePlansState(): PlansStateView {
   const isUnavailable = useCallback((): boolean => latest.current?.outcome === 'unavailable', []);
 
   const take = useCallback((next: SpacePlansState): void => {
+    if (!mounted.current) return;
     if (latest.current === null || next.version >= latest.current.version) {
       latest.current = next;
       setPlans(next);
@@ -82,7 +95,7 @@ export function usePlansState(): PlansStateView {
   }, []);
 
   const canRead = useCallback(
-    (): boolean => inViewRef.current && windowVisible() && !isUnavailable(),
+    (): boolean => mounted.current && inViewRef.current && windowVisible() && !isUnavailable(),
     [isUnavailable],
   );
 
@@ -108,10 +121,14 @@ export function usePlansState(): PlansStateView {
   }, [canRead]);
 
   const read = useCallback((): Promise<void> => {
+    if (!mounted.current) return Promise.resolve();
     lastStart.current = Date.now();
+    setPendingSince(lastStart.current);
     return window.cockpit
       .spacePlansRefresh({})
       .then((answer) => {
+        if (!mounted.current) return;
+        setPendingSince(null);
         if (answer.ok) take(answer.value);
         else {
           latest.current = null;
@@ -120,23 +137,38 @@ export function usePlansState(): PlansStateView {
         }
       })
       .catch((caught: unknown) => {
+        if (!mounted.current) return;
+        setPendingSince(null);
         latest.current = null;
         setPlans(null);
         setProblem(
           `Plans could not be asked for: ${caught instanceof Error ? caught.message : String(caught)}`,
         );
       })
-      .then(schedule);
+      .then(() => {
+        if (mounted.current) schedule();
+      });
   }, [take, schedule]);
   readRef.current = read;
 
   useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (timer.current !== null) window.clearTimeout(timer.current);
+      timer.current = null;
+      if (promiseTimer.current !== null) window.clearTimeout(promiseTimer.current);
+      promiseTimer.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     let live = true;
     const off = window.cockpit.onSpacePlansState((next) => {
-      if (live) take(next);
+      if (live && mounted.current) take(next);
     });
     void window.cockpit.spacePlansState({}).then((answer) => {
-      if (live && answer.ok && answer.value.outcome !== null) take(answer.value);
+      if (live && mounted.current && answer.ok && answer.value.outcome !== null) take(answer.value);
     });
     return () => {
       live = false;
@@ -186,7 +218,9 @@ export function usePlansState(): PlansStateView {
 
   const refresh = useCallback((): void => {
     setRequested(true);
-    void read().then(() => setRequested(false));
+    void read().then(() => {
+      if (mounted.current) setRequested(false);
+    });
   }, [read]);
 
   const open = useCallback((number: number): void => {
@@ -195,14 +229,18 @@ export function usePlansState(): PlansStateView {
     void window.cockpit
       .spacePlansOpen({ number })
       .then((answer) => {
-        if (!answer.ok) setOpenProblem(answer.error.message);
+        if (mounted.current && !answer.ok) setOpenProblem(answer.error.message);
       })
-      .catch((caught: unknown) =>
-        setOpenProblem(
-          `The dashboard was not opened: ${caught instanceof Error ? caught.message : String(caught)}`,
-        ),
+      .catch(
+        (caught: unknown) =>
+          mounted.current &&
+          setOpenProblem(
+            `The dashboard was not opened: ${caught instanceof Error ? caught.message : String(caught)}`,
+          ),
       )
-      .then(() => setOpening(null));
+      .then(() => {
+        if (mounted.current) setOpening(null);
+      });
   }, []);
 
   const bandRef = useCallback((element: Element | null): void => {
@@ -215,7 +253,7 @@ export function usePlansState(): PlansStateView {
     }
     const next = new IntersectionObserver((entries) => {
       const last = entries[entries.length - 1];
-      if (last !== undefined) setInView(last.isIntersecting);
+      if (last !== undefined && mounted.current) setInView(last.isIntersecting);
     });
     next.observe(element);
     observer.current = next;
@@ -223,5 +261,56 @@ export function usePlansState(): PlansStateView {
 
   useEffect(() => () => observer.current?.disconnect(), []);
 
-  return { plans, problem, requested, active, opening, openProblem, refresh, open, bandRef };
+  // The minute promise follows the read: re-render at the moment it must be withdrawn (the shown read turns a minute old, a
+  // refresh has been pending 30 s), not only when something else happens to change.
+  const readAtShown =
+    plans !== null && plans.units !== null && plans.readAt !== null ? plans.readAt : null;
+  useEffect(() => {
+    if (promiseTimer.current !== null) window.clearTimeout(promiseTimer.current);
+    promiseTimer.current = null;
+    if (!mounted.current) return;
+    const at = Date.now();
+    const moments = [
+      readAtShown === null ? null : readAtShown + MINUTE_MS,
+      pendingSince === null ? null : pendingSince + REFRESH_LATE_MS + 1,
+    ].filter((m): m is number => m !== null && m > at);
+    if (moments.length === 0) return;
+    promiseTimer.current = window.setTimeout(
+      () => {
+        promiseTimer.current = null;
+        if (mounted.current) setTick((n) => n + 1);
+      },
+      Math.min(...moments) - at,
+    );
+    return () => {
+      if (promiseTimer.current !== null) window.clearTimeout(promiseTimer.current);
+      promiseTimer.current = null;
+    };
+  });
+
+  // The ages the band says ("READ 5S AGO", "updated 12s ago") are counted from the hook's own clock, and that clock ticks every
+  // second while a list is shown, the band is in view and the window is visible: an age is never said more than about a second
+  // younger than it is. The ticker is a timer like any other: it stops when the band is hidden or unmounted (the rule of K1).
+  const showsAges = plans !== null && plans.units !== null;
+  useEffect(() => {
+    if (!showsAges || !active || !mounted.current) return;
+    const ticker = window.setInterval(() => {
+      if (mounted.current) setTick((n) => n + 1);
+    }, AGE_TICK_MS);
+    return () => window.clearInterval(ticker);
+  }, [showsAges, active]);
+
+  return {
+    plans,
+    problem,
+    now: Date.now(),
+    pendingSince,
+    requested,
+    active,
+    opening,
+    openProblem,
+    refresh,
+    open,
+    bandRef,
+  };
 }

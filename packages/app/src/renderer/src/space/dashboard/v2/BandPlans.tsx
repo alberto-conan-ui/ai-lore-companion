@@ -1,7 +1,14 @@
 import type { JSX } from 'react';
 import { useState } from 'react';
 import type { SpacePlansState, SpacePlansUnit } from '../../../../../shared/ipc.js';
-import { footerText, headingState, kindLabel, lastReadText, updatedText } from '../plansText.js';
+import {
+  footerText,
+  headingState,
+  kindLabel,
+  lastReadText,
+  minuteState,
+  updatedText,
+} from '../plansText.js';
 import type { PlansStateView } from '../usePlansState.js';
 import { OverflowFooter, capItems } from './overflow.js';
 
@@ -19,17 +26,21 @@ export type BandPlansProps = {
  * (`BandMoving`): its heading, rows, marks and overflow footer. A read that is incomplete, refused or not reachable is
  * said as that; the list of a read that did not answer is never drawn, and nothing saved is shown as current.
  */
-export function BandPlans({ view, now }: BandPlansProps): JSX.Element | null {
+export function BandPlans({ view, now: pageNow }: BandPlansProps): JSX.Element | null {
+  // the hook's own clock when it has one: the page's `now` ticks every 30 s, too slowly for a promise that lasts a minute
+  const now = view.now ?? pageNow;
   const [all, setAll] = useState(false);
   const state = view.plans;
   if (state?.outcome === 'unavailable') return null;
   const rows = state?.units ?? null;
+  const minute = minuteState(state, now, view.pendingSince ?? null, view.active);
   const shown = rows === null ? null : capItems(rows, all ? rows.length : PLANS_ROWS_SHOWN);
   return (
     <section
       className="dashboard-v2-panel dashboard-v2-band-moving dashboard-v2-band-plans dashboard-v2-plans-row"
       data-testid="dashboard-v2-plans"
       data-outcome={state?.outcome ?? (view.problem === null ? 'reading' : 'problem')}
+      data-minute={minute.promised ? 'promised' : 'withdrawn'}
       aria-label="Plans"
       ref={view.bandRef}
     >
@@ -43,6 +54,15 @@ export function BandPlans({ view, now }: BandPlansProps): JSX.Element | null {
       </div>
       <div className="dashboard-v2-moving-content">
         <PlansNotice view={view} state={state} now={now} />
+        {minute.words === '' ? null : (
+          <output
+            className="dashboard-v2-muted"
+            style={{ display: 'block' }}
+            data-testid="plans-minute"
+          >
+            {minute.words}
+          </output>
+        )}
         {shown === null ? null : (
           <div className="dashboard-v2-moving-group">
             {shown.visible.length === 0 && state?.outcome === 'complete' ? (
@@ -79,8 +99,7 @@ export function BandPlans({ view, now }: BandPlansProps): JSX.Element | null {
           </p>
         ))}
         <p className="dashboard-v2-muted" data-testid="plans-footer">
-          {footerText(state)}
-          {view.active ? '' : ' Not refreshing while this window is hidden.'}
+          {footerText(state, minute)}
         </p>
       </div>
     </section>
