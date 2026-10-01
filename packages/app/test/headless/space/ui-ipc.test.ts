@@ -176,6 +176,29 @@ test('what is pending is written when the Space closes, and read by the next ope
   }
 });
 
+test('P2: a save that races its own close is never lost: pending is flushed by dispose, a save after it is written at once, no timer is left', async () => {
+  const o = await open();
+  const ui = o.context.service(spaceUi) as unknown as {
+    save(concern: string, state: unknown): string;
+    dispose(): void;
+  };
+  try {
+    assert.equal(ui.save('files-editor', EDITOR), 'scheduled'); // pending, not yet written
+    ui.dispose(); // the Space closes: the pending write is flushed first
+    assert.deepEqual(readJson(join(o.ui, UI_FILES['files-editor'])), EDITOR);
+    const last = { ...EDITOR, activeKey: JSON.stringify(['lore', 'ai_readme.md']) };
+    assert.equal(ui.save('files-editor', last), 'scheduled'); // the window's last save arrives after dispose
+    assert.deepEqual(
+      readJson(join(o.ui, UI_FILES['files-editor'])),
+      last,
+      'the last save was lost',
+    );
+    ui.dispose();
+  } finally {
+    await close(o);
+  }
+});
+
 test('fields this build does not know are kept', async () => {
   const o = await open();
   try {

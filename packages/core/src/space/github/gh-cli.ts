@@ -37,7 +37,7 @@ import {
   parseGhApiResponse,
 } from './errors.js';
 import { bodyHasMarker } from './marker.js';
-import type { GitHubPort, GitHubResult } from './port.js';
+import { CLOSED_MESSAGE, type GitHubPort, type GitHubResult } from './port.js';
 import * as Q from './queries.js';
 import { buildProjectSnapshot } from './snapshot.js';
 import {
@@ -300,8 +300,10 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
   async function graphql(
     query: string,
     variables: Record<string, unknown>,
-    opts: { missingIsNull?: boolean; absentIsNull?: boolean } = {},
+    opts: { missingIsNull?: boolean; absentIsNull?: boolean; signal?: AbortSignal } = {},
   ): Promise<GitHubResult<unknown>> {
+    // the owner closed: no call is started, and what was being read is "not read", never complete or empty
+    if (opts.signal?.aborted === true) return err(failed(CLOSED_MESSAGE));
     const result = await run(GRAPHQL_ARGS, JSON.stringify({ query, variables }));
     const response = parseGhApiResponse(result.stdout);
     const errors = graphQlErrors(response.body);
@@ -445,7 +447,7 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
         const data = await graphql(
           Q.OWNER_PROJECTS_QUERY,
           { login: arg.owner, after },
-          { missingIsNull: true },
+          { missingIsNull: true, signal: arg.signal },
         );
         if (!data.ok) return data;
         const owner = at(data.value, 'repositoryOwner');
@@ -614,7 +616,11 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
       let left = [...new Set(arg.markers)];
       let after: string | null = null;
       while (left.length > 0) {
-        const data = await graphql(Q.ISSUE_BODIES_QUERY, { ...parts.value, after });
+        const data = await graphql(
+          Q.ISSUE_BODIES_QUERY,
+          { ...parts.value, after },
+          { signal: arg.signal },
+        );
         if (!data.ok) return data;
         const issues = at(data.value, 'repository', 'issues');
         for (const node of list(issues, 'nodes')) {
@@ -640,7 +646,11 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
       for (const marker of arg.markers) found[marker] = [];
       let after: string | null = null;
       for (;;) {
-        const data = await graphql(Q.ISSUE_BODIES_QUERY, { ...parts.value, after });
+        const data = await graphql(
+          Q.ISSUE_BODIES_QUERY,
+          { ...parts.value, after },
+          { signal: arg.signal },
+        );
         if (!data.ok) return data;
         const issues = at(data.value, 'repository', 'issues');
         for (const node of list(issues, 'nodes')) {
@@ -839,7 +849,7 @@ export function createGhCliGitHub(runner: CommandRunner, options: GhCliOptions =
             stage: STAGE_FIELD,
             after,
           },
-          { missingIsNull: true },
+          { missingIsNull: true, signal: arg.signal },
         );
         if (!data.ok) return data;
         const node = at(data.value, 'node');

@@ -269,8 +269,14 @@ export const spaceUi = defineSpaceService<SpaceUi>({
         return { state: parsed.data as JsonObject, notice: null };
       },
       save(concern, state) {
-        if (closedStore || newer.has(concern) || !owns()) return 'not-writable'; // nothing is scheduled after dispose
+        if (newer.has(concern) || !owns()) return 'not-writable';
         pending.set(concern, state);
+        if (closedStore) {
+          // The Space closed: nothing is scheduled any more, but a window's last save that races its own close is never lost: it
+          // is written now, once, synchronously, and no timer is set.
+          write(concern);
+          return 'scheduled';
+        }
         const timer = timers.get(concern);
         if (timer) clearTimeout(timer);
         const next = setTimeout(() => write(concern), UI_SAVE_DELAY_MS);

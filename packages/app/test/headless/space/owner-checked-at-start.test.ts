@@ -223,3 +223,38 @@ test('N1: the repositories service disposed while its roots are pending runs no 
   await service.refresh();
   assert.equal(commands.length, 0);
 });
+
+test("P1: the Project refresh hands the port its owner's signal, and aborts it at dispose", async () => {
+  const { fake, project } = await projectWorld();
+  const signals: (AbortSignal | undefined)[] = [];
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((done) => {
+    release = done;
+  });
+  const port = new Proxy(fake, {
+    get(target, name, receiver) {
+      const value = Reflect.get(target, name, receiver);
+      if (name !== 'readProject' || typeof value !== 'function') return value;
+      return async (arg: { signal?: AbortSignal }) => {
+        signals.push(arg.signal);
+        await gate; // page 1 in flight
+        return value.call(target, arg);
+      };
+    },
+  }) as unknown as GitHubPort;
+  const refresh = createProjectRefresh({
+    github: async () => port,
+    manifest: () => manifest(project.number) as never,
+    desk: () => ({ ok: false, error: { kind: 'not-found', message: '' } }) as never,
+    gates: () => [],
+    intervalMs: 0,
+  });
+  const pending = refresh.refresh();
+  for (let i = 0; i < 200 && signals.length === 0; i++) await tick(1);
+  assert.equal(signals.length, 1);
+  assert.equal(signals[0]?.aborted, false);
+  refresh.dispose();
+  assert.equal(signals[0]?.aborted, true, 'the page loop in the port would go on');
+  release();
+  await pending;
+});

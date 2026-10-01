@@ -36,7 +36,7 @@ import {
   unreachable,
 } from './errors.js';
 import { bodyHasMarker } from './marker.js';
-import type { GitHubPort, GitHubResult } from './port.js';
+import { CLOSED_MESSAGE, type GitHubPort, type GitHubResult } from './port.js';
 import { buildProjectSnapshot } from './snapshot.js';
 import {
   type EnsuredProjectView,
@@ -501,6 +501,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
 
     findProject: (arg) =>
       operate('findProject', false, () => {
+        if (arg.signal?.aborted === true) return err(failed(CLOSED_MESSAGE));
         const found = state.projects.find(
           (project) =>
             project.info.owner === arg.owner && project.info.title === arg.title && !project.closed,
@@ -627,6 +628,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
 
     findIssuesByMarkers: (arg) =>
       operate('findIssuesByMarkers', false, () => {
+        if (arg.signal?.aborted === true) return err(failed(CLOSED_MESSAGE));
         const known = repositoryFor(arg.repository);
         if (!known.ok) return known;
         const malformed = markersError(arg.markers);
@@ -638,6 +640,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
 
     findAllIssuesByMarkers: (arg) =>
       operate('findAllIssuesByMarkers', false, () => {
+        if (arg.signal?.aborted === true) return err(failed(CLOSED_MESSAGE));
         const known = repositoryFor(arg.repository);
         if (!known.ok) return known;
         const malformed = markersError(arg.markers);
@@ -793,6 +796,7 @@ export function createFakeGitHub(options: FakeGitHubOptions = {}): FakeGitHub {
 
     readProject: (arg) =>
       operate('readProject', false, () => {
+        if (arg.signal?.aborted === true) return err(failed(CLOSED_MESSAGE));
         const project = projectOf(arg.project);
         if (project === null) return missingProject(arg.project);
         const issues = project.items.flatMap((item) => {

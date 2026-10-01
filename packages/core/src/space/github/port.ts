@@ -41,7 +41,16 @@ import type {
 /** The result of a `GitHubPort` operation. */
 export type GitHubResult<T> = Result<T, GitHubError>;
 
-/** The operations on GitHub. `repository` is always `owner/name`. */
+/**
+ * What an aborted read says: the owner of the read (a Space's service) closed, so no further call is made and the answer
+ * is not a complete or an empty result, it is "not read".
+ */
+export const CLOSED_MESSAGE = 'not read: the Space was closed';
+
+/**
+ * The operations on GitHub. `repository` is always `owner/name`. An operation that reads page after page takes an optional
+ * `signal` (the owner's): each page call checks it before it starts, and an aborted read fails with `CLOSED_MESSAGE`.
+ */
 export type GitHubPort = {
   /** The signed-in account and its token's scopes. Fails with `not-signed-in` when there is none. */
   auth(): Promise<GitHubResult<GitHubAccount>>;
@@ -64,7 +73,11 @@ export type GitHubPort = {
   // ---------- the Project ----------
 
   /** The open Project of `owner` with exactly this title, or `null`. The oldest when several match. */
-  findProject(arg: { owner: string; title: string }): Promise<GitHubResult<ProjectInfo | null>>;
+  findProject(arg: {
+    owner: string;
+    title: string;
+    signal?: AbortSignal;
+  }): Promise<GitHubResult<ProjectInfo | null>>;
   /** Create a Project. GitHub allows two with one title, so a caller finds first. */
   createProject(arg: { owner: string; title: string }): Promise<GitHubResult<ProjectInfo>>;
   /**
@@ -113,6 +126,7 @@ export type GitHubPort = {
   findIssuesByMarkers(arg: {
     repository: string;
     markers: string[];
+    signal?: AbortSignal;
   }): Promise<GitHubResult<Record<string, IssueRef | null>>>;
   /**
    * Every issue, open or closed, that has each marker, oldest first; an empty
@@ -122,6 +136,7 @@ export type GitHubPort = {
   findAllIssuesByMarkers(arg: {
     repository: string;
     markers: string[];
+    signal?: AbortSignal;
   }): Promise<GitHubResult<Record<string, IssueRef[]>>>;
   /**
    * Create an issue. Every label must exist; an unknown label fails with
@@ -177,7 +192,10 @@ export type GitHubPort = {
   // ---------- reads ----------
 
   /** The Project's issues, sorted into focuses, standalone items and session issues. */
-  readProject(arg: { project: ProjectInfo }): Promise<GitHubResult<ProjectSnapshot>>;
+  readProject(arg: {
+    project: ProjectInfo;
+    signal?: AbortSignal;
+  }): Promise<GitHubResult<ProjectSnapshot>>;
   /** The merged pull requests of a repository, newest first, at most `limit`. */
   mergedPullRequests(arg: {
     repository: string;

@@ -114,6 +114,8 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
   let running: Promise<void> | null = null;
   let queued: Promise<void> | null = null;
   let disposed = false;
+  /** The owner's signal: aborted at dispose, so the port's page loops stop too, not only the steps between port calls. */
+  const owner = new AbortController();
   let attempted = false;
   /** When the last full read started, in milliseconds; `null` when none has. */
   let lastRunAt: number | null = null;
@@ -256,11 +258,15 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
     const github = await options.github();
     if (disposed) return;
     if (project === null) {
-      const found = await findSpaceProject(github, {
-        repository,
-        name: manifest.name,
-        project: manifest.github.project,
-      });
+      const found = await findSpaceProject(
+        github,
+        {
+          repository,
+          name: manifest.name,
+          project: manifest.github.project,
+        },
+        owner.signal,
+      );
       if (disposed) return;
       if (!found.ok) {
         failed(
@@ -274,7 +280,7 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
       project = found.value;
     }
     if (disposed) return;
-    const snapshot = await github.readProject({ project });
+    const snapshot = await github.readProject({ project, signal: owner.signal });
     if (disposed) return;
     if (!snapshot.ok) {
       if (snapshot.error.kind === 'not-found') {
@@ -392,6 +398,7 @@ export function createProjectRefresh(options: ProjectRefreshOptions): ProjectRef
     },
     dispose() {
       disposed = true;
+      owner.abort();
       if (timer !== null) clearInterval(timer);
       listeners.clear();
     },
