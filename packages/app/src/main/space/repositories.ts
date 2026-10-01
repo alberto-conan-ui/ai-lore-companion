@@ -30,6 +30,7 @@ import {
   type RepositoriesModelInput,
   type RepositoryRead,
   errorMessage,
+  ownedRunner,
   readLore,
   readRepositoryStateIn,
   repositoriesModel,
@@ -135,6 +136,9 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
   let running: Promise<void> | null = null;
   let queued: Promise<void> | null = null;
   let disposed = false;
+  // Rule N1 in the helpers: a compound read (repository state, mirror checks) starts no command once this service is disposed
+  const owner = new AbortController();
+  const runner = ownedRunner(options.runner, owner.signal);
   let attempted = false;
   const cachedMirrors: Record<string, MirrorDrift> = {};
   let nextMirrorCheck = 0;
@@ -204,7 +208,7 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
 
   const readWorkTree = async (workTree: string): Promise<RepositoryRead> => {
     try {
-      const result = await readRepositoryStateIn(options.runner, workTree, {
+      const result = await readRepositoryStateIn(runner, workTree, {
         timeoutMs: ROOT_REPOSITORY_TIMEOUT_MS,
         now,
       });
@@ -260,7 +264,7 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
                         (e: { card: MirrorCard }) => e.card,
                       );
                       return checkPayloadMirrors({
-                        runner: options.runner,
+                        runner,
                         spaceRoot,
                         roots,
                         mirrors,
@@ -348,6 +352,7 @@ export function createSpaceRepositories(options: SpaceRepositoriesOptions): Spac
     },
     dispose() {
       disposed = true;
+      owner.abort();
       if (timer !== null) clearInterval(timer);
       listeners.clear();
     },

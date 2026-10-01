@@ -48,6 +48,7 @@ import {
   deriveIgnoreLists,
   errorMessage,
   markRootReviewed,
+  ownedRunner,
   readSpaceManifest,
   resolveRoots,
   runGit,
@@ -162,7 +163,10 @@ function signatureOf(roots: readonly Root[], manifest: SpaceManifest): string {
 }
 
 function createSpaceRoots(context: SpaceContext): SpaceRoots {
-  const { runner, log } = context;
+  const { log } = context;
+  // Rule N1 in the helpers: every command of this service goes through a runner that refuses once the service is closed
+  const owner = new AbortController();
+  const runner = ownedRunner(context.runner, owner.signal);
   let push: RootsPush = () => undefined;
   let closed = false;
   let current: RunningRoots | null = null;
@@ -572,6 +576,7 @@ function createSpaceRoots(context: SpaceContext): SpaceRoots {
     },
     close() {
       closed = true;
+      owner.abort();
       return enqueue(async () => {
         const held = current;
         current = null;

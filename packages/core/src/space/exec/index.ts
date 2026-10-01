@@ -6,7 +6,9 @@ export {
   type RunFailureKind,
   type RunOptions,
   type RunResult,
+  OWNER_CLOSED_MESSAGE,
   commandFailure,
+  ownedRunner,
   runSucceeded,
 } from './runner.js';
 export {

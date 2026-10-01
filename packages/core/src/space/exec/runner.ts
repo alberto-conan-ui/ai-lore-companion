@@ -98,3 +98,28 @@ export function commandFailure(
       return { kind: 'command-failed', message: `${name} did not run: ${detail}` };
   }
 }
+
+/** What a command says when its owner (a Space's service) has closed: it was not run, or its answer is not taken. */
+export const OWNER_CLOSED_MESSAGE = 'the Space was closed';
+
+/**
+ * A runner whose commands belong to an owner. Once the owner's `signal` is aborted no command is started, and a command that
+ * was already running has its answer replaced by a refusal: so a compound helper that runs several commands one after the
+ * other (resolving roots, reading a repository's state, checking mirrors) starts none after the owner closed, and does not
+ * go on with an answer that arrived after it did. Rule N1 (checked before every command) and N2 (after the await).
+ */
+export function ownedRunner(runner: CommandRunner, signal: AbortSignal): CommandRunner {
+  const refused = (): RunResult => ({
+    code: -1,
+    stdout: '',
+    stderr: OWNER_CLOSED_MESSAGE,
+    failure: 'refused',
+  });
+  return {
+    async run(bin, args, opts) {
+      if (signal.aborted) return refused();
+      const result = await runner.run(bin, args, opts);
+      return signal.aborted ? refused() : result;
+    },
+  };
+}
